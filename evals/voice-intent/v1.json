@@ -1,0 +1,299 @@
+{
+  "schemaVersion": "1.0",
+  "description": "Airboard semantic voice-intent regression corpus. Every case is an independently replayable finalized voice turn.",
+  "cases": [
+    {
+      "id": "create-condition-block",
+      "description": "Repairs conversational framing and maps condition block to a decision node.",
+      "transcript": "Airo now add a condition block",
+      "parserIssue": "unknown_command",
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [
+          {
+            "label": "User",
+            "nodeType": "user",
+            "ordinal": 1,
+            "position": { "x": 180, "y": 280 },
+            "size": { "width": 160, "height": 92 }
+          },
+          {
+            "label": "API",
+            "nodeType": "api",
+            "ordinal": 1,
+            "position": { "x": 500, "y": 280 },
+            "size": { "width": 180, "height": 92 }
+          }
+        ],
+        "edges": [
+          {
+            "from": { "label": "User", "nodeType": "user", "ordinal": 1 },
+            "to": { "label": "API", "nodeType": "api", "ordinal": 1 },
+            "label": "requests"
+          }
+        ],
+        "projectGlossary": [
+          { "term": "condition block", "nodeType": "decision" },
+          { "term": "q", "nodeType": "queue" },
+          { "term": "backend", "nodeType": "service" }
+        ],
+        "pointerAvailable": true
+      },
+      "expected": {
+        "status": "resolved",
+        "actionTypeCounts": { "create": 1 },
+        "createdNodeTypes": ["decision"]
+      }
+    },
+    {
+      "id": "rename-circle-by-name",
+      "description": "Renames an unselected object by its visible name.",
+      "transcript": "Airo, change the name of circle to user",
+      "parserIssue": "grounding_failed",
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [
+          {
+            "label": "Circle",
+            "nodeType": "circle",
+            "ordinal": 1,
+            "position": { "x": 340, "y": 320 },
+            "size": { "width": 150, "height": 150 }
+          },
+          {
+            "label": "Orders API",
+            "nodeType": "api",
+            "ordinal": 1,
+            "position": { "x": 650, "y": 320 },
+            "size": { "width": 200, "height": 96 }
+          }
+        ],
+        "edges": [],
+        "projectGlossary": [
+          { "term": "customer", "nodeType": "user" },
+          { "term": "round node", "nodeType": "circle" }
+        ],
+        "pointerAvailable": false
+      },
+      "expected": {
+        "status": "resolved",
+        "actionTypeCounts": { "rename": 1 },
+        "renamedLabels": ["User"]
+      }
+    },
+    {
+      "id": "decision-yes-no-branch",
+      "description": "Produces one typed branch instead of treating all trailing words as one target.",
+      "transcript": "Airo connect the decision to user one and user two with yes and no",
+      "parserIssue": "compound_command",
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [
+          {
+            "label": "Decision",
+            "nodeType": "decision",
+            "ordinal": 1,
+            "position": { "x": 480, "y": 180 },
+            "size": { "width": 150, "height": 120 }
+          },
+          {
+            "label": "User One",
+            "nodeType": "user",
+            "ordinal": 1,
+            "position": { "x": 260, "y": 470 },
+            "size": { "width": 170, "height": 92 }
+          },
+          {
+            "label": "User Two",
+            "nodeType": "user",
+            "ordinal": 2,
+            "position": { "x": 700, "y": 470 },
+            "size": { "width": 170, "height": 92 }
+          }
+        ],
+        "edges": [],
+        "projectGlossary": [
+          { "term": "condition", "nodeType": "decision" },
+          { "term": "user one", "nodeType": "user" },
+          { "term": "user two", "nodeType": "user" }
+        ],
+        "pointerAvailable": true
+      },
+      "expected": {
+        "status": "resolved",
+        "actionTypeCounts": { "branch": 1 },
+        "branchLabels": ["yes", "no"]
+      }
+    },
+    {
+      "id": "truncated-decision-branch",
+      "description": "A cut-off branch must ask for the missing label and must not guess or mutate.",
+      "transcript": "Airo connect the decision to user one and user two with yes and",
+      "parserIssue": "compound_command",
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [
+          {
+            "label": "Decision",
+            "nodeType": "decision",
+            "ordinal": 1,
+            "position": { "x": 480, "y": 180 },
+            "size": { "width": 150, "height": 120 }
+          },
+          {
+            "label": "User One",
+            "nodeType": "user",
+            "ordinal": 1,
+            "position": { "x": 260, "y": 470 },
+            "size": { "width": 170, "height": 92 }
+          },
+          {
+            "label": "User Two",
+            "nodeType": "user",
+            "ordinal": 2,
+            "position": { "x": 700, "y": 470 },
+            "size": { "width": 170, "height": 92 }
+          }
+        ],
+        "edges": [],
+        "projectGlossary": [
+          { "term": "condition", "nodeType": "decision" },
+          { "term": "yes path" },
+          { "term": "no path" }
+        ],
+        "pointerAvailable": true
+      },
+      "expected": {
+        "status": "clarification",
+        "actionTypeCounts": {},
+        "missingSlotsIncludes": ["branch_label"]
+      }
+    },
+    {
+      "id": "resolve-no-branch-label",
+      "description": "Treats a short no answer as the missing branch label rather than cancelling the pending command.",
+      "transcript": "No.",
+      "parserIssue": "unknown_command",
+      "pendingClarification": {
+        "previousTranscript": "Airo connect the decision to user one and user two with yes and",
+        "question": "What label should the branch from Decision to User Two have?",
+        "missingSlots": ["branch_label"]
+      },
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [
+          {
+            "label": "Decision",
+            "nodeType": "decision",
+            "ordinal": 1,
+            "position": { "x": 480, "y": 180 },
+            "size": { "width": 150, "height": 120 }
+          },
+          {
+            "label": "User One",
+            "nodeType": "user",
+            "ordinal": 1,
+            "position": { "x": 260, "y": 470 },
+            "size": { "width": 170, "height": 92 }
+          },
+          {
+            "label": "User Two",
+            "nodeType": "user",
+            "ordinal": 2,
+            "position": { "x": 700, "y": 470 },
+            "size": { "width": 170, "height": 92 }
+          }
+        ],
+        "edges": [],
+        "projectGlossary": [
+          { "term": "Decision" },
+          { "term": "User One" },
+          { "term": "User Two" }
+        ],
+        "pointerAvailable": false
+      },
+      "expected": {
+        "status": "resolved",
+        "actionTypeCounts": { "branch": 1 },
+        "branchLabels": ["yes", "no"]
+      }
+    },
+    {
+      "id": "repair-q-to-queue",
+      "description": "Uses creation context and the project glossary to repair q to queue.",
+      "transcript": "Airo add a q",
+      "parserIssue": "missing_node_type",
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [
+          {
+            "label": "Checkout API",
+            "nodeType": "api",
+            "ordinal": 1,
+            "position": { "x": 260, "y": 300 },
+            "size": { "width": 200, "height": 92 }
+          },
+          {
+            "label": "Orders DB",
+            "nodeType": "database",
+            "ordinal": 1,
+            "position": { "x": 640, "y": 300 },
+            "size": { "width": 200, "height": 110 }
+          }
+        ],
+        "edges": [
+          {
+            "from": { "label": "Checkout API", "nodeType": "api", "ordinal": 1 },
+            "to": { "label": "Orders DB", "nodeType": "database", "ordinal": 1 },
+            "label": "writes"
+          }
+        ],
+        "projectGlossary": [
+          { "term": "q", "nodeType": "queue" },
+          { "term": "orders topic", "nodeType": "queue" }
+        ],
+        "pointerAvailable": true
+      },
+      "expected": {
+        "status": "resolved",
+        "actionTypeCounts": { "create": 1 },
+        "createdNodeTypes": ["queue"]
+      }
+    },
+    {
+      "id": "multi-node-api-narrative",
+      "description": "Turns one conversational narrative into a connected three-node plan.",
+      "transcript": "Airo create a diagram where a user, uh, makes an API request and the API updates a database",
+      "parserIssue": "compound_command",
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [],
+        "edges": [],
+        "projectGlossary": [
+          { "term": "customer", "nodeType": "user" },
+          { "term": "service endpoint", "nodeType": "api" },
+          { "term": "data store", "nodeType": "database" },
+          { "term": "request" },
+          { "term": "update" }
+        ],
+        "pointerAvailable": false
+      },
+      "expected": {
+        "status": "resolved",
+        "actionTypeCounts": { "create": 3, "connect": 2 },
+        "createdNodeTypes": ["user", "api", "database"],
+        "connectorLabelGroups": [
+          ["request", "requests", "api request"],
+          ["update", "updates", "write", "writes"]
+        ]
+      }
+    }
+  ]
+}

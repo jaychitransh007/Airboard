@@ -1,0 +1,21 @@
+{
+  "name": "airboard",
+  "private": true,
+  "packageManager": "pnpm@11.7.0",
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "dev:web": "pnpm --filter @airboard/web dev",
+    "dev:api": "pnpm --filter @airboard/api dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "eval:voice": "node scripts/eval-voice-intent.mjs",
+    "eval:false-accepts": "node scripts/eval-false-accepts.mjs",
+    "supabase:start": "supabase start",
+    "supabase:status": "supabase status",
+    "supabase:reset": "supabase db reset"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

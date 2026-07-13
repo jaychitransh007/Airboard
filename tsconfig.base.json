@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "baseUrl": ".",
+    "paths": {
+      "@airboard/core": ["packages/core/src/index.ts"],
+      "@airboard/core/semantic-capabilities": ["packages/core/src/semanticCapabilities.ts"],
+      "@airboard/drawing-engine": ["packages/drawing-engine/src/index.ts"],
+      "@airboard/gesture-engine": ["packages/gesture-engine/src/index.ts"],
+      "@airboard/realtime-client": ["packages/realtime-client/src/index.ts"],
+      "@airboard/integrations": ["packages/integrations/src/index.ts"]
+    }
+  }
+}
