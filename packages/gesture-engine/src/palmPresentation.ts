@@ -1,5 +1,5 @@
-import { clamp } from "./math.js";
-import type { HandLandmark } from "./types.js";
+import { clamp } from "./math.ts";
+import type { HandLandmark } from "./types.ts";
 
 // All geometry here is deliberately 2D image-plane geometry: the estimator
 // reasons about *projection* (what the camera sees), so MediaPipe's relative

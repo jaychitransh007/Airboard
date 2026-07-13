@@ -1,12 +1,12 @@
 import type { BoardSession, MeetingContext, Participant } from "@airboard/core";
-import { googleMeetCapabilities } from "./capabilities";
+import { googleMeetCapabilities } from "./capabilities.ts";
 import type {
   AdapterConfig,
   MeetingAdapter,
   MeetingParticipant,
   MeetingUser,
   StartBoardSessionInput,
-} from "./types";
+} from "./types.ts";
 
 type MeetAddonSession = {
   createSidePanelClient?: () => Promise<any>;

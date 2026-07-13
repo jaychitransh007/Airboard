@@ -1,4 +1,4 @@
-import type { DetectedHand, Handedness, HandLandmark } from "./types";
+import type { DetectedHand, Handedness, HandLandmark } from "./types.ts";
 
 export type MediaPipeHandTrackerOptions = {
   wasmBaseUrl?: string;

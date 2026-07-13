@@ -1,12 +1,12 @@
 import type { BoardSession, MeetingContext, Participant } from "@airboard/core";
-import { standaloneCapabilities } from "./capabilities";
+import { standaloneCapabilities } from "./capabilities.ts";
 import type {
   AdapterConfig,
   MeetingAdapter,
   MeetingParticipant,
   MeetingUser,
   StartBoardSessionInput,
-} from "./types";
+} from "./types.ts";
 
 export class StandaloneWebAdapter implements MeetingAdapter {
   provider = "standalone" as const;

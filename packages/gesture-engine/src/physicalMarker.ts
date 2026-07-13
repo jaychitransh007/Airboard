@@ -1,4 +1,4 @@
-import { average, clamp, distance } from "./math";
+import { average, clamp, distance } from "./math.ts";
 import type {
   CursorPoint,
   DetectedHand,
@@ -10,8 +10,8 @@ import type {
   PhysicalMarkerDetection,
   PhysicalMarkerModeConfig,
   Vector2D,
-} from "./types";
-import { defaultPhysicalMarkerModeConfig } from "./types";
+} from "./types.ts";
+import { defaultPhysicalMarkerModeConfig } from "./types.ts";
 
 const WRIST = 0;
 const THUMB_TIP = 4;

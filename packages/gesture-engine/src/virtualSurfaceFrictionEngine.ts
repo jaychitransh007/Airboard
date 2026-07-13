@@ -1,5 +1,5 @@
-import { clamp } from "./math";
-import { cleanupStrokePoints } from "./strokeCleanup";
+import { clamp } from "./math.ts";
+import { cleanupStrokePoints } from "./strokeCleanup.ts";
 import type {
   CursorPoint,
   FrictionDiagnostics,
@@ -14,8 +14,8 @@ import type {
   SpeedBucket,
   Vector2D,
   VirtualSurfaceFrictionConfig,
-} from "./types";
-import { defaultVirtualSurfaceFrictionConfig } from "./types";
+} from "./types.ts";
+import { defaultVirtualSurfaceFrictionConfig } from "./types.ts";
 
 type MarkerFrameInput = {
   detected: boolean;

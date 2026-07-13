@@ -1,5 +1,5 @@
-import { OneEuroFilter } from "./oneEuroFilter";
-import type { CursorPoint, GestureConfig, SmoothedPoint } from "./types";
+import { OneEuroFilter } from "./oneEuroFilter.ts";
+import type { CursorPoint, GestureConfig, SmoothedPoint } from "./types.ts";
 
 export class GestureSmoother {
   private readonly xFilter = new OneEuroFilter();

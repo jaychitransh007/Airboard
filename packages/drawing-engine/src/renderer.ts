@@ -5,7 +5,7 @@ import type {
   StrokeAnnotation,
   StrokePoint,
 } from "@airboard/core";
-import { getConnectorRoutePoints, getRouteMidpoint } from "./connectorGeometry.js";
+import { getConnectorRoutePoints, getRouteMidpoint } from "./connectorGeometry.ts";
 
 export type AnnotationRenderObject = {
   annotation: StrokeAnnotation;

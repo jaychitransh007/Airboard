@@ -1,17 +1,17 @@
-import { clamp } from "./math.js";
+import { clamp } from "./math.ts";
 import {
   defaultPinchHysteresisConfig,
   PinchHysteresis,
   type PinchHysteresisConfig,
   type PinchHysteresisOutput,
   type PinchPhase,
-} from "./pinchHysteresis.js";
+} from "./pinchHysteresis.ts";
 import {
   acquireStickyTarget,
   targetCenter,
   type GestureTarget,
-} from "./targetAcquisition.js";
-import type { Vector2D } from "./types.js";
+} from "./targetAcquisition.ts";
+import type { Vector2D } from "./types.ts";
 
 export type NormalizedControlZone = {
   x: number;

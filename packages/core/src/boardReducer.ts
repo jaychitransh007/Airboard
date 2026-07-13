@@ -4,7 +4,7 @@ import type {
   EraseAction,
   Stroke,
   StrokePoint,
-} from "./types";
+} from "./types.ts";
 
 export function createInitialBoardState(boardId: string): BoardState {
   return {

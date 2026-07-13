@@ -1,5 +1,5 @@
 import type { BoardState, Stroke, StrokePoint } from "@airboard/core";
-import { getConnectorRoutePoints } from "./connectorGeometry.js";
+import { getConnectorRoutePoints } from "./connectorGeometry.ts";
 
 export function findIntersectingStrokeIds(
   state: BoardState,

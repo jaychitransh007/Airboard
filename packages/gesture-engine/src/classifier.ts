@@ -1,10 +1,10 @@
-import { average, clamp, distance, midpoint } from "./math";
+import { average, clamp, distance, midpoint } from "./math.ts";
 import type {
   DetectedHand,
   GestureClassifierOutput,
   GestureConfig,
   HandLandmark,
-} from "./types";
+} from "./types.ts";
 
 const WRIST = 0;
 const THUMB_TIP = 4;

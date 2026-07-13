@@ -1,4 +1,4 @@
-import type { Vector2D } from "./types.js";
+import type { Vector2D } from "./types.ts";
 
 export type TargetBounds = {
   x: number;

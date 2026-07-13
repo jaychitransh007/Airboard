@@ -1,4 +1,4 @@
-import type { FrictionStrokePoint, VirtualSurfaceFrictionConfig } from "./types";
+import type { FrictionStrokePoint, VirtualSurfaceFrictionConfig } from "./types.ts";
 
 export type StrokeCleanupResult = {
   points: FrictionStrokePoint[];

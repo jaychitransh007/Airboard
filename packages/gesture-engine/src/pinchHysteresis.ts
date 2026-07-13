@@ -1,4 +1,4 @@
-import { clamp } from "./math.js";
+import { clamp } from "./math.ts";
 
 export type PinchPhase = "open" | "closing" | "closed" | "opening";
 

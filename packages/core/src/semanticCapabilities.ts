@@ -1,4 +1,4 @@
-import type { AnnotationNodeType } from "./types.js";
+import type { AnnotationNodeType } from "./types.ts";
 
 export const AIRBOARD_SEMANTIC_CAPABILITY_REGISTRY_VERSION = "1.0" as const;
 

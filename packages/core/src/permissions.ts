@@ -1,4 +1,4 @@
-import type { BoardEvent, BoardSession, Entitlement, Participant } from "./types";
+import type { BoardEvent, BoardSession, Entitlement, Participant } from "./types.ts";
 
 export function hasActiveEntitlement(
   entitlement: Entitlement | null | undefined,

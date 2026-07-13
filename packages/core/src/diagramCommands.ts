@@ -1,4 +1,4 @@
-import { applyBoardEvent, reduceBoardEvents } from "./boardReducer.js";
+import { applyBoardEvent, reduceBoardEvents } from "./boardReducer.ts";
 import type {
   AnnotationBounds,
   AnnotationNodeType,
@@ -9,7 +9,7 @@ import type {
   Stroke,
   StrokeAnnotation,
   StrokePoint,
-} from "./types.js";
+} from "./types.ts";
 
 export type DiagramObjectStyle = {
   strokeColor?: string;

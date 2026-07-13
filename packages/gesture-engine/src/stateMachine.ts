@@ -3,7 +3,7 @@ import type {
   GestureConfig,
   GestureMode,
   GestureName,
-} from "./types";
+} from "./types.ts";
 
 type ActiveGesture = {
   gesture: GestureName;

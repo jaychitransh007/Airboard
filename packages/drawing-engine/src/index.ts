@@ -1,3 +1,3 @@
-export * from "./connectorGeometry.js";
-export * from "./hitTest";
-export * from "./renderer";
+export * from "./connectorGeometry.ts";
+export * from "./hitTest.ts";
+export * from "./renderer.ts";

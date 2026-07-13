@@ -35,3 +35,28 @@ jobs:
       # Merge gate: ambient meeting talk must never parse as a board mutation.
       - name: Voice false-accept eval
         run: pnpm eval:false-accepts
+
+  e2e:
+    name: Playwright E2E (interaction layer)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm -r build
+
+      - name: Install Playwright browsers
+        run: pnpm --filter @airboard/web exec playwright install chromium --with-deps
+
+      - name: Run E2E tests
+        run: pnpm --filter @airboard/web e2e

@@ -1,4 +1,4 @@
-import type { BoardEvent } from "./types";
+import type { BoardEvent } from "./types.ts";
 
 export function createEventEnvelope(input: {
   boardSessionId: string;

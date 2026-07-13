@@ -1,5 +1,5 @@
-import { clamp, distance } from "./math.js";
-import type { DetectedHand, HandLandmark } from "./types.js";
+import { clamp, distance } from "./math.ts";
+import type { DetectedHand, HandLandmark } from "./types.ts";
 
 export type GrabFinger = "index" | "middle" | "ring" | "pinky";
 

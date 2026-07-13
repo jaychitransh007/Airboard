@@ -1,5 +1,5 @@
-import { AIRBOARD_SEMANTIC_NODE_CAPABILITIES } from "./semanticCapabilities.js";
-import type { AnnotationNodeType } from "./types.js";
+import { AIRBOARD_SEMANTIC_NODE_CAPABILITIES } from "./semanticCapabilities.ts";
+import type { AnnotationNodeType } from "./types.ts";
 
 export const AIRBOARD_SEMANTIC_PLAN_CONTRACT_VERSION = "1.0" as const;
 export const AIRBOARD_SEMANTIC_PLAN_TOOL_NAME = "propose_diagram_plan" as const;

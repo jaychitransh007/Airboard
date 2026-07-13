@@ -1,4 +1,4 @@
-import type { CanvasMapping, CursorPoint, HandLandmark } from "./types";
+import type { CanvasMapping, CursorPoint, HandLandmark } from "./types.ts";
 
 export function mapLandmarkToCanvas(
   landmark: HandLandmark,

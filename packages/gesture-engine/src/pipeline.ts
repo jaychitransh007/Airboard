@@ -1,9 +1,9 @@
-import { classifyGesture } from "./classifier";
-import { mapLandmarkToCanvas } from "./mapper";
-import { PhysicalMarkerTracker } from "./physicalMarker";
-import { GestureSmoother } from "./smoothing";
-import { GestureStateMachine } from "./stateMachine";
-import { VirtualSurfaceFrictionEngine } from "./virtualSurfaceFrictionEngine";
+import { classifyGesture } from "./classifier.ts";
+import { mapLandmarkToCanvas } from "./mapper.ts";
+import { PhysicalMarkerTracker } from "./physicalMarker.ts";
+import { GestureSmoother } from "./smoothing.ts";
+import { GestureStateMachine } from "./stateMachine.ts";
+import { VirtualSurfaceFrictionEngine } from "./virtualSurfaceFrictionEngine.ts";
 import type {
   CanvasMapping,
   DetectedHand,
@@ -18,8 +18,8 @@ import type {
   PhysicalMarkerModeConfig,
   SmoothedPoint,
   VirtualSurfaceFrictionConfig,
-} from "./types";
-import { defaultGestureConfig } from "./types";
+} from "./types.ts";
+import { defaultGestureConfig } from "./types.ts";
 
 export class GesturePipeline {
   private readonly stateMachine = new GestureStateMachine();
