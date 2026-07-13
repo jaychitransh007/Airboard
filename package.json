@@ -11,6 +11,7 @@
     "test": "pnpm -r test",
     "eval:voice": "node scripts/eval-voice-intent.mjs",
     "eval:false-accepts": "node scripts/eval-false-accepts.mjs",
+    "eval:grammar": "node scripts/eval-grammar.mjs",
     "supabase:start": "supabase start",
     "supabase:status": "supabase status",
     "supabase:reset": "supabase db reset"

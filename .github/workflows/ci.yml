@@ -32,8 +32,12 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
-      # Merge gate: ambient meeting talk must never parse as a board mutation.
-      - name: Voice false-accept eval
+      # Merge gates for the voice grammar, in both directions:
+      # nothing users say may break, and no meeting talk may start executing.
+      - name: Voice grammar eval (positives)
+        run: pnpm eval:grammar
+
+      - name: Voice false-accept eval (negatives)
         run: pnpm eval:false-accepts
 
   e2e:

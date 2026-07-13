@@ -42,6 +42,15 @@ export class VoiceTraceBuffer {
     return event;
   }
 
+  /** Every buffered turn, for aggregation. Insertion (≈recency) order. */
+  snapshotTurns(): VoiceTraceSnapshot[] {
+    return [...this.traces.entries()].map(([voiceTurnId, stored]) => ({
+      voiceTurnId,
+      events: stored.events.map((event) => structuredClone(event)),
+      droppedEvents: stored.droppedEvents,
+    }));
+  }
+
   get(voiceTurnId: string): VoiceTraceSnapshot | null {
     const stored = this.traces.get(voiceTurnId);
     if (!stored) {

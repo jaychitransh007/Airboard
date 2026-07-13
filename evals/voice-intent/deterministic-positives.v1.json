@@ -1,0 +1,1344 @@
+{
+  "schemaVersion": "1.0",
+  "description": "Positive regression corpus for the deterministic Intent Canvas grammar. Every case was machine-verified against the parser at authoring time; the offline eval (pnpm eval:grammar) re-verifies on every CI run so grammar patches prove they broke nothing. Cases with scoped=true are first rewritten by normalizeScopedVoiceUtterance (the hold-to-edit path).",
+  "knownGaps": [
+    "[create] Any leftover words after node-type/count/placement extraction silently become an inferred label: 'add a payment service here' parses with label 'payment', and 'add a circle up' parses with label 'up' because the bare-direction placement pattern accepts only left/right/above/below/over/under (not up/down, unlike move_selection which accepts up/down).",
+    "[create] Word-form counts stop at ten: 'add twelve circles here' parses as count 1 with label 'twelve' (the unknown count word falls into the inferred label) instead of count 12 or a rejection. Digit counts work up to 20 ('add 15 circles here' => count 15); 21+ digits are rejected with unsupported_count, but word counts eleven-twenty are never recognized.",
+    "[create] The 'custom' node type has no canonical term in its alias vocabulary ('add a custom here' is rejected with missing_node_type; you must say 'custom node', 'component', 'box', 'node', etc.), so custom nodes can never take the canonical exact_pattern confidence path (0.99) — they always parse via normalized_alias.",
+    "[create] 'the' is treated as a count word equal to 1 ('add the database here' parses as create count 1), same as 'a'/'an'.",
+    "[create] Placement anchors are limited to this/that/selected/the selection — a named anchor is not supported and leaks into the label: 'add a circle left of Billing' parses with default pointer placement and label 'left of Billing'; similarly 'add a queue next to this' yields label 'next to this'. These would create mislabeled nodes rather than being rejected.",
+    "[create] normalizeScopedVoiceUtterance passes create-family utterances through unchanged (its rewrites only target rename/delete/duplicate/move/connect while holding an element), so no scoped preprocessing is needed for this family.",
+    "[connect] Endpoint split uses the FIRST to/with/and separator (non-greedy), so a source name containing 'and' mis-splits: 'connect drag and drop to server' parses as from='drag', to='drop to server' instead of failing or treating 'drag and drop' as one name.",
+    "[connect] The branching guard rejects any 'to ... and ...' inside the endpoints as compound_command, so 'connect login to auth and audit' (a target name containing 'and') is rejected rather than parsed; but 'and' works fine as the sole separator when no 'to' precedes it ('connect database and payment service').",
+    "[connect] A second 'to' folds into the target name: 'connect send to queue to worker' parses as from='send', to named 'queue to worker'.",
+    "[connect] normalizeScopedVoiceUtterance rewrites 'connect that to X' into 'connect this to X', silently converting the spoken pronoun 'that' into deictic 'this' before parsing.",
+    "[connect] Unscoped 'connect this one to the queue' treats 'this one' as a NAMED reference (label 'this one'), not deictic - only bare 'this'/'that' are deictic; scoped normalization is required for 'this one' to become deictic.",
+    "[connect] The 'link' verb is listed in AIRBOARD_SEMANTIC_ACTION_CAPABILITIES connect terms but parseConnectCommand only accepts 'connect'; 'link user to api' returns unknown_command.",
+    "[connect] cleanLabel strips a trailing 'please' from connector labels, so 'connect user to api as calls please' yields label 'calls' (a connector genuinely labeled '... please' cannot be expressed unless quoted).",
+    "[connect] Leading 'the ' is stripped from named endpoints ('the api gateway' -> label 'api gateway'), and named endpoint labels preserve original casing while normalizedLabel lowercases.",
+    "[selection] Extra verified phrasings that also parse (kept out of the 40-case corpus only for size): 'change the label of Checkout to Checkout v2' (rename_object, label 'Checkout v2'), 'delete the selected items', 'duplicate selected', 'copy this' (scoped -> duplicate_selection), 'move selected above', 'nevermind', 'cancel', 'cancel the command', 'Cancel that.', 'undo', 'undo that', 'uh, please undo that', 'layout selected in bottom to top' (-> bottom_to_top), 'label that Gateway' and 'name this Invoice Service' (scoped -> rename_selection).",
+    "[selection] 'undo last change' (without 'the') is unrecognized: the undo pattern requires 'the last (action|change)' verbatim, so a very natural spoken phrasing falls through to unknown_command.",
+    "[selection] Deictic delete/duplicate are rejected unscoped: 'delete this' returns clarification missing_selection_target, while deictic rename works ('rename that to Done' parses to rename_object with a deictic target). Pronoun deletes only work via normalizeScopedVoiceUtterance, which rewrites them to 'delete selected'.",
+    "[selection] rename_object's lazy target capture splits at the FIRST ' to ': 'rename Send to Queue to Publish' parses as target 'Send' with label 'Queue to Publish', so objects whose labels contain the word 'to' cannot be addressed by name.",
+    "[selection] Ungrammatical 'move selected to up' parses (direction above): the optional 'to' in the move pattern combines freely with the up/down aliases intended for 'to the left/right'.",
+    "[selection] Scoped move only rewrites left/right/up/down: 'move it above' passes through normalizeScopedVoiceUtterance unchanged and then fails with missing_direction, even though unscoped 'move selected above' parses fine - above/below are second-class in the scoped grammar.",
+    "[selection] alignmentForToken maps 'horizontal'/'horizontally' through its default branch to {axis:'y', anchor:'center'} - correct today because the align regex constrains tokens, but any future token added to the regex silently becomes y-center alignment.",
+    "[selection] Layout filler words are fully optional: 'arrange selected grid' (no 'in a') parses to layout_selection grid.",
+    "[selection] 'rename selected to selected' parses to rename_selection with label 'selected' - the SELECTION_WORDS guard applies only to the rename target, not the new label.",
+    "[spoken] Trailing courtesy with a comma corrupts create labels: 'add a queue here, please' parses to create_node with a spurious label 'here,'. cleanText strips trailing .?! but not commas, so stripCourtesy's /\\s+please$/ removal leaves 'add a queue here,' — the trailing comma then defeats the /\\s+here$/ placement pattern, placement silently defaults to pointer, and the leftover 'here,' is kept as the node label. The comma-free form 'add a queue here please' parses cleanly (verified both against the real parser).",
+    "[spoken] The disfluency-stripping prefix list is broader than documented: 'right', 'now', and 'like' are also peeled as fillers (e.g. 'right, add a circle here' parses as create_node circle). Harmless for this corpus but worth knowing since 'right' is also a direction word.",
+    "[spoken] Unscoped 'move it left' is rejected with missing_direction because 'it' is not in SELECTION_WORDS — pronoun-targeted phrasing only works after normalizeScopedVoiceUtterance rewrites it to 'move selected left'. Scoped rewriting also does not strip disfluencies ('uh, rename to Cache' passes through normalizeScopedVoiceUtterance unchanged and then fails the rename grammar after courtesy stripping, since 'rename to Cache' has no target token), so scoped utterances with leading fillers fall through to clarification.",
+    "[spoken] Word-number counts stop at 'ten' in extractCount's regex; spoken 'eleven services' would treat 'eleven' as part of the node subject rather than a count (digits like '11' do parse). Not exercised in the corpus, only noted from reading extractCount.",
+    "[spoken] All 40 returned cases were verified against the real parser via /private/tmp/claude-501/-Users-mj-Projects-TheSigmaProject-Airboard/9f57fdd9-b24b-4209-ba69-85ea11d0d2a8/scratchpad/verify-spoken.mjs (wake cases parse via the wake path with default wake_word_required policy and activation.source === 'wake_word'; scoped cases were first passed through normalizeScopedVoiceUtterance)."
+  ],
+  "cases": [
+    {
+      "id": "create-add-circle-here",
+      "text": "add a circle here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "circle",
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "create-canonical-process-default",
+      "text": "create a process",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "process"
+      }
+    },
+    {
+      "id": "create-insert-database-left-of-this",
+      "text": "insert a database to the left of this",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "database",
+        "placementDirection": "left"
+      }
+    },
+    {
+      "id": "create-place-queue-right-of-that",
+      "text": "place a queue right of that",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "queue",
+        "placementDirection": "right"
+      }
+    },
+    {
+      "id": "create-make-note-above-this",
+      "text": "make a note above this",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "note",
+        "placementDirection": "above"
+      }
+    },
+    {
+      "id": "create-user-below-selected",
+      "text": "add a user below selected",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "user",
+        "placementDirection": "below"
+      }
+    },
+    {
+      "id": "create-api-canonical-here",
+      "text": "add an API here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "api",
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "create-decision-under-that",
+      "text": "create a decision under that",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "decision",
+        "placementDirection": "below"
+      }
+    },
+    {
+      "id": "create-service-over-this",
+      "text": "add a service over this",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "service",
+        "placementDirection": "above"
+      }
+    },
+    {
+      "id": "create-note-on-the-left",
+      "text": "add a note on the left",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "note",
+        "placementDirection": "left"
+      }
+    },
+    {
+      "id": "create-database-on-the-right",
+      "text": "create a database on the right",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "database",
+        "placementDirection": "right"
+      }
+    },
+    {
+      "id": "create-circle-bare-below",
+      "text": "add a circle below",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "circle",
+        "placementDirection": "below"
+      }
+    },
+    {
+      "id": "create-queue-bare-left",
+      "text": "insert a queue left",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "queue",
+        "placementDirection": "left"
+      }
+    },
+    {
+      "id": "create-two-circles-here",
+      "text": "add two circles here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "circle",
+        "count": 2,
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "create-three-services-default",
+      "text": "create three services",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "service",
+        "count": 3
+      }
+    },
+    {
+      "id": "create-digit-four-sticky-notes",
+      "text": "add 4 sticky notes here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "note",
+        "count": 4,
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "create-make-ten-boxes",
+      "text": "make ten boxes",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "custom",
+        "count": 10
+      }
+    },
+    {
+      "id": "create-seven-endpoints-here",
+      "text": "add seven endpoints here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "api",
+        "count": 7,
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "create-service-named-billing-here",
+      "text": "add a service named Billing here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "service",
+        "label": "Billing",
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "create-database-called-orders-db",
+      "text": "create a database called Orders DB",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "database",
+        "label": "Orders DB"
+      }
+    },
+    {
+      "id": "create-note-labeled-follow-up",
+      "text": "add a note labeled Follow up with legal here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "note",
+        "label": "Follow up with legal",
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "create-user-labelled-vip",
+      "text": "insert a user labelled VIP Customer",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "user",
+        "label": "VIP Customer"
+      }
+    },
+    {
+      "id": "create-microservice-alias",
+      "text": "add a microservice here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "service",
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "create-datastore-below-this",
+      "text": "create a datastore below this",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "database",
+        "placementDirection": "below"
+      }
+    },
+    {
+      "id": "create-topic-alias-here",
+      "text": "add a topic here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "queue",
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "create-actor-left-of-selected",
+      "text": "place an actor left of selected",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "user",
+        "placementDirection": "left"
+      }
+    },
+    {
+      "id": "create-gateway-above-that",
+      "text": "add a gateway above that",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "api",
+        "placementDirection": "above"
+      }
+    },
+    {
+      "id": "create-diamond-alias-here",
+      "text": "make a diamond here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "decision",
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "create-ellipse-alias-default",
+      "text": "create an ellipse",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "circle"
+      }
+    },
+    {
+      "id": "create-step-below-that",
+      "text": "add a step below that",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "process",
+        "placementDirection": "below"
+      }
+    },
+    {
+      "id": "create-component-alias-here",
+      "text": "add a component here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "custom",
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "create-custom-node-on-the-right",
+      "text": "add a custom node on the right",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "custom",
+        "placementDirection": "right"
+      }
+    },
+    {
+      "id": "create-circle-above-selection",
+      "text": "create a circle above the selection",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "circle",
+        "placementDirection": "above"
+      }
+    },
+    {
+      "id": "create-courtesy-please-database",
+      "text": "please add a database here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "database",
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "create-courtesy-okay-could-you",
+      "text": "okay, could you create a user below this",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "user",
+        "placementDirection": "below"
+      }
+    },
+    {
+      "id": "create-one-process-here",
+      "text": "create one process here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "process",
+        "count": 1,
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "create-trailing-please",
+      "text": "add a circle here please",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "circle",
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "create-um-filler-note",
+      "text": "um, add a note here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "note",
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "create-digit-two-users",
+      "text": "add 2 users right of this",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "user",
+        "count": 2,
+        "placementDirection": "right"
+      }
+    },
+    {
+      "id": "create-a-p-i-spelled-out",
+      "text": "add an a p i here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "api",
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "connect-named-to-named",
+      "text": "connect user to api",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "named",
+        "toKind": "named"
+      }
+    },
+    {
+      "id": "connect-deictic-this-that",
+      "text": "connect this to that",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "deictic",
+        "toKind": "deictic"
+      }
+    },
+    {
+      "id": "connect-deictic-that-this",
+      "text": "connect that to this",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "deictic",
+        "toKind": "deictic"
+      }
+    },
+    {
+      "id": "connect-and-separator",
+      "text": "connect database and payment service",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "named",
+        "toKind": "named"
+      }
+    },
+    {
+      "id": "connect-with-separator",
+      "text": "connect the user with the api gateway",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "named",
+        "toKind": "named"
+      }
+    },
+    {
+      "id": "connect-label-as",
+      "text": "connect user to api as calls",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "named",
+        "toKind": "named",
+        "connectorLabel": "calls"
+      }
+    },
+    {
+      "id": "connect-label-with-label",
+      "text": "connect database to service with label reads",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "named",
+        "toKind": "named",
+        "connectorLabel": "reads"
+      }
+    },
+    {
+      "id": "connect-label-with-the-label",
+      "text": "connect the queue to the worker service with the label drains",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "named",
+        "toKind": "named",
+        "connectorLabel": "drains"
+      }
+    },
+    {
+      "id": "connect-label-labelled",
+      "text": "connect billing to ledger labelled posts entries",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "named",
+        "toKind": "named",
+        "connectorLabel": "posts entries"
+      }
+    },
+    {
+      "id": "connect-label-labeled",
+      "text": "connect frontend to backend labeled fetches",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "named",
+        "toKind": "named",
+        "connectorLabel": "fetches"
+      }
+    },
+    {
+      "id": "connect-label-and-label-it",
+      "text": "connect this to that and label it verifies",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "deictic",
+        "toKind": "deictic",
+        "connectorLabel": "verifies"
+      }
+    },
+    {
+      "id": "connect-mixed-deictic-named",
+      "text": "connect this to the payment service",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "deictic",
+        "toKind": "named"
+      }
+    },
+    {
+      "id": "connect-mixed-named-deictic",
+      "text": "connect checkout to that",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "named",
+        "toKind": "deictic"
+      }
+    },
+    {
+      "id": "connect-mixed-that-named-label",
+      "text": "connect that to the audit log as records",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "deictic",
+        "toKind": "named",
+        "connectorLabel": "records"
+      }
+    },
+    {
+      "id": "connect-courtesy-please-prefix",
+      "text": "please connect this to that",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "deictic",
+        "toKind": "deictic"
+      }
+    },
+    {
+      "id": "connect-courtesy-could-you",
+      "text": "could you connect the user to the database",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "named",
+        "toKind": "named"
+      }
+    },
+    {
+      "id": "connect-trailing-please",
+      "text": "connect user to api please",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "named",
+        "toKind": "named"
+      }
+    },
+    {
+      "id": "connect-fillers",
+      "text": "um, okay, connect this to the api gateway",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "deictic",
+        "toKind": "named"
+      }
+    },
+    {
+      "id": "connect-wake-phrase",
+      "text": "Airboard, connect user to database",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "named",
+        "toKind": "named"
+      }
+    },
+    {
+      "id": "connect-quoted-label",
+      "text": "connect order service to inventory as \"reserves stock\"",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "named",
+        "toKind": "named",
+        "connectorLabel": "reserves stock"
+      }
+    },
+    {
+      "id": "connect-multiword-names",
+      "text": "connect payment gateway to fraud detection service",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "named",
+        "toKind": "named"
+      }
+    },
+    {
+      "id": "connect-deictic-and",
+      "text": "connect this and that",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "deictic",
+        "toKind": "deictic"
+      }
+    },
+    {
+      "id": "connect-deictic-with",
+      "text": "connect this with that",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "deictic",
+        "toKind": "deictic"
+      }
+    },
+    {
+      "id": "connect-label-case-preserved",
+      "text": "connect Login Page to Auth Service as Authenticates",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "named",
+        "toKind": "named",
+        "connectorLabel": "Authenticates"
+      }
+    },
+    {
+      "id": "connect-numbered-names",
+      "text": "connect User 1 to User 2",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "named",
+        "toKind": "named"
+      }
+    },
+    {
+      "id": "connect-capitalized",
+      "text": "Connect this to that",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "deictic",
+        "toKind": "deictic"
+      }
+    },
+    {
+      "id": "connect-trailing-period",
+      "text": "connect this to that.",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "deictic",
+        "toKind": "deictic"
+      }
+    },
+    {
+      "id": "connect-scoped-to-named",
+      "text": "connect to the database",
+      "scoped": true,
+      "expected": {
+        "kind": "connect",
+        "fromKind": "deictic",
+        "toKind": "named"
+      }
+    },
+    {
+      "id": "connect-scoped-it-to-named",
+      "text": "connect it to Billing Service",
+      "scoped": true,
+      "expected": {
+        "kind": "connect",
+        "fromKind": "deictic",
+        "toKind": "named"
+      }
+    },
+    {
+      "id": "connect-scoped-this-one",
+      "text": "connect this one to the message queue",
+      "scoped": true,
+      "expected": {
+        "kind": "connect",
+        "fromKind": "deictic",
+        "toKind": "named"
+      }
+    },
+    {
+      "id": "connect-scoped-label",
+      "text": "connect to the cache as reads through",
+      "scoped": true,
+      "expected": {
+        "kind": "connect",
+        "fromKind": "deictic",
+        "toKind": "named",
+        "connectorLabel": "reads through"
+      }
+    },
+    {
+      "id": "selection-rename-selected-basic",
+      "text": "rename selected to Orders API",
+      "expected": {
+        "kind": "rename_selection",
+        "label": "Orders API"
+      }
+    },
+    {
+      "id": "selection-relabel-selection-as",
+      "text": "relabel the selection as Cache Layer",
+      "expected": {
+        "kind": "rename_selection",
+        "label": "Cache Layer"
+      }
+    },
+    {
+      "id": "selection-rename-selected-objects",
+      "text": "rename the selected objects to Retry Workers",
+      "expected": {
+        "kind": "rename_selection",
+        "label": "Retry Workers"
+      }
+    },
+    {
+      "id": "selection-rename-object-named",
+      "text": "rename Circle to User",
+      "expected": {
+        "kind": "rename_object",
+        "label": "User"
+      }
+    },
+    {
+      "id": "selection-rename-object-change-name",
+      "text": "change the name of Login Service to Auth Service",
+      "expected": {
+        "kind": "rename_object",
+        "label": "Auth Service"
+      }
+    },
+    {
+      "id": "selection-rename-object-deictic",
+      "text": "rename that to Done",
+      "expected": {
+        "kind": "rename_object",
+        "label": "Done"
+      }
+    },
+    {
+      "id": "selection-scoped-rename-it",
+      "text": "rename it to Payments",
+      "scoped": true,
+      "expected": {
+        "kind": "rename_selection",
+        "label": "Payments"
+      }
+    },
+    {
+      "id": "selection-scoped-call-it",
+      "text": "call it Checkout Flow",
+      "scoped": true,
+      "expected": {
+        "kind": "rename_selection",
+        "label": "Checkout Flow"
+      }
+    },
+    {
+      "id": "selection-scoped-rename-no-pronoun",
+      "text": "rename to Fraud Check",
+      "scoped": true,
+      "expected": {
+        "kind": "rename_selection",
+        "label": "Fraud Check"
+      }
+    },
+    {
+      "id": "selection-delete-selected",
+      "text": "delete selected",
+      "expected": {
+        "kind": "delete_selection"
+      }
+    },
+    {
+      "id": "selection-remove-the-selection",
+      "text": "remove the selection",
+      "expected": {
+        "kind": "delete_selection"
+      }
+    },
+    {
+      "id": "selection-delete-courtesy",
+      "text": "um, delete selected please",
+      "expected": {
+        "kind": "delete_selection"
+      }
+    },
+    {
+      "id": "selection-scoped-delete-it",
+      "text": "delete it",
+      "scoped": true,
+      "expected": {
+        "kind": "delete_selection"
+      }
+    },
+    {
+      "id": "selection-scoped-remove-this-one",
+      "text": "remove this one",
+      "scoped": true,
+      "expected": {
+        "kind": "delete_selection"
+      }
+    },
+    {
+      "id": "selection-copy-the-selection",
+      "text": "copy the selection",
+      "expected": {
+        "kind": "duplicate_selection"
+      }
+    },
+    {
+      "id": "selection-duplicate-selected-node",
+      "text": "could you duplicate the selected node",
+      "expected": {
+        "kind": "duplicate_selection"
+      }
+    },
+    {
+      "id": "selection-scoped-duplicate-that",
+      "text": "duplicate that",
+      "scoped": true,
+      "expected": {
+        "kind": "duplicate_selection"
+      }
+    },
+    {
+      "id": "selection-move-left",
+      "text": "move selected left",
+      "expected": {
+        "kind": "move_selection",
+        "direction": "left"
+      }
+    },
+    {
+      "id": "selection-move-to-the-right",
+      "text": "move the selection to the right",
+      "expected": {
+        "kind": "move_selection",
+        "direction": "right"
+      }
+    },
+    {
+      "id": "selection-move-up-alias",
+      "text": "move selected up",
+      "expected": {
+        "kind": "move_selection",
+        "direction": "above"
+      }
+    },
+    {
+      "id": "selection-move-down-alias",
+      "text": "move the selected object down",
+      "expected": {
+        "kind": "move_selection",
+        "direction": "below"
+      }
+    },
+    {
+      "id": "selection-move-below-courtesy",
+      "text": "okay, move the selected objects below",
+      "expected": {
+        "kind": "move_selection",
+        "direction": "below"
+      }
+    },
+    {
+      "id": "selection-scoped-move-it-up",
+      "text": "move it up",
+      "scoped": true,
+      "expected": {
+        "kind": "move_selection",
+        "direction": "above"
+      }
+    },
+    {
+      "id": "selection-scoped-move-to-the-left",
+      "text": "move to the left",
+      "scoped": true,
+      "expected": {
+        "kind": "move_selection",
+        "direction": "left"
+      }
+    },
+    {
+      "id": "selection-align-left",
+      "text": "align selected left",
+      "expected": {
+        "kind": "align_selection"
+      }
+    },
+    {
+      "id": "selection-align-to-the-right",
+      "text": "align the selection to the right",
+      "expected": {
+        "kind": "align_selection"
+      }
+    },
+    {
+      "id": "selection-align-on-top",
+      "text": "align selected on the top",
+      "expected": {
+        "kind": "align_selection"
+      }
+    },
+    {
+      "id": "selection-align-bottom",
+      "text": "align the selected nodes bottom",
+      "expected": {
+        "kind": "align_selection"
+      }
+    },
+    {
+      "id": "selection-align-horizontally",
+      "text": "align selected horizontally",
+      "expected": {
+        "kind": "align_selection"
+      }
+    },
+    {
+      "id": "selection-align-vertically",
+      "text": "please align the selection vertically",
+      "expected": {
+        "kind": "align_selection"
+      }
+    },
+    {
+      "id": "selection-distribute-horizontally",
+      "text": "distribute selected horizontally",
+      "expected": {
+        "kind": "distribute_selection"
+      }
+    },
+    {
+      "id": "selection-distribute-vertically",
+      "text": "distribute the selection vertically",
+      "expected": {
+        "kind": "distribute_selection"
+      }
+    },
+    {
+      "id": "selection-layout-left-to-right",
+      "text": "layout selected left to right",
+      "expected": {
+        "kind": "layout_selection",
+        "direction": "left_to_right"
+      }
+    },
+    {
+      "id": "selection-layout-top-to-bottom",
+      "text": "lay out the selection top to bottom",
+      "expected": {
+        "kind": "layout_selection",
+        "direction": "top_to_bottom"
+      }
+    },
+    {
+      "id": "selection-layout-right-to-left",
+      "text": "arrange the selected nodes from right to left",
+      "expected": {
+        "kind": "layout_selection",
+        "direction": "right_to_left"
+      }
+    },
+    {
+      "id": "selection-layout-grid",
+      "text": "arrange the selection in a grid",
+      "expected": {
+        "kind": "layout_selection",
+        "direction": "grid"
+      }
+    },
+    {
+      "id": "selection-undo-last-change",
+      "text": "undo the last change",
+      "expected": {
+        "kind": "undo"
+      }
+    },
+    {
+      "id": "selection-undo-go-back",
+      "text": "go back",
+      "expected": {
+        "kind": "undo"
+      }
+    },
+    {
+      "id": "selection-cancel-never-mind",
+      "text": "never mind",
+      "expected": {
+        "kind": "cancel"
+      }
+    },
+    {
+      "id": "selection-cancel-stop-that",
+      "text": "stop that",
+      "expected": {
+        "kind": "cancel"
+      }
+    },
+    {
+      "id": "spoken-uh-add-circle-here",
+      "text": "uh, add a circle here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "circle",
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "spoken-um-create-three-services",
+      "text": "um, create three services here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "service",
+        "count": 3,
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "spoken-okay-so-connect-user-api",
+      "text": "okay, so, connect the user to the API as calls",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "named",
+        "toKind": "named",
+        "connectorLabel": "calls"
+      }
+    },
+    {
+      "id": "spoken-well-delete-selected-objects",
+      "text": "well, delete the selected objects",
+      "expected": {
+        "kind": "delete_selection"
+      }
+    },
+    {
+      "id": "spoken-yeah-move-selected-down",
+      "text": "yeah, move the selected object down",
+      "expected": {
+        "kind": "move_selection",
+        "direction": "below"
+      }
+    },
+    {
+      "id": "spoken-okay-never-mind",
+      "text": "okay, never mind",
+      "expected": {
+        "kind": "cancel"
+      }
+    },
+    {
+      "id": "spoken-so-duplicate-selected",
+      "text": "so, duplicate selected",
+      "expected": {
+        "kind": "duplicate_selection"
+      }
+    },
+    {
+      "id": "spoken-uh-align-selection-vertically",
+      "text": "uh, align the selection vertically",
+      "expected": {
+        "kind": "align_selection"
+      }
+    },
+    {
+      "id": "spoken-okay-distribute-horizontally",
+      "text": "okay, distribute the selected nodes horizontally",
+      "expected": {
+        "kind": "distribute_selection"
+      }
+    },
+    {
+      "id": "spoken-well-arrange-grid",
+      "text": "well, arrange the selection in a grid",
+      "expected": {
+        "kind": "layout_selection"
+      }
+    },
+    {
+      "id": "spoken-yeah-rename-selected-orders-api",
+      "text": "yeah, rename selected to Orders API",
+      "expected": {
+        "kind": "rename_selection",
+        "label": "Orders API"
+      }
+    },
+    {
+      "id": "spoken-um-add-api-left-of-this",
+      "text": "um, add an API to the left of this",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "api",
+        "placementDirection": "left"
+      }
+    },
+    {
+      "id": "spoken-uh-add-service-called-billing",
+      "text": "uh, add a service called Billing here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "service",
+        "label": "Billing",
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "spoken-okay-add-3-boxes",
+      "text": "okay, add 3 boxes here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "custom",
+        "count": 3,
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "spoken-well-make-note-named-follow-up",
+      "text": "well, make a note named Follow up with legal here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "note",
+        "label": "Follow up with legal",
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "spoken-please-add-sticky-note",
+      "text": "please add a sticky note here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "note",
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "spoken-can-you-connect-this-that",
+      "text": "can you connect this to that",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "deictic",
+        "toKind": "deictic"
+      }
+    },
+    {
+      "id": "spoken-could-you-add-database-below-this",
+      "text": "could you add a database below this",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "database",
+        "placementDirection": "below"
+      }
+    },
+    {
+      "id": "spoken-please-rename-circle-to-user",
+      "text": "please rename Circle to User",
+      "expected": {
+        "kind": "rename_object",
+        "label": "User"
+      }
+    },
+    {
+      "id": "spoken-can-you-please-move-selection-up",
+      "text": "can you please move the selection up",
+      "expected": {
+        "kind": "move_selection",
+        "direction": "above"
+      }
+    },
+    {
+      "id": "spoken-could-you-undo-that",
+      "text": "could you undo that",
+      "expected": {
+        "kind": "undo"
+      }
+    },
+    {
+      "id": "spoken-trailing-please-queue",
+      "text": "add a queue here please",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "queue",
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "spoken-please-create-five-sticky-notes",
+      "text": "please create five sticky notes here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "note",
+        "count": 5,
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "spoken-can-you-connect-api-db-with-label",
+      "text": "can you connect the API to the database with label reads",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "named",
+        "toKind": "named",
+        "connectorLabel": "reads"
+      }
+    },
+    {
+      "id": "spoken-please-align-selected-left",
+      "text": "please align the selected nodes to the left",
+      "expected": {
+        "kind": "align_selection"
+      }
+    },
+    {
+      "id": "spoken-wake-airo-add-user",
+      "text": "Airo, add a user here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "user",
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "spoken-wake-hey-airo-two-queues",
+      "text": "Hey Airo, create two queues here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "queue",
+        "count": 2,
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "spoken-wake-airboard-connect-labeled",
+      "text": "Airboard, connect Database to Payment Service as reads",
+      "expected": {
+        "kind": "connect",
+        "fromKind": "named",
+        "toKind": "named",
+        "connectorLabel": "reads"
+      }
+    },
+    {
+      "id": "spoken-wake-okay-airo-delete",
+      "text": "okay Airo, delete the selection",
+      "expected": {
+        "kind": "delete_selection"
+      }
+    },
+    {
+      "id": "spoken-wake-hey-airo-um-decision",
+      "text": "Hey Airo, um, add a decision above that",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "decision",
+        "placementDirection": "above"
+      }
+    },
+    {
+      "id": "spoken-wake-airo-move-left",
+      "text": "Airo move selected left",
+      "expected": {
+        "kind": "move_selection",
+        "direction": "left"
+      }
+    },
+    {
+      "id": "spoken-wake-air-board-undo",
+      "text": "Air board, undo",
+      "expected": {
+        "kind": "undo"
+      }
+    },
+    {
+      "id": "spoken-scoped-rename-to-payments",
+      "text": "rename to Payments",
+      "scoped": true,
+      "expected": {
+        "kind": "rename_selection",
+        "label": "Payments"
+      }
+    },
+    {
+      "id": "spoken-scoped-call-it-checkout-flow",
+      "text": "call it Checkout Flow",
+      "scoped": true,
+      "expected": {
+        "kind": "rename_selection",
+        "label": "Checkout Flow"
+      }
+    },
+    {
+      "id": "spoken-scoped-delete",
+      "text": "delete",
+      "scoped": true,
+      "expected": {
+        "kind": "delete_selection"
+      }
+    },
+    {
+      "id": "spoken-scoped-remove-it",
+      "text": "remove it",
+      "scoped": true,
+      "expected": {
+        "kind": "delete_selection"
+      }
+    },
+    {
+      "id": "spoken-scoped-duplicate-this",
+      "text": "duplicate this",
+      "scoped": true,
+      "expected": {
+        "kind": "duplicate_selection"
+      }
+    },
+    {
+      "id": "spoken-scoped-move-it-left",
+      "text": "move it left",
+      "scoped": true,
+      "expected": {
+        "kind": "move_selection",
+        "direction": "left"
+      }
+    },
+    {
+      "id": "spoken-scoped-connect-to-database",
+      "text": "connect to the database",
+      "scoped": true,
+      "expected": {
+        "kind": "connect",
+        "fromKind": "deictic",
+        "toKind": "named"
+      }
+    },
+    {
+      "id": "spoken-scoped-name-it-login-service",
+      "text": "name it Login Service",
+      "scoped": true,
+      "expected": {
+        "kind": "rename_selection",
+        "label": "Login Service"
+      }
+    }
+  ]
+}

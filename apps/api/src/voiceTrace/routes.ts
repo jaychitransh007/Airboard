@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { ApiConfig } from "../config";
 import { VoiceTraceBuffer } from "./buffer";
+import { computeVoiceMetrics } from "./metrics";
 import { parseVoiceTraceAppend, parseVoiceTurnId } from "./protocol";
 import { redactDiagnosticData } from "./redaction";
 
@@ -32,6 +33,16 @@ export function registerVoiceTraceRoutes(
       voiceTurnId: event.voiceTurnId,
       sequence: event.sequence,
     });
+  });
+
+  // The product's headline voice metrics, aggregated from the trace buffer.
+  // Same origin gate as the raw traces; returns definitions with the numbers
+  // so a dashboard (or a human) never has to guess what "success" means.
+  server.get("/voice/metrics", async (request, reply) => {
+    if (!originAllowed(request.headers.origin, config.allowedOrigins)) {
+      return reply.code(403).send({ error: "ORIGIN_NOT_ALLOWED" });
+    }
+    return computeVoiceMetrics(buffer.snapshotTurns());
   });
 
   server.get<{ Params: { voiceTurnId: string } }>(
