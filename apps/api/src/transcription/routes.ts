@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import WebSocket, { type RawData } from "ws";
 import type { ApiConfig } from "../config";
+import { apiTokenAllowed } from "../security";
 import { createTranscriptionProvider } from "./factory";
 import { parseTranscriptionControlMessage, resolveTranscriptionStart } from "./protocol";
 import { publicTranscriptionConfig } from "./publicConfig";
@@ -28,6 +29,10 @@ export function registerTranscriptionRoutes(server: FastifyInstance, config: Api
   server.get("/transcription/ws", { websocket: true }, (socket, request) => {
     if (!originAllowed(request.headers.origin, config.allowedOrigins)) {
       socket.close(1008, "Origin is not allowed");
+      return;
+    }
+    if (!apiTokenAllowed(request, config.apiToken)) {
+      socket.close(1008, "API token required");
       return;
     }
 

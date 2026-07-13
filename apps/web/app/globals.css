@@ -848,3 +848,62 @@ button:disabled {
     text-align: center;
   }
 }
+
+/* First-run onboarding overlay. */
+.onboarding-overlay {
+  position: absolute;
+  inset: 10px;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: rgba(31, 37, 32, 0.42);
+  backdrop-filter: blur(2px);
+}
+
+.onboarding-card {
+  display: grid;
+  gap: 14px;
+  width: min(520px, calc(100% - 48px));
+  padding: 22px;
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 18px 48px rgba(31, 37, 32, 0.3);
+}
+
+.onboarding-card h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.onboarding-card ul {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.onboarding-card button {
+  justify-self: start;
+}
+
+/* Collapsed advanced settings in the sidebar. */
+.advanced-settings {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.advanced-settings summary {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}

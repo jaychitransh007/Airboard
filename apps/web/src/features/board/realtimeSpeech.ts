@@ -219,6 +219,12 @@ export function buildRealtimeTranscriptionWebSocketUrl(
   baseUrl.pathname = path;
   baseUrl.search = "";
   baseUrl.hash = "";
+  // Browsers cannot set headers on WebSocket upgrades; the shared API token
+  // (when configured) travels as a query parameter instead.
+  const apiToken = process.env.NEXT_PUBLIC_AIRBOARD_API_TOKEN?.trim();
+  if (apiToken) {
+    baseUrl.searchParams.set("token", apiToken);
+  }
   return baseUrl.toString();
 }
 

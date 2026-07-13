@@ -107,7 +107,7 @@ test("no attempts → successRate is null, not a fake 100%", () => {
 test("GET /voice/metrics aggregates the live buffer and is origin-gated", async () => {
   const server = Fastify();
   const buffer = new VoiceTraceBuffer();
-  registerVoiceTraceRoutes(server, { allowedOrigins: [ORIGIN] }, buffer);
+  registerVoiceTraceRoutes(server, { allowedOrigins: [ORIGIN], rateLimits: { voiceTracePerMinute: 240 } }, buffer);
 
   buffer.append({
     voiceTurnId: "turn-e2e-000001",

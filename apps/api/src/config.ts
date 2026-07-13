@@ -9,6 +9,13 @@ export type ApiConfig = {
   ownerGraceSeconds: number;
   localEntitlements: boolean;
   allowedOrigins: string[];
+  /** Optional shared token guarding provider-spending endpoints. */
+  apiToken?: string;
+  rateLimits: {
+    intentPerMinute: number;
+    sessionStartPerMinute: number;
+    voiceTracePerMinute: number;
+  };
   supabaseUrl?: string;
   supabaseServiceRoleKey?: string;
   transcription: TranscriptionRuntimeConfig;
@@ -25,6 +32,30 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       .split(",")
       .map((origin) => origin.trim())
       .filter(Boolean),
+    ...(env.AIRBOARD_API_TOKEN?.trim() ? { apiToken: env.AIRBOARD_API_TOKEN.trim() } : {}),
+    rateLimits: {
+      intentPerMinute: parseNumber(
+        env.AIRBOARD_RATE_LIMIT_INTENT_PER_MINUTE,
+        30,
+        1,
+        10_000,
+        "AIRBOARD_RATE_LIMIT_INTENT_PER_MINUTE",
+      ),
+      sessionStartPerMinute: parseNumber(
+        env.AIRBOARD_RATE_LIMIT_SESSION_START_PER_MINUTE,
+        10,
+        1,
+        10_000,
+        "AIRBOARD_RATE_LIMIT_SESSION_START_PER_MINUTE",
+      ),
+      voiceTracePerMinute: parseNumber(
+        env.AIRBOARD_RATE_LIMIT_VOICE_TRACE_PER_MINUTE,
+        240,
+        1,
+        100_000,
+        "AIRBOARD_RATE_LIMIT_VOICE_TRACE_PER_MINUTE",
+      ),
+    },
     ...(env.SUPABASE_URL ? { supabaseUrl: env.SUPABASE_URL } : {}),
     ...(env.SUPABASE_SERVICE_ROLE_KEY
       ? { supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY }

@@ -1,9 +1,16 @@
 # System Architecture Review and Gap Analysis
 
-Status: **Assessment (2026-07-12).** Written after the P0 augmented-experience work, in
-response to the observation that fixes keep revealing new failure classes ("back and
-forth"). Every claim below is grounded in the code as of today; file references are
-included so they can be re-checked as the system evolves.
+Status: **Assessment (2026-07-12) — convergence plan EXECUTED (2026-07-13).** All five
+phases of §5 shipped as commits on `main`: Phase 0 (git + CI), Phase 1 (interaction-core
+extraction: voiceCommandRouter / palmGateTracker / holdToEditTracker / intentPipeline,
+monolith 6,705 → ~5,600 lines, Playwright E2E), Phase 2 (board sync live end-to-end,
+two-browser acceptance test), Phase 3 (151-case positive grammar corpus + false-accept
+negatives as CI merge gates; GET /voice/metrics), Phase 4 (API token + rate limits,
+physical_marker removed from the product surface, permissions join-flow gap closed,
+advanced-settings collapse, onboarding overlay, landmark-trace replay harness + in-app
+recorder). One correction to §3/§5: `permissions.ts` was NOT dead code — it authorizes
+every WS event; the actual gap was the REST join flow bypassing `canJoinBoard`, now
+fixed. The assessment below is preserved as written for historical context.
 
 ---
 

@@ -12,6 +12,7 @@ import {
 } from "./providerError";
 import { parseSemanticIntentRequest } from "./protocol";
 import { publicSemanticIntentConfig } from "./publicConfig";
+import { apiTokenAllowed, clientKey, createRateLimiter } from "../security";
 import type { SemanticIntentProviderResult, SemanticIntentRequest } from "./types";
 
 export function registerSemanticIntentRoutes(
@@ -21,12 +22,22 @@ export function registerSemanticIntentRoutes(
 ): void {
   const provider = createSemanticIntentProvider(config.semanticIntent);
   let activeRequests = 0;
+  const rateLimiter = createRateLimiter({
+    windowMs: 60_000,
+    max: config.rateLimits.intentPerMinute,
+  });
 
   server.get("/intent/config", async () => publicSemanticIntentConfig(config.semanticIntent));
 
   server.post<{ Body: unknown }>("/intent/resolve", async (request, reply) => {
     if (!originAllowed(request.headers.origin, config.allowedOrigins)) {
       return reply.code(403).send({ error: "ORIGIN_NOT_ALLOWED" });
+    }
+    if (!apiTokenAllowed(request, config.apiToken)) {
+      return reply.code(401).send({ error: "API_TOKEN_REQUIRED" });
+    }
+    if (!rateLimiter.allow(clientKey(request))) {
+      return reply.code(429).send({ error: "RATE_LIMITED" });
     }
     if (!provider) {
       return reply.code(503).send({ error: "SEMANTIC_INTENT_UNAVAILABLE" });

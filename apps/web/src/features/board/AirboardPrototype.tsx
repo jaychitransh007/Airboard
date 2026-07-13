@@ -84,7 +84,6 @@ import {
   frictionPresets,
   GesturePipeline,
   HybridGestureController,
-  markerModeFrictionConfig,
   MediaPipeHandTracker,
   type DetectedHand,
   type FrictionPreset,
@@ -433,6 +432,13 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
   const boardSyncConnectedOnceRef = useRef(false);
   const boardSyncStatusRef = useRef("off");
   const lastCursorPublishRef = useRef(0);
+  const landmarkTraceRef = useRef<{
+    startedAt: number;
+    frames: {
+      t: number;
+      hands: { handedness: string; score: number; landmarks: [number, number, number][] }[];
+    }[];
+  } | null>(null);
   const activeStrokeIdRef = useRef<string | null>(null);
   const pointerStrokeIdRef = useRef<string | null>(null);
   const activePointerIdRef = useRef<number | null>(null);
@@ -478,6 +484,8 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
   const [pendingIntent, setPendingIntent] = useState<PendingIntent | null>(null);
   const [voiceGate, setVoiceGate] = useState<VoiceGateUi | null>(null);
   const [boardSyncStatus, setBoardSyncStatus] = useState("off");
+  const [landmarkRecordingActive, setLandmarkRecordingActive] = useState(false);
+  const [onboardingVisible, setOnboardingVisible] = useState(false);
   const [actionToast, setActionToast] = useState<{ id: number; message: string } | null>(null);
   const [openCatalogId, setOpenCatalogId] = useState<string | null>(null);
   const [clearArmed, setClearArmed] = useState(false);
@@ -539,10 +547,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
       // Storage may be disabled; current-board terminology still works in memory.
     }
   }, []);
-  const markerInputMode = useMemo<MarkerInputMode>(
-    () => (inputMode === "physical_marker" ? "physical_marker" : "hand_marker"),
-    [inputMode],
-  );
+  const markerInputMode: MarkerInputMode = "hand_marker";
   const touchpadConfig = useMemo(
     () =>
       getTouchpadModeConfig(touchpadVariant, {
@@ -555,7 +560,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
   const gestureConfig = useMemo<GestureConfig>(
     () => ({
       ...defaultGestureConfig,
-      markerHand: inputMode === "physical_marker" ? "right" : "either",
+      markerHand: "either",
       markerGestureConfidenceThreshold: confidenceThreshold,
       dusterGestureConfidenceThreshold: Math.max(0.45, confidenceThreshold * 0.72),
     }),
@@ -565,7 +570,6 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
     () => ({
       ...defaultVirtualSurfaceFrictionConfig,
       ...frictionPresets[frictionPreset === "custom" ? "balanced" : frictionPreset],
-      ...(inputMode === "physical_marker" ? markerModeFrictionConfig : {}),
       enableAutoLift: autoLiftEnabled,
       enablePostStrokeSmoothing: strokeCleanupEnabled,
       enableLineSnap: strokeCleanupEnabled,
@@ -651,6 +655,17 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
   useEffect(() => {
     applyRemoteEventRef.current = applyRemoteEvent;
   }, [applyRemoteEvent]);
+
+  // First-run onboarding: the gesture vocabulary is invisible until taught.
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem("airboard.onboarding.v1") !== "done") {
+        setOnboardingVisible(true);
+      }
+    } catch {
+      // Storage may be unavailable; skip onboarding rather than block.
+    }
+  }, []);
 
   /**
    * Board sync bootstrap. With ?boardSessionId=… in the URL we join that
@@ -3631,6 +3646,60 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
   }, [endActiveTouchpadInteraction, inputMode, inputPaused, touchpadState]);
 
   /**
+   * Gesture ground-truth recorder: captures 5s of raw hand landmarks to a
+   * downloadable JSON trace for the gesture-engine replay harness, so pose
+   * thresholds can be calibrated against real hands instead of synthetic
+   * fixtures.
+   */
+  const startLandmarkTraceRecording = useCallback(() => {
+    landmarkTraceRef.current = { startedAt: performance.now(), frames: [] };
+    setLandmarkRecordingActive(true);
+    setCommandFeedback(
+      "Recording hand landmarks for 5 seconds — perform the pose you want to calibrate.",
+    );
+  }, []);
+
+  const captureLandmarkFrame = useCallback(
+    (hands: readonly DetectedHand[], timestampMs: number) => {
+      const recording = landmarkTraceRef.current;
+      if (!recording) {
+        return;
+      }
+      recording.frames.push({
+        t: Math.round(timestampMs - recording.startedAt),
+        hands: hands.map((hand) => ({
+          handedness: hand.handedness,
+          score: hand.handednessScore,
+          landmarks: hand.landmarks.map(
+            (landmark) => [landmark.x, landmark.y, landmark.z ?? 0] as [number, number, number],
+          ),
+        })),
+      });
+      if (timestampMs - recording.startedAt < 5_000) {
+        return;
+      }
+      landmarkTraceRef.current = null;
+      setLandmarkRecordingActive(false);
+      const trace = {
+        schemaVersion: "1.0",
+        recordedAt: new Date().toISOString(),
+        frames: recording.frames,
+      };
+      const blob = new Blob([JSON.stringify(trace)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `landmark-trace-${Date.now()}.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setCommandFeedback(
+        "Landmark trace downloaded. Add it to packages/gesture-engine/test/fixtures to extend the replay harness.",
+      );
+    },
+    [],
+  );
+
+  /**
    * Palm push-to-talk: an open, flat, upright hand held still briefly opens
    * the command mic gate; dropping the pose (with hysteresis) closes it. The
    * pose estimator gates hard on openness, so grabs and pointing never arm it,
@@ -3795,6 +3864,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
 
           const signal = getHybridHandSignal(hands, result?.hand);
           updatePalmPushToTalk(hands, timestampMs);
+          captureLandmarkFrame(hands, timestampMs);
           hybridOutput = hybridGestureControllerRef.current.update({
             handPoint: signal?.point ?? null,
             trackingConfidence: signal?.trackingConfidence ?? 0,
@@ -3832,6 +3902,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
     inputPaused,
     inputMode,
     markerInputMode,
+    captureLandmarkFrame,
     sensitivity,
     updatePalmPushToTalk,
   ]);
@@ -4591,6 +4662,45 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
                   : `Holding “${voiceGate.label}” — press Start Airo once to enable voice edits`}
             </div>
           ) : null}
+          {onboardingVisible && inputMode === "gesture" ? (
+            <div className="onboarding-overlay" role="dialog" aria-label="How to use Airboard">
+              <div className="onboarding-card">
+                <h2>Talk to the board, not to software</h2>
+                <ul>
+                  <li>
+                    <strong>Raise a flat palm</strong> and speak — no wake word.
+                    “Add a payment service next to the API.”
+                  </li>
+                  <li>
+                    <strong>Grab an element and hold it still</strong> to edit it by voice:
+                    “rename to Payments”, “delete”, “connect to the database.”
+                  </li>
+                  <li>
+                    <strong>Open hand points, closed hand grabs</strong>; reopen to drop.
+                    Drag shapes from the catalogs on the left.
+                  </li>
+                  <li>
+                    Everything applies instantly — <strong>every change shows an Undo
+                    toast</strong>, and “Airo, …” always works as a fallback.
+                  </li>
+                </ul>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={() => {
+                    setOnboardingVisible(false);
+                    try {
+                      window.localStorage.setItem("airboard.onboarding.v1", "done");
+                    } catch {
+                      // Best-effort persistence only.
+                    }
+                  }}
+                >
+                  Got it — let me try
+                </button>
+              </div>
+            </div>
+          ) : null}
           {actionToast ? (
             <div className="action-toast" role="status" data-testid="action-toast">
               <span>{actionToast.message}</span>
@@ -4880,24 +4990,6 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
                   </strong>
                 </>
               ) : null}
-              {inputMode === "physical_marker" ? (
-                <>
-                  <span>Gesture</span>
-                  <strong className="pill">{gestureResult?.mode ?? "idle"}</strong>
-                  <span>Marker</span>
-                  <strong>{markerStatus}</strong>
-                  <span>Confidence</span>
-                  <strong>{gestureResult ? gestureResult.confidence.toFixed(2) : "0.00"}</strong>
-                  <span>Grip</span>
-                  <strong>{formatDiagnostic(gestureResult?.diagnostics?.gripConfidence, 2)}</strong>
-                  <span>Tip</span>
-                  <strong>{formatDiagnostic(gestureResult?.diagnostics?.tipConfidence, 2)}</strong>
-                  <span>Tip source</span>
-                  <strong>{gestureResult?.diagnostics?.trackingSource ?? "-"}</strong>
-                  <span>Hand</span>
-                  <strong>{gestureResult?.hand ?? "-"}</strong>
-                </>
-              ) : null}
               {inputMode === "gesture" ? (
                 <>
                   <span>Hand cursor</span>
@@ -4967,7 +5059,6 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
               >
                 <option value="touchpad">Touchpad Writing</option>
                 <option value="gesture">Intent Canvas</option>
-                <option value="physical_marker">Marker Mode Beta</option>
               </select>
             </div>
             {inputMode === "touchpad" ? (
@@ -5048,6 +5139,8 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
                       points, closed hand grabs; reopen to drop. Shift-click remains the
                       deterministic multi-select fallback.
                     </p>
+                    <details className="advanced-settings">
+                      <summary>Advanced settings</summary>
                     <div className="control-row">
                       <label htmlFor="voice-model">Voice model</label>
                       <select
@@ -5129,66 +5222,21 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
                       />
                       <span>Object, grid, and connector snapping</span>
                     </label>
-                  </>
-                ) : (
-                  <>
-                    <p className="hint">Marker Mode Beta - use a physical marker prop or pinch marker.</p>
                     <div className="control-row">
-                      <label htmlFor="writing-feel">Writing Feel</label>
-                      <select
-                        id="writing-feel"
-                        value={frictionPreset}
-                        onChange={(event) => setFrictionPreset(event.target.value as FrictionPreset)}
+                      <label htmlFor="record-landmarks">Gesture calibration</label>
+                      <button
+                        id="record-landmarks"
+                        type="button"
+                        disabled={cameraStatus !== "active" || landmarkRecordingActive}
+                        onClick={startLandmarkTraceRecording}
+                        title="Record 5 seconds of hand-landmark frames to a JSON file for the gesture-engine replay harness"
                       >
-                        <option value="stable">Stable</option>
-                        <option value="balanced">Balanced</option>
-                        <option value="responsive">Responsive</option>
-                      </select>
+                        {landmarkRecordingActive ? "Recording…" : "Record 5s landmark trace"}
+                      </button>
                     </div>
-                    <div className="control-row">
-                      <label htmlFor="confidence">Confidence</label>
-                      <input
-                        id="confidence"
-                        type="range"
-                        min="0.4"
-                        max="0.95"
-                        step="0.01"
-                        value={confidenceThreshold}
-                        onChange={(event) => setConfidenceThreshold(Number(event.target.value))}
-                      />
-                    </div>
-                    <div className="control-row">
-                      <label htmlFor="sensitivity">Sensitivity</label>
-                      <input
-                        id="sensitivity"
-                        type="range"
-                        min="0.7"
-                        max="1.5"
-                        step="0.05"
-                        value={sensitivity}
-                        onChange={(event) => setSensitivity(Number(event.target.value))}
-                      />
-                    </div>
-                    <label className="check-row" htmlFor="auto-lift">
-                      <input
-                        id="auto-lift"
-                        type="checkbox"
-                        checked={autoLiftEnabled}
-                        onChange={(event) => setAutoLiftEnabled(event.target.checked)}
-                      />
-                      <span>Auto-lift</span>
-                    </label>
-                    <label className="check-row" htmlFor="stroke-cleanup">
-                      <input
-                        id="stroke-cleanup"
-                        type="checkbox"
-                        checked={strokeCleanupEnabled}
-                        onChange={(event) => setStrokeCleanupEnabled(event.target.checked)}
-                      />
-                      <span>Stroke cleanup</span>
-                    </label>
+                    </details>
                   </>
-                )}
+                ) : null}
               </>
             )}
             <label className="check-row" htmlFor="debug-visible">
@@ -5521,8 +5569,6 @@ function getInputModeLabel(mode: AirboardInputMode): string {
       return "Touchpad Writing";
     case "gesture":
       return "Intent Canvas";
-    case "physical_marker":
-      return "Marker Mode Beta";
   }
 }
 

@@ -1,4 +1,5 @@
 import {
+  canJoinBoard,
   applyBoardEvent,
   canStartBoard,
   createInitialBoardState,
@@ -75,7 +76,7 @@ export class InMemorySessionStore implements SessionStore {
     state: BoardState;
   } {
     const record = this.requireSession(input.sessionId);
-    if (record.session.status === "locked" || record.session.status === "ended") {
+    if (!canJoinBoard(record.session)) {
       throw new Error("SESSION_NOT_JOINABLE");
     }
 

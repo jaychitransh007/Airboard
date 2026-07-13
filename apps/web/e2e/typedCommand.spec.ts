@@ -9,6 +9,11 @@ import { expect, test } from "@playwright/test";
 test("typing a command creates and edits objects instantly", async ({ page }) => {
   await page.goto("/");
 
+  // First run shows the onboarding overlay; dismissing it is part of the flow.
+  const onboarding = page.getByRole("button", { name: "Got it — let me try" });
+  await expect(onboarding).toBeVisible();
+  await onboarding.click();
+
   const input = page.getByTestId("intent-command-input");
   await expect(input).toBeVisible();
 

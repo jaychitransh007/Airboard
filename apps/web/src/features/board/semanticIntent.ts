@@ -156,9 +156,13 @@ export async function resolveSemanticIntent(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 6_000);
   try {
+    const apiToken = process.env.NEXT_PUBLIC_AIRBOARD_API_TOKEN?.trim();
     const response = await fetchImpl(new URL("/intent/resolve", options.apiBaseUrl), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiToken ? { Authorization: `Bearer ${apiToken}` } : {}),
+      },
       body: JSON.stringify({
         voiceTurnId: options.voiceTurnId,
         transcript: options.transcript,

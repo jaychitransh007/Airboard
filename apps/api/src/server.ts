@@ -13,6 +13,7 @@ import {
 import Fastify from "fastify";
 import type { WebSocket } from "ws";
 import type { ApiConfig } from "./config";
+import { clientKey, createRateLimiter } from "./security";
 import { registerSemanticIntentRoutes } from "./semanticIntent/routes";
 import { createSessionStore } from "./storeFactory";
 import { registerTranscriptionRoutes } from "./transcription/routes";
@@ -88,6 +89,10 @@ export async function buildServer(config: ApiConfig) {
     origin: config.allowedOrigins,
   });
   await server.register(websocket);
+  const sessionStartLimiter = createRateLimiter({
+    windowMs: 60_000,
+    max: config.rateLimits.sessionStartPerMinute,
+  });
   registerTranscriptionRoutes(server, config);
   registerSemanticIntentRoutes(server, config, voiceTraceBuffer);
   registerVoiceTraceRoutes(server, config, voiceTraceBuffer);
@@ -121,6 +126,9 @@ export async function buildServer(config: ApiConfig) {
       allowParticipantDrawing?: boolean;
     };
   }>("/sessions/start", async (request, reply) => {
+    if (!sessionStartLimiter.allow(clientKey(request))) {
+      return reply.code(429).send({ error: "RATE_LIMITED" });
+    }
     const ownerUserId = request.headers["x-airboard-user-id"];
     if (!ownerUserId || Array.isArray(ownerUserId)) {
       return reply.code(401).send({ error: "OWNER_AUTH_REQUIRED" });

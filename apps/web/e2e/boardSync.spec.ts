@@ -43,6 +43,11 @@ async function waitForLiveSession(page: Page) {
 test("two browsers share one live board; reload rehydrates it", async ({ browser }) => {
   const ownerContext = await browser.newContext();
   const guestContext = await browser.newContext();
+  for (const context of [ownerContext, guestContext]) {
+    await context.addInitScript(() => {
+      window.localStorage.setItem("airboard.onboarding.v1", "done");
+    });
+  }
   const owner = await ownerContext.newPage();
   await owner.goto("/");
   await waitForLiveSession(owner);

@@ -1,4 +1,5 @@
 import {
+  canJoinBoard,
   applyBoardEvent,
   canStartBoard,
   createInitialBoardState,
@@ -128,7 +129,7 @@ export class SupabaseSessionStore implements SessionStore {
     state: BoardState;
   }> {
     const session = await this.getSession(input.sessionId);
-    if (session.status === "locked" || session.status === "ended") {
+    if (!canJoinBoard(session)) {
       throw new Error("SESSION_NOT_JOINABLE");
     }
 

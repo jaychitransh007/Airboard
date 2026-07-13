@@ -34,6 +34,12 @@ function summary(page: import("@playwright/test").Page) {
   );
 }
 
+test.beforeEach(async ({ context }) => {
+  await context.addInitScript(() => {
+    window.localStorage.setItem("airboard.onboarding.v1", "done");
+  });
+});
+
 test("wake-word transcripts execute; meeting talk never does", async ({ page }) => {
   await page.goto("/");
   await hooks(page);

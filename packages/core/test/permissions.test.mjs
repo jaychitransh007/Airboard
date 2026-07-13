@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { authorizeBoardEvent, shouldLockForOwnerAbsence } from "../dist/permissions.js";
+import { authorizeBoardEvent, canJoinBoard, shouldLockForOwnerAbsence } from "../dist/permissions.js";
 
 const FUTURE = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 const PAST = new Date(Date.now() - 60 * 60 * 1000).toISOString();
@@ -141,4 +141,21 @@ test("only the owner can change permissions or clear the board", () => {
     event: { type: "board.cleared" },
   });
   assert.equal(ownerClear.allowed, true);
+});
+
+test("canJoinBoard is the single joinability authority: expiry and lock both deny", () => {
+  assert.equal(canJoinBoard(makeSession()), true);
+  assert.equal(canJoinBoard(makeSession({ status: "locked" })), false);
+  assert.equal(canJoinBoard(makeSession({ status: "ended" })), false);
+  // owner_disconnected stays joinable — the grace window belongs to drawing,
+  // not joining.
+  assert.equal(canJoinBoard(makeSession({ status: "owner_disconnected" })), true);
+  // An expired-but-active session must deny joins: the REST join flow and the
+  // WS gate both route through this exact check now.
+  assert.equal(
+    canJoinBoard(
+      makeSession({ expiresAt: new Date(Date.now() - 60_000).toISOString() }),
+    ),
+    false,
+  );
 });

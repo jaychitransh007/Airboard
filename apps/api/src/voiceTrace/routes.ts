@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { ApiConfig } from "../config";
 import { VoiceTraceBuffer } from "./buffer";
+import { clientKey, createRateLimiter } from "../security";
 import { computeVoiceMetrics } from "./metrics";
 import { parseVoiceTraceAppend, parseVoiceTurnId } from "./protocol";
 import { redactDiagnosticData } from "./redaction";
@@ -10,9 +11,16 @@ export function registerVoiceTraceRoutes(
   config: ApiConfig,
   buffer = new VoiceTraceBuffer(),
 ): VoiceTraceBuffer {
+  const traceLimiter = createRateLimiter({
+    windowMs: 60_000,
+    max: config.rateLimits.voiceTracePerMinute,
+  });
   server.post<{ Body: unknown }>("/voice/trace", async (request, reply) => {
     if (!originAllowed(request.headers.origin, config.allowedOrigins)) {
       return reply.code(403).send({ error: "ORIGIN_NOT_ALLOWED" });
+    }
+    if (!traceLimiter.allow(clientKey(request))) {
+      return reply.code(429).send({ error: "RATE_LIMITED" });
     }
     const parsed = parseVoiceTraceAppend(request.body);
     if (!parsed.ok) {

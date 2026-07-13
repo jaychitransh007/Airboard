@@ -1,6 +1,7 @@
 export * from "./classifier.ts";
 export * from "./grabStrength.ts";
 export * from "./hybridGestureController.ts";
+export * from "./landmarkTrace.ts";
 export * from "./mapper.ts";
 export * from "./mediapipe.ts";
 export * from "./oneEuroFilter.ts";

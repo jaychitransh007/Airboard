@@ -1,6 +1,6 @@
 import type { StrokePoint } from "@airboard/core";
 
-export type AirboardInputMode = "touchpad" | "gesture" | "physical_marker";
+export type AirboardInputMode = "touchpad" | "gesture";
 
 export type TouchpadModeVariant = "simple" | "presenter" | "precision";
 

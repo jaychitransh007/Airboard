@@ -133,7 +133,7 @@ test("exposes same-origin append and local diagnostic retrieval routes", async (
   const buffer = new VoiceTraceBuffer();
   registerVoiceTraceRoutes(
     server,
-    { allowedOrigins: ["http://localhost:3000"] },
+    { allowedOrigins: ["http://localhost:3000"], rateLimits: { voiceTracePerMinute: 240 } },
     buffer,
   );
   t.after(() => server.close());
