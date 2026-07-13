@@ -39,6 +39,11 @@ import {
   resolveIntentOperation,
   resolveSemanticPlanAction,
 } from "./intentPipeline";
+import {
+  snapshotBoardEvents,
+  startBoardSync,
+  type BoardSyncHandle,
+} from "./boardSync";
 import { HoldToEditTracker } from "./holdToEditTracker";
 import { PalmGateTracker } from "./palmGateTracker";
 import {
@@ -418,6 +423,16 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
   }
   const scopedKeyActiveRef = useRef(false);
   const boardRef = useRef<BoardState>(createInitialBoardState(BOARD_SESSION_ID));
+  // Board sync: a live server session id takes over from the local fallback
+  // once a session is created/joined; every event addresses whichever id is
+  // current so the server accepts and rebroadcasts it.
+  const boardSessionIdRef = useRef(BOARD_SESSION_ID);
+  const boardSyncRef = useRef<BoardSyncHandle | null>(null);
+  const boardSyncSeededRef = useRef(false);
+  const boardSyncSeedEligibleRef = useRef(false);
+  const boardSyncConnectedOnceRef = useRef(false);
+  const boardSyncStatusRef = useRef("off");
+  const lastCursorPublishRef = useRef(0);
   const activeStrokeIdRef = useRef<string | null>(null);
   const pointerStrokeIdRef = useRef<string | null>(null);
   const activePointerIdRef = useRef<number | null>(null);
@@ -462,6 +477,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
   );
   const [pendingIntent, setPendingIntent] = useState<PendingIntent | null>(null);
   const [voiceGate, setVoiceGate] = useState<VoiceGateUi | null>(null);
+  const [boardSyncStatus, setBoardSyncStatus] = useState("off");
   const [actionToast, setActionToast] = useState<{ id: number; message: string } | null>(null);
   const [openCatalogId, setOpenCatalogId] = useState<string | null>(null);
   const [clearArmed, setClearArmed] = useState(false);
@@ -592,7 +608,38 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
     }));
   }, []);
 
+  /**
+   * Publishes a locally-applied event to the live session (no-op while
+   * offline). Cursor presence is throttled: it fires every pointer frame
+   * locally but peers only need ~8Hz.
+   */
+  const publishBoardEvent = useCallback((event: BoardEvent) => {
+    const sync = boardSyncRef.current;
+    if (!sync || event.boardSessionId !== sync.boardSessionId) {
+      return;
+    }
+    if (event.type === "cursor.moved") {
+      const now = performance.now();
+      if (now - lastCursorPublishRef.current < 120) {
+        return;
+      }
+      lastCursorPublishRef.current = now;
+    }
+    sync.publish(event);
+  }, []);
+
   const applyLocalEvent = useCallback(
+    (event: BoardEvent) => {
+      boardRef.current = applyBoardEvent(boardRef.current, event);
+      render();
+      updateStats();
+      publishBoardEvent(event);
+    },
+    [publishBoardEvent, render, updateStats],
+  );
+
+  /** A peer's event: apply and render, never re-publish (that would loop). */
+  const applyRemoteEvent = useCallback(
     (event: BoardEvent) => {
       boardRef.current = applyBoardEvent(boardRef.current, event);
       render();
@@ -600,6 +647,133 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
     },
     [render, updateStats],
   );
+  const applyRemoteEventRef = useRef(applyRemoteEvent);
+  useEffect(() => {
+    applyRemoteEventRef.current = applyRemoteEvent;
+  }, [applyRemoteEvent]);
+
+  /**
+   * Board sync bootstrap. With ?boardSessionId=… in the URL we join that
+   * session and hydrate from the server's state; otherwise we create a new
+   * session as owner and stamp its id into the URL so the page becomes a
+   * shareable live-board link. If the API is unreachable the board simply
+   * stays local — every feature works, nothing syncs.
+   */
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    let cancelled = false;
+    const requestedSessionId = new URLSearchParams(window.location.search).get(
+      "boardSessionId",
+    );
+    boardSyncStatusRef.current = "connecting";
+    setBoardSyncStatus("connecting");
+
+    const trySeed = () => {
+      if (
+        boardSyncSeededRef.current ||
+        !boardSyncSeedEligibleRef.current ||
+        !boardSyncConnectedOnceRef.current
+      ) {
+        return;
+      }
+      const sync = boardSyncRef.current;
+      if (!sync) {
+        return;
+      }
+      boardSyncSeededRef.current = true;
+      // Objects drawn before the socket opened still reach the session.
+      const seedEvents = snapshotBoardEvents(boardRef.current, {
+        boardSessionId: sync.boardSessionId,
+        actorParticipantId: PARTICIPANT_ID,
+      });
+      if (seedEvents.length > 0) {
+        sync.publish(seedEvents);
+      }
+    };
+
+    startBoardSync(
+      {
+        apiBaseUrl: AIRBOARD_API_URL,
+        boardSessionId: requestedSessionId,
+        ownerUserId: OWNER_USER_ID,
+        displayName: requestedSessionId ? "Guest" : "Owner",
+        title: "Airboard",
+      },
+      {
+        onRemoteEvent: (event) => {
+          if (!cancelled) {
+            applyRemoteEventRef.current(event);
+          }
+        },
+        onStatus: (status) => {
+          if (cancelled) {
+            return;
+          }
+          boardSyncStatusRef.current = status;
+          setBoardSyncStatus(status);
+          if (status === "connected") {
+            boardSyncConnectedOnceRef.current = true;
+            trySeed();
+          }
+        },
+        onRejection: (rejection) => {
+          if (!cancelled) {
+            setCommandFeedback(
+              `The board server rejected a change (${rejection.reason}). Reload to resync if boards diverge.`,
+            );
+          }
+        },
+      },
+    )
+      .then((result) => {
+        if (cancelled) {
+          result.handle.stop();
+          return;
+        }
+        boardSyncRef.current = result.handle;
+        boardSessionIdRef.current = result.handle.boardSessionId;
+        if (result.outcome === "joined") {
+          boardRef.current = result.initialState;
+          undoStackRef.current = [];
+          setSelectedAnnotationId(null);
+          setSelectedAnnotationIds([]);
+          render();
+          updateStats();
+          setCommandFeedback("Joined the live board session.");
+        } else {
+          boardSyncSeedEligibleRef.current = true;
+          trySeed();
+          setCommandFeedback(
+            "Live board session ready — share this page's URL to collaborate.",
+          );
+        }
+        const url = new URL(window.location.href);
+        url.searchParams.set("boardSessionId", result.handle.boardSessionId);
+        window.history.replaceState(null, "", url.toString());
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        boardSyncStatusRef.current = "offline";
+        setBoardSyncStatus("offline");
+        if (requestedSessionId) {
+          setCommandFeedback(
+            "Could not join the shared board session — working on a local board instead.",
+          );
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      boardSyncRef.current?.stop();
+      boardSyncRef.current = null;
+    };
+    // Mount-once by design: session lifetime == page lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const makePoint = useCallback((x: number, y: number, confidence?: number): StrokePoint => {
     const point: StrokePoint = {
@@ -650,7 +824,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
       const now = new Date().toISOString();
       const strokeInput: Parameters<typeof createStroke>[0] = {
         id: crypto.randomUUID(),
-        boardId: BOARD_SESSION_ID,
+        boardId: boardSessionIdRef.current,
         userId: OWNER_USER_ID,
         point,
         createdAt: now,
@@ -671,7 +845,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
       activeStrokeIdRef.current = stroke.id;
       applyLocalEvent({
         ...createEventEnvelope({
-          boardSessionId: BOARD_SESSION_ID,
+          boardSessionId: boardSessionIdRef.current,
           actorParticipantId: PARTICIPANT_ID,
           createdAt: now,
         }),
@@ -686,7 +860,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
     (strokeId: string, point: StrokePoint) => {
       applyLocalEvent({
         ...createEventEnvelope({
-          boardSessionId: BOARD_SESSION_ID,
+          boardSessionId: boardSessionIdRef.current,
           actorParticipantId: PARTICIPANT_ID,
         }),
         type: "stroke.point_added",
@@ -705,7 +879,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
 
       const event: StrokeCommittedEvent = {
         ...createEventEnvelope({
-          boardSessionId: BOARD_SESSION_ID,
+          boardSessionId: boardSessionIdRef.current,
           actorParticipantId: PARTICIPANT_ID,
         }),
         type: "stroke.committed",
@@ -749,7 +923,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
 
       applyLocalEvent({
         ...createEventEnvelope({
-          boardSessionId: BOARD_SESSION_ID,
+          boardSessionId: boardSessionIdRef.current,
           actorParticipantId: PARTICIPANT_ID,
         }),
         type: "cursor.moved",
@@ -763,7 +937,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
       const now = new Date().toISOString();
       const eraseInput: Parameters<typeof createEraseAction>[0] = {
         id: crypto.randomUUID(),
-        boardId: BOARD_SESSION_ID,
+        boardId: boardSessionIdRef.current,
         userId: OWNER_USER_ID,
         point,
         radius,
@@ -775,7 +949,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
       }
       applyLocalEvent({
         ...createEventEnvelope({
-          boardSessionId: BOARD_SESSION_ID,
+          boardSessionId: boardSessionIdRef.current,
           actorParticipantId: PARTICIPANT_ID,
           createdAt: now,
         }),
@@ -795,7 +969,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
     }) => {
       applyLocalEvent({
         ...createEventEnvelope({
-          boardSessionId: BOARD_SESSION_ID,
+          boardSessionId: boardSessionIdRef.current,
           actorParticipantId: PARTICIPANT_ID,
         }),
         type: "cursor.moved",
@@ -842,7 +1016,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
 
       applyLocalEvent({
         ...createEventEnvelope({
-          boardSessionId: BOARD_SESSION_ID,
+          boardSessionId: boardSessionIdRef.current,
           actorParticipantId: PARTICIPANT_ID,
         }),
         type: "stroke.annotation_updated",
@@ -854,7 +1028,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
       for (const connectorUpdate of connectorUpdates) {
         applyLocalEvent({
           ...createEventEnvelope({
-            boardSessionId: BOARD_SESSION_ID,
+            boardSessionId: boardSessionIdRef.current,
             actorParticipantId: PARTICIPANT_ID,
           }),
           type: "stroke.annotation_updated",
@@ -950,7 +1124,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
       const now = new Date().toISOString();
       const stroke = createStroke({
         id: crypto.randomUUID(),
-        boardId: BOARD_SESSION_ID,
+        boardId: boardSessionIdRef.current,
         userId: OWNER_USER_ID,
         point: firstPoint,
         color: annotationResult.color,
@@ -962,7 +1136,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
 
       applyLocalEvent({
         ...createEventEnvelope({
-          boardSessionId: BOARD_SESSION_ID,
+          boardSessionId: boardSessionIdRef.current,
           actorParticipantId: PARTICIPANT_ID,
           createdAt: now,
         }),
@@ -971,7 +1145,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
       });
       applyLocalEvent({
         ...createEventEnvelope({
-          boardSessionId: BOARD_SESSION_ID,
+          boardSessionId: boardSessionIdRef.current,
           actorParticipantId: PARTICIPANT_ID,
           createdAt: now,
         }),
@@ -1238,7 +1412,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
       } else if (interaction?.mode === "moving" || interaction?.mode === "resizing") {
         const initialState = objectInteractionInitialStateRef.current;
         const undoEvents = initialState
-          ? createAnnotationRestoreEvents(initialState, boardRef.current)
+          ? createAnnotationRestoreEvents(boardSessionIdRef.current, initialState, boardRef.current)
           : [];
         if (undoEvents.length > 0) {
           undoStackRef.current.push({
@@ -1286,7 +1460,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
 
     applyLocalEvent({
       ...createEventEnvelope({
-        boardSessionId: BOARD_SESSION_ID,
+        boardSessionId: boardSessionIdRef.current,
         actorParticipantId: PARTICIPANT_ID,
       }),
       type: "stroke.label_updated",
@@ -1690,6 +1864,9 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
         undoEvents: action.undoEvents,
       });
       boardRef.current = result.state;
+      if (result.events.length > 0) {
+        boardSyncRef.current?.publish(result.events);
+      }
       const restoredSelection = action.selectionBefore.filter(
         (strokeId) => boardRef.current.strokes[strokeId]?.status === "committed",
       );
@@ -1704,7 +1881,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
     if (action.type === "stroke") {
       applyLocalEvent({
         ...createEventEnvelope({
-          boardSessionId: BOARD_SESSION_ID,
+          boardSessionId: boardSessionIdRef.current,
           actorParticipantId: PARTICIPANT_ID,
         }),
         type: "stroke.deleted",
@@ -1716,7 +1893,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
 
     applyLocalEvent({
       ...createEventEnvelope({
-        boardSessionId: BOARD_SESSION_ID,
+        boardSessionId: boardSessionIdRef.current,
         actorParticipantId: PARTICIPANT_ID,
       }),
       type: "stroke.restored",
@@ -1816,7 +1993,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
           }
 
           for (const command of resolved.commands) {
-            const result = applyDiagramCommand(previewState, command, diagramCommandContext());
+            const result = applyDiagramCommand(previewState, command, diagramCommandContext(boardSessionIdRef.current));
             previewState = result.state;
             affectedStrokeIds = [...affectedStrokeIds, ...result.affectedStrokeIds];
           }
@@ -1997,7 +2174,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
             return "rejected";
           }
           for (const command of resolved.commands) {
-            const result = applyDiagramCommand(previewState, command, diagramCommandContext());
+            const result = applyDiagramCommand(previewState, command, diagramCommandContext(boardSessionIdRef.current));
             previewState = result.state;
             affectedStrokeIds = [...affectedStrokeIds, ...result.affectedStrokeIds];
           }
@@ -2486,11 +2663,17 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
       let nextState = boardRef.current;
       let undoEvents: BoardEvent[] = [];
       let affectedStrokeIds: string[] = [];
+      let forwardEvents: BoardEvent[] = [];
       for (const command of pending.commands) {
-        const result = applyDiagramCommand(nextState, command, diagramCommandContext());
+        const result = applyDiagramCommand(nextState, command, diagramCommandContext(boardSessionIdRef.current));
         nextState = result.state;
         undoEvents = [...result.undoEvents, ...undoEvents];
+        forwardEvents = [...forwardEvents, ...result.events];
         affectedStrokeIds = [...affectedStrokeIds, ...result.affectedStrokeIds];
+      }
+      // One atomic batch: peers replay the compound command in sequence order.
+      if (forwardEvents.length > 0) {
+        boardSyncRef.current?.publish(forwardEvents);
       }
 
       undoStackRef.current.push({
@@ -2775,6 +2958,8 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
           objectCount: committed.length,
           labels: committed.map((stroke) => stroke.annotation?.label ?? ""),
           selectedCount: selectedAnnotationIdsRef.current.length,
+          boardSessionId: boardSessionIdRef.current,
+          syncStatus: boardSyncStatusRef.current,
         };
       },
     };
@@ -3244,7 +3429,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
     setIntentCommandText("");
     applyLocalEvent({
       ...createEventEnvelope({
-        boardSessionId: BOARD_SESSION_ID,
+        boardSessionId: boardSessionIdRef.current,
         actorParticipantId: PARTICIPANT_ID,
       }),
       type: "board.cleared",
@@ -3260,7 +3445,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
           undoEvents: [
             {
               ...createEventEnvelope({
-                boardSessionId: BOARD_SESSION_ID,
+                boardSessionId: boardSessionIdRef.current,
                 actorParticipantId: PARTICIPANT_ID,
               }),
               type: "stroke.restored",
@@ -4667,6 +4852,8 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
                   <strong className="pill">{objectGestureState}</strong>
                   <span>Selection</span>
                   <strong>{selectedAnnotationIds.length}</strong>
+                  <span>Live sync</span>
+                  <strong className="pill">{boardSyncStatus}</strong>
                   <span>Command</span>
                   <strong>
                     {speechRecognitionStatus === "interpreting"
@@ -5088,15 +5275,15 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
   );
 }
 
-function diagramCommandContext() {
+function diagramCommandContext(boardSessionId: string) {
   return {
-    boardSessionId: BOARD_SESSION_ID,
+    boardSessionId,
     actorParticipantId: PARTICIPANT_ID,
     userId: OWNER_USER_ID,
   };
 }
 
-function createAnnotationRestoreEvents(initial: BoardState, current: BoardState): BoardEvent[] {
+function createAnnotationRestoreEvents(boardSessionId: string, initial: BoardState, current: BoardState): BoardEvent[] {
   const events: BoardEvent[] = [];
   for (const [strokeId, initialStroke] of Object.entries(initial.strokes)) {
     const currentStroke = current.strokes[strokeId];
@@ -5109,7 +5296,7 @@ function createAnnotationRestoreEvents(initial: BoardState, current: BoardState)
     }
     events.push({
       ...createEventEnvelope({
-        boardSessionId: BOARD_SESSION_ID,
+        boardSessionId,
         actorParticipantId: PARTICIPANT_ID,
       }),
       type: "stroke.annotation_updated",
