@@ -720,6 +720,23 @@ export function normalizeScopedVoiceUtterance(utterance: string): string {
     return `${resizeDimension[1].toLocaleLowerCase("en-US")} the ${resizeDimension[2].toLocaleLowerCase("en-US")} of selected`;
   }
 
+  const colorNames =
+    "red|blue|green|yellow|orange|purple|pink|teal|gray|grey|black|white|brown";
+  const recolorShort = new RegExp(
+    String.raw`^(?:make|color|colour|paint|fill)\s+${pronoun}\s+(?:in\s+)?(${colorNames})$`,
+    "iu",
+  ).exec(trimmed);
+  if (recolorShort?.[1]) {
+    return `make selected ${recolorShort[1].toLocaleLowerCase("en-US")}`;
+  }
+  const recolorChange = new RegExp(
+    String.raw`^(?:change|set)\s+(?:the\s+|its\s+)?(?:color|colour|fill)\s+to\s+(${colorNames})$`,
+    "iu",
+  ).exec(trimmed);
+  if (recolorChange?.[1]) {
+    return `make selected ${recolorChange[1].toLocaleLowerCase("en-US")}`;
+  }
+
   const connect = new RegExp(
     String.raw`^connect(?:\s+${pronoun})?\s+to\s+(.+)$`,
     "iu",

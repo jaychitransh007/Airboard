@@ -86,6 +86,9 @@ export type IntentCanvasOperation =
       dimension: "width" | "height" | "both";
       direction: "grow" | "shrink";
     }
+  | { kind: "recolor_selection"; color: string }
+  | { kind: "recolor_object"; target: IntentCanvasConnectionReference; color: string }
+  | { kind: "select_all" }
   | { kind: "rename_selection"; label: string }
   | { kind: "delete_selection" }
   | { kind: "duplicate_selection" }
@@ -274,6 +277,18 @@ export function parseIntentCanvasCommand(
       : reject(base, "clarification", resize.code, resize.message, resize.examples);
   }
 
+  const recolor = parseRecolorCommand(commandText);
+  if (recolor) {
+    return "command" in recolor
+      ? parsed(base, recolor.command, recolor.confidence, recolor.message)
+      : reject(base, "clarification", recolor.code, recolor.message, recolor.examples);
+  }
+
+  const selectAll = parseSelectAllCommand(commandText);
+  if (selectAll) {
+    return parsed(base, selectAll.command, selectAll.confidence, selectAll.message);
+  }
+
   const create = parseCreateCommand(commandText);
   if (create) {
     return "command" in create
@@ -334,6 +349,22 @@ function parseMetaCommand(text: string): ParseSuccess | null {
   }
   return null;
 }
+
+export const VOICE_COLOR_NAMES = [
+  "red",
+  "blue",
+  "green",
+  "yellow",
+  "orange",
+  "purple",
+  "pink",
+  "teal",
+  "gray",
+  "grey",
+  "black",
+  "white",
+  "brown",
+] as const;
 
 const SIZE_ADJECTIVES: Readonly<
   Record<string, { dimension: "width" | "height" | "both"; direction: "grow" | "shrink" }>
@@ -443,6 +474,67 @@ function buildResizeCommand(
     command: { kind: "resize_object", target, ...effect },
     confidence: confidence(0.96, "normalized_alias"),
     message: `Resize ${describeConnectionReference(target)}: ${describeEffect}.`,
+  };
+}
+
+/**
+ * Voice recolor: "make selected red", "make the API blue",
+ * "change the color of the No box to green", "color it teal" (scoped rewrite).
+ */
+function parseRecolorCommand(text: string): ParseSuccess | ParseFailure | null {
+  const colorAlternatives = VOICE_COLOR_NAMES.join("|");
+
+  const makeForm = new RegExp(
+    String.raw`^(?:make|color|colour|paint|fill)\s+(.+?)\s+(?:in\s+)?(${colorAlternatives})$`,
+    "i",
+  ).exec(text);
+  const changeForm = makeForm
+    ? null
+    : new RegExp(
+        String.raw`^(?:change|set)\s+the\s+(?:color|colour|fill)\s+of\s+(.+?)\s+to\s+(${colorAlternatives})$`,
+        "i",
+      ).exec(text);
+  const match = makeForm ?? changeForm;
+  if (!match?.[1] || !match[2]) {
+    return null;
+  }
+  const color = match[2].toLocaleLowerCase("en-US");
+  const subject = match[1].trim();
+  if (new RegExp(`^${SELECTION_WORDS}$`, "i").test(subject)) {
+    return {
+      command: { kind: "recolor_selection", color },
+      confidence: confidence(0.97, "exact_pattern"),
+      message: `Color the selection ${color}.`,
+    };
+  }
+  const target = parseConnectionReference(subject);
+  if (!target) {
+    return {
+      code: "missing_selection_target",
+      message: "Say which object to recolor, e.g. “make the API red.”",
+      examples: ["Make selected red", "Change the color of the No box to green"],
+    };
+  }
+  return {
+    command: { kind: "recolor_object", target, color },
+    confidence: confidence(0.95, "normalized_alias"),
+    message: `Color ${describeConnectionReference(target)} ${color}.`,
+  };
+}
+
+/** "select all", "select everything", "select all nodes/objects/shapes". */
+function parseSelectAllCommand(text: string): ParseSuccess | null {
+  if (
+    !/^select\s+(?:all|everything)(?:\s+(?:the\s+)?(?:nodes|objects|shapes|elements))?$/i.test(
+      text,
+    )
+  ) {
+    return null;
+  }
+  return {
+    command: { kind: "select_all" },
+    confidence: confidence(0.99, "exact_pattern"),
+    message: "Select every object on the board.",
   };
 }
 

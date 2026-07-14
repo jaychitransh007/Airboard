@@ -136,8 +136,16 @@ function classifyParsedRisk(command) {
   if (command.kind === "connect") {
     return [command.from, command.to].some((ref) => ref.kind === "deictic") ? "hard" : "soft";
   }
-  if (command.kind === "rename_object" || command.kind === "resize_object") {
+  if (
+    command.kind === "rename_object" ||
+    command.kind === "resize_object" ||
+    command.kind === "recolor_object"
+  ) {
     return command.target.kind === "deictic" ? "hard" : "soft";
+  }
+  if (command.kind === "select_all") {
+    // Changes selection only; board content is untouched.
+    return "harmless";
   }
   if (command.kind === "delete_connection") {
     return [command.from, command.to].some((ref) => ref.kind === "deictic") ? "hard" : "soft";

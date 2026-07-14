@@ -453,6 +453,9 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
     holdToEditTrackerRef.current = new HoldToEditTracker();
   }
   const scopedKeyActiveRef = useRef(false);
+  // Gesture lasso: close the hand on EMPTY canvas (Select tool) and drag a
+  // selection rectangle. Board-space origin while active.
+  const lassoOriginRef = useRef<{ x: number; y: number } | null>(null);
   const boardRef = useRef<BoardState>(createInitialBoardState(BOARD_SESSION_ID));
   // Board sync: a live server session id takes over from the local fallback
   // once a session is created/joined; every event addresses whichever id is
@@ -1323,6 +1326,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
         inputSource?: CursorState["inputSource"];
         preferSelected?: boolean;
         forcedStrokeId?: string;
+        forcedHandle?: AnnotationResizeHandle;
         placementTool?: ObjectDockTool;
       } = {},
     ) => {
@@ -1357,7 +1361,10 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
         ? boardRef.current.strokes[selectedAnnotationId]
         : undefined;
       const handle =
-        selectedStroke?.annotation ? getAnnotationHandleAtPoint(selectedStroke.annotation, point) : null;
+        options.forcedHandle ??
+        (selectedStroke?.annotation
+          ? getAnnotationHandleAtPoint(selectedStroke.annotation, point)
+          : null);
       if (selectedStroke?.annotation && handle) {
         objectInteractionInitialStateRef.current = boardRef.current;
         objectInteractionRef.current = {
@@ -1613,6 +1620,95 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
     [],
   );
 
+  const cancelLasso = useCallback(() => {
+    if (lassoOriginRef.current) {
+      lassoOriginRef.current = null;
+      setGhostAnnotation(null);
+    }
+  }, []);
+
+  const finalizeLasso = useCallback(
+    (point: { x: number; y: number }) => {
+      const origin = lassoOriginRef.current;
+      lassoOriginRef.current = null;
+      setGhostAnnotation(null);
+      if (!origin) {
+        return;
+      }
+      const rect = {
+        x: Math.min(origin.x, point.x),
+        y: Math.min(origin.y, point.y),
+        width: Math.abs(point.x - origin.x),
+        height: Math.abs(point.y - origin.y),
+      };
+      if (rect.width < 12 && rect.height < 12) {
+        // A stray pinch, not a marquee.
+        return;
+      }
+      const ids = Object.values(boardRef.current.strokes)
+        .filter((stroke) => {
+          const annotation = stroke.annotation;
+          if (stroke.status !== "committed" || !annotation) {
+            return false;
+          }
+          const bounds =
+            annotation.bounds ??
+            (annotation.start && annotation.end
+              ? {
+                  x: Math.min(annotation.start.x, annotation.end.x),
+                  y: Math.min(annotation.start.y, annotation.end.y),
+                  width: Math.abs(annotation.end.x - annotation.start.x),
+                  height: Math.abs(annotation.end.y - annotation.start.y),
+                }
+              : null);
+          if (!bounds) {
+            return false;
+          }
+          return (
+            bounds.x < rect.x + rect.width &&
+            bounds.x + bounds.width > rect.x &&
+            bounds.y < rect.y + rect.height &&
+            bounds.y + bounds.height > rect.y
+          );
+        })
+        .map((stroke) => stroke.id);
+      setSelectedAnnotationIds(ids);
+      setSelectedAnnotationId(ids[ids.length - 1] ?? null);
+      setCommandFeedback(
+        ids.length === 0
+          ? "Nothing inside the selection area."
+          : `Selected ${ids.length} object${ids.length === 1 ? "" : "s"}.`,
+      );
+    },
+    [],
+  );
+
+  const updateLassoGhost = useCallback(
+    (point: { x: number; y: number }) => {
+      const origin = lassoOriginRef.current;
+      if (!origin) {
+        return;
+      }
+      const annotation: StrokeAnnotation = {
+        type: "rectangle",
+        source: "gesture",
+        bounds: {
+          x: Math.min(origin.x, point.x),
+          y: Math.min(origin.y, point.y),
+          width: Math.max(1, Math.abs(point.x - origin.x)),
+          height: Math.max(1, Math.abs(point.y - origin.y)),
+        },
+      };
+      setGhostAnnotation({
+        annotation,
+        points: buildAnnotationPoints(annotation, performance.now()),
+        color: "#0f766e",
+        thickness: 1,
+      });
+    },
+    [],
+  );
+
   const handleGesture = useCallback(
     (result: GestureResult | null, hybridOutput?: HybridGestureControllerOutput) => {
       setGestureResult(result);
@@ -1652,6 +1748,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
           }
 
           if (action?.type === "grab_cancelled") {
+            cancelLasso();
             const interaction = objectInteractionRef.current;
             if (interaction?.mode === "moving" || interaction?.mode === "resizing") {
               updateAnnotationObject(interaction.strokeId, interaction.initialAnnotation);
@@ -1664,6 +1761,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
 
           if (hybridOutput.trackingState !== "tracked" && !action) {
             if (hybridOutput.trackingState === "lost") {
+              cancelLasso();
               if (cameraPlacementActiveRef.current) {
                 cancelObjectInteraction();
                 cameraPlacementActiveRef.current = false;
@@ -1739,6 +1837,17 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
 
           if (action?.type === "grab_started") {
             cameraGrabActiveRef.current = true;
+            const handleTarget = parseHandleTargetId(action.targetId);
+            if (handleTarget) {
+              // Grabbing a resize handle of the selected object: same
+              // resizing interaction the pointer path uses.
+              setObjectGestureState("grab");
+              beginObjectInteraction(point, {
+                inputSource: "air_gesture",
+                forcedHandle: handleTarget.handle,
+              });
+              return;
+            }
             selectAnnotationObject(action.targetId);
             setHoverStrokeId(action.targetId);
             setObjectGestureState("grab");
@@ -1763,6 +1872,36 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
             return;
           }
 
+          // Lasso: a closed hand over empty canvas with the Select tool drags
+          // a selection marquee. Separable by definition — every other pinch
+          // meaning requires a target, a dock button, or an armed tool.
+          if (lassoOriginRef.current) {
+            if (pinchClosed && point) {
+              updateLassoGhost(point);
+              setObjectGestureState("grab");
+            } else if (point) {
+              finalizeLasso(point);
+              setObjectGestureState("hover");
+            } else {
+              cancelLasso();
+            }
+            return;
+          }
+          if (
+            pinchJustClosed &&
+            point &&
+            !hybridOutput.focusedTargetId &&
+            activeObjectTool === "select" &&
+            !cameraPlacementArmedToolRef.current &&
+            !cameraPlacementActiveRef.current &&
+            !objectInteractionRef.current
+          ) {
+            lassoOriginRef.current = point;
+            updateLassoGhost(point);
+            setObjectGestureState("grab");
+            return;
+          }
+
           setHoverStrokeId(hybridOutput.focusedTargetId);
           setObjectGestureState(
             hybridOutput.pinchState === "closed" && !hybridOutput.focusedTargetId
@@ -1773,6 +1912,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
         }
 
         if (!result) {
+          cancelLasso();
           const lastPoint = lastGesturePointerRef.current;
           if (cameraGrabActiveRef.current && lastPoint) {
             endObjectInteraction(lastPoint);
@@ -1923,8 +2063,11 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
       cancelObjectInteraction,
       commitStroke,
       endObjectInteraction,
+      cancelLasso,
       eraseAt,
+      finalizeLasso,
       handleDockGesture,
+      updateLassoGhost,
       inputMode,
       inputPaused,
       makeFrictionPoint,
@@ -2832,11 +2975,13 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
         boardSyncRef.current?.publish(forwardEvents);
       }
 
-      undoStackRef.current.push({
-        type: "diagram",
-        undoEvents,
-        selectionBefore: selectedAnnotationIds,
-      });
+      if (undoEvents.length > 0) {
+        undoStackRef.current.push({
+          type: "diagram",
+          undoEvents,
+          selectionBefore: selectedAnnotationIds,
+        });
+      }
       boardRef.current = nextState;
       const requestedSelection = pending.selectionAfter ?? selectedAnnotationIds;
       const nextSelection = requestedSelection.filter(
@@ -4063,7 +4208,12 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
             timestampMs,
             // The controller hit-tests in screen space; board-space object
             // bounds go through the viewport transform.
-            targets: buildGestureTargets(boardRef.current).map((target) => ({
+            targets: buildGestureTargets(
+              boardRef.current,
+              selectedAnnotationIdsRef.current.length === 1
+                ? (selectedAnnotationIdsRef.current[0] ?? null)
+                : null,
+            ).map((target) => ({
               ...target,
               bounds: {
                 x: target.bounds.x * viewportForTargets.scale + viewportForTargets.x,
@@ -5963,8 +6113,61 @@ function getSelectableAnnotationIds(state: BoardState): string[] {
     .map((stroke) => stroke.id);
 }
 
-function buildGestureTargets(state: BoardState): GestureTarget[] {
+const HANDLE_TARGET_PREFIX = "handle:";
+
+function parseHandleTargetId(
+  targetId: string,
+): { strokeId: string; handle: AnnotationResizeHandle } | null {
+  if (!targetId.startsWith(HANDLE_TARGET_PREFIX)) {
+    return null;
+  }
+  const separator = targetId.lastIndexOf(":");
+  if (separator <= HANDLE_TARGET_PREFIX.length - 1) {
+    return null;
+  }
+  return {
+    strokeId: targetId.slice(HANDLE_TARGET_PREFIX.length, separator),
+    handle: targetId.slice(separator + 1) as AnnotationResizeHandle,
+  };
+}
+
+function buildGestureTargets(
+  state: BoardState,
+  selectedStrokeId: string | null,
+): GestureTarget[] {
   const targets: GestureTarget[] = [];
+
+  // Resize handles of the (single) selected object outrank every other
+  // target, mirroring the pointer path where handles win inside the shape.
+  const selected = selectedStrokeId ? state.strokes[selectedStrokeId] : undefined;
+  const selectedAnnotation =
+    selected?.status === "committed" ? selected.annotation : undefined;
+  if (selected && selectedAnnotation) {
+    const handleAnchors: { handle: AnnotationResizeHandle; x: number; y: number }[] = [];
+    if (selectedAnnotation.bounds) {
+      const { x, y, width, height } = selectedAnnotation.bounds;
+      handleAnchors.push(
+        { handle: "nw", x, y },
+        { handle: "ne", x: x + width, y },
+        { handle: "sw", x, y: y + height },
+        { handle: "se", x: x + width, y: y + height },
+      );
+    } else if (selectedAnnotation.start && selectedAnnotation.end) {
+      handleAnchors.push(
+        { handle: "start", x: selectedAnnotation.start.x, y: selectedAnnotation.start.y },
+        { handle: "end", x: selectedAnnotation.end.x, y: selectedAnnotation.end.y },
+      );
+    }
+    for (const anchor of handleAnchors) {
+      targets.push({
+        id: `${HANDLE_TARGET_PREFIX}${selected.id}:${anchor.handle}`,
+        bounds: { x: anchor.x - 10, y: anchor.y - 10, width: 20, height: 20 },
+        priority: 3,
+        capturePaddingPx: 8,
+        releasePaddingPx: 14,
+      });
+    }
+  }
   for (const stroke of Object.values(state.strokes)) {
     const annotation = stroke.annotation;
     if (stroke.status !== "committed" || !annotation) {

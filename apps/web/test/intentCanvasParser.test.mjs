@@ -376,3 +376,44 @@ test("scoped hold phrases rewrite to resize commands", () => {
   assert.equal(rewritten.command.kind, "resize_selection");
   assert.equal(rewritten.command.dimension, "height");
 });
+
+test("recolor by voice: selection, named targets, change-form, scoped rewrites", () => {
+  const selection = parsed("make selected red", { activationPolicy: "externally_activated" });
+  assert.deepEqual(
+    { kind: selection.command.kind, color: selection.command.color },
+    { kind: "recolor_selection", color: "red" },
+  );
+
+  const named = parsed("change the color of the No box to green", {
+    activationPolicy: "externally_activated",
+  });
+  assert.equal(named.command.kind, "recolor_object");
+  assert.equal(named.command.color, "green");
+
+  const paint = parsed("paint the API teal", { activationPolicy: "externally_activated" });
+  assert.equal(paint.command.kind, "recolor_object");
+
+  assert.equal(normalizeScopedVoiceUtterance("make it red"), "make selected red");
+  assert.equal(normalizeScopedVoiceUtterance("color it blue"), "make selected blue");
+  assert.equal(
+    normalizeScopedVoiceUtterance("change the color to teal"),
+    "make selected teal",
+  );
+
+  // Non-color "make" phrases still reach their own grammars.
+  const resize = parsed("make selected smaller", { activationPolicy: "externally_activated" });
+  assert.equal(resize.command.kind, "resize_selection");
+  const create = parsed("make a circle here", { activationPolicy: "externally_activated" });
+  assert.equal(create.command.kind, "create_node");
+});
+
+test("select all variants parse; trailing clauses do not", () => {
+  for (const text of ["select all", "select everything", "select all the nodes", "select all shapes"]) {
+    const result = parsed(text, { activationPolicy: "externally_activated" });
+    assert.equal(result.command.kind, "select_all", text);
+  }
+  const meeting = parseIntentCanvasCommand("select all the options that apply", {
+    activationPolicy: "externally_activated",
+  });
+  assert.notEqual(meeting.status, "parsed");
+});

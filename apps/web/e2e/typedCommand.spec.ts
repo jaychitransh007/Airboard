@@ -37,6 +37,19 @@ test("typing a command creates and edits objects instantly", async ({ page }) =>
   );
   expect(summary).toMatchObject({ objectCount: 1, labels: ["Payments"] });
 
+  // Voice-parity commands through the same pipeline: recolor, resize, select.
+  await input.fill("make selected red");
+  await page.getByTestId("intent-primary-action").click();
+  await expect(page.locator(".intent-feedback")).toContainText("Applied: Color");
+
+  await input.fill("make selected taller");
+  await page.getByTestId("intent-primary-action").click();
+  await expect(page.locator(".intent-feedback")).toContainText("Applied: Resize");
+
+  await input.fill("select everything");
+  await page.getByTestId("intent-primary-action").click();
+  await expect(page.locator(".intent-feedback")).toContainText("Applied: Select every object");
+
   // Undo from the toast reverts the rename.
   await input.fill("delete selected");
   await page.getByTestId("intent-primary-action").click();

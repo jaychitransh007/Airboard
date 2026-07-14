@@ -202,3 +202,40 @@ test("grounds delete_connection against endpoint bindings", () => {
   );
   assert.ok("error" in missing, "unknown endpoint fails closed");
 });
+
+test("grounds recolor into restyle commands and select_all into pure selection", () => {
+  let board = createInitialBoardState(BOARD_ID);
+  const node = (id, label) => ({
+    id, boardId: BOARD_ID, userId: "u", color: "#000", thickness: 3,
+    status: "committed", points: [], createdAt: new Date().toISOString(),
+    annotation: {
+      type: "flow_node", source: "voice", nodeType: "service", label,
+      bounds: { x: 100, y: 100, width: 120, height: 60 },
+    },
+  });
+  board = { ...board, strokes: { a: node("a", "API"), b: node("b", "Ledger") } };
+
+  const recolor = resolveIntentOperation(
+    {
+      kind: "recolor_object",
+      target: { kind: "named", label: "API", normalizedLabel: "api" },
+      color: "red",
+    },
+    groundingContext(board),
+  );
+  assert.ok(!("error" in recolor), JSON.stringify(recolor));
+  assert.equal(recolor.commands[0].type, "object.restyle");
+  assert.equal(recolor.commands[0].fillColor, "#fee2e2");
+  assert.equal(recolor.commands[0].strokeColor, "#b91c1c");
+
+  const all = resolveIntentOperation({ kind: "select_all" }, groundingContext(board));
+  assert.ok(!("error" in all));
+  assert.equal(all.commands.length, 0, "pure selection change — nothing mutates");
+  assert.deepEqual([...all.selectionAfter].sort(), ["a", "b"]);
+
+  const empty = resolveIntentOperation(
+    { kind: "select_all" },
+    groundingContext(createInitialBoardState(BOARD_ID)),
+  );
+  assert.ok("error" in empty, "empty board fails closed");
+});

@@ -70,6 +70,13 @@ export type GroupObjectsCommand = {
   style?: DiagramObjectStyle;
 };
 
+export type RestyleObjectCommand = {
+  type: "object.restyle";
+  objectId: string;
+  fillColor?: string;
+  strokeColor?: string;
+};
+
 export type DeleteObjectsCommand = {
   type: "objects.delete";
   objectIds: string[];
@@ -114,6 +121,7 @@ export type DiagramCommand =
   | ResizeObjectCommand
   | RenameObjectCommand
   | GroupObjectsCommand
+  | RestyleObjectCommand
   | DeleteObjectsCommand
   | DuplicateObjectsCommand
   | AlignObjectsCommand
@@ -189,6 +197,9 @@ export function planDiagramCommand(
       break;
     case "object.rename":
       planRenameObject(planner, command);
+      break;
+    case "object.restyle":
+      planRestyleObject(planner, command);
       break;
     case "objects.group":
       planGroupObjects(planner, command);
@@ -505,6 +516,22 @@ function planResizeObject(planner: CommandPlanner, command: ResizeObjectCommand)
 
 function planRenameObject(planner: CommandPlanner, command: RenameObjectCommand): void {
   planner.updateLabel(command.objectId, command.label);
+}
+
+function planRestyleObject(planner: CommandPlanner, command: RestyleObjectCommand): void {
+  const stroke = planner.getStroke(command.objectId);
+  const annotation = cloneAnnotation(stroke.annotation as StrokeAnnotation);
+  if (command.fillColor !== undefined) {
+    annotation.fillColor = command.fillColor;
+  }
+  if (command.strokeColor !== undefined) {
+    annotation.strokeColor = command.strokeColor;
+  }
+  planner.updateAnnotation(
+    stroke.id,
+    annotation,
+    pointsForAnnotation(annotation, planner.timestampMs),
+  );
 }
 
 function planGroupObjects(planner: CommandPlanner, command: GroupObjectsCommand): void {

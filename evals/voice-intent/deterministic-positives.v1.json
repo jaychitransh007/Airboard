@@ -1442,6 +1442,41 @@
       "expected": {
         "kind": "resize_object"
       }
+    },
+    {
+      "id": "parity-recolor-selection",
+      "text": "make selected red",
+      "expected": {
+        "kind": "recolor_selection"
+      }
+    },
+    {
+      "id": "parity-recolor-named",
+      "text": "change the color of the No box to green",
+      "expected": {
+        "kind": "recolor_object"
+      }
+    },
+    {
+      "id": "parity-recolor-paint",
+      "text": "uh, paint the API teal",
+      "expected": {
+        "kind": "recolor_object"
+      }
+    },
+    {
+      "id": "parity-select-all",
+      "text": "select everything",
+      "expected": {
+        "kind": "select_all"
+      }
+    },
+    {
+      "id": "parity-select-all-nodes",
+      "text": "Airo, select all the nodes",
+      "expected": {
+        "kind": "select_all"
+      }
     }
   ]
 }

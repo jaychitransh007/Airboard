@@ -801,6 +801,53 @@ export function resolveIntentOperation(
       };
     }
 
+    case "recolor_selection":
+    case "recolor_object": {
+      let targetIds: string[];
+      if (operation.kind === "recolor_selection") {
+        if (selectionIds.length === 0) {
+          return { error: "Select one or more objects before recoloring." };
+        }
+        targetIds = selectionIds;
+      } else {
+        const deictic = resolveDeicticIds({
+          boardState: context.boardState,
+          selectionIds,
+          primarySelectionId,
+          hoverStrokeId: context.hoverStrokeId,
+        });
+        const target = resolveConnectionReference(operation.target, context.boardState, deictic);
+        if ("error" in target) {
+          return target;
+        }
+        targetIds = [target.id];
+      }
+      const palette = VOICE_COLOR_PALETTE[operation.color];
+      if (!palette) {
+        return { error: `I don’t know the color “${operation.color}”.` };
+      }
+      return {
+        commands: targetIds.map((objectId) => ({
+          type: "object.restyle",
+          objectId,
+          fillColor: palette.fill,
+          strokeColor: palette.stroke,
+        })),
+        selectionAfter: targetIds,
+        previewStrokeId: targetIds[0],
+      };
+    }
+
+    case "select_all": {
+      const ids = Object.values(context.boardState.strokes)
+        .filter((stroke) => stroke.status === "committed" && stroke.annotation)
+        .map((stroke) => stroke.id);
+      if (ids.length === 0) {
+        return { error: "The board has no objects to select yet." };
+      }
+      return { commands: [], selectionAfter: ids };
+    }
+
     case "rename_object": {
       const deictic = resolveDeicticIds({
         boardState: context.boardState,
@@ -1019,6 +1066,26 @@ function resolveConnectionReference(
   }
   return { id: matches[0]!.id };
 }
+
+/**
+ * Voice color vocabulary → soft fill + strong stroke, chosen so labels stay
+ * readable on every fill. Connectors/arrows only use the stroke half.
+ */
+const VOICE_COLOR_PALETTE: Readonly<Record<string, { fill: string; stroke: string }>> = {
+  red: { fill: "#fee2e2", stroke: "#b91c1c" },
+  blue: { fill: "#dbeafe", stroke: "#1d4ed8" },
+  green: { fill: "#dcfce7", stroke: "#15803d" },
+  yellow: { fill: "#fef9c3", stroke: "#a16207" },
+  orange: { fill: "#ffedd5", stroke: "#c2410c" },
+  purple: { fill: "#f3e8ff", stroke: "#7e22ce" },
+  pink: { fill: "#fce7f3", stroke: "#be185d" },
+  teal: { fill: "#ccfbf1", stroke: "#0f766e" },
+  gray: { fill: "#f1f5f9", stroke: "#475569" },
+  grey: { fill: "#f1f5f9", stroke: "#475569" },
+  black: { fill: "#e5e7eb", stroke: "#111827" },
+  white: { fill: "#ffffff", stroke: "#334155" },
+  brown: { fill: "#f5ebe0", stroke: "#7c4a1e" },
+};
 
 /** Center-preserving resize: grow 1.25×, shrink 0.8×, floored at 36px. */
 function resizeBoundsAroundCenter(

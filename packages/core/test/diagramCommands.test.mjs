@@ -313,3 +313,30 @@ test("align and layout produce deterministic constraint-based geometry", () => {
     [25, 25, 25],
   );
 });
+
+test("object.restyle updates colors with a compensating undo", () => {
+  const context = { boardSessionId: "b", actorParticipantId: "p", userId: "u" };
+  const created = applyDiagramCommand(
+    createInitialBoardState("b"),
+    {
+      type: "node.create",
+      nodeId: "n1",
+      nodeType: "service",
+      label: "API",
+      center: { x: 200, y: 200 },
+      source: "voice",
+    },
+    context,
+  );
+  const restyled = applyDiagramCommand(
+    created.state,
+    { type: "object.restyle", objectId: "n1", fillColor: "#fee2e2", strokeColor: "#b91c1c" },
+    context,
+  );
+  const annotation = restyled.state.strokes.n1.annotation;
+  assert.equal(annotation.fillColor, "#fee2e2");
+  assert.equal(annotation.strokeColor, "#b91c1c");
+
+  const undone = applyDiagramUndo(restyled.state, { undoEvents: restyled.undoEvents });
+  assert.equal(undone.state.strokes.n1.annotation.fillColor, created.state.strokes.n1.annotation.fillColor);
+});
