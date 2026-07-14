@@ -87,16 +87,27 @@ fading ghost, never a board mutation.
 Deliberately small; every pose must be reliably separable in the current MediaPipe
 classifier before it ships.
 
-| Gesture | Context | Action |
-|---|---|---|
-| Open palm point | Canvas | Cursor / hover highlight |
-| Close hand (grab) on element | Canvas | Grab → move; reopen = drop |
-| Grab + hold still ~600ms | On element | **Scope element** → scoped voice edit (mic ring) |
-| Palm toward camera, held | Anywhere | **Push-to-talk** (command channel mic) |
-| Pinch + drag on empty canvas | Canvas | Pan |
-| Two open hands, spread/converge | Canvas | Zoom |
-| Point at A … point at B while speaking | With deixis | Resolves "this/that/here" |
-| Grab a ghost suggestion | On ghost | Accept suggestion |
+| Gesture | Hands | Context | Action | Status |
+|---|---|---|---|---|
+| Open palm point | 1 | Canvas | Cursor / hover highlight | shipped |
+| Close hand (grab) on element | 1 | Canvas | Grab → move; reopen = drop | shipped |
+| Grab + hold still ~600ms | 1 | On element | **Scope element** → scoped voice edit | shipped |
+| Flat palm, held still | 1 (only tracked hand) | Anywhere | **Push-to-talk** (command mic) | shipped |
+| Point + pinch on dock | 1 | Catalog dock | Open category / arm shape tool | shipped |
+| Two open palms, move together | 2 | Anywhere | **Pan** the canvas (bounded infinite plane) | shipped |
+| Two closed hands, spread/converge | 2 | Anywhere | **Zoom** (anchored at hand midpoint, 25–300%) | shipped |
+| Point at A … point at B while speaking | 1 | With deixis | Resolves "this/that/here" | P1 |
+| Grab a ghost suggestion | 1 | On ghost | Accept suggestion | P1 |
+
+Separation model (2026-07-14, as built): **hand count is the first-level switch** —
+two-hand navigation outranks and suppresses every single-hand gesture (object
+controller reset, palm gate suppressed); within two-hand, pose separates pan (open)
+from zoom (closed) and a session never morphs between them (release-then-re-engage
+with debounce and flicker-rebase). Within one-hand, location separates the dock
+(screen-space hit test, wins over board objects) from the canvas, and pose separates
+point / grab / flat-palm; push-to-talk additionally requires being the only tracked
+hand. Mouse parity: ctrl/⌘+wheel zooms at the cursor, plain wheel pans; the viewport
+resets when switching input modes.
 
 Explicitly **not** gestures (false-positive risk too high): undo, delete, clear. These
 stay voice ("undo", "delete this") and keyboard.

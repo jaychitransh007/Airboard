@@ -907,3 +907,9 @@ button:disabled {
   font-weight: 650;
   cursor: pointer;
 }
+
+/* Air-cursor hover over dock buttons (gesture targeting). */
+.catalog-dock button.gesture-hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.25);
+}

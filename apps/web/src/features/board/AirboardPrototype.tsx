@@ -44,6 +44,18 @@ import {
   startBoardSync,
   type BoardSyncHandle,
 } from "./boardSync";
+import {
+  boardPointFromScreen,
+  clampViewport,
+  DEFAULT_VIEWPORT_LIMITS,
+  IDENTITY_VIEWPORT,
+  panViewport,
+  screenPointFromBoard,
+  zoomViewport,
+  type BoardViewport,
+  type ViewportLimits,
+} from "./boardViewport";
+import { CanvasNavigationTracker } from "./canvasNavigationTracker";
 import { HoldToEditTracker } from "./holdToEditTracker";
 import { PalmGateTracker } from "./palmGateTracker";
 import {
@@ -246,8 +258,11 @@ type SemanticExecutionSnapshot = {
   primarySelectionId: string | null;
   hoverStrokeId: string | null;
   pointer: { x: number; y: number } | null;
+  /** Dimensions of the VISIBLE board window (screen size ÷ viewport scale). */
   canvasWidth: number;
   canvasHeight: number;
+  /** Board coordinates of the visible window's top-left corner. */
+  viewOrigin: { x: number; y: number };
 };
 
 const SEMANTIC_CLARIFICATION_TTL_MS = 2 * 60 * 1_000;
@@ -432,6 +447,13 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
   const boardSyncConnectedOnceRef = useRef(false);
   const boardSyncStatusRef = useRef("off");
   const lastCursorPublishRef = useRef(0);
+  // Pan/zoom camera over the board plane. Gesture mode only; switching input
+  // modes resets to identity so the other modes' 1:1 math stays exact.
+  const boardViewportRef = useRef<BoardViewport>({ ...IDENTITY_VIEWPORT });
+  const canvasNavTrackerRef = useRef<CanvasNavigationTracker | null>(null);
+  if (canvasNavTrackerRef.current === null) {
+    canvasNavTrackerRef.current = new CanvasNavigationTracker();
+  }
   const landmarkTraceRef = useRef<{
     startedAt: number;
     frames: {
@@ -486,6 +508,10 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
   const [boardSyncStatus, setBoardSyncStatus] = useState("off");
   const [landmarkRecordingActive, setLandmarkRecordingActive] = useState(false);
   const [onboardingVisible, setOnboardingVisible] = useState(false);
+  const [viewportScale, setViewportScale] = useState(1);
+  const [canvasNavMode, setCanvasNavMode] = useState<"pan" | "zoom" | null>(null);
+  const [dockGestureHover, setDockGestureHover] = useState<string | null>(null);
+  const dockRef = useRef<HTMLDivElement | null>(null);
   const [actionToast, setActionToast] = useState<{ id: number; message: string } | null>(null);
   const [openCatalogId, setOpenCatalogId] = useState<string | null>(null);
   const [clearArmed, setClearArmed] = useState(false);
@@ -584,6 +610,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
     }
 
     renderBoard(canvas, boardRef.current, {
+      view: boardViewportRef.current,
       background: "white",
       selectedStrokeId: selectedAnnotationId,
       selectedStrokeIds: selectedAnnotationIds,
@@ -655,6 +682,40 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
   useEffect(() => {
     applyRemoteEventRef.current = applyRemoteEvent;
   }, [applyRemoteEvent]);
+
+  /** Screen (canvas CSS px) → board coordinates through the live viewport. */
+  const toBoardPoint = useCallback(
+    (point: { x: number; y: number }) => boardPointFromScreen(boardViewportRef.current, point),
+    [],
+  );
+
+  const currentViewportLimits = useCallback((): ViewportLimits => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    return {
+      ...DEFAULT_VIEWPORT_LIMITS,
+      canvasWidth: rect?.width ?? 900,
+      canvasHeight: rect?.height ?? 600,
+    };
+  }, []);
+
+  const applyViewport = useCallback(
+    (next: BoardViewport) => {
+      const clamped = clampViewport(next, currentViewportLimits());
+      const current = boardViewportRef.current;
+      if (
+        Math.abs(clamped.x - current.x) < 0.01 &&
+        Math.abs(clamped.y - current.y) < 0.01 &&
+        Math.abs(clamped.scale - current.scale) < 0.0001
+      ) {
+        return;
+      }
+      boardViewportRef.current = clamped;
+      const rounded = Math.round(clamped.scale * 100) / 100;
+      setViewportScale((value) => (value === rounded ? value : rounded));
+      render();
+    },
+    [currentViewportLimits, render],
+  );
 
   // First-run onboarding: the gesture vocabulary is invisible until taught.
   useEffect(() => {
@@ -1493,6 +1554,42 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
     setLabelDraft(annotation?.label ?? "");
   }, [selectedAnnotationId]);
 
+  /**
+   * Screen-space hit test of the air cursor against the catalog dock. A pinch
+   * edge over a dock button activates it (open category / arm tool); mere
+   * hovering highlights. Returns true when the dock consumed the pinch so the
+   * caller must not also start a board grab.
+   */
+  const handleDockGesture = useCallback(
+    (screenPoint: { x: number; y: number }, pinchJustClosed: boolean): boolean => {
+      const dock = dockRef.current;
+      const canvasRect = canvasRef.current?.getBoundingClientRect();
+      if (!dock || !canvasRect) {
+        return false;
+      }
+      let hovered: { id: string; element: HTMLButtonElement } | null = null;
+      for (const element of dock.querySelectorAll<HTMLButtonElement>("[data-dock-id]")) {
+        const rect = element.getBoundingClientRect();
+        const x = screenPoint.x + canvasRect.left;
+        const y = screenPoint.y + canvasRect.top;
+        if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+          hovered = { id: element.dataset.dockId ?? "", element };
+          break;
+        }
+      }
+      setDockGestureHover((current) => (current === (hovered?.id ?? null) ? current : hovered?.id ?? null));
+      if (!hovered) {
+        return false;
+      }
+      if (pinchJustClosed) {
+        // Reuse the click behavior exactly — one code path for mouse and hand.
+        hovered.element.click();
+      }
+      return true;
+    },
+    [],
+  );
+
   const handleGesture = useCallback(
     (result: GestureResult | null, hybridOutput?: HybridGestureControllerOutput) => {
       setGestureResult(result);
@@ -1515,11 +1612,21 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
 
       if (inputMode === "gesture") {
         if (hybridOutput) {
-          const point = hybridOutput.cursor;
+          const screenPoint = hybridOutput.cursor;
+          const point = screenPoint ? toBoardPoint(screenPoint) : null;
           const action = hybridOutput.action;
           const pinchClosed = hybridOutput.pinchState === "closed";
           const pinchJustClosed = pinchClosed && !hybridPinchClosedRef.current;
           hybridPinchClosedRef.current = pinchClosed;
+
+          // The catalog dock lives in screen space and outranks board
+          // interactions while the cursor is over it: pinching a dock button
+          // opens/picks instead of grabbing whatever object sits beneath.
+          if (screenPoint && handleDockGesture(screenPoint, pinchJustClosed)) {
+            hybridGestureControllerRef.current?.reset({ requirePinchRelease: pinchJustClosed });
+            setObjectGestureState("hover");
+            return;
+          }
 
           if (action?.type === "grab_cancelled") {
             const interaction = objectInteractionRef.current;
@@ -1652,10 +1759,10 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
           return;
         }
 
-        const point = {
+        const point = toBoardPoint({
           x: result.cursorPoint.x,
           y: result.cursorPoint.y,
-        };
+        });
         lastGesturePointerRef.current = point;
 
         const markerHeld = isObjectGestureHeld(result);
@@ -1794,6 +1901,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
       commitStroke,
       endObjectInteraction,
       eraseAt,
+      handleDockGesture,
       inputMode,
       inputPaused,
       makeFrictionPoint,
@@ -1802,6 +1910,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
       moveCursor,
       moveCursorPoint,
       startStroke,
+      toBoardPoint,
       updateAnnotationObject,
     ],
   );
@@ -1962,10 +2071,12 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
 
       const baseState = boardRef.current;
       const canvasRect = canvasRef.current?.getBoundingClientRect();
-      const pointer = lastGesturePointerRef.current ?? {
-        x: (canvasRect?.width ?? 900) / 2,
-        y: (canvasRect?.height ?? 600) / 2,
-      };
+      const pointer =
+        lastGesturePointerRef.current ??
+        toBoardPoint({
+          x: (canvasRect?.width ?? 900) / 2,
+          y: (canvasRect?.height ?? 600) / 2,
+        });
       let previewState = baseState;
       let workingSelectionIds = selectedAnnotationIds.filter(
         (strokeId) => previewState.strokes[strokeId]?.status === "committed",
@@ -1982,8 +2093,9 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
           const resolved = resolveIntentOperation(step.command, {
             boardState: previewState,
             pointer,
-            canvasWidth: canvasRect?.width ?? 900,
-            canvasHeight: canvasRect?.height ?? 600,
+            canvasWidth: (canvasRect?.width ?? 900) / boardViewportRef.current.scale,
+            canvasHeight: (canvasRect?.height ?? 600) / boardViewportRef.current.scale,
+            viewOrigin: toBoardPoint({ x: 0, y: 0 }),
             selectionIds: workingSelectionIds,
             primarySelectionId: workingPrimarySelectionId,
             hoverStrokeId,
@@ -2131,14 +2243,18 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
 
       const baseState = executionSnapshot?.boardState ?? boardRef.current;
       const canvasRect = canvasRef.current?.getBoundingClientRect();
-      const canvasWidth = executionSnapshot?.canvasWidth ?? canvasRect?.width ?? 900;
-      const canvasHeight = executionSnapshot?.canvasHeight ?? canvasRect?.height ?? 600;
+      const viewScale = boardViewportRef.current.scale;
+      const canvasWidth =
+        executionSnapshot?.canvasWidth ?? (canvasRect?.width ?? 900) / viewScale;
+      const canvasHeight =
+        executionSnapshot?.canvasHeight ?? (canvasRect?.height ?? 600) / viewScale;
+      const viewOrigin = executionSnapshot?.viewOrigin ?? toBoardPoint({ x: 0, y: 0 });
       const actualPointer = executionSnapshot
         ? executionSnapshot.pointer
         : lastGesturePointerRef.current;
       const pointer = actualPointer ?? {
-        x: canvasWidth / 2,
-        y: canvasHeight / 2,
+        x: viewOrigin.x + canvasWidth / 2,
+        y: viewOrigin.y + canvasHeight / 2,
       };
       let previewState = baseState;
       const initialSelectionIds = executionSnapshot?.selectionIds ?? selectedAnnotationIds;
@@ -2166,6 +2282,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
               pointerAvailable: Boolean(actualPointer),
               canvasWidth,
               canvasHeight,
+              viewOrigin,
               selectionIds: workingSelectionIds,
               primarySelectionId: workingPrimarySelectionId,
               hoverStrokeId: workingHoverStrokeId,
@@ -2406,8 +2523,9 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
         primarySelectionId: requestSelectionIds[requestSelectionIds.length - 1] ?? null,
         hoverStrokeId,
         pointer: requestPointer,
-        canvasWidth: requestCanvasRect?.width ?? 900,
-        canvasHeight: requestCanvasRect?.height ?? 600,
+        canvasWidth: (requestCanvasRect?.width ?? 900) / boardViewportRef.current.scale,
+        canvasHeight: (requestCanvasRect?.height ?? 600) / boardViewportRef.current.scale,
+        viewOrigin: toBoardPoint({ x: 0, y: 0 }),
       };
       const pendingClarificationState = pendingSemanticClarificationRef.current;
       const pendingClarificationForRequest =
@@ -2965,6 +3083,12 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
         voiceRouter.reset();
         setVoiceGate(null);
       },
+      getViewport: () => ({ ...boardViewportRef.current }),
+      setViewport: (viewport: BoardViewport) => {
+        boardViewportRef.current = clampViewport(viewport, currentViewportLimits());
+        setViewportScale(Math.round(boardViewportRef.current.scale * 100) / 100);
+        render();
+      },
       getBoardSummary: () => {
         const committed = Object.values(boardRef.current.strokes).filter(
           (stroke) => stroke.status === "committed" && stroke.annotation,
@@ -2972,6 +3096,12 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
         return {
           objectCount: committed.length,
           labels: committed.map((stroke) => stroke.annotation?.label ?? ""),
+          positions: committed.map((stroke) => {
+            const bounds = stroke.annotation?.bounds;
+            return bounds
+              ? { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }
+              : null;
+          }),
           selectedCount: selectedAnnotationIdsRef.current.length,
           boardSessionId: boardSessionIdRef.current,
           syncStatus: boardSyncStatusRef.current,
@@ -2981,7 +3111,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
     return () => {
       delete target.__airboardTestHooks;
     };
-  }, [openVoiceGate, routeFinalTranscript, voiceRouter]);
+  }, [currentViewportLimits, openVoiceGate, render, routeFinalTranscript, voiceRouter]);
 
   const startVoiceCommand = useCallback(() => {
     const activeSession = speechSessionRef.current;
@@ -3722,13 +3852,19 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
         }
       }
 
+      // Push-to-talk requires the palm to be the ONLY tracked hand: with two
+      // hands visible the user is navigating (or about to).
+      const trackedHands = hands.reduce(
+        (count, hand) => (hand.landmarks.length >= 21 ? count + 1 : count),
+        0,
+      );
       const snapshot = voiceRouter.snapshot;
       const event = palmGateTrackerRef.current!.update({
         score: bestScore,
         point: bestPoint,
         timestampMs,
         gateOpen: snapshot?.mode === "ptt" && snapshot.open,
-        suppressed: snapshot?.mode === "scoped" && snapshot.open,
+        suppressed: (snapshot?.mode === "scoped" && snapshot.open) || trackedHands >= 2,
       });
       if (event === "engage") {
         openVoiceGate({ mode: "ptt" });
@@ -3863,15 +3999,56 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
           }
 
           const signal = getHybridHandSignal(hands, result?.hand);
-          updatePalmPushToTalk(hands, timestampMs);
           captureLandmarkFrame(hands, timestampMs);
+
+          // Two-hand canvas navigation outranks every single-hand gesture:
+          // while engaged, the object controller and voice gate are suppressed
+          // so pan/zoom can never grab an object or open the mic.
+          const navTracker = canvasNavTrackerRef.current!;
+          const navUpdate = navTracker.update({
+            hands: collectNavHands(hands, rect.width, rect.height),
+            timestampMs,
+          });
+          if (navTracker.engaged) {
+            setCanvasNavMode((mode) => (mode === navTracker.mode ? mode : navTracker.mode));
+            const viewport = boardViewportRef.current;
+            if (navUpdate.mode === "pan") {
+              applyViewport(
+                panViewport(viewport, navUpdate.dx, navUpdate.dy, currentViewportLimits()),
+              );
+            } else if (navUpdate.mode === "zoom") {
+              applyViewport(
+                zoomViewport(viewport, navUpdate.factor, navUpdate.anchor, currentViewportLimits()),
+              );
+            }
+            hybridGestureControllerRef.current.reset({ requirePinchRelease: true });
+            hybridPinchClosedRef.current = false;
+            palmGateTrackerRef.current!.reset();
+            handleGesture(null, undefined);
+            animationFrame = requestAnimationFrame(loop);
+            return;
+          }
+          setCanvasNavMode((mode) => (mode === null ? mode : null));
+
+          updatePalmPushToTalk(hands, timestampMs);
+          const viewportForTargets = boardViewportRef.current;
           hybridOutput = hybridGestureControllerRef.current.update({
             handPoint: signal?.point ?? null,
             trackingConfidence: signal?.trackingConfidence ?? 0,
             pinchStrength: signal?.grabStrength ?? 0,
             grabConfidence: signal?.grabConfidence ?? 0,
             timestampMs,
-            targets: buildGestureTargets(boardRef.current),
+            // The controller hit-tests in screen space; board-space object
+            // bounds go through the viewport transform.
+            targets: buildGestureTargets(boardRef.current).map((target) => ({
+              ...target,
+              bounds: {
+                x: target.bounds.x * viewportForTargets.scale + viewportForTargets.x,
+                y: target.bounds.y * viewportForTargets.scale + viewportForTargets.y,
+                width: target.bounds.width * viewportForTargets.scale,
+                height: target.bounds.height * viewportForTargets.scale,
+              },
+            })),
           });
           setHandControlDiagnostics({
             trackingConfidence: signal?.trackingConfidence ?? 0,
@@ -3902,7 +4079,9 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
     inputPaused,
     inputMode,
     markerInputMode,
+    applyViewport,
     captureLandmarkFrame,
+    currentViewportLimits,
     sensitivity,
     updatePalmPushToTalk,
   ]);
@@ -4138,7 +4317,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
 
       if (inputMode === "gesture") {
         event.preventDefault();
-        const point = getCanvasPoint(event);
+        const point = toBoardPoint(getCanvasPoint(event));
         if (event.shiftKey) {
           const hitStroke = findAnnotationObjectAtPoint(boardRef.current, point);
           if (hitStroke) {
@@ -4165,7 +4344,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
       }
 
       if (inputMode !== "touchpad") {
-        const point = getCanvasPoint(event);
+        const point = toBoardPoint(getCanvasPoint(event));
         event.currentTarget.setPointerCapture(event.pointerId);
         if (event.altKey || event.shiftKey) {
           pointerErasingRef.current = true;
@@ -4288,7 +4467,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
           return;
         }
 
-        const canvasPoint = getCanvasPoint(event);
+        const canvasPoint = toBoardPoint(getCanvasPoint(event));
         event.preventDefault();
         moveObjectInteraction(canvasPoint);
         moveCursorPoint({
@@ -4300,7 +4479,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
       }
 
       if (pointerErasingRef.current) {
-        const point = getCanvasPoint(event);
+        const point = toBoardPoint(getCanvasPoint(event));
         eraseAt(makePoint(point.x, point.y));
         return;
       }
@@ -4309,7 +4488,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
         return;
       }
 
-      const point = getCanvasPoint(event);
+      const point = toBoardPoint(getCanvasPoint(event));
       appendStrokePoint(pointerStrokeIdRef.current, makePoint(point.x, point.y));
     },
     [
@@ -4339,7 +4518,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
 
       if (inputMode === "gesture") {
         event.preventDefault();
-        endObjectInteraction(getCanvasPoint(event));
+        endObjectInteraction(toBoardPoint(getCanvasPoint(event)));
         pointerStrokeIdRef.current = null;
         activePointerIdRef.current = null;
         return;
@@ -4359,10 +4538,10 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
       }
 
       const rect = event.currentTarget.getBoundingClientRect();
-      const point = {
+      const point = toBoardPoint({
         x: event.clientX - rect.left,
         y: event.clientY - rect.top,
-      };
+      });
       const hitStroke = findAnnotationObjectAtPoint(boardRef.current, point);
       if (!hitStroke?.annotation || !annotationNeedsLabel(hitStroke.annotation)) {
         return;
@@ -4392,6 +4571,28 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
 
   const handleWheel = useCallback(
     (event: ReactWheelEvent<HTMLCanvasElement>) => {
+      if (inputMode === "gesture") {
+        // Mouse/trackpad parity for canvas navigation: pinch (ctrl/cmd+wheel)
+        // zooms anchored at the cursor; plain two-finger scroll pans.
+        const rect = event.currentTarget.getBoundingClientRect();
+        const viewport = boardViewportRef.current;
+        if (event.ctrlKey || event.metaKey) {
+          applyViewport(
+            zoomViewport(
+              viewport,
+              Math.exp(-event.deltaY * 0.01),
+              { x: event.clientX - rect.left, y: event.clientY - rect.top },
+              currentViewportLimits(),
+            ),
+          );
+          return;
+        }
+        applyViewport(
+          panViewport(viewport, -event.deltaX, -event.deltaY, currentViewportLimits()),
+        );
+        return;
+      }
+
       if (inputMode !== "touchpad") {
         return;
       }
@@ -4402,7 +4603,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
 
       event.preventDefault();
     },
-    [inputMode],
+    [applyViewport, currentViewportLimits, inputMode],
   );
 
   const activateObjectTool = useCallback(
@@ -4433,10 +4634,12 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
       }
 
       const rect = canvasRef.current?.getBoundingClientRect();
-      const center = lastGesturePointerRef.current ?? {
-        x: (rect?.width ?? 760) / 2,
-        y: (rect?.height ?? 520) / 2,
-      };
+      const center =
+        lastGesturePointerRef.current ??
+        toBoardPoint({
+          x: (rect?.width ?? 760) / 2,
+          y: (rect?.height ?? 520) / 2,
+        });
       updatePlacementGhost(tool, center, center);
       setCommandFeedback(
         `${objectToolLabel(tool)} preview ready. Close your hand anywhere, move it, then open to place.`,
@@ -4459,12 +4662,15 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
         return;
       }
       setOpenCatalogId(null);
-      commitPlacementObject(tool, {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      });
+      commitPlacementObject(
+        tool,
+        toBoardPoint({
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top,
+        }),
+      );
     },
-    [commitPlacementObject],
+    [commitPlacementObject, toBoardPoint],
   );
 
   const markerStatus = getMarkerStatus(gestureResult);
@@ -4483,10 +4689,13 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
     editingAnnotationId === selectedAnnotationId &&
     Boolean(selectedAnnotation && annotationNeedsLabel(selectedAnnotation)) &&
     labelAnchor;
-  const floatingLabelStyle = labelAnchor
+  const labelAnchorScreen = labelAnchor
+    ? screenPointFromBoard(boardViewportRef.current, labelAnchor)
+    : null;
+  const floatingLabelStyle = labelAnchorScreen
     ? {
-        left: Math.max(14, labelAnchor.x + 10),
-        top: Math.max(14, labelAnchor.y + 10),
+        left: Math.max(14, labelAnchorScreen.x + 10),
+        top: Math.max(14, labelAnchorScreen.y + 10),
       }
     : undefined;
 
@@ -4571,9 +4780,10 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
       <div className="content">
         <section className="board-area" aria-label="Airboard canvas">
           {inputMode === "gesture" ? (
-            <div className="object-dock catalog-dock" role="toolbar" aria-label="Shape catalog">
+            <div ref={dockRef} className="object-dock catalog-dock" role="toolbar" aria-label="Shape catalog">
               <button
-                className={activeObjectTool === "select" ? "selected" : undefined}
+                data-dock-id="select"
+                className={dockButtonClass(activeObjectTool === "select", dockGestureHover === "select")}
                 type="button"
                 aria-pressed={activeObjectTool === "select"}
                 onClick={() => {
@@ -4591,7 +4801,11 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
                 return (
                   <div key={category.id} className="catalog-category">
                     <button
-                      className={isOpen || holdsActiveTool ? "selected" : undefined}
+                      data-dock-id={`category:${category.id}`}
+                      className={dockButtonClass(
+                        isOpen || holdsActiveTool,
+                        dockGestureHover === `category:${category.id}`,
+                      )}
                       type="button"
                       aria-expanded={isOpen}
                       aria-haspopup="menu"
@@ -4611,8 +4825,12 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
                         {category.tools.map((item) => (
                           <button
                             key={item.tool}
+                            data-dock-id={`tool:${item.tool}`}
                             role="menuitem"
-                            className={activeObjectTool === item.tool ? "selected" : undefined}
+                            className={dockButtonClass(
+                              activeObjectTool === item.tool,
+                              dockGestureHover === `tool:${item.tool}`,
+                            )}
                             type="button"
                             title={`${item.label} — click to arm placement, or drag onto the board`}
                             draggable
@@ -4634,7 +4852,8 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
                 );
               })}
               <button
-                className={activeObjectTool === "eraser" ? "selected" : undefined}
+                data-dock-id="eraser"
+                className={dockButtonClass(activeObjectTool === "eraser", dockGestureHover === "eraser")}
                 type="button"
                 aria-pressed={activeObjectTool === "eraser"}
                 onClick={() => {
@@ -4678,6 +4897,10 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
                   <li>
                     <strong>Open hand points, closed hand grabs</strong>; reopen to drop.
                     Drag shapes from the catalogs on the left.
+                  </li>
+                  <li>
+                    <strong>Two open palms</strong> move the canvas; <strong>two closed
+                    hands</strong> spread apart or together to zoom.
                   </li>
                   <li>
                     Everything applies instantly — <strong>every change shows an Undo
@@ -4964,6 +5187,8 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
                   <strong>{selectedAnnotationIds.length}</strong>
                   <span>Live sync</span>
                   <strong className="pill">{boardSyncStatus}</strong>
+                  <span>Zoom</span>
+                  <strong>{`${Math.round(viewportScale * 100)}%${canvasNavMode ? ` · ${canvasNavMode}` : ""}`}</strong>
                   <span>Command</span>
                   <strong>
                     {speechRecognitionStatus === "interpreting"
@@ -5054,7 +5279,12 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
                   } else {
                     endActiveTouchpadInteraction(nextMode === "touchpad" ? "HOVER" : "IDLE");
                   }
+                  boardViewportRef.current = { ...IDENTITY_VIEWPORT };
+                  canvasNavTrackerRef.current?.reset();
+                  setViewportScale(1);
+                  setCanvasNavMode(null);
                   setInputMode(nextMode);
+                  render();
                 }}
               >
                 <option value="touchpad">Touchpad Writing</option>
@@ -5680,6 +5910,42 @@ function getHybridHandSignal(
 }
 
 // Committed diagram objects in a stable order, for keyboard Tab cycling.
+/**
+ * Maps up to two tracked hands into navigation inputs: mirrored full-frame
+ * canvas coordinates (matching the on-screen sense of motion) plus the grab
+ * signal that separates pan (open) from zoom (closed).
+ */
+function dockButtonClass(selected: boolean, gestureHover: boolean): string | undefined {
+  const classes = [selected ? "selected" : null, gestureHover ? "gesture-hover" : null].filter(
+    Boolean,
+  );
+  return classes.length > 0 ? classes.join(" ") : undefined;
+}
+
+function collectNavHands(
+  hands: readonly DetectedHand[],
+  canvasWidth: number,
+  canvasHeight: number,
+): { point: { x: number; y: number }; grabStrength: number }[] {
+  const tracked = hands.filter((hand) => hand.landmarks.length >= 21);
+  if (tracked.length !== 2) {
+    return [];
+  }
+  return tracked.map((hand) => {
+    const indexMcp = hand.landmarks[5]!;
+    const middleMcp = hand.landmarks[9]!;
+    const ringMcp = hand.landmarks[13]!;
+    const pinkyMcp = hand.landmarks[17]!;
+    return {
+      point: {
+        x: (1 - (indexMcp.x + middleMcp.x + ringMcp.x + pinkyMcp.x) / 4) * canvasWidth,
+        y: ((indexMcp.y + middleMcp.y + ringMcp.y + pinkyMcp.y) / 4) * canvasHeight,
+      },
+      grabStrength: estimateGrabStrength(hand.landmarks).strength,
+    };
+  });
+}
+
 function getSelectableAnnotationIds(state: BoardState): string[] {
   return Object.values(state.strokes)
     .filter((stroke) => stroke.status === "committed" && stroke.annotation)

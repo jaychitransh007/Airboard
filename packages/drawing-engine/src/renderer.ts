@@ -21,8 +21,22 @@ export type BoardAlignmentGuide = {
   kind?: "object" | "grid";
 };
 
+export type BoardRenderView = {
+  /** Screen offset of the board origin, in CSS pixels. */
+  x: number;
+  y: number;
+  /** Screen pixels per board unit. */
+  scale: number;
+};
+
 export type BoardRenderOptions = {
   background: "white" | "dark" | "transparent";
+  /**
+   * Viewport transform (pan/zoom). Content — strokes, overlays, ghosts,
+   * guides, cursors — is drawn in board coordinates and mapped through this
+   * uniformly; the background always fills the physical canvas.
+   */
+  view?: BoardRenderView;
   showDeleted?: boolean;
   selectedStrokeId?: string | null;
   selectedStrokeIds?: readonly string[];
@@ -68,6 +82,16 @@ export function renderBoard(
   const { width, height } = resizeCanvasToDisplaySize(canvas);
   context.clearRect(0, 0, width, height);
   paintBackground(context, width, height, options.background);
+  if (options.view) {
+    context.transform(
+      options.view.scale,
+      0,
+      0,
+      options.view.scale,
+      options.view.x,
+      options.view.y,
+    );
+  }
 
   for (const stroke of Object.values(state.strokes)) {
     if (stroke.status === "deleted" && !options.showDeleted) {

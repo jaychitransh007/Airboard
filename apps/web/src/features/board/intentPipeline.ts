@@ -34,6 +34,14 @@ export function boardContentChanged(a: BoardState, b: BoardState): boolean {
 }
 
 export type IntentResolutionContext = {
+  /**
+   * Board coordinates of the visible window's top-left. canvasWidth/Height
+   * describe the visible window (screen ÷ viewport scale), so canvas-relative
+   * placements ("on the left", region centers) land inside what the user can
+   * actually see, not at the board origin. Defaults to (0,0) — the identity
+   * viewport.
+   */
+  viewOrigin?: { x: number; y: number };
   boardState: BoardState;
   pointer: AnnotationPoint;
   canvasWidth: number;
@@ -423,8 +431,16 @@ function resolveSemanticCreateCenter(
     const index = planHandles.size;
     return {
       point: {
-        x: clampNumber(context.pointer.x + (index % 3) * 184, 100, context.canvasWidth - 100),
-        y: clampNumber(context.pointer.y + Math.floor(index / 3) * 120, 70, context.canvasHeight - 70),
+        x: clampNumber(
+          context.pointer.x + (index % 3) * 184,
+          (context.viewOrigin?.x ?? 0) + 100,
+          (context.viewOrigin?.x ?? 0) + context.canvasWidth - 100,
+        ),
+        y: clampNumber(
+          context.pointer.y + Math.floor(index / 3) * 120,
+          (context.viewOrigin?.y ?? 0) + 70,
+          (context.viewOrigin?.y ?? 0) + context.canvasHeight - 70,
+        ),
       },
     };
   }
@@ -515,11 +531,14 @@ function semanticPlacementCommands(
 
 function semanticCanvasRegionCenter(
   region: Extract<SemanticPlacement, { kind: "canvas_region" }>["region"],
-  context: Pick<SemanticIntentResolutionContext, "canvasWidth" | "canvasHeight">,
+  context: Pick<SemanticIntentResolutionContext, "canvasWidth" | "canvasHeight" | "viewOrigin">,
 ): AnnotationPoint {
   const x = region === "left" ? 0.25 : region === "right" ? 0.75 : 0.5;
   const y = region === "top" ? 0.25 : region === "bottom" ? 0.75 : 0.5;
-  return { x: context.canvasWidth * x, y: context.canvasHeight * y };
+  return {
+    x: (context.viewOrigin?.x ?? 0) + context.canvasWidth * x,
+    y: (context.viewOrigin?.y ?? 0) + context.canvasHeight * y,
+  };
 }
 
 function semanticOffsetDelta(
@@ -614,10 +633,12 @@ export function resolveIntentOperation(
       }
 
       const ids = Array.from({ length: operation.count }, () => crypto.randomUUID());
-      const maxCenterX = Math.max(90, context.canvasWidth - 90);
-      const maxCenterY = Math.max(60, context.canvasHeight - 60);
-      const minCenterX = Math.min(220, maxCenterX);
-      const minCenterY = Math.min(220, maxCenterY);
+      const originX = context.viewOrigin?.x ?? 0;
+      const originY = context.viewOrigin?.y ?? 0;
+      const maxCenterX = originX + Math.max(90, context.canvasWidth - 90);
+      const maxCenterY = originY + Math.max(60, context.canvasHeight - 60);
+      const minCenterX = Math.min(originX + 220, maxCenterX);
+      const minCenterY = Math.min(originY + 220, maxCenterY);
       const availableWidth = Math.max(0, maxCenterX - minCenterX);
       const availableHeight = Math.max(0, maxCenterY - minCenterY);
       const preferredColumns =
@@ -928,8 +949,10 @@ function resolvePlacementCenter(
   }
   if (placement.relativeTo.kind === "canvas") {
     return {
-      x: placement.direction === "left" ? context.canvasWidth * 0.25 : context.canvasWidth * 0.75,
-      y: context.canvasHeight * 0.5,
+      x:
+        (context.viewOrigin?.x ?? 0) +
+        (placement.direction === "left" ? context.canvasWidth * 0.25 : context.canvasWidth * 0.75),
+      y: (context.viewOrigin?.y ?? 0) + context.canvasHeight * 0.5,
     };
   }
 
