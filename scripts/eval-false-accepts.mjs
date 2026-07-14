@@ -136,8 +136,11 @@ function classifyParsedRisk(command) {
   if (command.kind === "connect") {
     return [command.from, command.to].some((ref) => ref.kind === "deictic") ? "hard" : "soft";
   }
-  if (command.kind === "rename_object") {
+  if (command.kind === "rename_object" || command.kind === "resize_object") {
     return command.target.kind === "deictic" ? "hard" : "soft";
+  }
+  if (command.kind === "delete_connection") {
+    return [command.from, command.to].some((ref) => ref.kind === "deictic") ? "hard" : "soft";
   }
   return "hard";
 }

@@ -1403,6 +1403,45 @@
         "nodeType": "terminator",
         "placementDirection": "here"
       }
+    },
+    {
+      "id": "parity-delete-connection",
+      "text": "delete the connection between API and Database",
+      "expected": {
+        "kind": "delete_connection",
+        "fromKind": "named",
+        "toKind": "named"
+      }
+    },
+    {
+      "id": "parity-disconnect-deictic",
+      "text": "disconnect this from that",
+      "expected": {
+        "kind": "delete_connection",
+        "fromKind": "deictic",
+        "toKind": "deictic"
+      }
+    },
+    {
+      "id": "parity-resize-smaller",
+      "text": "uh, make selected smaller",
+      "expected": {
+        "kind": "resize_selection"
+      }
+    },
+    {
+      "id": "parity-resize-height",
+      "text": "reduce the height of the No box",
+      "expected": {
+        "kind": "resize_object"
+      }
+    },
+    {
+      "id": "parity-resize-wider",
+      "text": "make the API wider",
+      "expected": {
+        "kind": "resize_object"
+      }
     }
   ]
 }

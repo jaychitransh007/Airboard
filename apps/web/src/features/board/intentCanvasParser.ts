@@ -70,6 +70,22 @@ export type IntentCanvasOperation =
       label?: string;
     }
   | { kind: "rename_object"; target: IntentCanvasConnectionReference; label: string }
+  | {
+      kind: "delete_connection";
+      from: IntentCanvasConnectionReference;
+      to: IntentCanvasConnectionReference;
+    }
+  | {
+      kind: "resize_selection";
+      dimension: "width" | "height" | "both";
+      direction: "grow" | "shrink";
+    }
+  | {
+      kind: "resize_object";
+      target: IntentCanvasConnectionReference;
+      dimension: "width" | "height" | "both";
+      direction: "grow" | "shrink";
+    }
   | { kind: "rename_selection"; label: string }
   | { kind: "delete_selection" }
   | { kind: "duplicate_selection" }
@@ -244,6 +260,20 @@ export function parseIntentCanvasCommand(
     return parsed(base, meta.command, meta.confidence, meta.message);
   }
 
+  const connectionDelete = parseDeleteConnectionCommand(commandText);
+  if (connectionDelete) {
+    return "command" in connectionDelete
+      ? parsed(base, connectionDelete.command, connectionDelete.confidence, connectionDelete.message)
+      : reject(base, "clarification", connectionDelete.code, connectionDelete.message, connectionDelete.examples);
+  }
+
+  const resize = parseResizeCommand(commandText);
+  if (resize) {
+    return "command" in resize
+      ? parsed(base, resize.command, resize.confidence, resize.message)
+      : reject(base, "clarification", resize.code, resize.message, resize.examples);
+  }
+
   const create = parseCreateCommand(commandText);
   if (create) {
     return "command" in create
@@ -303,6 +333,117 @@ function parseMetaCommand(text: string): ParseSuccess | null {
     };
   }
   return null;
+}
+
+const SIZE_ADJECTIVES: Readonly<
+  Record<string, { dimension: "width" | "height" | "both"; direction: "grow" | "shrink" }>
+> = {
+  bigger: { dimension: "both", direction: "grow" },
+  larger: { dimension: "both", direction: "grow" },
+  smaller: { dimension: "both", direction: "shrink" },
+  wider: { dimension: "width", direction: "grow" },
+  narrower: { dimension: "width", direction: "shrink" },
+  taller: { dimension: "height", direction: "grow" },
+  shorter: { dimension: "height", direction: "shrink" },
+};
+
+/** "delete/remove the connection|line|arrow between X and Y", "disconnect X from Y". */
+function parseDeleteConnectionCommand(text: string): ParseSuccess | ParseFailure | null {
+  const between =
+    /^(?:delete|remove)\s+(?:the\s+|every\s+|all\s+)?(?:connection|connections|connector|connectors|line|lines|arrow|arrows|link|links|edge|edges)\s+between\s+(.+?)\s+and\s+(.+)$/i.exec(
+      text,
+    );
+  const disconnect = between ? null : /^disconnect\s+(.+?)\s+(?:from|and)\s+(.+)$/i.exec(text);
+  const match = between ?? disconnect;
+  if (!match?.[1] || !match[2]) {
+    if (/^disconnect\b/i.test(text)) {
+      return {
+        code: "missing_connection_endpoint",
+        message: "Name both ends, e.g. “disconnect API from Database.”",
+        examples: ["Disconnect API from Database", "Delete the connection between this and that"],
+      };
+    }
+    return null;
+  }
+  const from = parseConnectionReference(match[1]);
+  const to = parseConnectionReference(match[2]);
+  if (!from || !to || connectionReferenceKey(from) === connectionReferenceKey(to)) {
+    return {
+      code: "missing_connection_endpoint",
+      message: "Name two distinct endpoints, e.g. “delete the connection between API and Database.”",
+      examples: ["Delete the connection between API and Database"],
+    };
+  }
+  return {
+    command: { kind: "delete_connection", from, to },
+    confidence: confidence(0.97, "exact_pattern"),
+    message: `Delete the connection between ${describeConnectionReference(from)} and ${describeConnectionReference(to)}.`,
+  };
+}
+
+/**
+ * Voice resize: "make selected smaller", "make the No box taller",
+ * "reduce the height of the API", "increase the width of selected".
+ */
+function parseResizeCommand(text: string): ParseSuccess | ParseFailure | null {
+  const adjectiveAlternatives = Object.keys(SIZE_ADJECTIVES).join("|");
+
+  const makeForm = new RegExp(
+    String.raw`^(?:resize\s+|make\s+)(.+?)\s+(?:a\s+(?:bit|little)\s+|much\s+)?(${adjectiveAlternatives})$`,
+    "i",
+  ).exec(text);
+  if (makeForm?.[1] && makeForm[2]) {
+    const effect = SIZE_ADJECTIVES[makeForm[2].toLocaleLowerCase("en-US")];
+    if (!effect) {
+      return null;
+    }
+    return buildResizeCommand(makeForm[1], effect);
+  }
+
+  const dimensionForm =
+    /^(reduce|decrease|shrink|increase|grow|expand)\s+the\s+(height|width|size)\s+of\s+(.+)$/i.exec(
+      text,
+    );
+  if (dimensionForm?.[1] && dimensionForm[2] && dimensionForm[3]) {
+    const direction = /^(?:reduce|decrease|shrink)$/i.test(dimensionForm[1]) ? "shrink" : "grow";
+    const token = dimensionForm[2].toLocaleLowerCase("en-US");
+    const dimension = token === "size" ? "both" : (token as "width" | "height");
+    return buildResizeCommand(dimensionForm[3], { dimension, direction });
+  }
+
+  return null;
+}
+
+function buildResizeCommand(
+  subject: string,
+  effect: { dimension: "width" | "height" | "both"; direction: "grow" | "shrink" },
+): ParseSuccess | ParseFailure {
+  const describeEffect =
+    effect.dimension === "both"
+      ? effect.direction === "grow"
+        ? "bigger"
+        : "smaller"
+      : `${effect.direction === "grow" ? "increase" : "reduce"} its ${effect.dimension}`;
+  if (new RegExp(`^${SELECTION_WORDS}$`, "i").test(subject.trim())) {
+    return {
+      command: { kind: "resize_selection", ...effect },
+      confidence: confidence(0.98, "exact_pattern"),
+      message: `Resize the selection: ${describeEffect}.`,
+    };
+  }
+  const target = parseConnectionReference(subject);
+  if (!target) {
+    return {
+      code: "missing_selection_target",
+      message: "Say which object to resize, e.g. “make the API smaller.”",
+      examples: ["Make selected smaller", "Reduce the height of the No box"],
+    };
+  }
+  return {
+    command: { kind: "resize_object", target, ...effect },
+    confidence: confidence(0.96, "normalized_alias"),
+    message: `Resize ${describeConnectionReference(target)}: ${describeEffect}.`,
+  };
 }
 
 function parseCreateCommand(text: string): ParseSuccess | ParseFailure | null {

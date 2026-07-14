@@ -727,6 +727,80 @@ export function resolveIntentOperation(
       };
     }
 
+    case "delete_connection": {
+      const deictic = resolveDeicticIds({
+        boardState: context.boardState,
+        selectionIds,
+        primarySelectionId,
+        hoverStrokeId: context.hoverStrokeId,
+      });
+      const from = resolveConnectionReference(operation.from, context.boardState, deictic);
+      if ("error" in from) {
+        return from;
+      }
+      const to = resolveConnectionReference(operation.to, context.boardState, deictic);
+      if ("error" in to) {
+        return to;
+      }
+      const connectionIds = findConnectionsBetween(context.boardState, from.id, to.id);
+      if (connectionIds.length === 0) {
+        return { error: "No connector between those two objects was found." };
+      }
+      return {
+        commands: [
+          {
+            type: "objects.delete",
+            objectIds: connectionIds,
+            cascadeConnectors: false,
+          },
+        ],
+        selectionAfter: [],
+      };
+    }
+
+    case "resize_selection":
+    case "resize_object": {
+      let targetIds: string[];
+      if (operation.kind === "resize_selection") {
+        if (selectionIds.length === 0) {
+          return { error: "Select one or more objects before resizing." };
+        }
+        targetIds = selectionIds;
+      } else {
+        const deictic = resolveDeicticIds({
+          boardState: context.boardState,
+          selectionIds,
+          primarySelectionId,
+          hoverStrokeId: context.hoverStrokeId,
+        });
+        const target = resolveConnectionReference(operation.target, context.boardState, deictic);
+        if ("error" in target) {
+          return target;
+        }
+        targetIds = [target.id];
+      }
+      const commands: DiagramCommand[] = [];
+      for (const objectId of targetIds) {
+        const bounds = context.boardState.strokes[objectId]?.annotation?.bounds;
+        if (!bounds) {
+          continue;
+        }
+        commands.push({
+          type: "object.resize",
+          objectId,
+          bounds: resizeBoundsAroundCenter(bounds, operation.dimension, operation.direction),
+        });
+      }
+      if (commands.length === 0) {
+        return { error: "That object has no resizable bounds — try a node or note." };
+      }
+      return {
+        commands,
+        selectionAfter: targetIds,
+        previewStrokeId: targetIds[0],
+      };
+    }
+
     case "rename_object": {
       const deictic = resolveDeicticIds({
         boardState: context.boardState,
@@ -894,29 +968,45 @@ function resolveConnectionReference(
         };
   }
 
+  const search = (lookup: string, nodeTypeFilter: string | null) => {
+    const candidates = Object.values(state.strokes).flatMap((stroke) => {
+      const annotation = stroke.annotation;
+      if (
+        stroke.status !== "committed" ||
+        !annotation ||
+        annotation.type === "connector" ||
+        annotation.type === "arrow" ||
+        !annotation.bounds
+      ) {
+        return [];
+      }
+      if (nodeTypeFilter && annotation.nodeType !== nodeTypeFilter) {
+        return [];
+      }
+      const label = normalizeObjectLookup(annotation.label ?? "");
+      const nodeType = normalizeObjectLookup(annotation.nodeType ?? "");
+      const exactLabel = lookup.length > 0 && label === lookup;
+      const exactType = lookup.length > 0 && nodeType === lookup;
+      if (!exactLabel && !exactType && !(lookup.length === 0 && nodeTypeFilter)) {
+        return [];
+      }
+      return [{ id: stroke.id, exactLabel }];
+    });
+    const exactLabelMatches = candidates.filter((candidate) => candidate.exactLabel);
+    return exactLabelMatches.length > 0 ? exactLabelMatches : candidates;
+  };
+
   const lookup = normalizeObjectLookup(reference.normalizedLabel);
-  const candidates = Object.values(state.strokes).flatMap((stroke) => {
-    const annotation = stroke.annotation;
-    if (
-      stroke.status !== "committed" ||
-      !annotation ||
-      annotation.type === "connector" ||
-      annotation.type === "arrow" ||
-      !annotation.bounds
-    ) {
-      return [];
+  let matches = search(lookup, null);
+  if (matches.length === 0) {
+    // Spoken references often append the shape kind — "the No box", "the
+    // user circle". Strip a trailing type word and retry, constrained to
+    // that type; a bare type word resolves when exactly one such node exists.
+    const stripped = stripTrailingNodeTerm(lookup);
+    if (stripped) {
+      matches = search(stripped.remainder, stripped.nodeType);
     }
-    const label = normalizeObjectLookup(annotation.label ?? "");
-    const nodeType = normalizeObjectLookup(annotation.nodeType ?? "");
-    const exactLabel = label === lookup;
-    const exactType = nodeType === lookup;
-    if (!exactLabel && !exactType) {
-      return [];
-    }
-    return [{ id: stroke.id, exactLabel }];
-  });
-  const exactLabelMatches = candidates.filter((candidate) => candidate.exactLabel);
-  const matches = exactLabelMatches.length > 0 ? exactLabelMatches : candidates;
+  }
   if (matches.length === 0) {
     return {
       error: `I couldn’t find an object named “${reference.label}”. Use its visible label or select both endpoints.`,
@@ -928,6 +1018,117 @@ function resolveConnectionReference(
     };
   }
   return { id: matches[0]!.id };
+}
+
+/** Center-preserving resize: grow 1.25×, shrink 0.8×, floored at 36px. */
+function resizeBoundsAroundCenter(
+  bounds: { x: number; y: number; width: number; height: number },
+  dimension: "width" | "height" | "both",
+  direction: "grow" | "shrink",
+): { x: number; y: number; width: number; height: number } {
+  const factor = direction === "grow" ? 1.25 : 0.8;
+  const width =
+    dimension === "height" ? bounds.width : Math.max(36, bounds.width * factor);
+  const height =
+    dimension === "width" ? bounds.height : Math.max(36, bounds.height * factor);
+  return {
+    x: bounds.x + (bounds.width - width) / 2,
+    y: bounds.y + (bounds.height - height) / 2,
+    width,
+    height,
+  };
+}
+
+/**
+ * Every committed connector/arrow whose endpoints join the two objects —
+ * preferring explicit endpoint bindings, falling back to endpoint-in-bounds
+ * geometry for lines drawn before snapping existed.
+ */
+function findConnectionsBetween(
+  boardState: BoardState,
+  firstId: string,
+  secondId: string,
+): string[] {
+  const matches: string[] = [];
+  for (const stroke of Object.values(boardState.strokes)) {
+    const annotation = stroke.annotation;
+    if (
+      stroke.status !== "committed" ||
+      !annotation ||
+      (annotation.type !== "connector" && annotation.type !== "arrow")
+    ) {
+      continue;
+    }
+    const boundPair = [annotation.snappedStartStrokeId, annotation.snappedEndStrokeId];
+    if (
+      (boundPair[0] === firstId && boundPair[1] === secondId) ||
+      (boundPair[0] === secondId && boundPair[1] === firstId)
+    ) {
+      matches.push(stroke.id);
+      continue;
+    }
+    if (annotation.start && annotation.end) {
+      const startHit = endpointNearObject(boardState, annotation.start, firstId)
+        ? firstId
+        : endpointNearObject(boardState, annotation.start, secondId)
+          ? secondId
+          : null;
+      const endHit = endpointNearObject(boardState, annotation.end, firstId)
+        ? firstId
+        : endpointNearObject(boardState, annotation.end, secondId)
+          ? secondId
+          : null;
+      if (startHit && endHit && startHit !== endHit) {
+        matches.push(stroke.id);
+      }
+    }
+  }
+  return matches;
+}
+
+function endpointNearObject(
+  boardState: BoardState,
+  point: { x: number; y: number },
+  objectId: string,
+): boolean {
+  const bounds = boardState.strokes[objectId]?.annotation?.bounds;
+  if (!bounds) {
+    return false;
+  }
+  const margin = 28;
+  return (
+    point.x >= bounds.x - margin &&
+    point.x <= bounds.x + bounds.width + margin &&
+    point.y >= bounds.y - margin &&
+    point.y <= bounds.y + bounds.height + margin
+  );
+}
+
+/**
+ * Splits a spoken reference like "no box" / "user circle" into its label
+ * prefix and a trailing shape word. Generic words (box/node/shape/object)
+ * strip without a type constraint.
+ */
+function stripTrailingNodeTerm(
+  lookup: string,
+): { remainder: string; nodeType: string | null } | null {
+  const words = lookup.split(" ").filter(Boolean);
+  if (words.length === 0) {
+    return null;
+  }
+  const last = words[words.length - 1]!;
+  const generic = new Set(["box", "node", "shape", "object"]);
+  for (const capability of AIRBOARD_SEMANTIC_NODE_CAPABILITIES) {
+    for (const term of capability.terms) {
+      if (normalizeObjectLookup(term) === last) {
+        return { remainder: words.slice(0, -1).join(" "), nodeType: capability.nodeType };
+      }
+    }
+  }
+  if (generic.has(last) && words.length > 1) {
+    return { remainder: words.slice(0, -1).join(" "), nodeType: null };
+  }
+  return null;
 }
 
 function normalizeObjectLookup(value: string): string {

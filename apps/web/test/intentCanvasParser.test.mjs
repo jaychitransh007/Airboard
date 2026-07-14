@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { normalizeScopedVoiceUtterance } from "../src/features/board/browserSpeech.ts";
 import {
   normalizeIntentCanvasText,
   parseIntentCanvasCommand,
@@ -315,4 +316,63 @@ test("strips spoken disfluencies before parsing", () => {
   const bare = parseIntentCanvasCommand("uh", { activationPolicy: "externally_activated" });
   assert.equal(bare.status, "clarification");
   assert.equal(bare.issue.code, "empty_command");
+});
+
+test("connectors are deletable by voice: between-form and disconnect-form", () => {
+  const between = parsed("delete the connection between API and Database", {
+    activationPolicy: "externally_activated",
+  });
+  assert.equal(between.command.kind, "delete_connection");
+  assert.equal(between.command.from.label, "API");
+  assert.equal(between.command.to.label, "Database");
+
+  const disconnect = parsed("disconnect this from that", {
+    activationPolicy: "externally_activated",
+  });
+  assert.equal(disconnect.command.kind, "delete_connection");
+  assert.equal(disconnect.command.from.pronoun, "this");
+
+  const arrowForm = parsed("remove the arrow between User and API", {
+    activationPolicy: "externally_activated",
+  });
+  assert.equal(arrowForm.command.kind, "delete_connection");
+});
+
+test("resize by voice: selection and named targets, every dimension", () => {
+  const smaller = parsed("make selected smaller", { activationPolicy: "externally_activated" });
+  assert.deepEqual(
+    { kind: smaller.command.kind, dimension: smaller.command.dimension, direction: smaller.command.direction },
+    { kind: "resize_selection", dimension: "both", direction: "shrink" },
+  );
+
+  const height = parsed("reduce the height of the No box", {
+    activationPolicy: "externally_activated",
+  });
+  assert.equal(height.command.kind, "resize_object");
+  assert.equal(height.command.dimension, "height");
+  assert.equal(height.command.direction, "shrink");
+  assert.equal(height.command.target.label, "No box");
+
+  const wider = parsed("make the API wider", { activationPolicy: "externally_activated" });
+  assert.equal(wider.command.kind, "resize_object");
+  assert.equal(wider.command.dimension, "width");
+  assert.equal(wider.command.direction, "grow");
+
+  // "make a start here" must still be a create, not a resize.
+  const create = parsed("make a start here", { activationPolicy: "externally_activated" });
+  assert.equal(create.command.kind, "create_node");
+});
+
+test("scoped hold phrases rewrite to resize commands", () => {
+  assert.equal(normalizeScopedVoiceUtterance("make it smaller"), "make selected smaller");
+  assert.equal(normalizeScopedVoiceUtterance("make it a bit taller"), "make selected taller");
+  assert.equal(
+    normalizeScopedVoiceUtterance("reduce the height"),
+    "reduce the height of selected",
+  );
+  const rewritten = parsed(normalizeScopedVoiceUtterance("reduce the height"), {
+    activationPolicy: "externally_activated",
+  });
+  assert.equal(rewritten.command.kind, "resize_selection");
+  assert.equal(rewritten.command.dimension, "height");
 });

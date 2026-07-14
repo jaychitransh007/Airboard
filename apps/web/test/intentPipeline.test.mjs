@@ -120,3 +120,85 @@ test("grounding a selection edit without a selection fails closed", () => {
   );
   assert.ok("error" in resolution, "no selection → grounding error, not a mutation");
 });
+
+test("grounds a voice resize into a center-preserving object.resize", () => {
+  let board = createInitialBoardState(BOARD_ID);
+  board = {
+    ...board,
+    strokes: {
+      n1: {
+        id: "n1", boardId: BOARD_ID, userId: "u", color: "#000", thickness: 3,
+        status: "committed", points: [], createdAt: new Date().toISOString(),
+        annotation: {
+          type: "flow_node", source: "voice", nodeType: "custom", label: "No",
+          bounds: { x: 100, y: 100, width: 200, height: 100 },
+        },
+      },
+    },
+  };
+  const resolution = resolveIntentOperation(
+    {
+      kind: "resize_object",
+      target: { kind: "named", label: "No box", normalizedLabel: "no box" },
+      dimension: "height",
+      direction: "shrink",
+    },
+    groundingContext(board),
+  );
+  assert.ok(!("error" in resolution), JSON.stringify(resolution));
+  const command = resolution.commands[0];
+  assert.equal(command.type, "object.resize");
+  assert.equal(command.objectId, "n1", "'the No box' resolves the node labeled 'No'");
+  assert.equal(command.bounds.width, 200, "width untouched");
+  assert.equal(command.bounds.height, 80, "height shrunk 0.8x");
+  assert.equal(command.bounds.y, 110, "center preserved");
+});
+
+test("grounds delete_connection against endpoint bindings", () => {
+  let board = createInitialBoardState(BOARD_ID);
+  const node = (id, label, x) => ({
+    id, boardId: BOARD_ID, userId: "u", color: "#000", thickness: 3,
+    status: "committed", points: [], createdAt: new Date().toISOString(),
+    annotation: {
+      type: "flow_node", source: "voice", nodeType: "service", label,
+      bounds: { x, y: 100, width: 120, height: 60 },
+    },
+  });
+  board = {
+    ...board,
+    strokes: {
+      a: node("a", "API", 100),
+      b: node("b", "Database", 400),
+      edge: {
+        id: "edge", boardId: BOARD_ID, userId: "u", color: "#000", thickness: 3,
+        status: "committed", points: [], createdAt: new Date().toISOString(),
+        annotation: {
+          type: "connector", source: "voice",
+          start: { x: 220, y: 130 }, end: { x: 400, y: 130 },
+          snappedStartStrokeId: "a", snappedEndStrokeId: "b",
+        },
+      },
+    },
+  };
+  const resolution = resolveIntentOperation(
+    {
+      kind: "delete_connection",
+      from: { kind: "named", label: "Database", normalizedLabel: "database" },
+      to: { kind: "named", label: "API", normalizedLabel: "api" },
+    },
+    groundingContext(board),
+  );
+  assert.ok(!("error" in resolution), JSON.stringify(resolution));
+  assert.equal(resolution.commands[0].type, "objects.delete");
+  assert.deepEqual(resolution.commands[0].objectIds, ["edge"], "order-independent match");
+
+  const missing = resolveIntentOperation(
+    {
+      kind: "delete_connection",
+      from: { kind: "named", label: "API", normalizedLabel: "api" },
+      to: { kind: "named", label: "Ledger", normalizedLabel: "ledger" },
+    },
+    groundingContext(board),
+  );
+  assert.ok("error" in missing, "unknown endpoint fails closed");
+});

@@ -704,6 +704,22 @@ export function normalizeScopedVoiceUtterance(utterance: string): string {
     return `move selected ${move[1].toLocaleLowerCase("en-US")}`;
   }
 
+  const resizeAdjective = new RegExp(
+    String.raw`^make(?:\s+${pronoun})?\s+(?:a\s+(?:bit|little)\s+|much\s+)?(bigger|larger|smaller|wider|narrower|taller|shorter)$`,
+    "iu",
+  ).exec(trimmed);
+  if (resizeAdjective?.[1]) {
+    return `make selected ${resizeAdjective[1].toLocaleLowerCase("en-US")}`;
+  }
+
+  const resizeDimension = new RegExp(
+    String.raw`^(reduce|decrease|shrink|increase|grow|expand)\s+(?:the\s+|its\s+)?(height|width|size)$`,
+    "iu",
+  ).exec(trimmed);
+  if (resizeDimension?.[1] && resizeDimension[2]) {
+    return `${resizeDimension[1].toLocaleLowerCase("en-US")} the ${resizeDimension[2].toLocaleLowerCase("en-US")} of selected`;
+  }
+
   const connect = new RegExp(
     String.raw`^connect(?:\s+${pronoun})?\s+to\s+(.+)$`,
     "iu",

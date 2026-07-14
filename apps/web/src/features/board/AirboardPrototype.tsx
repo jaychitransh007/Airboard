@@ -86,6 +86,7 @@ import {
   exportCanvasPng,
   findAnnotationObjectAtPoint,
   findIntersectingStrokeIds,
+  getConnectorRoutePoints,
   renderBoard,
   type AnnotationRenderObject,
 } from "@airboard/drawing-engine";
@@ -5982,22 +5983,29 @@ function buildGestureTargets(state: BoardState): GestureTarget[] {
     }
 
     if (annotation.start && annotation.end) {
-      const center = {
-        x: (annotation.start.x + annotation.end.x) / 2,
-        y: (annotation.start.y + annotation.end.y) / 2,
-      };
-      targets.push({
-        id: stroke.id,
-        bounds: {
-          x: center.x - 24,
-          y: center.y - 24,
-          width: 48,
-          height: 48,
-        },
-        priority: annotation.type === "connector" ? 1 : 0.75,
-        capturePaddingPx: 12,
-        releasePaddingPx: 18,
-      });
+      // A connector is grabbable along its ENTIRE routed elbow, not just the
+      // straight-line midpoint (which often sits in empty space or under a
+      // node). One inflated target per route segment; all share the stroke id
+      // so acquisition is seamless across corners. Priority stays below nodes
+      // so a line hugging a shape never steals the shape's grab.
+      const route = getConnectorRoutePoints(annotation);
+      const inflate = 10;
+      for (let index = 1; index < route.length; index += 1) {
+        const from = route[index - 1]!;
+        const to = route[index]!;
+        targets.push({
+          id: stroke.id,
+          bounds: {
+            x: Math.min(from.x, to.x) - inflate,
+            y: Math.min(from.y, to.y) - inflate,
+            width: Math.abs(to.x - from.x) + inflate * 2,
+            height: Math.abs(to.y - from.y) + inflate * 2,
+          },
+          priority: annotation.type === "connector" ? 0.9 : 0.8,
+          capturePaddingPx: 10,
+          releasePaddingPx: 16,
+        });
+      }
     }
   }
   return targets;
