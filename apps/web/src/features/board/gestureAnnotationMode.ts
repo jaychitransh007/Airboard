@@ -59,6 +59,9 @@ export type ObjectDockTool =
   | "user"
   | "api"
   | "decision"
+  | "terminator"
+  | "io"
+  | "document"
   | "note"
   | "circle"
   | "box"
@@ -724,6 +727,12 @@ function nodeTypeForTool(tool: ObjectDockTool): AnnotationNodeType | null {
       return "api";
     case "decision":
       return "decision";
+    case "terminator":
+      return "terminator";
+    case "io":
+      return "io";
+    case "document":
+      return "document";
     case "note":
       return "note";
     case "select":
@@ -954,9 +963,26 @@ function nodeBoundsForType(
   nodeType: AnnotationNodeType,
   center: AnnotationPoint,
 ): AnnotationBounds {
-  const width = nodeType === "circle" ? 120 : nodeType === "decision" ? 122 : DEFAULT_NODE_WIDTH;
+  const width =
+    nodeType === "circle"
+      ? 120
+      : nodeType === "decision"
+        ? 122
+        : nodeType === "terminator"
+          ? 150
+          : nodeType === "io"
+            ? 152
+            : DEFAULT_NODE_WIDTH;
   const height =
-    nodeType === "circle" ? 120 : nodeType === "database" ? 78 : nodeType === "decision" ? 78 : DEFAULT_NODE_HEIGHT;
+    nodeType === "circle"
+      ? 120
+      : nodeType === "database" || nodeType === "decision"
+        ? 78
+        : nodeType === "terminator"
+          ? 58
+          : nodeType === "document"
+            ? 86
+            : DEFAULT_NODE_HEIGHT;
   return {
     x: center.x - width / 2,
     y: center.y - height / 2,
@@ -979,6 +1005,12 @@ function defaultLabelForNodeType(nodeType: AnnotationNodeType): string {
       return "API";
     case "decision":
       return "Decision";
+    case "terminator":
+      return "Start";
+    case "io":
+      return "Input";
+    case "document":
+      return "Document";
     case "note":
       return "Note";
     case "circle":

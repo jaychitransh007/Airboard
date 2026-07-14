@@ -351,16 +351,34 @@ function parseCreateCommand(text: string): ParseSuccess | ParseFailure | null {
   if (!nodeMatch) {
     return null;
   }
+  // A node term buried deep in the sentence ("make the font bigger in the
+  // DOCUMENT you're sharing") is meeting dictation, not a create command —
+  // deliberate commands put the shape right after the verb, allowing a short
+  // modifier ("add a payment service").
+  const wordsBeforeMatch = countResult.subject
+    .slice(0, nodeMatch.index)
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+  if (wordsBeforeMatch > 2) {
+    return {
+      code: "missing_node_type",
+      message: "Say the shape right after the verb, e.g. “add a document named Specs.”",
+      examples: ["Add a document here", "Create a payment service here"],
+    };
+  }
   const inferredLabel = removeSpan(countResult.subject, nodeMatch.index, nodeMatch.length);
   // An inferred label that opens with a subordinate clause ("make a note THAT
   // we owe legal a response") is meeting-style dictation, not a diagram label.
   // Never guess a label from it — ask instead. Explicit "named/called" labels
   // are unaffected.
+  const cleanedInferredLabel = cleanLabel(inferredLabel);
   if (
     !explicitLabel &&
-    /^(?:that|which|because|so|if|when|to|about|regarding|saying|says)\b/i.test(
-      cleanLabel(inferredLabel),
-    )
+    (/^(?:that|which|because|so|if|when|to|about|regarding|saying|says|on|of|for|with|from|in|at|by|into|onto|your|my|our|their|his|her|its|some|any|more)\b/i.test(
+      cleanedInferredLabel,
+    ) ||
+      cleanedInferredLabel.split(/\s+/).filter(Boolean).length >= 4)
   ) {
     return {
       code: "missing_label",

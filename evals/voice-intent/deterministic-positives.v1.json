@@ -1339,6 +1339,70 @@
         "kind": "rename_selection",
         "label": "Login Service"
       }
+    },
+    {
+      "id": "shapes-terminator-start",
+      "text": "add a start here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "terminator",
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "shapes-terminator-end-below",
+      "text": "create an end below this",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "terminator",
+        "placementDirection": "below"
+      }
+    },
+    {
+      "id": "shapes-io-input",
+      "text": "add an input here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "io",
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "shapes-io-output-right",
+      "text": "place an output right of this",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "io",
+        "placementDirection": "right"
+      }
+    },
+    {
+      "id": "shapes-document-here",
+      "text": "add a document here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "document",
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "shapes-document-named",
+      "text": "insert a document named Specs here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "document",
+        "label": "Specs",
+        "placementDirection": "here"
+      }
+    },
+    {
+      "id": "shapes-terminator-uh",
+      "text": "uh, add a terminator here",
+      "expected": {
+        "kind": "create_node",
+        "nodeType": "terminator",
+        "placementDirection": "here"
+      }
     }
   ]
 }

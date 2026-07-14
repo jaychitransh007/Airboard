@@ -331,6 +331,12 @@ function drawNodeShape(context: CanvasRenderingContext2D, stroke: Stroke): void 
     drawDatabaseShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
   } else if (annotation.nodeType === "decision") {
     drawDiamondShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
+  } else if (annotation.nodeType === "terminator") {
+    drawStadiumShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
+  } else if (annotation.nodeType === "io") {
+    drawParallelogramShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
+  } else if (annotation.nodeType === "document") {
+    drawDocumentShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
   } else {
     roundRectPath(context, bounds.x, bounds.y, bounds.width, bounds.height, 8);
     context.fill();
@@ -363,6 +369,72 @@ function drawDatabaseShape(
   context.stroke();
   context.beginPath();
   context.ellipse(x + width / 2, y + capHeight, width / 2, capHeight, 0, 0, Math.PI * 2);
+  context.stroke();
+}
+
+/** Flowchart terminator (start/end): a stadium / pill. */
+function drawStadiumShape(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): void {
+  const radius = Math.min(height / 2, width / 2);
+  context.beginPath();
+  context.moveTo(x + radius, y);
+  context.lineTo(x + width - radius, y);
+  context.arc(x + width - radius, y + height / 2, radius, -Math.PI / 2, Math.PI / 2);
+  context.lineTo(x + radius, y + height);
+  context.arc(x + radius, y + height / 2, radius, Math.PI / 2, (3 * Math.PI) / 2);
+  context.closePath();
+  context.fill();
+  context.stroke();
+}
+
+/** Flowchart input/output: a parallelogram. */
+function drawParallelogramShape(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): void {
+  const skew = Math.min(width * 0.18, 26);
+  context.beginPath();
+  context.moveTo(x + skew, y);
+  context.lineTo(x + width, y);
+  context.lineTo(x + width - skew, y + height);
+  context.lineTo(x, y + height);
+  context.closePath();
+  context.fill();
+  context.stroke();
+}
+
+/** Flowchart document: a rectangle with a wave along the bottom edge. */
+function drawDocumentShape(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): void {
+  const wave = Math.min(14, height * 0.18);
+  const bottom = y + height - wave;
+  context.beginPath();
+  context.moveTo(x, y);
+  context.lineTo(x + width, y);
+  context.lineTo(x + width, bottom);
+  context.bezierCurveTo(
+    x + width * 0.72,
+    bottom + wave * 1.6,
+    x + width * 0.28,
+    bottom - wave * 1.2,
+    x,
+    bottom + wave * 0.6,
+  );
+  context.closePath();
+  context.fill();
   context.stroke();
 }
 

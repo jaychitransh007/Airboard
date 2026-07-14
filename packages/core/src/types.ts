@@ -59,6 +59,9 @@ export type AnnotationNodeType =
   | "user"
   | "api"
   | "decision"
+  | "terminator"
+  | "io"
+  | "document"
   | "note"
   | "circle"
   | "custom";

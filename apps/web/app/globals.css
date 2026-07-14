@@ -913,3 +913,39 @@ button:disabled {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.25);
 }
+
+/* Catalog flyout as a shape-preview grid (FigJam-style). */
+.catalog-flyout {
+  grid-template-columns: repeat(3, 74px);
+}
+
+.catalog-flyout .catalog-tile {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-height: 60px;
+  padding: 8px 4px 6px;
+  text-align: center;
+  color: #33413c;
+}
+
+.catalog-flyout .catalog-tile .catalog-glyph {
+  width: 40px;
+  height: 26px;
+}
+
+.catalog-flyout .catalog-tile .catalog-tile-label {
+  font-size: 10px;
+  line-height: 1.15;
+  color: var(--muted);
+}
+
+.catalog-flyout .catalog-tile.selected,
+.catalog-flyout .catalog-tile.gesture-hover {
+  color: var(--accent);
+}
+
+.catalog-flyout .catalog-tile.selected .catalog-tile-label,
+.catalog-flyout .catalog-tile.gesture-hover .catalog-tile-label {
+  color: var(--accent);
+}

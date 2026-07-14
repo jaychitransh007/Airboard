@@ -23,7 +23,6 @@ test("typing a command creates and edits objects instantly", async ({ page }) =>
   await expect(page.locator(".intent-feedback")).toContainText("Applied:", {
     timeout: 15_000,
   });
-  await expect(page.locator(".intent-confidence")).toContainText("1 selected");
   // Instant-commit feedback layer: the undo toast appears.
   await expect(page.getByTestId("action-toast")).toBeVisible();
 

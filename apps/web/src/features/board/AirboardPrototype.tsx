@@ -56,6 +56,7 @@ import {
   type ViewportLimits,
 } from "./boardViewport";
 import { CanvasNavigationTracker } from "./canvasNavigationTracker";
+import { CatalogGlyph } from "./catalogGlyphs";
 import { HoldToEditTracker } from "./holdToEditTracker";
 import { PalmGateTracker } from "./palmGateTracker";
 import {
@@ -305,6 +306,9 @@ const SEMANTIC_NODE_DOCK_TOOLS: Record<AnnotationNodeType, ObjectDockTool> = {
   user: "user",
   api: "api",
   decision: "decision",
+  terminator: "terminator",
+  io: "io",
+  document: "document",
   note: "note",
   circle: "circle",
   custom: "box",
@@ -330,7 +334,19 @@ const OBJECT_CATALOG: readonly {
   label: string;
   tools: readonly { label: string; tool: ObjectDockTool }[];
 }[] = [
-  { id: "flow", label: "Flow", tools: catalogTools(["flow", "decision", "arrow", "connector"]) },
+  {
+    id: "flow",
+    label: "Flow",
+    tools: catalogTools([
+      "flow",
+      "decision",
+      "terminator",
+      "io",
+      "document",
+      "arrow",
+      "connector",
+    ]),
+  },
   { id: "system", label: "System", tools: catalogTools(["user", "service", "api", "database", "queue"]) },
   { id: "annotate", label: "Annotate", tools: catalogTools(["note", "circle", "box", "highlight"]) },
 ];
@@ -1242,12 +1258,14 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
         confidence: annotationResult.confidence,
       });
 
+      // Never auto-open the label editor: the augmented path is to hold the
+      // element and say "rename to …" (double-click/F2 still open typing).
+      setLabelDraft("");
+      setEditingAnnotationId(null);
       if (annotationResult.needsLabel) {
-        setLabelDraft(annotationResult.annotation.label ?? "");
-        setEditingAnnotationId(stroke.id);
-      } else {
-        setLabelDraft("");
-        setEditingAnnotationId(null);
+        setCommandFeedback(
+          "Placed. Hold it and say “rename to …”, or double-click to type a label.",
+        );
       }
       setSelectedAnnotationId(stroke.id);
       setSelectedAnnotationIds([stroke.id]);
@@ -1431,6 +1449,10 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
           annotation: translated,
           boardState: boardRef.current,
           excludeStrokeId: interaction.strokeId,
+          // Hand tracking jitters far more than a pointer: give air-gesture
+          // drags a wider capture radius, kept screen-consistent under zoom.
+          thresholdPx:
+            (inputSource === "air_gesture" ? 22 : 9) / boardViewportRef.current.scale,
         });
         setAlignmentGuides(snapped.guides);
         updateAnnotationObject(
@@ -4757,6 +4779,22 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
                 ? "Turn off camera"
                 : "Enable hands"}
           </button>
+          <button
+            className={speechArmed ? "voice-button listening" : "voice-button"}
+            type="button"
+            onClick={startVoiceCommand}
+            disabled={!speechSupported}
+            title={
+              speechSupported
+                ? speechArmed
+                  ? "Stop realtime Airo listening"
+                  : `Start Airo with ${voiceEngineLabel}${activeVoiceModel ? ` / ${activeVoiceModel}` : ""}`
+                : "Realtime voice is not configured; type instead"
+            }
+            aria-label={speechArmed ? "Stop Airo listening" : "Start Airo listening"}
+          >
+            {speechArmed ? "Stop Airo" : "Start Airo"}
+          </button>
           <button type="button" onClick={undoLastAction}>
             Undo
           </button>
@@ -4827,12 +4865,14 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
                             key={item.tool}
                             data-dock-id={`tool:${item.tool}`}
                             role="menuitem"
-                            className={dockButtonClass(
-                              activeObjectTool === item.tool,
-                              dockGestureHover === `tool:${item.tool}`,
-                            )}
+                            className={`catalog-tile ${
+                              dockButtonClass(
+                                activeObjectTool === item.tool,
+                                dockGestureHover === `tool:${item.tool}`,
+                              ) ?? ""
+                            }`}
                             type="button"
-                            title={`${item.label} — click to arm placement, or drag onto the board`}
+                            title={`${item.label} — click or pinch to arm placement, or drag onto the board`}
                             draggable
                             onDragStart={(event) => {
                               event.dataTransfer.setData(CATALOG_DRAG_MIME, item.tool);
@@ -4843,7 +4883,8 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
                               setOpenCatalogId(null);
                             }}
                           >
-                            {item.label}
+                            <CatalogGlyph tool={item.tool} />
+                            <span className="catalog-tile-label">{item.label}</span>
                           </button>
                         ))}
                       </div>
@@ -4944,99 +4985,6 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
               >
                 ×
               </button>
-            </div>
-          ) : null}
-          {inputMode === "gesture" ? (
-            <div className="intent-command-panel" data-testid="intent-command-panel">
-              <div className="intent-command-heading">
-                <div>
-                  <strong>Intent Canvas</strong>
-                  <span>Raise a flat palm to talk. Hold an element to edit it by voice.</span>
-                </div>
-                <span className="intent-confidence idle">
-                  {`${selectedAnnotationIds.length} selected`}
-                </span>
-              </div>
-              <form
-                className="intent-command-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (speechRecognitionStatus !== "interpreting") {
-                    runIntentCommand(intentCommandText);
-                  }
-                }}
-              >
-                <button
-                  className={speechArmed ? "voice-button listening" : "voice-button"}
-                  type="button"
-                  onClick={startVoiceCommand}
-                  disabled={!speechSupported}
-                  title={
-                    speechSupported
-                      ? speechArmed
-                        ? "Stop realtime Airo listening"
-                        : `Start Airo with ${voiceEngineLabel}${activeVoiceModel ? ` / ${activeVoiceModel}` : ""}`
-                      : "Realtime voice is not configured; type instead"
-                  }
-                  aria-label={speechArmed ? "Stop Airo listening" : "Start Airo listening"}
-                >
-                  {speechArmed ? "Stop Airo" : "Start Airo"}
-                </button>
-                <input
-                  data-testid="intent-command-input"
-                  type="text"
-                  value={intentCommandText}
-                  onChange={(event) => {
-                    semanticIntentRequestIdRef.current += 1;
-                    if (speechRecognitionStatus === "interpreting") {
-                      setSpeechRecognitionStatus(speechSessionRef.current ? "waiting" : "idle");
-                    }
-                    setIntentCommandText(event.target.value);
-                  }}
-                  placeholder="Add a payment service here"
-                  aria-label="Intent Canvas command"
-                />
-                <button
-                  className="primary"
-                  data-testid="intent-primary-action"
-                  type="submit"
-                  disabled={!intentCommandText.trim() || speechRecognitionStatus === "interpreting"}
-                >
-                  {speechRecognitionStatus === "interpreting" ? "Understanding…" : "Run"}
-                </button>
-              </form>
-              <p className="intent-feedback" aria-live="polite">
-                {commandFeedback}
-              </p>
-              {speechArmed || speechHeardText || speechRecognitionStatus === "error" ? (
-                <p
-                  className={`voice-heard ${speechRecognitionStatus}`}
-                  data-testid="voice-heard"
-                  aria-live="polite"
-                >
-                  <strong>Mic heard:</strong>{" "}
-                  {speechHeardText ? `“${truncateSpeechTranscript(speechHeardText)}”` : "waiting for speech…"}
-                  <span>{speechRecognitionLabel(speechRecognitionStatus)}</span>
-                </p>
-              ) : null}
-              <div className="intent-examples" aria-label="Command examples">
-                {["Add a circle here", "Add a user here", "Connect User to API"].map(
-                  (example) => (
-                    <button
-                      key={example}
-                      type="button"
-                      disabled={speechRecognitionStatus === "interpreting"}
-                      onClick={() => {
-                        semanticIntentRequestIdRef.current += 1;
-                        setIntentCommandText(example);
-                        runIntentCommand(example);
-                      }}
-                    >
-                      {example}
-                    </button>
-                  ),
-                )}
-              </div>
             </div>
           ) : null}
           <canvas
@@ -5166,6 +5114,59 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
         </section>
 
         <aside className="sidebar">
+          {inputMode === "gesture" ? (
+            <section className="section">
+              <h2>Command</h2>
+              <form
+                className="intent-command-form sidebar-command-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (speechRecognitionStatus !== "interpreting") {
+                    runIntentCommand(intentCommandText);
+                  }
+                }}
+              >
+                <input
+                  data-testid="intent-command-input"
+                  type="text"
+                  value={intentCommandText}
+                  onChange={(event) => {
+                    semanticIntentRequestIdRef.current += 1;
+                    if (speechRecognitionStatus === "interpreting") {
+                      setSpeechRecognitionStatus(speechSessionRef.current ? "waiting" : "idle");
+                    }
+                    setIntentCommandText(event.target.value);
+                  }}
+                  placeholder="Add a payment service here"
+                  aria-label="Typed board command"
+                />
+                <button
+                  className="primary"
+                  data-testid="intent-primary-action"
+                  type="submit"
+                  disabled={!intentCommandText.trim() || speechRecognitionStatus === "interpreting"}
+                >
+                  {speechRecognitionStatus === "interpreting" ? "…" : "Run"}
+                </button>
+              </form>
+              <p className="intent-feedback" aria-live="polite">
+                {commandFeedback}
+              </p>
+              {speechArmed || speechHeardText || speechRecognitionStatus === "error" ? (
+                <p
+                  className={`voice-heard ${speechRecognitionStatus}`}
+                  data-testid="voice-heard"
+                  aria-live="polite"
+                >
+                  <strong>Mic heard:</strong>{" "}
+                  {speechHeardText
+                    ? `“${truncateSpeechTranscript(speechHeardText)}”`
+                    : "waiting for speech…"}
+                  <span>{speechRecognitionLabel(speechRecognitionStatus)}</span>
+                </p>
+              ) : null}
+            </section>
+          ) : null}
           <section className="section">
             <h2>Status</h2>
             <div className="status-grid">
