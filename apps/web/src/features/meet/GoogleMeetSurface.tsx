@@ -3,7 +3,6 @@
 import {
   createGoogleMeetRuntime,
   describeGoogleMeetError,
-  parseGoogleMeetActivityData,
   serializeGoogleMeetActivityData,
   type GoogleMeetActivityData,
   type GoogleMeetRuntime,
@@ -11,6 +10,7 @@ import {
 } from "@airboard/integrations";
 import { useCallback, useEffect, useState } from "react";
 import { AirboardPrototype } from "../board/AirboardPrototype";
+import { resolveMeetActivityState } from "./meetActivityState";
 
 type RuntimeState =
   | { status: "loading" }
@@ -52,17 +52,15 @@ export function GoogleMeetSurface({ surface }: { surface: GoogleMeetSurfaceKind 
     })
       .then(async (runtime) => {
         const startingState = await runtime.readActivityStartingState();
-        let activity: GoogleMeetActivityData | null = null;
-        if (startingState?.additionalData) {
-          activity = parseGoogleMeetActivityData(startingState.additionalData);
-        }
-        if (surface === "main-stage" && !activity) {
-          throw new Error("The Meet activity did not provide an Airboard session.");
-        }
+        const { activity, staleActivityNotice } = resolveMeetActivityState({
+          surface,
+          additionalData: startingState?.additionalData,
+        });
         if (!cancelled) {
           setRuntimeState({ status: "ready", runtime, activity, correlationId });
           setBoardSessionId(activity?.boardSessionId ?? null);
           setActivityStarted(Boolean(activity));
+          setActivityError(staleActivityNotice);
         }
       })
       .catch((error) => {
