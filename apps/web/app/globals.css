@@ -294,6 +294,22 @@ button:disabled {
   background: #f1f8f6;
 }
 
+.companion-link {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: #0f6b5f;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.companion-link:hover {
+  background: #0c574d;
+}
+
 .meet-activity-footer {
   display: grid;
   gap: 12px;

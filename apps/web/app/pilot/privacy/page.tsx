@@ -18,8 +18,8 @@ export default function PilotPrivacyPage() {
             the activity with an Airboard session.
           </li>
           <li>
-            Board content and actions created by testers, including typed commands, objects,
-            connectors, pointer actions, and session events.
+            Board content and actions created by testers, including typed commands, gesture- and
+            voice-derived edits, objects, connectors, pointer actions, and session events.
           </li>
           <li>
             Operational metadata such as timestamps, route and status information, correlation
@@ -35,11 +35,16 @@ export default function PilotPrivacyPage() {
           database. Do not enter confidential, regulated, customer, or production information.
         </p>
         <p>
-          The deployed pilot does not have transcription or semantic-AI provider credentials
-          configured. Inside Google Meet, Airboard does not request separate camera or microphone
-          access, does not capture Meet&apos;s media streams, and does not show its own video preview.
-          Google Meet remains responsible for meeting camera and microphone controls. Airboard&apos;s
-          Meet experience uses typed, pointer, keyboard, and direct canvas input.
+          Airboard never captures camera or microphone in the background and cannot read Google
+          Meet&apos;s own media streams. Gesture (camera) and voice (microphone) input start only from
+          an explicit tester action with a visible on-screen indicator: inside Meet when the Meet
+          client delegates browser media permission to the add-on, otherwise in a separate
+          companion browser window connected to the same board. Camera frames are processed in
+          the browser for hand tracking and are not uploaded or stored by Airboard. When a
+          transcription provider is configured for the pilot, voice audio is streamed to that
+          provider to produce a transcript and is not stored by Airboard; the currently deployed
+          pilot has no transcription or semantic-AI provider credentials configured. Google
+          Meet&apos;s own meeting media controls are never affected.
         </p>
       </section>
 

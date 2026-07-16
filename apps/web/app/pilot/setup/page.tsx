@@ -27,9 +27,11 @@ export default function PilotSetupPage() {
       <section>
         <h2>Safe pilot path</h2>
         <p>
-          Use typed commands, pointer, keyboard, and direct canvas controls in Airboard. Google Meet
-          owns the meeting camera and microphone controls; the Airboard add-on does not request a
-          second media permission or show a separate video preview. Do not use confidential or
+          Typed commands, pointer, keyboard, and direct canvas controls work in every Meet
+          surface. Gesture and voice input start only when you enable them: on the shared board
+          when your Meet client delegates camera and microphone permission to the add-on, or
+          through the companion window link in the Airboard side panel otherwise. Google
+          Meet&apos;s own meeting media controls are never affected. Do not use confidential or
           production meeting content.
         </p>
       </section>

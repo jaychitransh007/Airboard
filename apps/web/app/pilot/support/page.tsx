@@ -27,8 +27,9 @@ export default function PilotSupportPage() {
           <li>Only approved Marketplace draft testers can install this build.</li>
           <li>Typed commands and pointer input are the baseline test path.</li>
           <li>
-            Airboard does not request separate camera or microphone access inside Meet; role,
-            reconnect, and multi-participant behavior are still being validated.
+            Gesture and voice inside Meet depend on the Meet client delegating media permission
+            to add-ons; the companion window is the fallback and capture is always started by
+            you. Role, reconnect, and multi-participant behavior are still being validated.
           </li>
           <li>Board state is disposable and can be lost when the pilot service restarts.</li>
         </ul>

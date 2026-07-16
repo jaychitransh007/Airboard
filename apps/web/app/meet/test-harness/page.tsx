@@ -11,17 +11,20 @@ import { AirboardPrototype } from "../../../src/features/board/AirboardPrototype
 export default async function MeetTestHarnessPage({
   searchParams,
 }: {
-  searchParams: Promise<{ surface?: string }>;
+  searchParams: Promise<{ surface?: string; media?: string }>;
 }) {
   if (process.env.NEXT_PUBLIC_AIRBOARD_TEST_HOOKS !== "1") {
     notFound();
   }
-  const { surface } = await searchParams;
+  // media=embedded emulates a host client that delegates camera/microphone
+  // permission to the add-on frame; the default emulates no delegation.
+  const { surface, media } = await searchParams;
   return (
     <AirboardPrototype
       surface={surface === "side-panel" ? "meet-side-panel" : "meet-main-stage"}
       meetingProvider="google_meet"
       providerMeetingId="test-harness-meeting"
+      embeddedMediaCapture={media === "embedded"}
     />
   );
 }

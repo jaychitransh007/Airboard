@@ -411,6 +411,7 @@ export function AirboardPrototype({
   providerMeetingId,
   initialBoardSessionId,
   onBoardSessionReady,
+  embeddedMediaCapture = false,
 }: {
   surface: Surface;
   meetingProvider?: MeetingProvider;
@@ -421,8 +422,14 @@ export function AirboardPrototype({
     participantId: string;
     role: string;
   }) => void;
+  /**
+   * Meeting surfaces only: true when the host client delegates camera and
+   * microphone permission to this frame, so explicit gesture/voice capture
+   * can run embedded. False routes gesture/voice to the companion window.
+   */
+  embeddedMediaCapture?: boolean;
 }) {
-  const usesHostMeetingMedia = surface !== "standalone";
+  const usesHostMeetingMedia = surface !== "standalone" && !embeddedMediaCapture;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const labelInputRef = useRef<HTMLInputElement | null>(null);
@@ -544,6 +551,9 @@ export function AirboardPrototype({
   const [pendingIntent, setPendingIntent] = useState<PendingIntent | null>(null);
   const [voiceGate, setVoiceGate] = useState<VoiceGateUi | null>(null);
   const [boardSyncStatus, setBoardSyncStatus] = useState("off");
+  // Rendered by the companion-window link on meeting surfaces; the ref alone
+  // would not re-render when the session becomes available.
+  const [activeBoardSessionId, setActiveBoardSessionId] = useState<string | null>(null);
   const [landmarkRecordingActive, setLandmarkRecordingActive] = useState(false);
   const [onboardingVisible, setOnboardingVisible] = useState(false);
   const [viewportScale, setViewportScale] = useState(1);
@@ -854,6 +864,7 @@ export function AirboardPrototype({
         }
         boardSyncRef.current = result.handle;
         boardSessionIdRef.current = result.handle.boardSessionId;
+        setActiveBoardSessionId(result.handle.boardSessionId);
         if (result.outcome === "joined") {
           boardRef.current = result.initialState;
           undoStackRef.current = [];
@@ -3314,7 +3325,7 @@ export function AirboardPrototype({
     if (usesHostMeetingMedia) {
       setSpeechRecognitionStatus("idle");
       setCommandFeedback(
-        "Google Meet owns camera and microphone access. Use typed commands or direct canvas controls in Airboard.",
+        "This meeting surface cannot capture the microphone. Type commands here, or open the gesture & voice companion window from the sidebar.",
       );
       return;
     }
@@ -4972,11 +4983,26 @@ export function AirboardPrototype({
         </section>
 
         <section className="meet-panel-card meet-media-policy">
-          <h2>Meet controls camera and microphone</h2>
-          <p>
-            Use Google Meet&apos;s own media buttons. Airboard does not request separate camera or
-            microphone access and does not show a second video preview in Meet.
-          </p>
+          {embeddedMediaCapture ? (
+            <>
+              <h2>Gesture and voice on the shared board</h2>
+              <p>
+                This Meet client shares camera and microphone permission with Airboard. Start
+                gesture or voice from the main-stage board; capture begins only when you turn it
+                on and always shows an on-screen indicator.
+              </p>
+            </>
+          ) : (
+            <>
+              <h2>Gesture and voice run in a companion window</h2>
+              <p>
+                This Meet client does not delegate camera or microphone to add-ons, so Airboard
+                cannot capture media inside Meet. The companion window connects to this same
+                board — gestures and voice commands there appear for everyone in Meet.
+              </p>
+              <CompanionMediaLink boardSessionId={activeBoardSessionId} />
+            </>
+          )}
         </section>
 
         <section className="meet-panel-card">
@@ -5625,9 +5651,10 @@ export function AirboardPrototype({
                     <>
                       <p className="hint">
                         Type a command or use pointer, keyboard, and direct canvas controls.
-                        Google Meet owns camera and microphone access; Airboard does not request
-                        separate media permissions in this surface.
+                        This meeting surface cannot capture camera or microphone, so gesture and
+                        voice run in a companion window connected to this same board.
                       </p>
+                      <CompanionMediaLink boardSessionId={activeBoardSessionId} />
                       <label className="check-row" htmlFor="auto-snap-connectors">
                         <input
                           id="auto-snap-connectors"
@@ -5809,8 +5836,8 @@ export function AirboardPrototype({
             {usesHostMeetingMedia ? (
               <p className="hint">
                 Type commands in the Command field, drag shapes from the catalogs, Shift-click
-                to multi-select, and press Cmd/Ctrl+Z to undo. Use Google Meet&apos;s controls for
-                camera and microphone.
+                to multi-select, and press Cmd/Ctrl+Z to undo. Gesture and voice are available
+                through the companion window.
               </p>
             ) : inputMode === "touchpad" ? (
               <p className="hint">
@@ -6358,4 +6385,26 @@ function surfaceLabel(surface: Surface): string {
   }
 
   return "Standalone prototype";
+}
+
+/**
+ * Opens the standalone surface bound to the same live board session. On
+ * meeting surfaces that cannot capture media, this window is where gesture
+ * and voice run; edits sync back to the shared stage for everyone.
+ */
+function CompanionMediaLink({ boardSessionId }: { boardSessionId: string | null }) {
+  if (!boardSessionId) {
+    return <p className="hint">The companion link appears once the board connects.</p>;
+  }
+  return (
+    <a
+      className="companion-link"
+      href={`/?boardSessionId=${encodeURIComponent(boardSessionId)}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      data-testid="companion-media-link"
+    >
+      Open gesture &amp; voice companion
+    </a>
+  );
 }

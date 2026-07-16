@@ -3,6 +3,7 @@
 import {
   createGoogleMeetRuntime,
   describeGoogleMeetError,
+  probeMediaCaptureCapability,
   serializeGoogleMeetActivityData,
   type GoogleMeetActivityData,
   type GoogleMeetRuntime,
@@ -30,6 +31,14 @@ export function GoogleMeetSurface({ surface }: { surface: GoogleMeetSurfaceKind 
   const [boardSessionId, setBoardSessionId] = useState<string | null>(null);
   const [activityStarted, setActivityStarted] = useState(false);
   const [activityError, setActivityError] = useState<string | null>(null);
+  // Whether Meet delegates camera/microphone permission to this frame decides
+  // if gesture/voice run embedded or in the companion window. Probed after
+  // mount so server rendering and hydration agree.
+  const [embeddedMediaCapture, setEmbeddedMediaCapture] = useState(false);
+
+  useEffect(() => {
+    setEmbeddedMediaCapture(probeMediaCaptureCapability() === "embedded");
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -122,6 +131,7 @@ export function GoogleMeetSurface({ surface }: { surface: GoogleMeetSurfaceKind 
         providerMeetingId={runtimeState.runtime.meetingInfo.meetingId}
         initialBoardSessionId={runtimeState.activity?.boardSessionId ?? null}
         onBoardSessionReady={handleBoardSessionReady}
+        embeddedMediaCapture={embeddedMediaCapture}
       />
       {surface === "side-panel" ? (
         <footer className="meet-activity-footer" aria-live="polite">
