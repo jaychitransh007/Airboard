@@ -26,7 +26,10 @@ test("the bridge restores embedded gesture on the Meet main stage", async ({ pag
 
   const enableHands = page.getByRole("button", { name: /Enable hand tracking/ });
   await expect(enableHands).toBeVisible();
-  await expect(page.getByRole("button", { name: /Airo listening/ })).toHaveCount(0);
+  // Voice rides the bridge too, so its entry point returns; without a
+  // transcription provider configured in this environment it stays disabled
+  // with the not-configured tooltip rather than vanishing.
+  await expect(page.getByRole("button", { name: /Airo listening/ })).toBeVisible();
   await expect(page.getByTestId("companion-media-link")).toHaveCount(0);
 
   // Explicit start: bridge frames feed the tracker until the camera is On.
@@ -54,7 +57,7 @@ test("the bridge restores embedded gesture on the Meet main stage", async ({ pag
 test("the side panel explains the bridge instead of the companion window", async ({ page }) => {
   await page.goto("/meet/test-harness?surface=side-panel&bridge=emulate");
 
-  await expect(page.getByText("Gesture is on the shared board")).toBeVisible({
+  await expect(page.getByText("Gesture and voice are on the shared board")).toBeVisible({
     timeout: 10_000,
   });
   await expect(page.getByTestId("companion-media-link")).toHaveCount(0);

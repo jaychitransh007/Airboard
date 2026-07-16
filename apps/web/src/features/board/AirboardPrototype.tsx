@@ -58,6 +58,7 @@ import {
 } from "./boardViewport";
 import { CanvasNavigationTracker } from "./canvasNavigationTracker";
 import {
+  createBridgedMicStream,
   probeMeetMediaBridgeInWindow,
   type MeetMediaBridge,
   type MeetMediaBridgeVideoSession,
@@ -436,11 +437,11 @@ export function AirboardPrototype({
 }) {
   const isMeetSurface = surface !== "standalone";
   // The Meet media bridge extension (a meet.google.com content script) can
-  // stream the meeting origin's camera into this frame when installed. Video
-  // only for now, so camera and voice availability diverge on Meet surfaces.
+  // stream the meeting origin's camera and microphone into this frame when
+  // installed; capture always starts from an explicit user action here.
   const [meetMediaBridge, setMeetMediaBridge] = useState<MeetMediaBridge | null>(null);
   const cameraCaptureAvailable = !isMeetSurface || embeddedMediaCapture || meetMediaBridge !== null;
-  const voiceCaptureAvailable = !isMeetSurface || embeddedMediaCapture;
+  const voiceCaptureAvailable = !isMeetSurface || embeddedMediaCapture || meetMediaBridge !== null;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const meetBridgeSessionRef = useRef<MeetMediaBridgeVideoSession | null>(null);
@@ -3528,6 +3529,11 @@ export function AirboardPrototype({
           // screen; the transport bounds the merged list to the provider cap.
           keyterms: buildSessionKeyterms(boardRef.current),
         },
+        // On Meet surfaces the iframe cannot capture the microphone itself;
+        // the bridge extension streams it from the meeting page instead.
+        isMeetSurface && !embeddedMediaCapture && meetMediaBridge
+          ? { getUserMedia: () => createBridgedMicStream(meetMediaBridge) }
+          : {},
       );
       if (!realtimeSession) {
         setSpeechRecognitionStatus("error");
@@ -3645,6 +3651,9 @@ export function AirboardPrototype({
     routeFinalTranscript,
     speechEngine,
     speechSupported,
+    embeddedMediaCapture,
+    isMeetSurface,
+    meetMediaBridge,
     syncVoiceGateUi,
     voiceCaptureAvailable,
     voiceRouter,
@@ -5067,11 +5076,11 @@ export function AirboardPrototype({
             </>
           ) : meetMediaBridge ? (
             <>
-              <h2>Gesture is on the shared board</h2>
+              <h2>Gesture and voice are on the shared board</h2>
               <p>
-                The Airboard extension connects this meeting&apos;s camera to the main-stage board.
-                Click Enable hands there to gesture; capture starts only when you turn it on.
-                Voice arrives next — use typed commands meanwhile.
+                The Airboard extension connects this meeting&apos;s camera and microphone to the
+                main-stage board. Click Enable hands or Start Airo there; capture starts only
+                when you turn it on and stops the moment you turn it off.
               </p>
             </>
           ) : (
@@ -5426,7 +5435,10 @@ export function AirboardPrototype({
             </svg>
           ) : null}
           {cameraCaptureAvailable ? (
-            cameraStatus !== "idle" ? (
+            // Inside a meeting the client already shows the user's self-view;
+            // a second preview is noise. The element stays mounted (opacity 0)
+            // because the tracker reads its frames.
+            cameraStatus !== "idle" && !isMeetSurface ? (
               <video ref={videoRef} className="camera-preview" muted playsInline />
             ) : (
               <video ref={videoRef} className="camera-preview hidden" muted playsInline />

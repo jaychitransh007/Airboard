@@ -12,7 +12,11 @@
  *
  * Protocol (all messages carry `bridge: "airboard-media-bridge", v: 1`):
  *   frame -> host: hello | start-video {maxWidth} | frame-ack {id} | stop-video
- *   host -> frame: ready | frame {id, bitmap} | ended {reason} | error {message}
+ *                | start-audio | stop-audio
+ *   host -> frame: ready | frame {id, bitmap} | audio-chunk {seq, sampleRate, samples}
+ *                | ended {reason, channel} | error {message, channel}
+ * `channel` ("video" | "audio") scopes end/error events so one capture
+ * stopping never tears down the other.
  */
 
 export const MEET_MEDIA_BRIDGE_MARKER = "airboard-media-bridge";
@@ -49,11 +53,19 @@ export type MeetMediaBridgeVideoSession = {
   stop(): void;
 };
 
+export type MeetMediaBridgeAudioSession = {
+  stop(): void;
+};
+
 export type MeetMediaBridge = {
   startVideo(handlers: {
     onFrame: (bitmap: ImageBitmap) => void;
     onEnded: (reason: string) => void;
   }): Promise<MeetMediaBridgeVideoSession>;
+  startAudio(handlers: {
+    onChunk: (samples: Float32Array<ArrayBuffer>, sampleRate: number) => void;
+    onEnded: (reason: string) => void;
+  }): Promise<MeetMediaBridgeAudioSession>;
 };
 
 function makeMessage(type: string, fields?: Record<string, unknown>): BridgeMessage {
@@ -125,72 +137,184 @@ export function probeMeetMediaBridge(env: MeetMediaBridgeEnv): Promise<MeetMedia
 }
 
 function createBridge(env: MeetMediaBridgeEnv): MeetMediaBridge {
+  const startChannel = <TSession>(input: {
+    channel: "video" | "audio";
+    startMessage: BridgeMessage;
+    stopMessage: BridgeMessage;
+    timeoutError: string;
+    /** Handles a data message; returns true when the session is "started". */
+    onData: (message: BridgeMessage) => boolean;
+    onEnded: (reason: string) => void;
+    makeSession: (stop: () => void) => TSession;
+  }): Promise<TSession> => {
+    const firstDataTimeoutMs = env.firstFrameTimeoutMs ?? 8000;
+    return new Promise((resolve, reject) => {
+      let started = false;
+      let stopped = false;
+
+      const stop = (notifyHost: boolean) => {
+        if (stopped) {
+          return;
+        }
+        stopped = true;
+        unsubscribe();
+        if (notifyHost) {
+          env.postToHost(input.stopMessage);
+        }
+      };
+
+      const timeout = setTimeout(() => {
+        if (!started) {
+          stop(true);
+          reject(new Error(input.timeoutError));
+        }
+      }, firstDataTimeoutMs);
+
+      const unsubscribe = env.listen((event) => {
+        const message = parseHostMessage(event, env);
+        if (!message || stopped) {
+          return;
+        }
+        if (message.type === "ended" || message.type === "error") {
+          // Unscoped end/error events apply to every channel; scoped ones
+          // only to their own.
+          const channel = typeof message.channel === "string" ? message.channel : null;
+          if (channel !== null && channel !== input.channel) {
+            return;
+          }
+          const reason =
+            typeof message.reason === "string"
+              ? message.reason
+              : typeof message.message === "string"
+                ? message.message
+                : message.type;
+          const wasStarted = started;
+          clearTimeout(timeout);
+          stop(false);
+          if (wasStarted) {
+            input.onEnded(reason);
+          } else {
+            reject(new Error(`The Meet media bridge stopped: ${reason}`));
+          }
+          return;
+        }
+        if (input.onData(message) && !started) {
+          started = true;
+          clearTimeout(timeout);
+          resolve(input.makeSession(() => stop(true)));
+        }
+      });
+
+      env.postToHost(input.startMessage);
+    });
+  };
+
   return {
     startVideo(handlers) {
-      const firstFrameTimeoutMs = env.firstFrameTimeoutMs ?? 8000;
-      return new Promise((resolve, reject) => {
-        let started = false;
-        let stopped = false;
-
-        const stop = (notifyHost: boolean) => {
-          if (stopped) {
-            return;
+      return startChannel<MeetMediaBridgeVideoSession>({
+        channel: "video",
+        startMessage: makeMessage("start-video", { maxWidth: 640 }),
+        stopMessage: makeMessage("stop-video"),
+        timeoutError: "The Meet media bridge did not deliver video frames.",
+        onEnded: handlers.onEnded,
+        makeSession: (stop) => ({ stop }),
+        onData: (message) => {
+          if (message.type !== "frame") {
+            return false;
           }
-          stopped = true;
-          unsubscribe();
-          if (notifyHost) {
-            env.postToHost(makeMessage("stop-video"));
+          const bitmap = message.bitmap as ImageBitmap | undefined;
+          if (!bitmap) {
+            return false;
           }
-        };
-
-        const timeout = setTimeout(() => {
-          if (!started) {
-            stop(true);
-            reject(new Error("The Meet media bridge did not deliver video frames."));
+          env.postToHost(makeMessage("frame-ack", { id: message.id }));
+          handlers.onFrame(bitmap);
+          return true;
+        },
+      });
+    },
+    startAudio(handlers) {
+      return startChannel<MeetMediaBridgeAudioSession>({
+        channel: "audio",
+        startMessage: makeMessage("start-audio"),
+        stopMessage: makeMessage("stop-audio"),
+        timeoutError: "The Meet media bridge did not deliver microphone audio.",
+        onEnded: handlers.onEnded,
+        makeSession: (stop) => ({ stop }),
+        onData: (message) => {
+          if (message.type !== "audio-chunk") {
+            return false;
           }
-        }, firstFrameTimeoutMs);
-
-        const unsubscribe = env.listen((event) => {
-          const message = parseHostMessage(event, env);
-          if (!message || stopped) {
-            return;
+          const samples = message.samples as ArrayBuffer | undefined;
+          const sampleRate = typeof message.sampleRate === "number" ? message.sampleRate : 0;
+          if (!samples || sampleRate <= 0) {
+            return false;
           }
-          if (message.type === "frame") {
-            const bitmap = message.bitmap as ImageBitmap | undefined;
-            if (!bitmap) {
-              return;
-            }
-            env.postToHost(makeMessage("frame-ack", { id: message.id }));
-            if (!started) {
-              started = true;
-              clearTimeout(timeout);
-              resolve({ stop: () => stop(true) });
-            }
-            handlers.onFrame(bitmap);
-            return;
-          }
-          if (message.type === "ended" || message.type === "error") {
-            const reason =
-              typeof message.reason === "string"
-                ? message.reason
-                : typeof message.message === "string"
-                  ? message.message
-                  : message.type;
-            const wasStarted = started;
-            clearTimeout(timeout);
-            stop(false);
-            if (wasStarted) {
-              handlers.onEnded(reason);
-            } else {
-              reject(new Error(`The Meet media bridge stopped: ${reason}`));
-            }
-          }
-        });
-
-        env.postToHost(makeMessage("start-video", { maxWidth: 640 }));
+          handlers.onChunk(new Float32Array(samples), sampleRate);
+          return true;
+        },
       });
     },
   };
+}
+
+/**
+ * Rebuilds a live microphone MediaStream from bridged audio chunks so the
+ * realtime speech session can consume it exactly like a local microphone.
+ * Calling stop() on the returned stream's track (which the speech session
+ * does on teardown) also stops the bridge capture on the Meet page.
+ */
+export async function createBridgedMicStream(bridge: MeetMediaBridge): Promise<MediaStream> {
+  type AudioContextCtor = new () => AudioContext;
+  const Ctor: AudioContextCtor | undefined =
+    (window as { AudioContext?: AudioContextCtor; webkitAudioContext?: AudioContextCtor })
+      .AudioContext ??
+    (window as { webkitAudioContext?: AudioContextCtor }).webkitAudioContext;
+  if (!Ctor) {
+    throw new Error("Web Audio is unavailable in this browser.");
+  }
+  const context = new Ctor();
+  const destination = context.createMediaStreamDestination();
+  let nextTime = 0;
+  let torndown = false;
+
+  const session = await bridge.startAudio({
+    onChunk: (samples, sampleRate) => {
+      if (torndown) {
+        return;
+      }
+      // Schedule chunks back-to-back; the context resamples as needed.
+      const buffer = context.createBuffer(1, samples.length, sampleRate);
+      buffer.copyToChannel(samples, 0);
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.connect(destination);
+      const lead = context.currentTime + 0.02;
+      if (nextTime < lead) {
+        nextTime = lead;
+      }
+      source.start(nextTime);
+      nextTime += buffer.duration;
+    },
+    onEnded: () => {
+      teardown();
+    },
+  });
+
+  const [track] = destination.stream.getAudioTracks();
+  const originalStop = track ? track.stop.bind(track) : null;
+  const teardown = () => {
+    if (torndown) {
+      return;
+    }
+    torndown = true;
+    session.stop();
+    originalStop?.();
+    void context.close().catch(() => {});
+  };
+  if (track) {
+    track.stop = teardown;
+  }
+  return destination.stream;
 }
 
 /**

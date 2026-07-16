@@ -112,6 +112,64 @@ test("startVideo rejects when no frame arrives before the timeout", async () => 
   );
 });
 
+test("startAudio resolves on the first chunk and delivers samples with their rate", async () => {
+  const { env, emit, hostMessage, sentToHost } = makeEnv();
+  const pcm = new Float32Array([0.25, -0.5, 1]);
+  env.onHostReceived = (message) => {
+    if (message.type === "hello") {
+      emit(hostMessage("ready"));
+    }
+    if (message.type === "start-audio") {
+      emit(hostMessage("audio-chunk", { seq: 1, sampleRate: 48000, samples: pcm.buffer }));
+    }
+  };
+  const bridge = await probeMeetMediaBridge(env);
+  const chunks = [];
+  const session = await bridge.startAudio({
+    onChunk: (samples, sampleRate) => chunks.push({ samples: [...samples], sampleRate }),
+    onEnded: () => {
+      throw new Error("must not end in this test");
+    },
+  });
+  assert.deepEqual(chunks, [{ samples: [0.25, -0.5, 1], sampleRate: 48000 }]);
+  session.stop();
+  assert.equal(sentToHost.filter((m) => m.type === "stop-audio").length, 1);
+});
+
+test("channel-scoped end events tear down only their own session", async () => {
+  const { env, emit, hostMessage } = makeEnv();
+  env.onHostReceived = (message) => {
+    if (message.type === "hello") {
+      emit(hostMessage("ready"));
+    }
+    if (message.type === "start-video") {
+      emit(hostMessage("frame", { id: 1, bitmap: { fake: "bitmap" } }));
+    }
+    if (message.type === "start-audio") {
+      emit(hostMessage("audio-chunk", { seq: 1, sampleRate: 48000, samples: new Float32Array(4).buffer }));
+    }
+  };
+  const bridge = await probeMeetMediaBridge(env);
+  const videoEnds = [];
+  const audioChunks = [];
+  const audioEnds = [];
+  await bridge.startVideo({ onFrame: () => {}, onEnded: (r) => videoEnds.push(r) });
+  await bridge.startAudio({
+    onChunk: (samples) => audioChunks.push(samples.length),
+    onEnded: (r) => audioEnds.push(r),
+  });
+
+  emit(hostMessage("ended", { reason: "camera-ended", channel: "video" }));
+  assert.deepEqual(videoEnds, ["camera-ended"]);
+  assert.deepEqual(audioEnds, [], "video end must not stop audio");
+
+  emit(hostMessage("audio-chunk", { seq: 2, sampleRate: 48000, samples: new Float32Array(8).buffer }));
+  assert.deepEqual(audioChunks, [4, 8], "audio keeps flowing after the video ended");
+
+  emit(hostMessage("ended", { reason: "microphone-ended", channel: "audio" }));
+  assert.deepEqual(audioEnds, ["microphone-ended"]);
+});
+
 test("a host-side end after frames reports onEnded exactly once and stops delivery", async () => {
   const { env, emit, hostMessage } = makeEnv();
   env.onHostReceived = (message) => {

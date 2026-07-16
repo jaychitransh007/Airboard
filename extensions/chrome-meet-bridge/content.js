@@ -10,7 +10,9 @@
 //
 // Protocol (mirrored by apps/web/src/features/meet/meetMediaBridge.ts):
 //   frame -> host: hello | start-video {maxWidth} | frame-ack {id} | stop-video
-//   host -> frame: ready | frame {id, bitmap} | ended {reason} | error {message}
+//                | start-audio | stop-audio
+//   host -> frame: ready | frame {id, bitmap} | audio-chunk {seq, sampleRate, samples}
+//                | ended {reason, channel} | error {message, channel}
 
 "use strict";
 
@@ -29,6 +31,8 @@ const MAX_IN_FLIGHT = 2;
 
 /** @type {{sourceWin: MessageEventSource, origin: string, stream: MediaStream, video: HTMLVideoElement, inFlight: number, nextId: number, stopped: boolean} | null} */
 let active = null;
+/** @type {{sourceWin: MessageEventSource, origin: string, stream: MediaStream, context: AudioContext, nodes: AudioNode[], stopped: boolean} | null} */
+let activeAudio = null;
 
 function makeMessage(type, fields) {
   return Object.assign({ bridge: MARKER, v: VERSION, type }, fields);
@@ -52,7 +56,105 @@ function stopActive(reason, notifyFrame) {
   session.stream.getTracks().forEach((track) => track.stop());
   session.video.srcObject = null;
   if (notifyFrame) {
-    post(session.sourceWin, session.origin, makeMessage("ended", { reason }));
+    post(session.sourceWin, session.origin, makeMessage("ended", { reason, channel: "video" }));
+  }
+}
+
+function stopActiveAudio(reason, notifyFrame) {
+  const session = activeAudio;
+  if (!session || session.stopped) {
+    return;
+  }
+  session.stopped = true;
+  activeAudio = null;
+  session.nodes.forEach((node) => {
+    try {
+      node.disconnect();
+    } catch {
+      // Already torn down.
+    }
+  });
+  session.stream.getTracks().forEach((track) => track.stop());
+  session.context.close().catch(() => {});
+  if (notifyFrame) {
+    post(session.sourceWin, session.origin, makeMessage("ended", { reason, channel: "audio" }));
+  }
+}
+
+async function startAudio(sourceWin, origin) {
+  if (activeAudio) {
+    if (activeAudio.sourceWin === sourceWin) {
+      stopActiveAudio("restarted", false);
+    } else {
+      post(sourceWin, origin, makeMessage("error", { message: "busy", channel: "audio" }));
+      return;
+    }
+  }
+
+  let stream;
+  try {
+    // meet.google.com already holds the user's microphone grant; no prompt.
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  } catch (error) {
+    post(
+      sourceWin,
+      origin,
+      makeMessage("error", {
+        message: `microphone-unavailable: ${error && error.name}`,
+        channel: "audio",
+      }),
+    );
+    return;
+  }
+
+  const context = new AudioContext();
+  const source = context.createMediaStreamSource(stream);
+  // ScriptProcessor avoids loading worklet modules under Meet's CSP. The
+  // zero-gain sink keeps it firing without feeding audio to the speakers.
+  const processor = context.createScriptProcessor(4096, 1, 1);
+  const silence = context.createGain();
+  silence.gain.value = 0;
+
+  const session = {
+    sourceWin,
+    origin,
+    stream,
+    context,
+    nodes: [source, processor, silence],
+    stopped: false,
+  };
+  activeAudio = session;
+  let seq = 1;
+
+  processor.onaudioprocess = (event) => {
+    if (session.stopped) {
+      return;
+    }
+    const input = event.inputBuffer.getChannelData(0);
+    const copy = new Float32Array(input.length);
+    copy.set(input);
+    post(
+      session.sourceWin,
+      session.origin,
+      makeMessage("audio-chunk", {
+        seq: seq++,
+        sampleRate: context.sampleRate,
+        samples: copy.buffer,
+      }),
+      [copy.buffer],
+    );
+  };
+  source.connect(processor);
+  processor.connect(silence);
+  silence.connect(context.destination);
+
+  const [track] = stream.getAudioTracks();
+  if (track) {
+    track.addEventListener("ended", () => {
+      if (activeAudio === session) {
+        stopActiveAudio("microphone-ended", true);
+      }
+    });
   }
 }
 
@@ -164,7 +266,20 @@ window.addEventListener("message", (event) => {
     if (active && event.source === active.sourceWin) {
       stopActive("stopped", false);
     }
+    return;
+  }
+  if (data.type === "start-audio") {
+    void startAudio(event.source, event.origin);
+    return;
+  }
+  if (data.type === "stop-audio") {
+    if (activeAudio && event.source === activeAudio.sourceWin) {
+      stopActiveAudio("stopped", false);
+    }
   }
 });
 
-window.addEventListener("pagehide", () => stopActive("page-hidden", true));
+window.addEventListener("pagehide", () => {
+  stopActive("page-hidden", true);
+  stopActiveAudio("page-hidden", true);
+});

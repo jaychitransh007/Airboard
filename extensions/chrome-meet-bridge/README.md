@@ -11,15 +11,20 @@ inside Airboard**.
 ## Behavior and privacy contract
 
 - No capture happens until the Airboard frame sends an explicit start request,
-  which the Airboard UI issues only from a user click.
-- Frames are posted only to allowlisted Airboard origins (see
+  which the Airboard UI issues only from a user click (Enable hands for the
+  camera, Start Airo for the microphone).
+- Frames and audio chunks are posted only to allowlisted Airboard origins (see
   `ALLOWED_ORIGINS` in `content.js`); requests from any other origin are
   ignored.
-- Chrome's camera-in-use indicator is visible for the whole session.
-- Stopping capture in Airboard, the camera track ending, or leaving the page
-  stops the stream immediately.
+- Chrome's camera/microphone-in-use indicators are visible for the whole
+  session.
+- Stopping capture in Airboard, the device track ending, or leaving the page
+  stops the stream immediately; camera and microphone stop independently.
 - Frames are processed in the Airboard iframe for hand tracking (MediaPipe,
-  in-browser); the bridge itself stores and uploads nothing.
+  in-browser). Microphone audio is consumed by Airboard's existing realtime
+  transcription session (streamed to the configured speech provider through
+  the Airboard API, exactly as on the standalone surface). The bridge itself
+  stores and uploads nothing.
 
 ## Install for the pilot (unpacked)
 

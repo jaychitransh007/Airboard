@@ -7,13 +7,20 @@ const VERSION = 1;
 const MAX_IN_FLIGHT = 2;
 // Host->frame message types; the emulator must ignore its own posts, since in
 // the harness both protocol sides share one window.
-const HOST_MESSAGE_TYPES = new Set(["ready", "frame", "ended", "error"]);
+const HOST_MESSAGE_TYPES = new Set(["ready", "frame", "audio-chunk", "ended", "error"]);
 
 type ActiveSession = {
   stream: MediaStream;
   video: HTMLVideoElement;
   inFlight: number;
   nextId: number;
+  stopped: boolean;
+};
+
+type ActiveAudioSession = {
+  stream: MediaStream;
+  context: AudioContext;
+  nodes: AudioNode[];
   stopped: boolean;
 };
 
@@ -49,8 +56,73 @@ export function MeetBridgeEmulator() {
       session.stream.getTracks().forEach((track) => track.stop());
       session.video.srcObject = null;
       if (notify) {
-        post({ type: "ended", reason });
+        post({ type: "ended", reason, channel: "video" });
       }
+    };
+
+    let activeAudio: ActiveAudioSession | null = null;
+    const stopActiveAudio = (reason: string, notify: boolean) => {
+      const session = activeAudio;
+      if (!session || session.stopped) {
+        return;
+      }
+      session.stopped = true;
+      activeAudio = null;
+      session.nodes.forEach((node) => {
+        try {
+          node.disconnect();
+        } catch {
+          // Already torn down.
+        }
+      });
+      session.stream.getTracks().forEach((track) => track.stop());
+      void session.context.close().catch(() => {});
+      if (notify) {
+        post({ type: "ended", reason, channel: "audio" });
+      }
+    };
+
+    const startAudio = async () => {
+      stopActiveAudio("restarted", false);
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      } catch (error) {
+        post({
+          type: "error",
+          message: `microphone-unavailable: ${(error as Error)?.name}`,
+          channel: "audio",
+        });
+        return;
+      }
+      const context = new AudioContext();
+      const source = context.createMediaStreamSource(stream);
+      const processor = context.createScriptProcessor(4096, 1, 1);
+      const silence = context.createGain();
+      silence.gain.value = 0;
+      const session: ActiveAudioSession = {
+        stream,
+        context,
+        nodes: [source, processor, silence],
+        stopped: false,
+      };
+      activeAudio = session;
+      let seq = 1;
+      processor.onaudioprocess = (event) => {
+        if (session.stopped) {
+          return;
+        }
+        const input = event.inputBuffer.getChannelData(0);
+        const copy = new Float32Array(input.length);
+        copy.set(input);
+        post(
+          { type: "audio-chunk", seq: seq++, sampleRate: context.sampleRate, samples: copy.buffer },
+          [copy.buffer],
+        );
+      };
+      source.connect(processor);
+      processor.connect(silence);
+      silence.connect(context.destination);
     };
 
     const startVideo = async (maxWidthRaw: unknown) => {
@@ -126,6 +198,14 @@ export function MeetBridgeEmulator() {
       }
       if (data.type === "stop-video") {
         stopActive("stopped", false);
+        return;
+      }
+      if (data.type === "start-audio") {
+        void startAudio();
+        return;
+      }
+      if (data.type === "stop-audio") {
+        stopActiveAudio("stopped", false);
       }
     };
 
@@ -133,6 +213,7 @@ export function MeetBridgeEmulator() {
     return () => {
       window.removeEventListener("message", onMessage);
       stopActive("unmounted", false);
+      stopActiveAudio("unmounted", false);
     };
   }, []);
 
