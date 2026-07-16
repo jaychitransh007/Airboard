@@ -38,8 +38,11 @@ export default function PilotPrivacyPage() {
           Airboard never captures camera or microphone in the background and cannot read Google
           Meet&apos;s own media streams. Gesture (camera) and voice (microphone) input start only from
           an explicit tester action with a visible on-screen indicator: inside Meet when the Meet
-          client delegates browser media permission to the add-on, otherwise in a separate
-          companion browser window connected to the same board. Camera frames are processed in
+          client delegates browser media permission to the add-on, through the optional Airboard
+          Meet Media Bridge browser extension (which captures on the meeting page — using the
+          permission already granted to Meet — only after an explicit start in Airboard, and
+          streams frames solely to the Airboard add-on), or otherwise in a separate companion
+          browser window connected to the same board. Camera frames are processed in
           the browser for hand tracking and are not uploaded or stored by Airboard. When a
           transcription provider is configured for the pilot, voice audio is streamed to that
           provider to produce a transcript and is not stored by Airboard; the currently deployed

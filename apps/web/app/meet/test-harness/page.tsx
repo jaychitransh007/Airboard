@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { AirboardPrototype } from "../../../src/features/board/AirboardPrototype";
+import { MeetBridgeEmulator } from "../../../src/features/meet/MeetBridgeEmulator";
 
 /**
  * E2E-only mount of the Meet-surface board. The real Meet routes require the
@@ -11,20 +12,25 @@ import { AirboardPrototype } from "../../../src/features/board/AirboardPrototype
 export default async function MeetTestHarnessPage({
   searchParams,
 }: {
-  searchParams: Promise<{ surface?: string; media?: string }>;
+  searchParams: Promise<{ surface?: string; media?: string; bridge?: string }>;
 }) {
   if (process.env.NEXT_PUBLIC_AIRBOARD_TEST_HOOKS !== "1") {
     notFound();
   }
   // media=embedded emulates a host client that delegates camera/microphone
   // permission to the add-on frame; the default emulates no delegation.
-  const { surface, media } = await searchParams;
+  // bridge=emulate answers the media-bridge protocol in-page, standing in for
+  // the Meet Media Bridge extension.
+  const { surface, media, bridge } = await searchParams;
   return (
-    <AirboardPrototype
-      surface={surface === "side-panel" ? "meet-side-panel" : "meet-main-stage"}
-      meetingProvider="google_meet"
-      providerMeetingId="test-harness-meeting"
-      embeddedMediaCapture={media === "embedded"}
-    />
+    <>
+      {bridge === "emulate" ? <MeetBridgeEmulator /> : null}
+      <AirboardPrototype
+        surface={surface === "side-panel" ? "meet-side-panel" : "meet-main-stage"}
+        meetingProvider="google_meet"
+        providerMeetingId="test-harness-meeting"
+        embeddedMediaCapture={media === "embedded"}
+      />
+    </>
   );
 }

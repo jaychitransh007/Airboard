@@ -57,6 +57,11 @@ import {
   type ViewportLimits,
 } from "./boardViewport";
 import { CanvasNavigationTracker } from "./canvasNavigationTracker";
+import {
+  probeMeetMediaBridgeInWindow,
+  type MeetMediaBridge,
+  type MeetMediaBridgeVideoSession,
+} from "../meet/meetMediaBridge";
 import { CatalogGlyph } from "./catalogGlyphs";
 import { HoldToEditTracker } from "./holdToEditTracker";
 import { PalmGateTracker } from "./palmGateTracker";
@@ -429,9 +434,17 @@ export function AirboardPrototype({
    */
   embeddedMediaCapture?: boolean;
 }) {
-  const usesHostMeetingMedia = surface !== "standalone" && !embeddedMediaCapture;
+  const isMeetSurface = surface !== "standalone";
+  // The Meet media bridge extension (a meet.google.com content script) can
+  // stream the meeting origin's camera into this frame when installed. Video
+  // only for now, so camera and voice availability diverge on Meet surfaces.
+  const [meetMediaBridge, setMeetMediaBridge] = useState<MeetMediaBridge | null>(null);
+  const cameraCaptureAvailable = !isMeetSurface || embeddedMediaCapture || meetMediaBridge !== null;
+  const voiceCaptureAvailable = !isMeetSurface || embeddedMediaCapture;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const meetBridgeSessionRef = useRef<MeetMediaBridgeVideoSession | null>(null);
+  const meetBridgeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const labelInputRef = useRef<HTMLInputElement | null>(null);
   const trackerRef = useRef<MediaPipeHandTracker | null>(null);
   // Synchronous guard against a double-start race (state updates lag within a tick).
@@ -765,9 +778,26 @@ export function AirboardPrototype({
     [currentViewportLimits, render],
   );
 
+  // Meet surfaces cannot capture media themselves, but the bridge extension
+  // on meet.google.com can stream the meeting's camera in. Probe for it once.
+  useEffect(() => {
+    if (!isMeetSurface || embeddedMediaCapture) {
+      return;
+    }
+    let cancelled = false;
+    void probeMeetMediaBridgeInWindow().then((bridge) => {
+      if (!cancelled && bridge) {
+        setMeetMediaBridge(bridge);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [embeddedMediaCapture, isMeetSurface]);
+
   // First-run onboarding: the gesture vocabulary is invisible until taught.
   useEffect(() => {
-    if (usesHostMeetingMedia) {
+    if (!cameraCaptureAvailable) {
       setOnboardingVisible(false);
       return;
     }
@@ -778,7 +808,7 @@ export function AirboardPrototype({
     } catch {
       // Storage may be unavailable; skip onboarding rather than block.
     }
-  }, [usesHostMeetingMedia]);
+  }, [cameraCaptureAvailable]);
 
   /**
    * Board sync bootstrap. With ?boardSessionId=… in the URL we join that
@@ -3322,10 +3352,10 @@ export function AirboardPrototype({
   }, [currentViewportLimits, openVoiceGate, render, routeFinalTranscript, voiceRouter]);
 
   const startVoiceCommand = useCallback(() => {
-    if (usesHostMeetingMedia) {
+    if (!voiceCaptureAvailable) {
       setSpeechRecognitionStatus("idle");
       setCommandFeedback(
-        "This meeting surface cannot capture the microphone. Type commands here, or open the gesture & voice companion window from the sidebar.",
+        "This meeting surface cannot capture the microphone yet. Type commands here, or open the gesture & voice companion window from the sidebar.",
       );
       return;
     }
@@ -3616,7 +3646,7 @@ export function AirboardPrototype({
     speechEngine,
     speechSupported,
     syncVoiceGateUi,
-    usesHostMeetingMedia,
+    voiceCaptureAvailable,
     voiceRouter,
   ]);
 
@@ -3663,6 +3693,8 @@ export function AirboardPrototype({
 
   const stopCamera = useCallback(() => {
     cameraStartInProgressRef.current = false;
+    meetBridgeSessionRef.current?.stop();
+    meetBridgeSessionRef.current = null;
     const video = videoRef.current;
     const stream = video?.srcObject as MediaStream | null;
     stream?.getTracks().forEach((track) => track.stop());
@@ -3676,7 +3708,7 @@ export function AirboardPrototype({
   }, []);
 
   const startCamera = useCallback(async () => {
-    if (usesHostMeetingMedia) {
+    if (!cameraCaptureAvailable) {
       setCameraStatus("idle");
       setCameraError(null);
       return;
@@ -3707,16 +3739,53 @@ export function AirboardPrototype({
       return true;
     };
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 30 },
+    // On Meet surfaces without delegated permission, video arrives from the
+    // bridge extension as ImageBitmaps; a canvas capture stream feeds the same
+    // video element so the tracker and preview code stay identical.
+    const bridge = isMeetSurface && !embeddedMediaCapture ? meetMediaBridge : null;
+    const acquireBridgedStream = async (): Promise<MediaStream> => {
+      if (!bridge) {
+        throw new Error("Meet media bridge is unavailable");
+      }
+      const canvas = meetBridgeCanvasRef.current ?? document.createElement("canvas");
+      meetBridgeCanvasRef.current = canvas;
+      const context = canvas.getContext("2d");
+      if (!context) {
+        throw new Error("Canvas 2D context is unavailable");
+      }
+      const session = await bridge.startVideo({
+        onFrame: (bitmap) => {
+          if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+            canvas.width = bitmap.width;
+            canvas.height = bitmap.height;
+          }
+          context.drawImage(bitmap, 0, 0);
+          bitmap.close();
         },
-        audio: false,
+        onEnded: () => {
+          meetBridgeSessionRef.current = null;
+          stopCamera();
+          setCameraError("The Meet camera bridge stopped. Click Enable hands to restart.");
+        },
       });
+      meetBridgeSessionRef.current = session;
+      return canvas.captureStream(30);
+    };
+
+    try {
+      const stream = bridge
+        ? await acquireBridgedStream()
+        : await navigator.mediaDevices.getUserMedia({
+            video: {
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              frameRate: { ideal: 30 },
+            },
+            audio: false,
+          });
       if (releaseIfUnmounted(stream, null)) {
+        meetBridgeSessionRef.current?.stop();
+        meetBridgeSessionRef.current = null;
         return;
       }
       const video = videoRef.current;
@@ -3732,6 +3801,8 @@ export function AirboardPrototype({
         modelAssetPath: "/vendor/mediapipe/models/hand_landmarker.task",
       });
       if (releaseIfUnmounted(stream, tracker)) {
+        meetBridgeSessionRef.current?.stop();
+        meetBridgeSessionRef.current = null;
         video.srcObject = null;
         return;
       }
@@ -3749,6 +3820,8 @@ export function AirboardPrototype({
       if (video) {
         video.srcObject = null;
       }
+      meetBridgeSessionRef.current?.stop();
+      meetBridgeSessionRef.current = null;
       trackerRef.current?.close();
       trackerRef.current = null;
       setCameraStatus(isPermissionError ? "blocked" : hadVideoStream ? "tracker_error" : "error");
@@ -3756,7 +3829,7 @@ export function AirboardPrototype({
     } finally {
       cameraStartInProgressRef.current = false;
     }
-  }, [cameraStatus, usesHostMeetingMedia]);
+  }, [cameraCaptureAvailable, cameraStatus, embeddedMediaCapture, isMeetSurface, meetMediaBridge, stopCamera]);
 
   const clearBoard = useCallback(() => {
     semanticIntentRequestIdRef.current += 1;
@@ -4372,7 +4445,7 @@ export function AirboardPrototype({
       // Camera-off parity for hold-to-edit: holding V with a single selected
       // object scopes the mic to it, exactly like grab-and-hold does by hand.
       if (
-        !usesHostMeetingMedia &&
+        voiceCaptureAvailable &&
         inputMode === "gesture" &&
         shortcutsActiveRef.current &&
         event.key.toLowerCase() === "v" &&
@@ -4513,7 +4586,7 @@ export function AirboardPrototype({
     selectedAnnotationIds,
     touchpadState,
     undoLastAction,
-    usesHostMeetingMedia,
+    voiceCaptureAvailable,
   ]);
 
   useEffect(() => {
@@ -4992,13 +5065,23 @@ export function AirboardPrototype({
                 on and always shows an on-screen indicator.
               </p>
             </>
+          ) : meetMediaBridge ? (
+            <>
+              <h2>Gesture is on the shared board</h2>
+              <p>
+                The Airboard extension connects this meeting&apos;s camera to the main-stage board.
+                Click Enable hands there to gesture; capture starts only when you turn it on.
+                Voice arrives next — use typed commands meanwhile.
+              </p>
+            </>
           ) : (
             <>
               <h2>Gesture and voice run in a companion window</h2>
               <p>
                 This Meet client does not delegate camera or microphone to add-ons, so Airboard
                 cannot capture media inside Meet. The companion window connects to this same
-                board — gestures and voice commands there appear for everyone in Meet.
+                board — gestures and voice commands there appear for everyone in Meet. Installing
+                the Airboard extension brings gesture directly into Meet.
               </p>
               <CompanionMediaLink boardSessionId={activeBoardSessionId} />
             </>
@@ -5018,49 +5101,49 @@ export function AirboardPrototype({
   }
 
   return (
-    <main className={`airboard-shell${usesHostMeetingMedia ? " airboard-meet-embedded" : ""}`}>
+    <main className={`airboard-shell${isMeetSurface ? " airboard-meet-embedded" : ""}`}>
       <header className="topbar">
         <div className="brand">
           <h1>Airboard</h1>
           <span className="surface-label">{surfaceLabel(surface)}</span>
         </div>
         <div className="toolbar">
-          {!usesHostMeetingMedia ? (
-            <>
-              <button
-                className={inputMode === "touchpad" ? undefined : "primary"}
-                type="button"
-                onClick={cameraStatus === "active" ? stopCamera : startCamera}
-                disabled={cameraStatus === "starting" || cameraStatus === "tracker_loading"}
-                aria-label={
-                  cameraStatus === "active"
-                    ? "Turn off the camera"
-                    : "Enable hand tracking with the camera"
-                }
-              >
-                {cameraStatus === "starting" || cameraStatus === "tracker_loading"
-                  ? "Starting…"
-                  : cameraStatus === "active"
-                    ? "Turn off camera"
-                    : "Enable hands"}
-              </button>
-              <button
-                className={speechArmed ? "voice-button listening" : "voice-button"}
-                type="button"
-                onClick={startVoiceCommand}
-                disabled={!speechSupported}
-                title={
-                  speechSupported
-                    ? speechArmed
-                      ? "Stop realtime Airo listening"
-                      : `Start Airo with ${voiceEngineLabel}${activeVoiceModel ? ` / ${activeVoiceModel}` : ""}`
-                    : "Realtime voice is not configured; type instead"
-                }
-                aria-label={speechArmed ? "Stop Airo listening" : "Start Airo listening"}
-              >
-                {speechArmed ? "Stop Airo" : "Start Airo"}
-              </button>
-            </>
+          {cameraCaptureAvailable ? (
+            <button
+              className={inputMode === "touchpad" ? undefined : "primary"}
+              type="button"
+              onClick={cameraStatus === "active" ? stopCamera : startCamera}
+              disabled={cameraStatus === "starting" || cameraStatus === "tracker_loading"}
+              aria-label={
+                cameraStatus === "active"
+                  ? "Turn off the camera"
+                  : "Enable hand tracking with the camera"
+              }
+            >
+              {cameraStatus === "starting" || cameraStatus === "tracker_loading"
+                ? "Starting…"
+                : cameraStatus === "active"
+                  ? "Turn off camera"
+                  : "Enable hands"}
+            </button>
+          ) : null}
+          {voiceCaptureAvailable ? (
+            <button
+              className={speechArmed ? "voice-button listening" : "voice-button"}
+              type="button"
+              onClick={startVoiceCommand}
+              disabled={!speechSupported}
+              title={
+                speechSupported
+                  ? speechArmed
+                    ? "Stop realtime Airo listening"
+                    : `Start Airo with ${voiceEngineLabel}${activeVoiceModel ? ` / ${activeVoiceModel}` : ""}`
+                  : "Realtime voice is not configured; type instead"
+              }
+              aria-label={speechArmed ? "Stop Airo listening" : "Start Airo listening"}
+            >
+              {speechArmed ? "Stop Airo" : "Start Airo"}
+            </button>
           ) : null}
           <button type="button" onClick={undoLastAction}>
             Undo
@@ -5173,7 +5256,7 @@ export function AirboardPrototype({
               </button>
             </div>
           ) : null}
-          {!usesHostMeetingMedia && voiceGate ? (
+          {voiceCaptureAvailable && voiceGate ? (
             <div
               className={`voice-gate-pill ${speechArmed ? "armed" : "unarmed"}`}
               role="status"
@@ -5189,7 +5272,7 @@ export function AirboardPrototype({
                   : `Holding “${voiceGate.label}” — press Start Airo once to enable voice edits`}
             </div>
           ) : null}
-          {!usesHostMeetingMedia && onboardingVisible && inputMode === "gesture" ? (
+          {cameraCaptureAvailable && onboardingVisible && inputMode === "gesture" ? (
             <div className="onboarding-overlay" role="dialog" aria-label="How to use Airboard">
               <div className="onboarding-card">
                 <h2>Talk to the board, not to software</h2>
@@ -5342,7 +5425,7 @@ export function AirboardPrototype({
               />
             </svg>
           ) : null}
-          {!usesHostMeetingMedia ? (
+          {cameraCaptureAvailable ? (
             cameraStatus !== "idle" ? (
               <video ref={videoRef} className="camera-preview" muted playsInline />
             ) : (
@@ -5421,7 +5504,7 @@ export function AirboardPrototype({
               <p className="intent-feedback" aria-live="polite">
                 {commandFeedback}
               </p>
-              {!usesHostMeetingMedia &&
+              {voiceCaptureAvailable &&
               (speechArmed || speechHeardText || speechRecognitionStatus === "error") ? (
                 <p
                   className={`voice-heard ${speechRecognitionStatus}`}
@@ -5440,7 +5523,7 @@ export function AirboardPrototype({
           <section className="section">
             <h2>Status</h2>
             <div className="status-grid">
-              {!usesHostMeetingMedia ? (
+              {cameraCaptureAvailable ? (
                 <>
                   <span>Camera</span>
                   <strong className={cameraStatus === "active" ? "pill" : "pill warning"}>
@@ -5474,7 +5557,7 @@ export function AirboardPrototype({
                           ? "waiting for Airo"
                           : "ready"}
                   </strong>
-                  {!usesHostMeetingMedia ? (
+                  {voiceCaptureAvailable ? (
                     <>
                       <span>Voice</span>
                       <strong className="pill">
@@ -5494,7 +5577,7 @@ export function AirboardPrototype({
                   </strong>
                 </>
               ) : null}
-              {!usesHostMeetingMedia && inputMode === "gesture" ? (
+              {cameraCaptureAvailable && inputMode === "gesture" ? (
                 <>
                   <span>Hand cursor</span>
                   <strong className="pill">{handControlDiagnostics.controllerState}</strong>
@@ -5506,15 +5589,15 @@ export function AirboardPrototype({
                   <strong>{gestureResult?.hand ?? "either"}</strong>
                 </>
               ) : null}
-              {!usesHostMeetingMedia ? (
+              {cameraCaptureAvailable ? (
                 <>
                   <span>Hands detected</span>
                   <strong>{stats.handsDetected}</strong>
                 </>
               ) : null}
             </div>
-            {!usesHostMeetingMedia && cameraError ? <p className="hint">{cameraError}</p> : null}
-            {!usesHostMeetingMedia && inputMode === "gesture" ? (
+            {cameraCaptureAvailable && cameraError ? <p className="hint">{cameraError}</p> : null}
+            {cameraCaptureAvailable && inputMode === "gesture" ? (
               <p className="hint">{handControlCoach}</p>
             ) : null}
           </section>
@@ -5647,7 +5730,7 @@ export function AirboardPrototype({
             ) : (
               <>
                 {inputMode === "gesture" ? (
-                  usesHostMeetingMedia ? (
+                  !cameraCaptureAvailable ? (
                     <>
                       <p className="hint">
                         Type a command or use pointer, keyboard, and direct canvas controls.
@@ -5668,10 +5751,9 @@ export function AirboardPrototype({
                   ) : (
                     <>
                     <p className="hint">
-                      Start Airo once. Then raise a flat palm and speak (no wake word), hold an
-                      element still to voice-edit it, or say “Airo, …” hands-free. Open hand
-                      points, closed hand grabs; reopen to drop. Shift-click remains the
-                      deterministic multi-select fallback.
+                      {voiceCaptureAvailable
+                        ? "Start Airo once. Then raise a flat palm and speak (no wake word), hold an element still to voice-edit it, or say “Airo, …” hands-free. Open hand points, closed hand grabs; reopen to drop. Shift-click remains the deterministic multi-select fallback."
+                        : "Click Enable hands to gesture with the meeting camera through the Airboard extension. Open hand points, closed hand grabs; reopen to drop. Voice is not available on this surface yet — pair gestures with typed commands. Shift-click remains the deterministic multi-select fallback."}
                     </p>
                     <details className="advanced-settings">
                       <summary>Advanced settings</summary>
@@ -5774,7 +5856,7 @@ export function AirboardPrototype({
                 ) : null}
               </>
             )}
-            {!usesHostMeetingMedia ? (
+            {cameraCaptureAvailable ? (
               <label className="check-row" htmlFor="debug-visible">
                 <input
                   id="debug-visible"
@@ -5787,7 +5869,7 @@ export function AirboardPrototype({
             ) : null}
           </section>
 
-          {!usesHostMeetingMedia && debugVisible ? (
+          {cameraCaptureAvailable && debugVisible ? (
             <section className="section">
               <h2>Friction Debug</h2>
               <div className="status-grid">
@@ -5833,7 +5915,7 @@ export function AirboardPrototype({
 
           <section className="section">
             <h2>Shortcuts</h2>
-            {usesHostMeetingMedia ? (
+            {!cameraCaptureAvailable ? (
               <p className="hint">
                 Type commands in the Command field, drag shapes from the catalogs, Shift-click
                 to multi-select, and press Cmd/Ctrl+Z to undo. Gesture and voice are available
@@ -5846,12 +5928,9 @@ export function AirboardPrototype({
               </p>
             ) : inputMode === "gesture" ? (
               <p className="hint">
-                Start Airo once, then talk to the board without a wake word: raise a flat, open
-                palm (push-to-talk) and speak, or grab an element and hold it still to edit it by
-                voice — “rename to Payments”, “delete”, “connect to the database”. Commands apply
-                instantly; every change shows an Undo toast. Camera off? Select an object and hold
-                V for the same scoped mic, or say “Airo, …”. Drag shapes from the catalogs on the
-                left. Shift-click multi-selects; Cmd/Ctrl+Z undoes.
+                {voiceCaptureAvailable
+                  ? "Start Airo once, then talk to the board without a wake word: raise a flat, open palm (push-to-talk) and speak, or grab an element and hold it still to edit it by voice — “rename to Payments”, “delete”, “connect to the database”. Commands apply instantly; every change shows an Undo toast. Camera off? Select an object and hold V for the same scoped mic, or say “Airo, …”. Drag shapes from the catalogs on the left. Shift-click multi-selects; Cmd/Ctrl+Z undoes."
+                  : "Enable hands, then point with an open hand and grab with a closed hand; reopen to drop. Commands apply instantly; every change shows an Undo toast. Voice is not available on this surface yet — type commands in the Command field. Drag shapes from the catalogs on the left. Shift-click multi-selects; Cmd/Ctrl+Z undoes."}
               </p>
             ) : (
               <p className="hint">Mouse or trackpad draws. Hold Shift or Alt while dragging to erase.</p>
