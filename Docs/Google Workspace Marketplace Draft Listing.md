@@ -43,7 +43,7 @@ The PF-002 real-user test path is a **public Marketplace draft** with individual
 | Application icon 32×32 | `apps/web/public/marketplace/airboard-icon-32.png` | Prepared and dimension-verified; native file-picker selection required |
 | Application icon 128×128 | `apps/web/public/marketplace/airboard-icon-128.png` | Prepared and dimension-verified; native file-picker selection required |
 | Card banner 220×140 | `apps/web/public/marketplace/airboard-card-banner.png` | Prepared and dimension-verified; native file-picker selection required |
-| Screenshot 1280×800 | `apps/web/public/marketplace/airboard-meet-main-stage-1280x800.jpg` | Truthful real Meet main-stage capture prepared and dimension-verified; native file-picker selection required |
+| Screenshot 1280×800 | `apps/web/public/marketplace/airboard-meet-main-stage-1280x800.jpg` | Stale: captured before the Meet media-ownership change and still shows the removed media UI. Must be re-captured from the current build before Save Draft; dimension requirement (1280×800) already verified |
 | Optional icons 48×48 and 96×96 | `apps/web/public/marketplace/airboard-icon-48.png`, `apps/web/public/marketplace/airboard-icon-96.png` | Prepared; optional uploads |
 | Support URL | `/pilot/support` on the pilot web origin | Deployed, returned 200, and entered |
 | Setup/Admin/Help URLs | `/pilot/setup` on the pilot web origin | Deployed, returned 200, and entered |
@@ -65,7 +65,8 @@ The tester never opens Cloud Console, receives IAM, or runs a deployment command
 
 ## Remaining console and review blockers
 
-- Use Google's native file pickers to select the four required prepared files: 32×32 icon, 128×128 icon, 220×140 card banner, and 1280×800 screenshot.
+- Re-capture the 1280×800 main-stage screenshot from the current no-media build; the prepared file predates the media-ownership change and shows removed UI.
+- Use Google's native file pickers to select the four required prepared files: 32×32 icon, 128×128 icon, 220×140 card banner, and the re-captured 1280×800 screenshot.
 - Click **Save Draft** only. Do not click **Submit for review** during PF-002.
 - Confirm the draft tester persisted, then install through Marketplace as that tester and execute the real-user path.
 - Obtain legal approval or replace the pilot privacy/terms copy before GMEET-010/GMEET-011 review submission.
