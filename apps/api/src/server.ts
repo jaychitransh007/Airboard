@@ -14,6 +14,7 @@ import Fastify from "fastify";
 import type { WebSocket } from "ws";
 import type { ApiConfig } from "./config";
 import { clientKey, createRateLimiter } from "./security";
+import { validateSessionStartBody } from "./sessionStartValidation";
 import { registerSemanticIntentRoutes } from "./semanticIntent/routes";
 import { createSessionStore } from "./storeFactory";
 import { registerTranscriptionRoutes } from "./transcription/routes";
@@ -133,19 +134,17 @@ export async function buildServer(config: ApiConfig) {
     if (!ownerUserId || Array.isArray(ownerUserId)) {
       return reply.code(401).send({ error: "OWNER_AUTH_REQUIRED" });
     }
+    // JSON off the wire is untyped: bound provider, meeting binding, and
+    // title before they reach the store or persistence.
+    const validation = validateSessionStartBody(request.body);
+    if (!validation.ok) {
+      return reply.code(400).send({ error: validation.error });
+    }
 
     try {
-      const startInput = {
-        ownerUserId,
-        provider: request.body.provider ?? "standalone",
-        allowParticipantDrawing: request.body.allowParticipantDrawing ?? true,
-        ...(request.body.providerMeetingId
-          ? { providerMeetingId: request.body.providerMeetingId }
-          : {}),
-        ...(request.body.title ? { title: request.body.title } : {}),
-      };
       const result = await store.startSession({
-        ...startInput,
+        ownerUserId,
+        ...validation.value,
       });
       return result;
     } catch (error) {
