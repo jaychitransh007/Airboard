@@ -88,8 +88,35 @@ test("create path: owner header, standalone provider, ws to the session", async 
   assert.equal(result.initialState, null);
   assert.equal(result.handle.boardSessionId, "session-9");
   assert.equal(calls[0].init.headers["x-airboard-user-id"], "user-1");
+  assert.equal(JSON.parse(calls[0].init.body).provider, "standalone");
   assert.equal(clients[0].options.url, "ws://127.0.0.1:4600/ws");
   assert.equal(clients[0].connected, true);
+});
+
+test("create path binds a provider meeting to the server session", async () => {
+  const { fetchImpl, calls } = fakeFetchRouter([
+    {
+      match: "/sessions/start",
+      body: {
+        session: { id: "meet-session" },
+        ownerParticipant: { id: "meet-owner", role: "owner" },
+      },
+    },
+  ]);
+  await startBoardSync(
+    {
+      apiBaseUrl: "http://127.0.0.1:4600",
+      ownerUserId: "user-1",
+      provider: "google_meet",
+      providerMeetingId: "meet-global-id",
+    },
+    { onRemoteEvent: () => {} },
+    { fetchImpl, createClient: (o) => new FakeClient(o), ...noTimers },
+  );
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    provider: "google_meet",
+    providerMeetingId: "meet-global-id",
+  });
 });
 
 test("join path returns the server board state for hydration", async () => {

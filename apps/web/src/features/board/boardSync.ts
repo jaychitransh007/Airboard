@@ -2,6 +2,7 @@ import {
   createEventEnvelope,
   type BoardEvent,
   type BoardState,
+  type MeetingProvider,
   type Stroke,
 } from "@airboard/core";
 import {
@@ -84,6 +85,8 @@ export async function startBoardSync(
     /** Join this existing session; omit to create a new one as owner. */
     boardSessionId?: string | null;
     ownerUserId: string;
+    provider?: MeetingProvider;
+    providerMeetingId?: string;
     displayName?: string;
     title?: string;
   },
@@ -136,7 +139,10 @@ export async function startBoardSync(
           "x-airboard-user-id": options.ownerUserId,
         },
         body: JSON.stringify({
-          provider: "standalone",
+          provider: options.provider ?? "standalone",
+          ...(options.providerMeetingId
+            ? { providerMeetingId: options.providerMeetingId }
+            : {}),
           ...(options.title ? { title: options.title } : {}),
         }),
       },

@@ -1,0 +1,19 @@
+{
+  "addOns": {
+    "common": {
+      "name": "Airboard Pilot",
+      "logoUrl": "https://airboard-pilot-web-634900453473.asia-south1.run.app/airboard-pilot.svg"
+    },
+    "meet": {
+      "web": {
+        "sidePanelUrl": "https://airboard-pilot-web-634900453473.asia-south1.run.app/meet/side-panel",
+        "supportsScreenSharing": true,
+        "addOnOrigins": [
+          "https://airboard-pilot-web-634900453473.asia-south1.run.app"
+        ],
+        "logoUrl": "https://airboard-pilot-web-634900453473.asia-south1.run.app/airboard-pilot.svg",
+        "darkModeLogoUrl": "https://airboard-pilot-web-634900453473.asia-south1.run.app/airboard-pilot.svg"
+      }
+    }
+  }
+}

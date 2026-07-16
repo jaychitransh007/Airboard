@@ -1,5 +1,5 @@
-import { AirboardPrototype } from "../../../src/features/board/AirboardPrototype";
+import { GoogleMeetSurface } from "../../../src/features/meet/GoogleMeetSurface";
 
 export default function MeetMainStagePage() {
-  return <AirboardPrototype surface="meet-main-stage" />;
+  return <GoogleMeetSurface surface="main-stage" />;
 }

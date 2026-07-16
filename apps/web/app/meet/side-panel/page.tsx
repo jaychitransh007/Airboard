@@ -1,5 +1,5 @@
-import { AirboardPrototype } from "../../../src/features/board/AirboardPrototype";
+import { GoogleMeetSurface } from "../../../src/features/meet/GoogleMeetSurface";
 
 export default function MeetSidePanelPage() {
-  return <AirboardPrototype surface="meet-side-panel" />;
+  return <GoogleMeetSurface surface="side-panel" />;
 }

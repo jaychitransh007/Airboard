@@ -1,5 +1,11 @@
 import type { BoardSession, MeetingContext, Participant } from "@airboard/core";
 import { googleMeetCapabilities } from "./capabilities.ts";
+import {
+  createGoogleMeetRuntime,
+  serializeGoogleMeetActivityData,
+  type GoogleMeetRuntime,
+  type GoogleMeetSurface,
+} from "./googleMeetRuntime.ts";
 import type {
   AdapterConfig,
   MeetingAdapter,
@@ -8,42 +14,34 @@ import type {
   StartBoardSessionInput,
 } from "./types.ts";
 
-type MeetAddonSession = {
-  createSidePanelClient?: () => Promise<any>;
-  createMainStageClient?: () => Promise<any>;
-};
-
-declare global {
-  interface Window {
-    meet?: {
-      addon?: {
-        createAddonSession: (input: { cloudProjectNumber: string }) => Promise<MeetAddonSession>;
-      };
-    };
-  }
-}
-
 export class GoogleMeetAdapter implements MeetingAdapter {
   provider = "google_meet" as const;
   private config: AdapterConfig | null = null;
-  private addonSession: MeetAddonSession | null = null;
-  private client: any = null;
+  private runtime: GoogleMeetRuntime | null = null;
 
-  async initialize(config: AdapterConfig & { cloudProjectNumber?: string }): Promise<void> {
+  async initialize(
+    config: AdapterConfig & {
+      cloudProjectNumber?: string;
+      surface?: GoogleMeetSurface;
+    },
+  ): Promise<void> {
     this.config = config;
 
-    if (!window.meet?.addon || !config.cloudProjectNumber) {
+    if (!config.cloudProjectNumber) {
       return;
     }
-
-    this.addonSession = await window.meet.addon.createAddonSession({
+    this.runtime = await createGoogleMeetRuntime({
       cloudProjectNumber: config.cloudProjectNumber,
+      surface: config.surface ?? "side-panel",
     });
   }
 
   async getMeetingContext(): Promise<MeetingContext> {
     return {
       provider: "google_meet",
+      ...(this.runtime?.meetingInfo.meetingId
+        ? { providerMeetingId: this.runtime.meetingInfo.meetingId }
+        : {}),
       capabilities: googleMeetCapabilities,
     };
   }
@@ -116,19 +114,16 @@ export class GoogleMeetAdapter implements MeetingAdapter {
   }
 
   async dispose(): Promise<void> {
-    this.client = null;
-    this.addonSession = null;
+    this.runtime = null;
   }
 
   private async startMeetActivity(boardSessionId: string): Promise<void> {
-    if (!this.addonSession?.createSidePanelClient) {
+    if (!this.runtime) {
       return;
     }
-
-    this.client = this.client ?? (await this.addonSession.createSidePanelClient());
-    await this.client.startActivity?.({
-      mainStageUrl: `${window.location.origin}/meet/main-stage?boardSessionId=${boardSessionId}`,
-      additionalData: JSON.stringify({ boardSessionId }),
+    await this.runtime.startActivity({
+      mainStageUrl: `${window.location.origin}/meet/main-stage`,
+      additionalData: serializeGoogleMeetActivityData({ boardSessionId }),
     });
   }
 

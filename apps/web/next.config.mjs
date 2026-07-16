@@ -1,5 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Cloud Run uses Next's traced standalone server so the pilot image contains
+  // only runtime files rather than the whole monorepo dependency tree.
+  output: "standalone",
   // Keep production builds away from the live dev-server bundle. Running
   // `next build` used to replace `.next` while `next dev` was serving it,
   // leaving open pages with stale MediaPipe chunk URLs.

@@ -15,6 +15,7 @@ import {
   type BoardState,
   type CursorState,
   type DiagramCommand,
+  type MeetingProvider,
   type SemanticObjectReference,
   type SemanticPlacement,
   type SemanticPlan,
@@ -404,7 +405,24 @@ function collectBoardVoiceKeyterms(state: BoardState): string[] {
   return [...labels];
 }
 
-export function AirboardPrototype({ surface }: { surface: Surface }) {
+export function AirboardPrototype({
+  surface,
+  meetingProvider = "standalone",
+  providerMeetingId,
+  initialBoardSessionId,
+  onBoardSessionReady,
+}: {
+  surface: Surface;
+  meetingProvider?: MeetingProvider;
+  providerMeetingId?: string;
+  initialBoardSessionId?: string | null;
+  onBoardSessionReady?: (session: {
+    boardSessionId: string;
+    participantId: string;
+    role: string;
+  }) => void;
+}) {
+  const usesHostMeetingMedia = surface !== "standalone";
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const labelInputRef = useRef<HTMLInputElement | null>(null);
@@ -739,6 +757,10 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
 
   // First-run onboarding: the gesture vocabulary is invisible until taught.
   useEffect(() => {
+    if (usesHostMeetingMedia) {
+      setOnboardingVisible(false);
+      return;
+    }
     try {
       if (window.localStorage.getItem("airboard.onboarding.v1") !== "done") {
         setOnboardingVisible(true);
@@ -746,7 +768,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
     } catch {
       // Storage may be unavailable; skip onboarding rather than block.
     }
-  }, []);
+  }, [usesHostMeetingMedia]);
 
   /**
    * Board sync bootstrap. With ?boardSessionId=… in the URL we join that
@@ -760,9 +782,9 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
       return;
     }
     let cancelled = false;
-    const requestedSessionId = new URLSearchParams(window.location.search).get(
-      "boardSessionId",
-    );
+    const requestedSessionId =
+      initialBoardSessionId ??
+      new URLSearchParams(window.location.search).get("boardSessionId");
     boardSyncStatusRef.current = "connecting";
     setBoardSyncStatus("connecting");
 
@@ -794,6 +816,8 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
         apiBaseUrl: AIRBOARD_API_URL,
         boardSessionId: requestedSessionId,
         ownerUserId: OWNER_USER_ID,
+        provider: meetingProvider,
+        ...(providerMeetingId ? { providerMeetingId } : {}),
         displayName: requestedSessionId ? "Guest" : "Owner",
         title: "Airboard",
       },
@@ -848,6 +872,11 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
         const url = new URL(window.location.href);
         url.searchParams.set("boardSessionId", result.handle.boardSessionId);
         window.history.replaceState(null, "", url.toString());
+        onBoardSessionReady?.({
+          boardSessionId: result.handle.boardSessionId,
+          participantId: result.handle.participantId,
+          role: result.handle.role,
+        });
       })
       .catch(() => {
         if (cancelled) {
@@ -3282,6 +3311,13 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
   }, [currentViewportLimits, openVoiceGate, render, routeFinalTranscript, voiceRouter]);
 
   const startVoiceCommand = useCallback(() => {
+    if (usesHostMeetingMedia) {
+      setSpeechRecognitionStatus("idle");
+      setCommandFeedback(
+        "Google Meet owns camera and microphone access. Use typed commands or direct canvas controls in Airboard.",
+      );
+      return;
+    }
     const activeSession = speechSessionRef.current;
     if (activeSession) {
       semanticIntentRequestIdRef.current += 1;
@@ -3569,6 +3605,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
     speechEngine,
     speechSupported,
     syncVoiceGateUi,
+    usesHostMeetingMedia,
     voiceRouter,
   ]);
 
@@ -3628,6 +3665,11 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
   }, []);
 
   const startCamera = useCallback(async () => {
+    if (usesHostMeetingMedia) {
+      setCameraStatus("idle");
+      setCameraError(null);
+      return;
+    }
     // Guard synchronously (state updates lag within a tick) and cover the whole
     // busy window including tracker_loading — the slow WASM/model download — so an
     // impatient second click cannot acquire a second stream + tracker.
@@ -3703,7 +3745,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
     } finally {
       cameraStartInProgressRef.current = false;
     }
-  }, [cameraStatus]);
+  }, [cameraStatus, usesHostMeetingMedia]);
 
   const clearBoard = useCallback(() => {
     semanticIntentRequestIdRef.current += 1;
@@ -4319,6 +4361,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
       // Camera-off parity for hold-to-edit: holding V with a single selected
       // object scopes the mic to it, exactly like grab-and-hold does by hand.
       if (
+        !usesHostMeetingMedia &&
         inputMode === "gesture" &&
         shortcutsActiveRef.current &&
         event.key.toLowerCase() === "v" &&
@@ -4459,6 +4502,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
     selectedAnnotationIds,
     touchpadState,
     undoLastAction,
+    usesHostMeetingMedia,
   ]);
 
   useEffect(() => {
@@ -4905,47 +4949,93 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
           ? "checking"
           : "not configured";
 
+  if (surface === "meet-side-panel") {
+    return (
+      <main className="airboard-meet-panel">
+        <header className="airboard-meet-panel-header">
+          <span className="eyebrow">Google Meet add-on</span>
+          <h1>Airboard</h1>
+          <p>Start a shared visual workspace, then collaborate in Meet&apos;s main stage.</p>
+        </header>
+
+        <section className="meet-panel-card" aria-live="polite">
+          <div className="meet-panel-status-row">
+            <span>Board connection</span>
+            <strong className="pill">
+              {boardSyncStatus === "connected" ? "Ready" : boardSyncStatus}
+            </strong>
+          </div>
+          <p>
+            Airboard uses typed commands, pointer, keyboard, and direct canvas controls inside
+            Meet. The shared board opens for everyone when the activity starts.
+          </p>
+        </section>
+
+        <section className="meet-panel-card meet-media-policy">
+          <h2>Meet controls camera and microphone</h2>
+          <p>
+            Use Google Meet&apos;s own media buttons. Airboard does not request separate camera or
+            microphone access and does not show a second video preview in Meet.
+          </p>
+        </section>
+
+        <section className="meet-panel-card">
+          <h2>On the shared board</h2>
+          <ul>
+            <li>Type a command such as “add a payment service”.</li>
+            <li>Drag, select, label, connect, undo, and export with ordinary controls.</li>
+            <li>Camera and microphone are optional to the meeting, not required by Airboard.</li>
+          </ul>
+        </section>
+      </main>
+    );
+  }
+
   return (
-    <main className="airboard-shell">
+    <main className={`airboard-shell${usesHostMeetingMedia ? " airboard-meet-embedded" : ""}`}>
       <header className="topbar">
         <div className="brand">
           <h1>Airboard</h1>
           <span className="surface-label">{surfaceLabel(surface)}</span>
         </div>
         <div className="toolbar">
-          <button
-            className={inputMode === "touchpad" ? undefined : "primary"}
-            type="button"
-            onClick={cameraStatus === "active" ? stopCamera : startCamera}
-            disabled={cameraStatus === "starting" || cameraStatus === "tracker_loading"}
-            aria-label={
-              cameraStatus === "active"
-                ? "Turn off the camera"
-                : "Enable hand tracking with the camera"
-            }
-          >
-            {cameraStatus === "starting" || cameraStatus === "tracker_loading"
-              ? "Starting…"
-              : cameraStatus === "active"
-                ? "Turn off camera"
-                : "Enable hands"}
-          </button>
-          <button
-            className={speechArmed ? "voice-button listening" : "voice-button"}
-            type="button"
-            onClick={startVoiceCommand}
-            disabled={!speechSupported}
-            title={
-              speechSupported
-                ? speechArmed
-                  ? "Stop realtime Airo listening"
-                  : `Start Airo with ${voiceEngineLabel}${activeVoiceModel ? ` / ${activeVoiceModel}` : ""}`
-                : "Realtime voice is not configured; type instead"
-            }
-            aria-label={speechArmed ? "Stop Airo listening" : "Start Airo listening"}
-          >
-            {speechArmed ? "Stop Airo" : "Start Airo"}
-          </button>
+          {!usesHostMeetingMedia ? (
+            <>
+              <button
+                className={inputMode === "touchpad" ? undefined : "primary"}
+                type="button"
+                onClick={cameraStatus === "active" ? stopCamera : startCamera}
+                disabled={cameraStatus === "starting" || cameraStatus === "tracker_loading"}
+                aria-label={
+                  cameraStatus === "active"
+                    ? "Turn off the camera"
+                    : "Enable hand tracking with the camera"
+                }
+              >
+                {cameraStatus === "starting" || cameraStatus === "tracker_loading"
+                  ? "Starting…"
+                  : cameraStatus === "active"
+                    ? "Turn off camera"
+                    : "Enable hands"}
+              </button>
+              <button
+                className={speechArmed ? "voice-button listening" : "voice-button"}
+                type="button"
+                onClick={startVoiceCommand}
+                disabled={!speechSupported}
+                title={
+                  speechSupported
+                    ? speechArmed
+                      ? "Stop realtime Airo listening"
+                      : `Start Airo with ${voiceEngineLabel}${activeVoiceModel ? ` / ${activeVoiceModel}` : ""}`
+                    : "Realtime voice is not configured; type instead"
+                }
+                aria-label={speechArmed ? "Stop Airo listening" : "Start Airo listening"}
+              >
+                {speechArmed ? "Stop Airo" : "Start Airo"}
+              </button>
+            </>
+          ) : null}
           <button type="button" onClick={undoLastAction}>
             Undo
           </button>
@@ -5057,7 +5147,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
               </button>
             </div>
           ) : null}
-          {voiceGate ? (
+          {!usesHostMeetingMedia && voiceGate ? (
             <div
               className={`voice-gate-pill ${speechArmed ? "armed" : "unarmed"}`}
               role="status"
@@ -5073,7 +5163,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
                   : `Holding “${voiceGate.label}” — press Start Airo once to enable voice edits`}
             </div>
           ) : null}
-          {onboardingVisible && inputMode === "gesture" ? (
+          {!usesHostMeetingMedia && onboardingVisible && inputMode === "gesture" ? (
             <div className="onboarding-overlay" role="dialog" aria-label="How to use Airboard">
               <div className="onboarding-card">
                 <h2>Talk to the board, not to software</h2>
@@ -5226,11 +5316,13 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
               />
             </svg>
           ) : null}
-          {cameraStatus !== "idle" ? (
-            <video ref={videoRef} className="camera-preview" muted playsInline />
-          ) : (
-            <video ref={videoRef} className="camera-preview hidden" muted playsInline />
-          )}
+          {!usesHostMeetingMedia ? (
+            cameraStatus !== "idle" ? (
+              <video ref={videoRef} className="camera-preview" muted playsInline />
+            ) : (
+              <video ref={videoRef} className="camera-preview hidden" muted playsInline />
+            )
+          ) : null}
           {showFloatingLabelEditor && floatingLabelStyle ? (
             <div className="floating-label-editor" style={floatingLabelStyle}>
               <label htmlFor="floating-annotation-label">Say or type label</label>
@@ -5303,7 +5395,8 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
               <p className="intent-feedback" aria-live="polite">
                 {commandFeedback}
               </p>
-              {speechArmed || speechHeardText || speechRecognitionStatus === "error" ? (
+              {!usesHostMeetingMedia &&
+              (speechArmed || speechHeardText || speechRecognitionStatus === "error") ? (
                 <p
                   className={`voice-heard ${speechRecognitionStatus}`}
                   data-testid="voice-heard"
@@ -5321,10 +5414,14 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
           <section className="section">
             <h2>Status</h2>
             <div className="status-grid">
-              <span>Camera</span>
-              <strong className={cameraStatus === "active" ? "pill" : "pill warning"}>
-                {cameraStatusLabel(cameraStatus)}
-              </strong>
+              {!usesHostMeetingMedia ? (
+                <>
+                  <span>Camera</span>
+                  <strong className={cameraStatus === "active" ? "pill" : "pill warning"}>
+                    {cameraStatusLabel(cameraStatus)}
+                  </strong>
+                </>
+              ) : null}
               <span>Input</span>
               <strong>{inputModeLabel}</strong>
               <span>Touchpad</span>
@@ -5351,14 +5448,18 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
                           ? "waiting for Airo"
                           : "ready"}
                   </strong>
-                  <span>Voice</span>
-                  <strong className="pill">
-                    {speechArmed ? (speechListening ? "listening" : "connecting") : "off"}
-                  </strong>
-                  <span>Voice engine</span>
-                  <strong>{voiceEngineLabel}</strong>
-                  <span>Voice model</span>
-                  <strong>{activeVoiceModel ?? "-"}</strong>
+                  {!usesHostMeetingMedia ? (
+                    <>
+                      <span>Voice</span>
+                      <strong className="pill">
+                        {speechArmed ? (speechListening ? "listening" : "connecting") : "off"}
+                      </strong>
+                      <span>Voice engine</span>
+                      <strong>{voiceEngineLabel}</strong>
+                      <span>Voice model</span>
+                      <strong>{activeVoiceModel ?? "-"}</strong>
+                    </>
+                  ) : null}
                   <span>Intent AI</span>
                   <strong>
                     {semanticIntentConfig?.available
@@ -5367,7 +5468,7 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
                   </strong>
                 </>
               ) : null}
-              {inputMode === "gesture" ? (
+              {!usesHostMeetingMedia && inputMode === "gesture" ? (
                 <>
                   <span>Hand cursor</span>
                   <strong className="pill">{handControlDiagnostics.controllerState}</strong>
@@ -5379,11 +5480,17 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
                   <strong>{gestureResult?.hand ?? "either"}</strong>
                 </>
               ) : null}
-              <span>Hands detected</span>
-              <strong>{stats.handsDetected}</strong>
+              {!usesHostMeetingMedia ? (
+                <>
+                  <span>Hands detected</span>
+                  <strong>{stats.handsDetected}</strong>
+                </>
+              ) : null}
             </div>
-            {cameraError ? <p className="hint">{cameraError}</p> : null}
-            {inputMode === "gesture" ? <p className="hint">{handControlCoach}</p> : null}
+            {!usesHostMeetingMedia && cameraError ? <p className="hint">{cameraError}</p> : null}
+            {!usesHostMeetingMedia && inputMode === "gesture" ? (
+              <p className="hint">{handControlCoach}</p>
+            ) : null}
           </section>
 
           <section className="section">
@@ -5514,7 +5621,25 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
             ) : (
               <>
                 {inputMode === "gesture" ? (
-                  <>
+                  usesHostMeetingMedia ? (
+                    <>
+                      <p className="hint">
+                        Type a command or use pointer, keyboard, and direct canvas controls.
+                        Google Meet owns camera and microphone access; Airboard does not request
+                        separate media permissions in this surface.
+                      </p>
+                      <label className="check-row" htmlFor="auto-snap-connectors">
+                        <input
+                          id="auto-snap-connectors"
+                          type="checkbox"
+                          checked={autoSnapConnectors}
+                          onChange={(event) => setAutoSnapConnectors(event.target.checked)}
+                        />
+                        <span>Object, grid, and connector snapping</span>
+                      </label>
+                    </>
+                  ) : (
+                    <>
                     <p className="hint">
                       Start Airo once. Then raise a flat palm and speak (no wake word), hold an
                       element still to voice-edit it, or say “Airo, …” hands-free. Open hand
@@ -5616,23 +5741,26 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
                         {landmarkRecordingActive ? "Recording…" : "Record 5s landmark trace"}
                       </button>
                     </div>
-                    </details>
-                  </>
+                      </details>
+                    </>
+                  )
                 ) : null}
               </>
             )}
-            <label className="check-row" htmlFor="debug-visible">
-              <input
-                id="debug-visible"
-                type="checkbox"
-                checked={debugVisible}
-                onChange={(event) => setDebugVisible(event.target.checked)}
-              />
-              <span>Debug</span>
-            </label>
+            {!usesHostMeetingMedia ? (
+              <label className="check-row" htmlFor="debug-visible">
+                <input
+                  id="debug-visible"
+                  type="checkbox"
+                  checked={debugVisible}
+                  onChange={(event) => setDebugVisible(event.target.checked)}
+                />
+                <span>Debug</span>
+              </label>
+            ) : null}
           </section>
 
-          {debugVisible ? (
+          {!usesHostMeetingMedia && debugVisible ? (
             <section className="section">
               <h2>Friction Debug</h2>
               <div className="status-grid">
@@ -5678,7 +5806,13 @@ export function AirboardPrototype({ surface }: { surface: Surface }) {
 
           <section className="section">
             <h2>Shortcuts</h2>
-            {inputMode === "touchpad" ? (
+            {usesHostMeetingMedia ? (
+              <p className="hint">
+                Type commands in the Command field, drag shapes from the catalogs, Shift-click
+                to multi-select, and press Cmd/Ctrl+Z to undo. Use Google Meet&apos;s controls for
+                camera and microphone.
+              </p>
+            ) : inputMode === "touchpad" ? (
               <p className="hint">
                 Press and drag to draw. Hold E to erase. Hold Shift while drawing for a straight
                 line. Cmd/Ctrl+Z undoes the last local action.
