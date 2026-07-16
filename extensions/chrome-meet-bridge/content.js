@@ -31,8 +31,12 @@ const MAX_IN_FLIGHT = 2;
 
 /** @type {{sourceWin: MessageEventSource, origin: string, stream: MediaStream, video: HTMLVideoElement, inFlight: number, nextId: number, stopped: boolean} | null} */
 let active = null;
-/** @type {{sourceWin: MessageEventSource, origin: string, stream: MediaStream, context: AudioContext, nodes: AudioNode[], stopped: boolean} | null} */
+/** @type {{sourceWin: MessageEventSource, origin: string, stream: MediaStream, reader: ReadableStreamDefaultReader | null, stopped: boolean} | null} */
 let activeAudio = null;
+
+// ~85ms of audio per message at 48kHz; batches the small AudioData frames
+// MediaStreamTrackProcessor yields so postMessage traffic stays low.
+const AUDIO_BATCH_SAMPLES = 4096;
 
 function makeMessage(type, fields) {
   return Object.assign({ bridge: MARKER, v: VERSION, type }, fields);
@@ -67,15 +71,10 @@ function stopActiveAudio(reason, notifyFrame) {
   }
   session.stopped = true;
   activeAudio = null;
-  session.nodes.forEach((node) => {
-    try {
-      node.disconnect();
-    } catch {
-      // Already torn down.
-    }
-  });
+  if (session.reader) {
+    session.reader.cancel().catch(() => {});
+  }
   session.stream.getTracks().forEach((track) => track.stop());
-  session.context.close().catch(() => {});
   if (notifyFrame) {
     post(session.sourceWin, session.origin, makeMessage("ended", { reason, channel: "audio" }));
   }
@@ -89,6 +88,15 @@ async function startAudio(sourceWin, origin) {
       post(sourceWin, origin, makeMessage("error", { message: "busy", channel: "audio" }));
       return;
     }
+  }
+
+  if (typeof MediaStreamTrackProcessor !== "function") {
+    post(
+      sourceWin,
+      origin,
+      makeMessage("error", { message: "audio-capture-unsupported", channel: "audio" }),
+    );
+    return;
   }
 
   let stream;
@@ -107,55 +115,78 @@ async function startAudio(sourceWin, origin) {
     return;
   }
 
-  const context = new AudioContext();
-  const source = context.createMediaStreamSource(stream);
-  // ScriptProcessor avoids loading worklet modules under Meet's CSP. The
-  // zero-gain sink keeps it firing without feeding audio to the speakers.
-  const processor = context.createScriptProcessor(4096, 1, 1);
-  const silence = context.createGain();
-  silence.gain.value = 0;
+  const [track] = stream.getAudioTracks();
+  if (!track) {
+    stream.getTracks().forEach((t) => t.stop());
+    post(sourceWin, origin, makeMessage("error", { message: "no-audio-track", channel: "audio" }));
+    return;
+  }
 
-  const session = {
-    sourceWin,
-    origin,
-    stream,
-    context,
-    nodes: [source, processor, silence],
-    stopped: false,
-  };
+  // MediaStreamTrackProcessor reads PCM straight off the track — no
+  // AudioContext, no deprecated ScriptProcessor, no worklet module to load
+  // under Meet's CSP.
+  const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
+  const session = { sourceWin, origin, stream, reader, stopped: false };
   activeAudio = session;
   let seq = 1;
+  let pending = [];
+  let pendingSamples = 0;
+  let sampleRate = 0;
 
-  processor.onaudioprocess = (event) => {
-    if (session.stopped) {
+  const flush = () => {
+    if (pendingSamples === 0 || sampleRate === 0) {
       return;
     }
-    const input = event.inputBuffer.getChannelData(0);
-    const copy = new Float32Array(input.length);
-    copy.set(input);
+    const merged = new Float32Array(pendingSamples);
+    let offset = 0;
+    for (const part of pending) {
+      merged.set(part, offset);
+      offset += part.length;
+    }
+    pending = [];
+    pendingSamples = 0;
     post(
       session.sourceWin,
       session.origin,
-      makeMessage("audio-chunk", {
-        seq: seq++,
-        sampleRate: context.sampleRate,
-        samples: copy.buffer,
-      }),
-      [copy.buffer],
+      makeMessage("audio-chunk", { seq: seq++, sampleRate, samples: merged.buffer }),
+      [merged.buffer],
     );
   };
-  source.connect(processor);
-  processor.connect(silence);
-  silence.connect(context.destination);
 
-  const [track] = stream.getAudioTracks();
-  if (track) {
-    track.addEventListener("ended", () => {
-      if (activeAudio === session) {
-        stopActiveAudio("microphone-ended", true);
+  (async () => {
+    try {
+      while (!session.stopped) {
+        const { value, done } = await reader.read();
+        if (done || session.stopped) {
+          if (value) {
+            value.close();
+          }
+          break;
+        }
+        sampleRate = value.sampleRate;
+        const samples = new Float32Array(value.numberOfFrames);
+        value.copyTo(samples, { planeIndex: 0, format: "f32-planar" });
+        value.close();
+        pending.push(samples);
+        pendingSamples += samples.length;
+        if (pendingSamples >= AUDIO_BATCH_SAMPLES) {
+          flush();
+        }
       }
-    });
-  }
+    } catch {
+      // Reader cancellation or track end; teardown below.
+    }
+    flush();
+    if (activeAudio === session) {
+      stopActiveAudio("microphone-ended", true);
+    }
+  })();
+
+  track.addEventListener("ended", () => {
+    if (activeAudio === session) {
+      stopActiveAudio("microphone-ended", true);
+    }
+  });
 }
 
 async function startVideo(sourceWin, origin, request) {

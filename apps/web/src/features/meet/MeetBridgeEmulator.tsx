@@ -19,9 +19,19 @@ type ActiveSession = {
 
 type ActiveAudioSession = {
   stream: MediaStream;
-  context: AudioContext;
-  nodes: AudioNode[];
+  reader: ReadableStreamDefaultReader<AudioDataLike> | null;
   stopped: boolean;
+};
+
+// Chrome-only WebCodecs APIs not yet in lib.dom; minimal shapes used here.
+type AudioDataLike = {
+  sampleRate: number;
+  numberOfFrames: number;
+  copyTo(destination: Float32Array, options: { planeIndex: number; format: string }): void;
+  close(): void;
+};
+type MediaStreamTrackProcessorCtor = new (init: { track: MediaStreamTrack }) => {
+  readable: ReadableStream<AudioDataLike>;
 };
 
 /**
@@ -68,15 +78,8 @@ export function MeetBridgeEmulator() {
       }
       session.stopped = true;
       activeAudio = null;
-      session.nodes.forEach((node) => {
-        try {
-          node.disconnect();
-        } catch {
-          // Already torn down.
-        }
-      });
+      void session.reader?.cancel().catch(() => {});
       session.stream.getTracks().forEach((track) => track.stop());
-      void session.context.close().catch(() => {});
       if (notify) {
         post({ type: "ended", reason, channel: "audio" });
       }
@@ -84,6 +87,13 @@ export function MeetBridgeEmulator() {
 
     const startAudio = async () => {
       stopActiveAudio("restarted", false);
+      const Processor = (
+        window as { MediaStreamTrackProcessor?: MediaStreamTrackProcessorCtor }
+      ).MediaStreamTrackProcessor;
+      if (!Processor) {
+        post({ type: "error", message: "audio-capture-unsupported", channel: "audio" });
+        return;
+      }
       let stream: MediaStream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -95,34 +105,36 @@ export function MeetBridgeEmulator() {
         });
         return;
       }
-      const context = new AudioContext();
-      const source = context.createMediaStreamSource(stream);
-      const processor = context.createScriptProcessor(4096, 1, 1);
-      const silence = context.createGain();
-      silence.gain.value = 0;
-      const session: ActiveAudioSession = {
-        stream,
-        context,
-        nodes: [source, processor, silence],
-        stopped: false,
-      };
+      const [track] = stream.getAudioTracks();
+      if (!track) {
+        stream.getTracks().forEach((t) => t.stop());
+        post({ type: "error", message: "no-audio-track", channel: "audio" });
+        return;
+      }
+      const reader = new Processor({ track }).readable.getReader();
+      const session: ActiveAudioSession = { stream, reader, stopped: false };
       activeAudio = session;
       let seq = 1;
-      processor.onaudioprocess = (event) => {
-        if (session.stopped) {
-          return;
+      void (async () => {
+        try {
+          while (!session.stopped) {
+            const { value, done } = await reader.read();
+            if (done || session.stopped) {
+              value?.close();
+              break;
+            }
+            const samples = new Float32Array(value.numberOfFrames);
+            value.copyTo(samples, { planeIndex: 0, format: "f32-planar" });
+            const sampleRate = value.sampleRate;
+            value.close();
+            post({ type: "audio-chunk", seq: seq++, sampleRate, samples: samples.buffer }, [
+              samples.buffer,
+            ]);
+          }
+        } catch {
+          // Reader cancelled; teardown handled by stopActiveAudio.
         }
-        const input = event.inputBuffer.getChannelData(0);
-        const copy = new Float32Array(input.length);
-        copy.set(input);
-        post(
-          { type: "audio-chunk", seq: seq++, sampleRate: context.sampleRate, samples: copy.buffer },
-          [copy.buffer],
-        );
-      };
-      source.connect(processor);
-      processor.connect(silence);
-      silence.connect(context.destination);
+      })();
     };
 
     const startVideo = async (maxWidthRaw: unknown) => {
