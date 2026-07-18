@@ -66,7 +66,7 @@ Existing building blocks: the MediaPipe hand pipeline (AR mode *simplifies* coor
    - Overlay channel (reverse of the capture bridge): the main-stage board streams ~15fps downscaled transparent ImageBitmaps with the scrim value; ack-backpressured; leaving the surface disarms the compositor so a stale overlay can never ride the camera.
    - UI: "Lightboard on my camera" toggle on the Meet main stage (auto-switches to the neon theme) with engaged/pending status — enabling mid-meeting requires one Meet camera off/on cycle since Meet acquires the camera before the add-on opens.
    - Verified: protocol unit tests (state, in-flight cap, ack, stop) and an emulated-compositor Playwright journey (toggle → theme flip → frames counted → disarm). Deployed: pilot web revision `airboard-pilot-web-00009-zvc` (image `lightboard-step4-f294a52`, Cloud Build `2dd3ae8a`), overlay channel confirmed in the served bundle. The real composite onto the outgoing tile needs a real meeting with extension 0.3.0 (reload the unpacked extension).
-   - Known limit: Meet mirrors the presenter's own tile, so baked overlay text reads reversed to the presenter alone; remote participants read it correctly.
+   - Mirroring solved (2026-07-18, extension 0.4.0): the compositor transmits the mirror-space canonical frame (mirrored camera under the overlay — hands align with shapes, text audience-correct) and counter-flips the presenter's own Meet tile by output-track identity, so presenter, remote participants, recordings, and tab-shares all see one identical, correct-reading frame.
 5. Zoom Camera Mode pilot → concrete PF-004 goal.
 6. Teams filter-app spike, else virtual camera → PF-003 alignment; D is also the universal streaming/recording end-state.
 

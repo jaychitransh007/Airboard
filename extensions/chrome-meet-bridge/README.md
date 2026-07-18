@@ -36,8 +36,16 @@ meet.google.com localStorage because Meet acquires the camera before the
 add-on opens — enabling mid-meeting takes one Meet camera off/on cycle. When
 off, `getUserMedia` returns Meet's original stream untouched. Overlay frames
 come only from allowlisted Airboard origins; leaving the main stage disarms
-the compositor. Note: Meet mirrors your own tile, so overlay text reads
-reversed to you alone — remote participants see it correctly.
+the compositor.
+
+Mirroring: gestures and board content are authored in mirror space (selfie
+mapping), so the compositor transmits the mirrored camera under the overlay —
+one canonical frame in which hands align with the shapes they touch and text
+reads correctly for every viewer. Because Meet force-mirrors the presenter's
+own tile, the compositor also finds the tile carrying its own output track
+(track-identity matching, not Meet CSS selectors) and neutralizes the flip
+while the overlay is active, so the presenter sees the exact transmitted
+frame too. Fallback if Meet's DOM changes: minimize the self-view.
 
 ## Install for the pilot (unpacked)
 

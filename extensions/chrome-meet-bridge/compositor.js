@@ -48,6 +48,88 @@
   let overlayClient = null;
   /** @type {Array<{stop(): void}>} */
   const pipelines = [];
+  /** Track ids of composited output video, for self-view identification. */
+  const outputTrackIds = new Set();
+  /** @type {ReturnType<typeof setInterval> | null} */
+  let selfViewTimer = null;
+
+  // --- Self-view counter-flip ---------------------------------------------
+  // Meet force-mirrors the presenter's own tile, which would show the baked
+  // overlay text backwards to the presenter alone. The tile that carries OUR
+  // output track is found by track identity (robust to Meet DOM changes) and
+  // its net horizontal flip is neutralized while the overlay is active, so
+  // the presenter sees the exact transmitted frame.
+
+  function netFlippedX(element) {
+    let flipped = false;
+    let node = element;
+    while (node && node.nodeType === 1) {
+      const transform = getComputedStyle(node).transform;
+      if (transform && transform !== "none") {
+        try {
+          if (new DOMMatrixReadOnly(transform).a < 0) {
+            flipped = !flipped;
+          }
+        } catch {
+          // Unparseable transform; ignore.
+        }
+      }
+      node = node.parentElement;
+    }
+    return flipped;
+  }
+
+  function isOurOutputVideo(video) {
+    const stream = video.srcObject;
+    if (!stream || typeof stream.getVideoTracks !== "function") {
+      return false;
+    }
+    try {
+      return stream.getVideoTracks().some((track) => outputTrackIds.has(track.id));
+    } catch {
+      return false;
+    }
+  }
+
+  function syncSelfViewMirror() {
+    const videos = document.querySelectorAll("video");
+    for (const video of videos) {
+      const marked = video.dataset.airboardUnmirrored === "1";
+      if (!isOurOutputVideo(video)) {
+        if (marked) {
+          video.style.transform = "";
+          delete video.dataset.airboardUnmirrored;
+        }
+        continue;
+      }
+      // Measure Meet's own net flip with our correction removed, then apply
+      // or clear the counter-flip in the same synchronous block (no flicker).
+      const previous = video.style.transform;
+      video.style.transform = "";
+      const flippedByMeet = netFlippedX(video);
+      if (overlay.active && flippedByMeet) {
+        video.style.transform = "scaleX(-1)";
+        video.dataset.airboardUnmirrored = "1";
+      } else {
+        if (!marked && previous) {
+          video.style.transform = previous;
+        } else {
+          delete video.dataset.airboardUnmirrored;
+        }
+      }
+    }
+  }
+
+  function updateSelfViewWatcher() {
+    const shouldRun = pipelines.length > 0;
+    if (shouldRun && selfViewTimer === null) {
+      selfViewTimer = setInterval(syncSelfViewMirror, 1000);
+    } else if (!shouldRun && selfViewTimer !== null) {
+      clearInterval(selfViewTimer);
+      selfViewTimer = null;
+      syncSelfViewMirror();
+    }
+  }
 
   function isArmed() {
     try {
@@ -113,8 +195,16 @@
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
         }
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
         if (overlay.active) {
+          // Lightboard production frame: gestures and board content are
+          // authored in mirror space (selfie mapping), so the camera is
+          // mirrored to match — hands align with the shapes they touch and
+          // overlay text reads correctly for every viewer.
+          context.save();
+          context.translate(canvas.width, 0);
+          context.scale(-1, 1);
+          context.drawImage(video, 0, 0, canvas.width, canvas.height);
+          context.restore();
           if (overlay.scrim > 0) {
             context.fillStyle = `rgba(5, 8, 12, ${overlay.scrim})`;
             context.fillRect(0, 0, canvas.width, canvas.height);
@@ -122,6 +212,8 @@
           if (overlay.bitmap) {
             context.drawImage(overlay.bitmap, 0, 0, canvas.width, canvas.height);
           }
+        } else {
+          context.drawImage(video, 0, 0, canvas.width, canvas.height);
         }
       }
       video.requestVideoFrameCallback(draw);
@@ -135,6 +227,7 @@
       output.addTrack(audioTrack);
     }
 
+    let outputTrackId = null;
     const pipeline = {
       stop() {
         if (stopped) {
@@ -143,10 +236,14 @@
         stopped = true;
         sourceTrack.stop();
         video.srcObject = null;
+        if (outputTrackId) {
+          outputTrackIds.delete(outputTrackId);
+        }
         const index = pipelines.indexOf(pipeline);
         if (index >= 0) {
           pipelines.splice(index, 1);
         }
+        updateSelfViewWatcher();
         sendState();
       },
     };
@@ -157,12 +254,15 @@
     // the real camera ending must end the composited track.
     const outputTrack = output.getVideoTracks()[0];
     if (outputTrack) {
+      outputTrackId = outputTrack.id;
+      outputTrackIds.add(outputTrackId);
       const originalStop = outputTrack.stop.bind(outputTrack);
       outputTrack.stop = () => {
         pipeline.stop();
         originalStop();
       };
     }
+    updateSelfViewWatcher();
     sourceTrack.addEventListener("ended", () => {
       pipeline.stop();
       if (outputTrack) {
@@ -209,6 +309,7 @@
       setArmed(true);
       overlay.active = true;
       overlay.inFlight = 0;
+      syncSelfViewMirror();
       sendState();
       return;
     }
@@ -235,6 +336,7 @@
         overlay.bitmap.close();
         overlay.bitmap = null;
       }
+      syncSelfViewMirror();
       sendState();
     }
   });

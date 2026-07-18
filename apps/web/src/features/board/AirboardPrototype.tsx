@@ -5987,8 +5987,8 @@ export function AirboardPrototype({
                 ) : null}
                 {cameraOverlayEnabled && cameraOverlayState?.engaged ? (
                   <p className="hint" data-testid="camera-overlay-live">
-                    Everyone now sees the lightboard on your camera tile. Meet mirrors only
-                    your own view, so text reads reversed to you alone.
+                    Everyone — including your own tile — now sees the same correct-reading
+                    lightboard on your camera.
                   </p>
                 ) : null}
               </>
