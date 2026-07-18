@@ -124,6 +124,30 @@ test("studio records the composite to a local webm download", async ({ page }) =
   await expect(page.getByTestId("recording-badge")).toHaveCount(0);
 });
 
+test("presenting mode strips chrome, keeps typed input, and exits on Escape", async ({
+  page,
+}) => {
+  await openStandalone(page);
+  await page.getByLabel("Lightboard (neon) theme").check();
+  await page.getByTestId("present-toggle").click();
+
+  // The stage is clean: no toolbar, sidebar, or catalog — just the board.
+  await expect(page.locator("header.topbar")).not.toBeVisible();
+  await expect(page.locator("aside.sidebar")).not.toBeVisible();
+  await expect(page.locator(".catalog-dock")).not.toBeVisible();
+  await expect(page.getByTestId("present-exit")).toBeVisible();
+
+  // Typed commands stay reachable through the floating dock — no dead end.
+  const input = page.getByTestId("present-command-input");
+  await input.fill("add a circle here");
+  await page.getByTestId("present-command-run").click();
+  await expect(page.locator(".present-feedback")).toContainText("Applied:", { timeout: 15_000 });
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator("header.topbar")).toBeVisible();
+  await expect(page.getByTestId("present-exit")).toHaveCount(0);
+});
+
 test("theme choice survives a reload", async ({ page }) => {
   await openStandalone(page);
   await page.getByLabel("Lightboard (neon) theme").check();

@@ -861,6 +861,68 @@ button:disabled {
   background: transparent;
 }
 
+.airboard-shell.presenting .topbar,
+.airboard-shell.presenting .sidebar,
+.airboard-shell.presenting .catalog-dock {
+  display: none;
+}
+
+.airboard-shell.presenting .content {
+  grid-template-columns: 1fr;
+}
+
+.airboard-shell.presenting .board-area {
+  padding: 0;
+}
+
+.airboard-shell.presenting .board-canvas {
+  border: none;
+  border-radius: 0;
+}
+
+.present-exit {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 5;
+  padding: 6px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 999px;
+  background: rgba(10, 12, 16, 0.72);
+  color: #cbd5e1;
+  font-size: 12px;
+  opacity: 0.45;
+  transition: opacity 120ms ease;
+}
+
+.present-exit:hover,
+.present-exit:focus-visible {
+  opacity: 1;
+}
+
+.present-command-dock {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: grid;
+  gap: 6px;
+  width: min(560px, calc(100% - 48px));
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 14px;
+  background: rgba(8, 10, 14, 0.78);
+  backdrop-filter: blur(6px);
+}
+
+.present-feedback {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 12px;
+  text-align: center;
+}
+
 .recording-badge {
   position: absolute;
   top: 22px;

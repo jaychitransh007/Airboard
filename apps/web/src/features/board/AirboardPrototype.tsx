@@ -581,6 +581,8 @@ export function AirboardPrototype({
   const underlayVideoRef = useRef<HTMLVideoElement | null>(null);
   // Studio recording. Refs mirror theme/scrim so the recorder's per-frame
   // compositor reads current values without re-starting on every change.
+  // Presenting: a clean stage for tab-sharing — chrome hidden, board full-bleed.
+  const [presenting, setPresenting] = useState(false);
   const [recordingState, setRecordingState] = useState<"idle" | "recording">("idle");
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [recordingNotice, setRecordingNotice] = useState<string | null>(null);
@@ -842,6 +844,20 @@ export function AirboardPrototype({
     boardThemeRef.current = boardTheme;
     scrimOpacityRef.current = scrimOpacity;
   }, [boardTheme, scrimOpacity]);
+
+  // Escape leaves presenting mode unless a command preview owns the key.
+  useEffect(() => {
+    if (!presenting) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !pendingIntentRef.current) {
+        setPresenting(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [presenting]);
 
   // Stop an in-flight recording if the board unmounts.
   useEffect(() => {
@@ -5233,7 +5249,11 @@ export function AirboardPrototype({
   }
 
   return (
-    <main className={`airboard-shell${isMeetSurface ? " airboard-meet-embedded" : ""}`}>
+    <main
+      className={`airboard-shell${isMeetSurface ? " airboard-meet-embedded" : ""}${
+        presenting ? " presenting" : ""
+      }`}
+    >
       <header className="topbar">
         <div className="brand">
           <h1>Airboard</h1>
@@ -5275,6 +5295,16 @@ export function AirboardPrototype({
               aria-label={speechArmed ? "Stop Airo listening" : "Start Airo listening"}
             >
               {speechArmed ? "Stop Airo" : "Start Airo"}
+            </button>
+          ) : null}
+          {surface === "standalone" ? (
+            <button
+              type="button"
+              data-testid="present-toggle"
+              title="Hide the app chrome for tab-sharing or a clean stage (Esc exits)"
+              onClick={() => setPresenting(true)}
+            >
+              Present
             </button>
           ) : null}
           <button type="button" onClick={undoLastAction}>
@@ -5325,6 +5355,60 @@ export function AirboardPrototype({
               <span className="recording-dot" aria-hidden="true" />
               REC {formatRecordingClock(recordingSeconds)}
             </div>
+          ) : null}
+          {presenting ? (
+            <>
+              <button
+                type="button"
+                className="present-exit"
+                data-testid="present-exit"
+                title="Exit presenting (Esc)"
+                onClick={() => setPresenting(false)}
+              >
+                Exit presenting
+              </button>
+              <div className="present-command-dock">
+                <form
+                  className="intent-command-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    if (speechRecognitionStatus !== "interpreting") {
+                      runIntentCommand(intentCommandText);
+                    }
+                  }}
+                >
+                  <input
+                    data-testid="present-command-input"
+                    type="text"
+                    value={intentCommandText}
+                    onChange={(event) => {
+                      semanticIntentRequestIdRef.current += 1;
+                      if (speechRecognitionStatus === "interpreting") {
+                        setSpeechRecognitionStatus(speechSessionRef.current ? "waiting" : "idle");
+                      }
+                      setIntentCommandText(event.target.value);
+                    }}
+                    placeholder="Type a command — or gesture and speak"
+                    aria-label="Typed board command while presenting"
+                  />
+                  <button
+                    className="primary"
+                    data-testid="present-command-run"
+                    type="submit"
+                    disabled={
+                      !intentCommandText.trim() || speechRecognitionStatus === "interpreting"
+                    }
+                  >
+                    {speechRecognitionStatus === "interpreting" ? "…" : "Run"}
+                  </button>
+                </form>
+                {commandFeedback ? (
+                  <p className="present-feedback" aria-live="polite">
+                    {commandFeedback}
+                  </p>
+                ) : null}
+              </div>
+            </>
           ) : null}
           {inputMode === "gesture" ? (
             <div ref={dockRef} className="object-dock catalog-dock" role="toolbar" aria-label="Shape catalog">
