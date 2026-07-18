@@ -26,6 +26,19 @@ inside Airboard**.
   the Airboard API, exactly as on the standalone surface). The bridge itself
   stores and uploads nothing.
 
+## Camera compositor (lightboard on your tile)
+
+`compositor.js` (MAIN world, document_start) can composite the Airboard neon
+board onto your outgoing Meet camera so every participant sees you behind the
+glowing glass with no tab-sharing. It is inert until the "Lightboard on my
+camera" toggle in the Airboard main stage arms it; arming persists in
+meet.google.com localStorage because Meet acquires the camera before the
+add-on opens — enabling mid-meeting takes one Meet camera off/on cycle. When
+off, `getUserMedia` returns Meet's original stream untouched. Overlay frames
+come only from allowlisted Airboard origins; leaving the main stage disarms
+the compositor. Note: Meet mirrors your own tile, so overlay text reads
+reversed to you alone — remote participants see it correctly.
+
 ## Install for the pilot (unpacked)
 
 1. Open `chrome://extensions`.

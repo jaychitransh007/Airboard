@@ -1,6 +1,6 @@
 # Lightboard Mode — Feasibility and Design Directions
 
-> **Status:** Steps 1–3 implemented (2026-07-18) — neon theme, camera underlay, scrim dial, studio recorder, and presenting mode live on the standalone surface; steps 4–6 remain proposals. Not part of the public-beta plan.
+> **Status:** Steps 1–4 implemented (2026-07-18) — neon theme, camera underlay, scrim dial, studio recorder, and presenting mode live on the standalone surface; steps 4–6 remain proposals. Not part of the public-beta plan.
 > **Date:** 2026-07-17
 > **Context:** Inspired by physical lightboard videos (presenter behind glass, neon marker strokes on black). Goal: Airboard delivers that experience digitally — gesture/voice-built neon diagrams composited over the presenter's own camera video, visible to other meeting participants — without the glass, the darkroom, or the mirror rig.
 > **Relationship to the beta checklist:** This is not beta work. If adopted, the Zoom and Teams paths below become concrete goals inside PF-004 and PF-003 respectively; the Meet path extends the existing Media Bridge extension; everything else is standalone product work.
@@ -61,7 +61,12 @@ Existing building blocks: the MediaPipe hand pipeline (AR mode *simplifies* coor
 3. **[DONE 2026-07-18]** Screenshare presenting mode → use case 1 usable in Meet immediately.
    - A Present toggle (standalone toolbar) strips the topbar, sidebar, and catalog to a full-bleed stage for "Present a tab"; a translucent floating dock keeps typed commands and Airo feedback reachable (no dead end), Escape or the corner button exits, and the REC badge stays visible while recording.
    - Verified by a Playwright journey: chrome hidden, typed command applied through the floating dock, Escape restores the app.
-4. Extension camera compositor → Meet camera-tile magic.
+4. **[DONE 2026-07-18, real-meeting verification pending]** Extension camera compositor → Meet camera-tile magic.
+   - Extension gains a MAIN-world `compositor.js` (document_start): wraps meet.google.com's `getUserMedia`; when armed (localStorage, set only by an allowlisted Airboard frame), Meet receives a composited stream — camera frames + scrim + the transparent neon overlay — via a canvas capture pipeline with clean track-stop propagation. Off = pure passthrough (original stream untouched).
+   - Overlay channel (reverse of the capture bridge): the main-stage board streams ~15fps downscaled transparent ImageBitmaps with the scrim value; ack-backpressured; leaving the surface disarms the compositor so a stale overlay can never ride the camera.
+   - UI: "Lightboard on my camera" toggle on the Meet main stage (auto-switches to the neon theme) with engaged/pending status — enabling mid-meeting requires one Meet camera off/on cycle since Meet acquires the camera before the add-on opens.
+   - Verified: protocol unit tests (state, in-flight cap, ack, stop) and an emulated-compositor Playwright journey (toggle → theme flip → frames counted → disarm). The real composite onto the outgoing tile needs a real meeting with extension 0.3.0.
+   - Known limit: Meet mirrors the presenter's own tile, so baked overlay text reads reversed to the presenter alone; remote participants read it correctly.
 5. Zoom Camera Mode pilot → concrete PF-004 goal.
 6. Teams filter-app spike, else virtual camera → PF-003 alignment; D is also the universal streaming/recording end-state.
 

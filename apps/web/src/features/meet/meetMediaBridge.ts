@@ -39,7 +39,7 @@ export type MeetMediaBridgeEnv = {
   /** Subscribes to message events; returns an unsubscribe function. */
   listen: (handler: (event: MeetMediaBridgeEvent) => void) => () => void;
   /** Posts a message to the host (top) window. */
-  postToHost: (message: BridgeMessage) => void;
+  postToHost: (message: BridgeMessage, transfer?: Transferable[]) => void;
   /** The only window object accepted as a message source. */
   hostWindow: unknown;
   /** The only origins accepted for host messages. */
@@ -346,12 +346,145 @@ export function probeMeetMediaBridgeInWindow(): Promise<MeetMediaBridge | null> 
       window.addEventListener("message", domHandler);
       return () => window.removeEventListener("message", domHandler);
     },
-    postToHost: (message) => {
+    postToHost: (message, transfer) => {
       // The hello/start payloads carry no sensitive data; responses are
       // validated against hostWindow + allowedOrigins on receipt.
-      hostWindow.postMessage(message, "*");
+      hostWindow.postMessage(message, "*", transfer ?? []);
     },
     hostWindow,
     allowedOrigins,
   });
+}
+
+/**
+ * Camera-overlay channel: the inverse of the capture bridge. The add-on frame
+ * streams transparent neon board frames to the extension's MAIN-world
+ * compositor, which blends them onto the presenter's outgoing Meet camera.
+ */
+export type MeetCameraOverlayState = { armed: boolean; engaged: boolean };
+
+export type MeetCameraOverlay = {
+  /** Arms the compositor and begins accepting frames. */
+  start(): void;
+  /** Disarms the compositor; the camera returns to passthrough. */
+  stop(): void;
+  /**
+   * Sends one overlay frame unless the in-flight cap is reached. Returns
+   * whether the bitmap was sent (and therefore transferred); the caller must
+   * close it when false.
+   */
+  trySendFrame(bitmap: ImageBitmap, scrim: number): boolean;
+  /** Unsubscribes; does not disarm the compositor. */
+  dispose(): void;
+};
+
+export function probeMeetCameraOverlay(
+  env: MeetMediaBridgeEnv,
+  onState: (state: MeetCameraOverlayState) => void,
+): Promise<MeetCameraOverlay | null> {
+  const attempts = env.helloAttempts ?? 8;
+  const intervalMs = env.helloIntervalMs ?? 500;
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let sent = 0;
+    let inFlight = 0;
+    let nextId = 1;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const unsubscribe = env.listen((event) => {
+      const message = parseHostMessage(event, env);
+      if (!message) {
+        return;
+      }
+      if (message.type === "overlay-state") {
+        onState({ armed: message.armed === true, engaged: message.engaged === true });
+        if (!settled) {
+          settled = true;
+          if (timer) {
+            clearTimeout(timer);
+          }
+          resolve(overlayHandle);
+        }
+        return;
+      }
+      if (message.type === "overlay-ack") {
+        inFlight = Math.max(0, inFlight - 1);
+      }
+    });
+
+    const overlayHandle: MeetCameraOverlay = {
+      start() {
+        env.postToHost(makeMessage("overlay-start"));
+      },
+      stop() {
+        env.postToHost(makeMessage("overlay-stop"));
+      },
+      trySendFrame(bitmap, scrim) {
+        if (inFlight >= 2) {
+          return false;
+        }
+        inFlight += 1;
+        env.postToHost(makeMessage("overlay-frame", { id: nextId++, scrim, bitmap }), [bitmap]);
+        return true;
+      },
+      dispose() {
+        unsubscribe();
+      },
+    };
+
+    const sendHello = () => {
+      if (settled) {
+        return;
+      }
+      if (sent >= attempts) {
+        settled = true;
+        unsubscribe();
+        resolve(null);
+        return;
+      }
+      sent += 1;
+      env.postToHost(makeMessage("overlay-hello"));
+      timer = setTimeout(sendHello, intervalMs);
+    };
+    sendHello();
+  });
+}
+
+/** Browser wrapper for the camera-overlay probe (Meet iframe or test hooks). */
+export function probeMeetCameraOverlayInWindow(
+  onState: (state: MeetCameraOverlayState) => void,
+): Promise<MeetCameraOverlay | null> {
+  if (typeof window === "undefined") {
+    return Promise.resolve(null);
+  }
+  const testHooks = process.env.NEXT_PUBLIC_AIRBOARD_TEST_HOOKS === "1";
+  let hostWindow: Window;
+  try {
+    hostWindow = window.top ?? window;
+  } catch {
+    return Promise.resolve(null);
+  }
+  if (hostWindow === window && !testHooks) {
+    return Promise.resolve(null);
+  }
+  const allowedOrigins = [
+    "https://meet.google.com",
+    ...(testHooks ? [window.location.origin] : []),
+  ];
+  return probeMeetCameraOverlay(
+    {
+      listen: (handler) => {
+        const domHandler = (event: MessageEvent) => handler(event);
+        window.addEventListener("message", domHandler);
+        return () => window.removeEventListener("message", domHandler);
+      },
+      postToHost: (message, transfer) => {
+        hostWindow.postMessage(message, "*", transfer ?? []);
+      },
+      hostWindow,
+      allowedOrigins,
+    },
+    onState,
+  );
 }

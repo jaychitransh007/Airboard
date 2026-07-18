@@ -1,13 +1,19 @@
 {
   "manifest_version": 3,
   "name": "Airboard Meet Media Bridge",
-  "version": "0.2.0",
-  "description": "Lets the Airboard add-on use this meeting's existing camera permission for gesture input. Capture starts only when you enable it inside Airboard and stops the moment you turn it off.",
+  "version": "0.3.0",
+  "description": "Lets the Airboard add-on use this meeting's existing camera permission for gesture input, and can composite the Airboard lightboard onto your outgoing camera. Everything starts only when you enable it inside Airboard.",
   "content_scripts": [
     {
       "matches": ["https://meet.google.com/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://meet.google.com/*"],
+      "js": ["compositor.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
     }
   ]
 }

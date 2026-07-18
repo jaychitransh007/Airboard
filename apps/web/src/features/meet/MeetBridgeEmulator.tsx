@@ -7,7 +7,15 @@ const VERSION = 1;
 const MAX_IN_FLIGHT = 2;
 // Host->frame message types; the emulator must ignore its own posts, since in
 // the harness both protocol sides share one window.
-const HOST_MESSAGE_TYPES = new Set(["ready", "frame", "audio-chunk", "ended", "error"]);
+const HOST_MESSAGE_TYPES = new Set([
+  "ready",
+  "frame",
+  "audio-chunk",
+  "ended",
+  "error",
+  "overlay-state",
+  "overlay-ack",
+]);
 
 type ActiveSession = {
   stream: MediaStream;
@@ -218,6 +226,35 @@ export function MeetBridgeEmulator() {
       }
       if (data.type === "stop-audio") {
         stopActiveAudio("stopped", false);
+        return;
+      }
+      // Camera-overlay compositor emulation: acks frames and mirrors state so
+      // e2e can assert the pump without a real Meet page. Counters land on
+      // window for assertions.
+      const testWindow = window as unknown as {
+        __overlayFrames?: number;
+        __overlayArmed?: boolean;
+      };
+      if (data.type === "overlay-hello") {
+        post({ type: "overlay-state", armed: testWindow.__overlayArmed === true, engaged: true });
+        return;
+      }
+      if (data.type === "overlay-start") {
+        testWindow.__overlayArmed = true;
+        testWindow.__overlayFrames = testWindow.__overlayFrames ?? 0;
+        post({ type: "overlay-state", armed: true, engaged: true });
+        return;
+      }
+      if (data.type === "overlay-frame") {
+        const frame = data as unknown as { id?: number; bitmap?: ImageBitmap };
+        testWindow.__overlayFrames = (testWindow.__overlayFrames ?? 0) + 1;
+        frame.bitmap?.close();
+        post({ type: "overlay-ack", id: frame.id });
+        return;
+      }
+      if (data.type === "overlay-stop") {
+        testWindow.__overlayArmed = false;
+        post({ type: "overlay-state", armed: false, engaged: true });
       }
     };
 

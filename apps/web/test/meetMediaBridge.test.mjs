@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { probeMeetMediaBridge } from "../src/features/meet/meetMediaBridge.ts";
+import {
+  probeMeetCameraOverlay,
+  probeMeetMediaBridge,
+} from "../src/features/meet/meetMediaBridge.ts";
 
 const HOST = { name: "host-window" };
 const ORIGIN = "https://meet.google.com";
@@ -168,6 +171,48 @@ test("channel-scoped end events tear down only their own session", async () => {
 
   emit(hostMessage("ended", { reason: "microphone-ended", channel: "audio" }));
   assert.deepEqual(audioEnds, ["microphone-ended"]);
+});
+
+test("overlay probe resolves with a handle and reports compositor state", async () => {
+  const { env, emit, hostMessage } = makeEnv();
+  env.onHostReceived = (message) => {
+    if (message.type === "overlay-hello") {
+      emit(hostMessage("overlay-state", { armed: false, engaged: true }));
+    }
+  };
+  const states = [];
+  const overlay = await probeMeetCameraOverlay(env, (state) => states.push(state));
+  assert.notEqual(overlay, null);
+  assert.deepEqual(states, [{ armed: false, engaged: true }]);
+});
+
+test("overlay probe resolves null when no compositor answers", async () => {
+  const { env } = makeEnv({ helloAttempts: 2 });
+  assert.equal(await probeMeetCameraOverlay(env, () => {}), null);
+});
+
+test("overlay frames respect the in-flight cap until acked; start/stop reach the host", async () => {
+  const { env, emit, hostMessage, sentToHost } = makeEnv();
+  env.onHostReceived = (message) => {
+    if (message.type === "overlay-hello") {
+      emit(hostMessage("overlay-state", { armed: false, engaged: true }));
+    }
+  };
+  const overlay = await probeMeetCameraOverlay(env, () => {});
+  overlay.start();
+
+  assert.equal(overlay.trySendFrame({ fake: "b1" }, 0.85), true);
+  assert.equal(overlay.trySendFrame({ fake: "b2" }, 0.85), true);
+  assert.equal(overlay.trySendFrame({ fake: "b3" }, 0.85), false, "cap of 2 in flight");
+
+  const sentFrames = sentToHost.filter((m) => m.type === "overlay-frame");
+  assert.equal(sentFrames.length, 2);
+  emit(hostMessage("overlay-ack", { id: sentFrames[0].id }));
+  assert.equal(overlay.trySendFrame({ fake: "b4" }, 0.5), true, "ack frees a slot");
+
+  overlay.stop();
+  assert.equal(sentToHost.filter((m) => m.type === "overlay-start").length, 1);
+  assert.equal(sentToHost.filter((m) => m.type === "overlay-stop").length, 1);
 });
 
 test("a host-side end after frames reports onEnded exactly once and stops delivery", async () => {

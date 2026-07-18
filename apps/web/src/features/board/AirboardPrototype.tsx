@@ -64,7 +64,10 @@ import {
 } from "./lightboardRecorder";
 import {
   createBridgedMicStream,
+  probeMeetCameraOverlayInWindow,
   probeMeetMediaBridgeInWindow,
+  type MeetCameraOverlay,
+  type MeetCameraOverlayState,
   type MeetMediaBridge,
   type MeetMediaBridgeVideoSession,
 } from "../meet/meetMediaBridge";
@@ -583,6 +586,13 @@ export function AirboardPrototype({
   // compositor reads current values without re-starting on every change.
   // Presenting: a clean stage for tab-sharing — chrome hidden, board full-bleed.
   const [presenting, setPresenting] = useState(false);
+  // Camera overlay: the extension's MAIN-world compositor blends neon board
+  // frames onto the outgoing Meet camera (main stage only).
+  const [cameraOverlay, setCameraOverlay] = useState<MeetCameraOverlay | null>(null);
+  const [cameraOverlayState, setCameraOverlayState] = useState<MeetCameraOverlayState | null>(
+    null,
+  );
+  const [cameraOverlayEnabled, setCameraOverlayEnabled] = useState(false);
   const [recordingState, setRecordingState] = useState<"idle" | "recording">("idle");
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [recordingNotice, setRecordingNotice] = useState<string | null>(null);
@@ -821,6 +831,67 @@ export function AirboardPrototype({
       cancelled = true;
     };
   }, [embeddedMediaCapture, isMeetSurface]);
+
+  // Camera-overlay compositor probe (main stage only). Leaving the surface
+  // disarms the compositor so a stale overlay can never ride the camera.
+  useEffect(() => {
+    if (surface !== "meet-main-stage") {
+      return;
+    }
+    let cancelled = false;
+    let handle: MeetCameraOverlay | null = null;
+    void probeMeetCameraOverlayInWindow((state) => {
+      if (!cancelled) {
+        setCameraOverlayState(state);
+      }
+    }).then((overlay) => {
+      if (cancelled) {
+        overlay?.dispose();
+        return;
+      }
+      handle = overlay;
+      if (overlay) {
+        setCameraOverlay(overlay);
+      }
+    });
+    return () => {
+      cancelled = true;
+      handle?.stop();
+      handle?.dispose();
+    };
+  }, [surface]);
+
+  // Overlay frame pump: ~15fps of the neon board, downscaled for transfer.
+  useEffect(() => {
+    if (!cameraOverlay || !cameraOverlayEnabled) {
+      return;
+    }
+    let cancelled = false;
+    let busy = false;
+    const timer = setInterval(() => {
+      const canvas = canvasRef.current;
+      if (cancelled || busy || !canvas || canvas.width === 0) {
+        return;
+      }
+      busy = true;
+      const width = Math.min(1280, canvas.width);
+      const height = Math.max(2, Math.round((canvas.height * width) / canvas.width));
+      void createImageBitmap(canvas, { resizeWidth: width, resizeHeight: height })
+        .then((bitmap) => {
+          if (cancelled || !cameraOverlay.trySendFrame(bitmap, scrimOpacityRef.current)) {
+            bitmap.close();
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          busy = false;
+        });
+    }, 66);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [cameraOverlay, cameraOverlayEnabled]);
 
   // Load stored appearance preferences after mount (SSR-safe).
   useEffect(() => {
@@ -5881,6 +5952,47 @@ export function AirboardPrototype({
               />
               <span>Lightboard (neon) theme</span>
             </label>
+            {surface === "meet-main-stage" && cameraOverlay ? (
+              <>
+                <label className="check-row" htmlFor="camera-overlay-toggle">
+                  <input
+                    id="camera-overlay-toggle"
+                    type="checkbox"
+                    checked={cameraOverlayEnabled}
+                    onChange={(event) => {
+                      const enabled = event.target.checked;
+                      setCameraOverlayEnabled(enabled);
+                      if (enabled) {
+                        if (boardTheme !== "lightboard") {
+                          setBoardTheme("lightboard");
+                          try {
+                            window.localStorage.setItem("airboard.theme.v1", "lightboard");
+                          } catch {
+                            // Preference persistence is best-effort.
+                          }
+                        }
+                        cameraOverlay.start();
+                      } else {
+                        cameraOverlay.stop();
+                      }
+                    }}
+                  />
+                  <span>Lightboard on my camera</span>
+                </label>
+                {cameraOverlayEnabled && cameraOverlayState && !cameraOverlayState.engaged ? (
+                  <p className="hint" data-testid="camera-overlay-pending">
+                    Turn your Meet camera off and on once — the lightboard rides the next
+                    camera start.
+                  </p>
+                ) : null}
+                {cameraOverlayEnabled && cameraOverlayState?.engaged ? (
+                  <p className="hint" data-testid="camera-overlay-live">
+                    Everyone now sees the lightboard on your camera tile. Meet mirrors only
+                    your own view, so text reads reversed to you alone.
+                  </p>
+                ) : null}
+              </>
+            ) : null}
             {boardTheme === "lightboard" ? (
               <>
                 {surface === "standalone" ? (

@@ -54,6 +54,36 @@ test("the bridge restores embedded gesture on the Meet main stage", async ({ pag
   await expect(page.locator(".status-grid").getByText("Off", { exact: true })).toBeVisible();
 });
 
+test("camera overlay pumps neon frames to the compositor and disarms on toggle-off", async ({
+  page,
+}) => {
+  await page.goto("/meet/test-harness?bridge=emulate");
+
+  const onboarding = page.getByRole("button", { name: "Got it — let me try" });
+  await expect(onboarding).toBeVisible({ timeout: 10_000 });
+  await onboarding.click();
+
+  const overlayToggle = page.getByLabel("Lightboard on my camera");
+  await expect(overlayToggle).toBeVisible({ timeout: 10_000 });
+  await overlayToggle.check();
+
+  // Enabling forces the neon theme and reports the compositor as live.
+  await expect(page.locator("section.board-area.lightboard")).toBeVisible();
+  await expect(page.getByTestId("camera-overlay-live")).toBeVisible();
+
+  // The pump streams downscaled board frames; the emulated compositor counts them.
+  await expect
+    .poll(() => page.evaluate(() => (window as { __overlayFrames?: number }).__overlayFrames ?? 0), {
+      timeout: 10_000,
+    })
+    .toBeGreaterThan(3);
+
+  await overlayToggle.uncheck();
+  await expect
+    .poll(() => page.evaluate(() => (window as { __overlayArmed?: boolean }).__overlayArmed))
+    .toBe(false);
+});
+
 test("the side panel explains the bridge instead of the companion window", async ({ page }) => {
   await page.goto("/meet/test-harness?surface=side-panel&bridge=emulate");
 
