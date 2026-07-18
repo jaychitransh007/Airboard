@@ -1,6 +1,6 @@
 # Lightboard Mode — Feasibility and Design Directions
 
-> **Status:** Step 1 implemented (2026-07-18) — neon theme, camera underlay, and scrim dial live on the standalone surface; steps 2–6 remain proposals. Not part of the public-beta plan.
+> **Status:** Steps 1–2 implemented (2026-07-18) — neon theme, camera underlay, scrim dial, and the studio recorder live on the standalone surface; steps 3–6 remain proposals. Not part of the public-beta plan.
 > **Date:** 2026-07-17
 > **Context:** Inspired by physical lightboard videos (presenter behind glass, neon marker strokes on black). Goal: Airboard delivers that experience digitally — gesture/voice-built neon diagrams composited over the presenter's own camera video, visible to other meeting participants — without the glass, the darkroom, or the mirror rig.
 > **Relationship to the beta checklist:** This is not beta work. If adopted, the Zoom and Teams paths below become concrete goals inside PF-004 and PF-003 respectively; the Meet path extends the existing Media Bridge extension; everything else is standalone product work.
@@ -54,7 +54,10 @@ Existing building blocks: the MediaPipe hand pipeline (AR mode *simplifies* coor
    - App: Appearance section (theme toggle everywhere; camera-underlay toggle standalone-only; board-dimming slider 0–1), DOM-layer underlay video (mirrored, shares the tracker stream — no per-frame canvas compositing) + scrim div, redundant corner self-preview hidden while the underlay is on, preferences in localStorage.
    - Verified: 5 Playwright journeys with pixel-level assertions (opaque white classic corner, transparent lightboard canvas, neon brightness, fake-camera underlay, persistence).
    - Known limits: PNG export of a lightboard board has a transparent background (glow preserved); gesture cursor is not yet AR-anchored to the underlay video.
-2. Built-in recorder → ship use case 3 as the "lightboard studio" (no platform gatekeepers; most differentiated).
+2. **[DONE 2026-07-18]** Built-in recorder → use case 3 ships as the "lightboard studio" (no platform gatekeepers; most differentiated).
+   - `lightboardRecorder.ts`: a recording canvas re-composites the DOM stack per frame (mirrored cover-fit underlay → scrim → neon board canvas), capped at 1920 wide with even dimensions; `captureStream(30)` plus a best-effort microphone track feed MediaRecorder (VP9→VP8→WebM fallback); stop() yields a Blob downloaded locally as `airboard-lightboard-<timestamp>.webm`. Nothing uploads.
+   - UI: Studio section (standalone only) with record/stop and elapsed clock; pulsing REC badge over the board; denied microphone degrades to video-only with a notice.
+   - Verified: pure-geometry unit tests (dimensions, cover-fit, filename) and a Playwright journey that records ~2.5s with the fake camera/mic and asserts a real >5KB WebM download.
 3. Screenshare presenting mode → use case 1 usable in Meet immediately.
 4. Extension camera compositor → Meet camera-tile magic.
 5. Zoom Camera Mode pilot → concrete PF-004 goal.

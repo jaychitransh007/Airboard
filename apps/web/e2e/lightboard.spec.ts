@@ -1,3 +1,5 @@
+import { promises as fs } from "node:fs";
+
 import { expect, test, type Page } from "@playwright/test";
 
 /**
@@ -94,6 +96,32 @@ test("camera underlay puts the presenter behind the board", async ({ page }) => 
     .toBeGreaterThan(0);
   // The corner self-preview is redundant while the underlay is on.
   await expect(page.locator("video.camera-preview")).toHaveClass(/hidden/);
+});
+
+test("studio records the composite to a local webm download", async ({ page }) => {
+  await openStandalone(page);
+  await page.getByLabel("Lightboard (neon) theme").check();
+  await page.getByRole("button", { name: /Enable hand tracking/ }).click();
+
+  const input = page.getByTestId("intent-command-input");
+  await input.fill("add a circle here");
+  await page.getByTestId("intent-primary-action").click();
+  await expect(page.locator(".intent-feedback")).toContainText("Applied:", { timeout: 15_000 });
+
+  await page.getByTestId("studio-record").click();
+  await expect(page.getByTestId("recording-badge")).toBeVisible();
+  // Capture a couple of seconds of composite frames + fake microphone.
+  await page.waitForTimeout(2500);
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByTestId("studio-record").click();
+  const download = await downloadPromise;
+
+  expect(download.suggestedFilename()).toMatch(/^airboard-lightboard-\d{8}-\d{6}\.webm$/);
+  const filePath = await download.path();
+  const stats = await fs.stat(filePath!);
+  expect(stats.size).toBeGreaterThan(5_000);
+  await expect(page.getByTestId("recording-badge")).toHaveCount(0);
 });
 
 test("theme choice survives a reload", async ({ page }) => {

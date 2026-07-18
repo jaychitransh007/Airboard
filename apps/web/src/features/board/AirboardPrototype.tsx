@@ -58,6 +58,11 @@ import {
 } from "./boardViewport";
 import { CanvasNavigationTracker } from "./canvasNavigationTracker";
 import {
+  recordingFileName,
+  startLightboardRecording,
+  type LightboardRecorderHandle,
+} from "./lightboardRecorder";
+import {
   createBridgedMicStream,
   probeMeetMediaBridgeInWindow,
   type MeetMediaBridge,
@@ -574,6 +579,15 @@ export function AirboardPrototype({
   const [cameraUnderlayEnabled, setCameraUnderlayEnabled] = useState(true);
   const [scrimOpacity, setScrimOpacity] = useState(0.85);
   const underlayVideoRef = useRef<HTMLVideoElement | null>(null);
+  // Studio recording. Refs mirror theme/scrim so the recorder's per-frame
+  // compositor reads current values without re-starting on every change.
+  const [recordingState, setRecordingState] = useState<"idle" | "recording">("idle");
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [recordingNotice, setRecordingNotice] = useState<string | null>(null);
+  const recorderRef = useRef<LightboardRecorderHandle | null>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const boardThemeRef = useRef(boardTheme);
+  const scrimOpacityRef = useRef(scrimOpacity);
   const [landmarkRecordingActive, setLandmarkRecordingActive] = useState(false);
   const [onboardingVisible, setOnboardingVisible] = useState(false);
   const [viewportScale, setViewportScale] = useState(1);
@@ -822,6 +836,72 @@ export function AirboardPrototype({
     } catch {
       // Storage may be unavailable; keep defaults.
     }
+  }, []);
+
+  useEffect(() => {
+    boardThemeRef.current = boardTheme;
+    scrimOpacityRef.current = scrimOpacity;
+  }, [boardTheme, scrimOpacity]);
+
+  // Stop an in-flight recording if the board unmounts.
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
+      void recorderRef.current?.stop().catch(() => {});
+      recorderRef.current = null;
+    };
+  }, []);
+
+  const startStudioRecording = useCallback(async () => {
+    const canvas = canvasRef.current;
+    if (!canvas || recorderRef.current) {
+      return;
+    }
+    setRecordingNotice(null);
+    try {
+      const handle = await startLightboardRecording({
+        boardCanvas: canvas,
+        underlayVideo: underlayVideoRef.current,
+        getScrimOpacity: () => scrimOpacityRef.current,
+        getTheme: () => boardThemeRef.current,
+      });
+      recorderRef.current = handle;
+      setRecordingState("recording");
+      setRecordingSeconds(0);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((seconds) => seconds + 1);
+      }, 1000);
+      if (!handle.hasAudio) {
+        setRecordingNotice("Microphone unavailable — recording video only.");
+      }
+    } catch (error) {
+      setRecordingNotice(
+        error instanceof Error ? error.message : "Recording could not start.",
+      );
+    }
+  }, []);
+
+  const stopStudioRecording = useCallback(async () => {
+    const handle = recorderRef.current;
+    if (!handle) {
+      return;
+    }
+    recorderRef.current = null;
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    setRecordingState("idle");
+    const blob = await handle.stop();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = recordingFileName(new Date());
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    setRecordingNotice("Recording saved to your downloads.");
   }, []);
 
   // The underlay video mirrors whatever stream feeds the hand tracker.
@@ -5240,6 +5320,12 @@ export function AirboardPrototype({
               aria-hidden="true"
             />
           ) : null}
+          {recordingState === "recording" ? (
+            <div className="recording-badge" data-testid="recording-badge" role="status">
+              <span className="recording-dot" aria-hidden="true" />
+              REC {formatRecordingClock(recordingSeconds)}
+            </div>
+          ) : null}
           {inputMode === "gesture" ? (
             <div ref={dockRef} className="object-dock catalog-dock" role="toolbar" aria-label="Shape catalog">
               <button
@@ -5760,6 +5846,31 @@ export function AirboardPrototype({
               </>
             ) : null}
           </section>
+
+          {surface === "standalone" ? (
+            <section className="section">
+              <h2>Studio</h2>
+              <p className="hint">
+                Record what a viewer sees — you behind the glowing board, with your microphone —
+                as a local WebM file. Nothing is uploaded.
+              </p>
+              <button
+                type="button"
+                className={recordingState === "recording" ? "danger" : "primary"}
+                data-testid="studio-record"
+                onClick={() =>
+                  recordingState === "recording"
+                    ? void stopStudioRecording()
+                    : void startStudioRecording()
+                }
+              >
+                {recordingState === "recording"
+                  ? `Stop recording (${formatRecordingClock(recordingSeconds)})`
+                  : "Start recording"}
+              </button>
+              {recordingNotice ? <p className="hint">{recordingNotice}</p> : null}
+            </section>
+          ) : null}
 
           <section className="section">
             <h2>Input Controls</h2>
@@ -6599,6 +6710,12 @@ function buildGestureTargets(
     }
   }
   return targets;
+}
+
+function formatRecordingClock(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 function surfaceLabel(surface: Surface): string {
