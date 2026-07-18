@@ -568,6 +568,12 @@ export function AirboardPrototype({
   // Rendered by the companion-window link on meeting surfaces; the ref alone
   // would not re-render when the session becomes available.
   const [activeBoardSessionId, setActiveBoardSessionId] = useState<string | null>(null);
+  // Lightboard (neon-on-dark) appearance. Defaults here; stored preferences
+  // load after mount so server and client render the same initial tree.
+  const [boardTheme, setBoardTheme] = useState<"classic" | "lightboard">("classic");
+  const [cameraUnderlayEnabled, setCameraUnderlayEnabled] = useState(true);
+  const [scrimOpacity, setScrimOpacity] = useState(0.85);
+  const underlayVideoRef = useRef<HTMLVideoElement | null>(null);
   const [landmarkRecordingActive, setLandmarkRecordingActive] = useState(false);
   const [onboardingVisible, setOnboardingVisible] = useState(false);
   const [viewportScale, setViewportScale] = useState(1);
@@ -673,7 +679,10 @@ export function AirboardPrototype({
 
     renderBoard(canvas, boardRef.current, {
       view: boardViewportRef.current,
-      background: "white",
+      // Lightboard content sits on DOM layers (camera underlay + scrim), so
+      // the canvas itself stays transparent there.
+      background: boardTheme === "lightboard" ? "transparent" : "white",
+      theme: boardTheme,
       selectedStrokeId: selectedAnnotationId,
       selectedStrokeIds: selectedAnnotationIds,
       hoverStrokeId,
@@ -683,6 +692,7 @@ export function AirboardPrototype({
     });
   }, [
     alignmentGuides,
+    boardTheme,
     ghostAnnotation,
     ghostAnnotations,
     hoverStrokeId,
@@ -795,6 +805,39 @@ export function AirboardPrototype({
       cancelled = true;
     };
   }, [embeddedMediaCapture, isMeetSurface]);
+
+  // Load stored appearance preferences after mount (SSR-safe).
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem("airboard.theme.v1") === "lightboard") {
+        setBoardTheme("lightboard");
+      }
+      if (window.localStorage.getItem("airboard.underlay.v1") === "off") {
+        setCameraUnderlayEnabled(false);
+      }
+      const scrim = Number(window.localStorage.getItem("airboard.scrim.v1"));
+      if (Number.isFinite(scrim) && scrim >= 0 && scrim <= 1) {
+        setScrimOpacity(scrim);
+      }
+    } catch {
+      // Storage may be unavailable; keep defaults.
+    }
+  }, []);
+
+  // The underlay video mirrors whatever stream feeds the hand tracker.
+  useEffect(() => {
+    const underlay = underlayVideoRef.current;
+    if (!underlay) {
+      return;
+    }
+    const source = videoRef.current?.srcObject ?? null;
+    if (underlay.srcObject !== source) {
+      underlay.srcObject = source;
+      if (source) {
+        void underlay.play().catch(() => {});
+      }
+    }
+  }, [boardTheme, cameraStatus, cameraUnderlayEnabled]);
 
   // First-run onboarding: the gesture vocabulary is invisible until taught.
   useEffect(() => {
@@ -5175,7 +5218,28 @@ export function AirboardPrototype({
       </header>
 
       <div className="content">
-        <section className="board-area" aria-label="Airboard canvas">
+        <section
+          className={`board-area${boardTheme === "lightboard" ? " lightboard" : ""}`}
+          aria-label="Airboard canvas"
+        >
+          {boardTheme === "lightboard" && surface === "standalone" && cameraUnderlayEnabled ? (
+            <video
+              ref={underlayVideoRef}
+              className="lightboard-underlay"
+              data-testid="lightboard-underlay"
+              aria-hidden="true"
+              muted
+              playsInline
+            />
+          ) : null}
+          {boardTheme === "lightboard" ? (
+            <div
+              className="lightboard-scrim"
+              data-testid="lightboard-scrim"
+              style={{ opacity: scrimOpacity }}
+              aria-hidden="true"
+            />
+          ) : null}
           {inputMode === "gesture" ? (
             <div ref={dockRef} className="object-dock catalog-dock" role="toolbar" aria-label="Shape catalog">
               <button
@@ -5438,7 +5502,9 @@ export function AirboardPrototype({
             // Inside a meeting the client already shows the user's self-view;
             // a second preview is noise. The element stays mounted (opacity 0)
             // because the tracker reads its frames.
-            cameraStatus !== "idle" && !isMeetSurface ? (
+            cameraStatus !== "idle" &&
+            !isMeetSurface &&
+            !(boardTheme === "lightboard" && cameraUnderlayEnabled) ? (
               <video ref={videoRef} className="camera-preview" muted playsInline />
             ) : (
               <video ref={videoRef} className="camera-preview hidden" muted playsInline />
@@ -5624,6 +5690,75 @@ export function AirboardPrototype({
               <span>Active strokes</span>
               <strong>{stats.active}</strong>
             </div>
+          </section>
+
+          <section className="section">
+            <h2>Appearance</h2>
+            <label className="check-row" htmlFor="lightboard-theme">
+              <input
+                id="lightboard-theme"
+                type="checkbox"
+                checked={boardTheme === "lightboard"}
+                onChange={(event) => {
+                  const nextTheme = event.target.checked ? "lightboard" : "classic";
+                  setBoardTheme(nextTheme);
+                  try {
+                    window.localStorage.setItem("airboard.theme.v1", nextTheme);
+                  } catch {
+                    // Preference persistence is best-effort.
+                  }
+                }}
+              />
+              <span>Lightboard (neon) theme</span>
+            </label>
+            {boardTheme === "lightboard" ? (
+              <>
+                {surface === "standalone" ? (
+                  <label className="check-row" htmlFor="camera-underlay">
+                    <input
+                      id="camera-underlay"
+                      type="checkbox"
+                      checked={cameraUnderlayEnabled}
+                      onChange={(event) => {
+                        setCameraUnderlayEnabled(event.target.checked);
+                        try {
+                          window.localStorage.setItem(
+                            "airboard.underlay.v1",
+                            event.target.checked ? "on" : "off",
+                          );
+                        } catch {
+                          // Preference persistence is best-effort.
+                        }
+                      }}
+                    />
+                    <span>Camera behind board</span>
+                  </label>
+                ) : null}
+                <div className="control-row">
+                  <label htmlFor="scrim-opacity">Board dimming</label>
+                  <input
+                    id="scrim-opacity"
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={scrimOpacity}
+                    onChange={(event) => {
+                      const next = Number(event.target.value);
+                      setScrimOpacity(next);
+                      try {
+                        window.localStorage.setItem("airboard.scrim.v1", String(next));
+                      } catch {
+                        // Preference persistence is best-effort.
+                      }
+                    }}
+                  />
+                </div>
+                {surface === "standalone" && cameraUnderlayEnabled && cameraStatus === "idle" ? (
+                  <p className="hint">Enable hands to appear behind the board.</p>
+                ) : null}
+              </>
+            ) : null}
           </section>
 
           <section className="section">

@@ -835,6 +835,32 @@ button:disabled {
   font-weight: 650;
 }
 
+.board-area.lightboard {
+  background: #05080c;
+}
+
+.lightboard-underlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+.lightboard-scrim {
+  position: absolute;
+  inset: 0;
+  background: #05080c;
+  pointer-events: none;
+}
+
+.board-area.lightboard .board-canvas {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+}
+
 .camera-preview {
   position: absolute;
   right: 22px;

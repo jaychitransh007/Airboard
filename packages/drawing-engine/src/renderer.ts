@@ -6,6 +6,7 @@ import type {
   StrokePoint,
 } from "@airboard/core";
 import { getConnectorRoutePoints, getRouteMidpoint } from "./connectorGeometry.ts";
+import { adaptInkForDarkBoard } from "./neonInk.ts";
 
 export type AnnotationRenderObject = {
   annotation: StrokeAnnotation;
@@ -29,8 +30,16 @@ export type BoardRenderView = {
   scale: number;
 };
 
+export type BoardRenderTheme = "classic" | "lightboard";
+
 export type BoardRenderOptions = {
   background: "white" | "dark" | "transparent";
+  /**
+   * "lightboard" draws content through an offscreen layer composited as a
+   * blurred additive halo under a sharp core (neon glow), and adapts dark
+   * inks so light-board content stays legible on a dark surface.
+   */
+  theme?: BoardRenderTheme;
   /**
    * Viewport transform (pan/zoom). Content — strokes, overlays, ghosts,
    * guides, cursors — is drawn in board coordinates and mapped through this
@@ -69,6 +78,44 @@ export function resizeCanvasToDisplaySize(canvas: HTMLCanvasElement): {
   return { width, height, dpr };
 }
 
+const identityInk = (color: string): string => color;
+// Set per renderBoard call; drawing helpers route content colors through it.
+let inkTransform: (color: string) => string = identityInk;
+
+function themedInk(color: string): string {
+  return inkTransform(color);
+}
+
+const glowLayerCache = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>();
+
+function acquireGlowLayer(canvas: HTMLCanvasElement): HTMLCanvasElement {
+  let layer = glowLayerCache.get(canvas);
+  if (!layer) {
+    layer = document.createElement("canvas");
+    glowLayerCache.set(canvas, layer);
+  }
+  if (layer.width !== canvas.width || layer.height !== canvas.height) {
+    layer.width = canvas.width;
+    layer.height = canvas.height;
+  }
+  return layer;
+}
+
+function compositeGlowLayer(context: CanvasRenderingContext2D, layer: HTMLCanvasElement): void {
+  context.save();
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.globalCompositeOperation = "lighter";
+  if (typeof context.filter === "string") {
+    context.filter = "blur(7px)";
+    context.globalAlpha = 0.9;
+    context.drawImage(layer, 0, 0);
+    context.filter = "none";
+  }
+  context.globalAlpha = 1;
+  context.drawImage(layer, 0, 0);
+  context.restore();
+}
+
 export function renderBoard(
   canvas: HTMLCanvasElement,
   state: BoardState,
@@ -79,10 +126,47 @@ export function renderBoard(
     return;
   }
 
-  const { width, height } = resizeCanvasToDisplaySize(canvas);
+  const { width, height, dpr } = resizeCanvasToDisplaySize(canvas);
   context.clearRect(0, 0, width, height);
   paintBackground(context, width, height, options.background);
+
+  // Lightboard: draw content into an offscreen layer, then composite it as a
+  // blurred additive halo under a sharp core so every primitive glows without
+  // touching the individual draw functions.
+  let target = context;
+  let layer: HTMLCanvasElement | null = null;
+  if ((options.theme ?? "classic") === "lightboard") {
+    const candidate = acquireGlowLayer(canvas);
+    const layerContext = candidate.getContext("2d");
+    if (layerContext) {
+      layerContext.setTransform(dpr, 0, 0, dpr, 0, 0);
+      layerContext.clearRect(0, 0, width, height);
+      layer = candidate;
+      target = layerContext;
+    }
+    inkTransform = adaptInkForDarkBoard;
+  }
+
+  try {
+    renderBoardContent(target, state, options, width, height);
+  } finally {
+    inkTransform = identityInk;
+  }
+
+  if (layer && target !== context) {
+    compositeGlowLayer(context, layer);
+  }
+}
+
+function renderBoardContent(
+  context: CanvasRenderingContext2D,
+  state: BoardState,
+  options: BoardRenderOptions,
+  width: number,
+  height: number,
+): void {
   if (options.view) {
+    context.save();
     context.transform(
       options.view.scale,
       0,
@@ -140,6 +224,9 @@ export function renderBoard(
   for (const cursor of Object.values(state.cursors)) {
     drawCursor(context, cursor);
   }
+  if (options.view) {
+    context.restore();
+  }
 }
 
 function drawAlignmentGuides(
@@ -184,7 +271,7 @@ export function drawStroke(
   context.globalAlpha = alpha;
   context.lineCap = "round";
   context.lineJoin = "round";
-  context.strokeStyle = stroke.color;
+  context.strokeStyle = themedInk(stroke.color);
   context.lineWidth = stroke.thickness;
 
   context.beginPath();
@@ -234,8 +321,8 @@ function drawAnnotationStroke(
   context.globalAlpha = alpha * (annotation.opacity ?? 1);
   context.lineCap = "round";
   context.lineJoin = "round";
-  context.strokeStyle = annotation.strokeColor ?? stroke.color;
-  context.fillStyle = annotation.fillColor ?? "transparent";
+  context.strokeStyle = themedInk(annotation.strokeColor ?? stroke.color);
+  context.fillStyle = themedInk(annotation.fillColor ?? "transparent");
   context.lineWidth = stroke.thickness;
 
   if ((annotation.type === "ellipse" || annotation.type === "pointer") && annotation.bounds) {
@@ -271,8 +358,8 @@ function drawAnnotationStroke(
 
   if (annotation.type === "highlight" && annotation.bounds) {
     context.globalAlpha = alpha * (annotation.opacity ?? 0.28);
-    context.fillStyle = annotation.fillColor ?? "#fde68a";
-    context.strokeStyle = annotation.strokeColor ?? "rgba(202, 138, 4, 0.45)";
+    context.fillStyle = themedInk(annotation.fillColor ?? "#fde68a");
+    context.strokeStyle = themedInk(annotation.strokeColor ?? "rgba(202, 138, 4, 0.45)");
     roundRectPath(
       context,
       annotation.bounds.x,
@@ -323,8 +410,8 @@ function drawNodeShape(context: CanvasRenderingContext2D, stroke: Stroke): void 
     return;
   }
 
-  context.fillStyle = annotation.fillColor ?? "#f8fafc";
-  context.strokeStyle = annotation.strokeColor ?? stroke.color;
+  context.fillStyle = themedInk(annotation.fillColor ?? "#f8fafc");
+  context.strokeStyle = themedInk(annotation.strokeColor ?? stroke.color);
   context.lineWidth = stroke.thickness;
 
   if (annotation.nodeType === "database") {
@@ -522,7 +609,7 @@ function drawAnnotationLabel(
 
   context.save();
   context.globalAlpha = 1;
-  context.fillStyle = "#111827";
+  context.fillStyle = themedInk("#111827");
   context.font = "600 13px Inter, ui-sans-serif, system-ui, sans-serif";
   context.textAlign = "center";
   context.textBaseline = "middle";
@@ -606,7 +693,7 @@ function drawDeletePreviewMark(
   annotation: StrokeAnnotation,
 ): void {
   context.save();
-  context.strokeStyle = "rgba(220, 38, 38, 0.82)";
+  context.strokeStyle = themedInk("rgba(220, 38, 38, 0.82)");
   context.lineWidth = 2.4;
   context.setLineDash([8, 6]);
   context.beginPath();
@@ -637,15 +724,16 @@ function drawAnnotationOverlay(
 ): void {
   context.save();
   context.lineWidth = mode === "selected" || mode === "multi-selected" ? 1.6 : 1.2;
-  context.strokeStyle =
+  context.strokeStyle = themedInk(
     mode === "selected" || mode === "multi-selected"
       ? "#0f766e"
       : mode === "delete-ghost"
         ? "rgba(220, 38, 38, 0.72)"
       : mode === "ghost"
         ? "rgba(15, 118, 110, 0.55)"
-        : "rgba(15, 118, 110, 0.42)";
-  context.fillStyle = "#ffffff";
+        : "rgba(15, 118, 110, 0.42)",
+  );
+  context.fillStyle = themedInk("#ffffff");
   context.setLineDash(mode === "selected" || mode === "multi-selected" ? [5, 4] : [4, 4]);
 
   if (annotation.bounds) {
@@ -696,8 +784,8 @@ function drawAnnotationOverlay(
 function drawHandle(context: CanvasRenderingContext2D, x: number, y: number): void {
   context.save();
   context.setLineDash([]);
-  context.fillStyle = "#ffffff";
-  context.strokeStyle = "#0f766e";
+  context.fillStyle = themedInk("#ffffff");
+  context.strokeStyle = themedInk("#0f766e");
   context.lineWidth = 1.6;
   context.beginPath();
   context.rect(x - 4, y - 4, 8, 8);
@@ -731,8 +819,8 @@ export function drawCursor(context: CanvasRenderingContext2D, cursor: CursorStat
   }
 
   if (cursor.mode === "panning") {
-    context.strokeStyle = "rgba(31, 37, 32, 0.7)";
-    context.fillStyle = "rgba(31, 37, 32, 0.06)";
+    context.strokeStyle = themedInk("rgba(31, 37, 32, 0.7)");
+    context.fillStyle = themedInk("rgba(31, 37, 32, 0.06)");
     context.lineWidth = 2;
     context.beginPath();
     context.arc(cursor.x, cursor.y, 10, 0, Math.PI * 2);
@@ -743,8 +831,8 @@ export function drawCursor(context: CanvasRenderingContext2D, cursor: CursorStat
   }
 
   if (cursor.mode === "erasing" || cursor.mode === "duster_ready") {
-    context.strokeStyle = cursor.mode === "erasing" ? "#ef4444" : "rgba(239, 68, 68, 0.55)";
-    context.fillStyle = "rgba(239, 68, 68, 0.08)";
+    context.strokeStyle = themedInk(cursor.mode === "erasing" ? "#ef4444" : "rgba(239, 68, 68, 0.55)");
+    context.fillStyle = themedInk("rgba(239, 68, 68, 0.08)");
     context.lineWidth = 2;
     context.beginPath();
     context.arc(cursor.x, cursor.y, cursor.mode === "erasing" ? 42 : 34, 0, Math.PI * 2);
@@ -755,7 +843,7 @@ export function drawCursor(context: CanvasRenderingContext2D, cursor: CursorStat
   }
 
   if (cursor.mode === "repositioning") {
-    context.strokeStyle = "rgba(15, 118, 110, 0.78)";
+    context.strokeStyle = themedInk("rgba(15, 118, 110, 0.78)");
     context.fillStyle = "transparent";
     context.lineWidth = 2;
     context.setLineDash([5, 4]);
@@ -767,8 +855,8 @@ export function drawCursor(context: CanvasRenderingContext2D, cursor: CursorStat
   }
 
   if (cursor.mode === "low_confidence") {
-    context.strokeStyle = "rgba(180, 83, 9, 0.85)";
-    context.fillStyle = "rgba(180, 83, 9, 0.08)";
+    context.strokeStyle = themedInk("rgba(180, 83, 9, 0.85)");
+    context.fillStyle = themedInk("rgba(180, 83, 9, 0.08)");
     context.lineWidth = 2;
     context.beginPath();
     context.arc(cursor.x, cursor.y, 8, 0, Math.PI * 2);
@@ -779,7 +867,7 @@ export function drawCursor(context: CanvasRenderingContext2D, cursor: CursorStat
   }
 
   if (cursor.mode === "hand_detected") {
-    context.fillStyle = "rgba(17, 24, 39, 0.18)";
+    context.fillStyle = themedInk("rgba(17, 24, 39, 0.18)");
     context.beginPath();
     context.arc(cursor.x, cursor.y, 4, 0, Math.PI * 2);
     context.fill();
@@ -788,8 +876,8 @@ export function drawCursor(context: CanvasRenderingContext2D, cursor: CursorStat
   }
 
   if (cursor.mode === "contact_ready") {
-    context.strokeStyle = "rgba(15, 118, 110, 0.72)";
-    context.fillStyle = "rgba(15, 118, 110, 0.18)";
+    context.strokeStyle = themedInk("rgba(15, 118, 110, 0.72)");
+    context.fillStyle = themedInk("rgba(15, 118, 110, 0.18)");
     context.lineWidth = 2;
     context.beginPath();
     context.arc(cursor.x, cursor.y, 12, 0, Math.PI * 2);
@@ -802,8 +890,8 @@ export function drawCursor(context: CanvasRenderingContext2D, cursor: CursorStat
     return;
   }
 
-  context.strokeStyle = cursor.mode === "writing" ? "#111827" : "rgba(17, 24, 39, 0.55)";
-  context.fillStyle = cursor.mode === "writing" ? "#111827" : "transparent";
+  context.strokeStyle = themedInk(cursor.mode === "writing" ? "#111827" : "rgba(17, 24, 39, 0.55)");
+  context.fillStyle = themedInk(cursor.mode === "writing" ? "#111827" : "transparent");
   context.lineWidth = 2;
   context.beginPath();
   context.arc(cursor.x, cursor.y, cursor.mode === "writing" ? 5 : 7, 0, Math.PI * 2);
