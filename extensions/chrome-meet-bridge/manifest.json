@@ -1,8 +1,31 @@
 {
   "manifest_version": 3,
-  "name": "Airboard Meet Media Bridge",
-  "version": "0.4.0",
-  "description": "Lets the Airboard add-on use this meeting's existing camera permission for gesture input, and can composite the Airboard lightboard onto your outgoing camera. Everything starts only when you enable it inside Airboard.",
+  "name": "Airboard for Google Meet",
+  "short_name": "Airboard",
+  "version": "0.8.0",
+  "description": "Runs Airboard as a neon overlay on your outgoing Meet camera, with camera and Airo microphone input enabled by default after installation.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://airboard-pilot-api-634900453473.asia-south1.run.app/*",
+    "http://127.0.0.1:4000/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Airboard",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
   "content_scripts": [
     {
       "matches": ["https://meet.google.com/*"],
@@ -15,5 +38,22 @@
       "world": "MAIN",
       "run_at": "document_start"
     }
-  ]
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["engine.html", "engine-relay.js"],
+      "matches": ["https://meet.google.com/*"]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; frame-src https://airboard-pilot-web-634900453473.asia-south1.run.app https://airboard-pilot-web-efs77okmmq-el.a.run.app http://localhost:3000 http://127.0.0.1:3100"
+  },
+  "externally_connectable": {
+    "matches": [
+      "https://airboard-pilot-web-634900453473.asia-south1.run.app/*",
+      "https://airboard-pilot-web-efs77okmmq-el.a.run.app/*",
+      "http://localhost:3000/*",
+      "http://127.0.0.1:3100/*"
+    ]
+  }
 }

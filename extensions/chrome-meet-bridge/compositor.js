@@ -26,6 +26,7 @@
   const MARKER = "airboard-media-bridge";
   const VERSION = 1;
   const ARMED_KEY = "airboard.camera-overlay.v1";
+  const EXTENSION_VERSION = "0.8.0";
 
   const ALLOWED_ORIGINS = new Set([
     "https://airboard-pilot-web-634900453473.asia-south1.run.app",
@@ -42,6 +43,8 @@
     scrim: 0,
     active: false,
     inFlight: 0,
+    framesComposited: 0,
+    lastCompositeAt: 0,
   };
 
   /** @type {{sourceWin: MessageEventSource, origin: string} | null} */
@@ -50,8 +53,114 @@
   const pipelines = [];
   /** Track ids of composited output video, for self-view identification. */
   const outputTrackIds = new Set();
+  const outputTrackInfo = new Map();
   /** @type {ReturnType<typeof setInterval> | null} */
   let selfViewTimer = null;
+  /** RTP senders observed through Meet's real peer connections. */
+  const observedSenders = new Set();
+  const replacementPending = new Set();
+  let nativeReplaceTrack = null;
+  let verificationTimer = null;
+  const outboundVerification = {
+    senderAttached: false,
+    framesEncoded: 0,
+    bytesSent: 0,
+    lastVerifiedAt: 0,
+  };
+
+  // --- Real outbound-track verification ---------------------------------
+  // The compositor being engaged only proves that Meet requested our wrapped
+  // camera. Intercept sender attachment at document_start and inspect WebRTC
+  // outbound stats so the Airboard frame can distinguish "prepared" from
+  // "the composited track is really being encoded by this Meet client".
+
+  function rememberSender(sender) {
+    if (sender && typeof sender === "object") {
+      observedSenders.add(sender);
+      if (overlay.active) {
+        void retrofitSender(sender);
+      }
+    }
+  }
+
+  const peerConnectionPrototype = window.RTCPeerConnection?.prototype;
+  if (peerConnectionPrototype) {
+    const originalAddTrack = peerConnectionPrototype.addTrack;
+    if (typeof originalAddTrack === "function") {
+      peerConnectionPrototype.addTrack = function (...args) {
+        const sender = originalAddTrack.apply(this, args);
+        rememberSender(sender);
+        return sender;
+      };
+    }
+    const originalAddTransceiver = peerConnectionPrototype.addTransceiver;
+    if (typeof originalAddTransceiver === "function") {
+      peerConnectionPrototype.addTransceiver = function (...args) {
+        const transceiver = originalAddTransceiver.apply(this, args);
+        rememberSender(transceiver?.sender);
+        return transceiver;
+      };
+    }
+  }
+
+  const senderPrototype = window.RTCRtpSender?.prototype;
+  if (senderPrototype && typeof senderPrototype.replaceTrack === "function") {
+    const originalReplaceTrack = senderPrototype.replaceTrack;
+    nativeReplaceTrack = originalReplaceTrack;
+    senderPrototype.replaceTrack = function (...args) {
+      const result = originalReplaceTrack.apply(this, args);
+      Promise.resolve(result).then(() => rememberSender(this)).catch(() => {});
+      return result;
+    };
+  }
+
+  async function refreshOutboundVerification() {
+    const attached = [...observedSenders].filter((sender) => {
+      try {
+        return sender.track && outputTrackIds.has(sender.track.id);
+      } catch {
+        return false;
+      }
+    });
+    outboundVerification.senderAttached = attached.length > 0;
+    let framesEncoded = 0;
+    let bytesSent = 0;
+    for (const sender of attached) {
+      if (typeof sender.getStats !== "function") {
+        continue;
+      }
+      try {
+        const report = await sender.getStats();
+        report.forEach((stat) => {
+          if (stat.type === "outbound-rtp" && (stat.kind === "video" || stat.mediaType === "video")) {
+            framesEncoded += Number(stat.framesEncoded) || 0;
+            bytesSent += Number(stat.bytesSent) || 0;
+          }
+        });
+      } catch {
+        // Stats can be unavailable during renegotiation; retry next tick.
+      }
+    }
+    outboundVerification.framesEncoded = framesEncoded;
+    outboundVerification.bytesSent = bytesSent;
+    if (attached.length > 0 && framesEncoded > 0 && bytesSent > 0) {
+      outboundVerification.lastVerifiedAt = Date.now();
+    }
+    sendState();
+  }
+
+  function updateVerificationWatcher() {
+    const shouldRun = pipelines.length > 0;
+    if (shouldRun && verificationTimer === null) {
+      void refreshOutboundVerification();
+      verificationTimer = setInterval(() => void refreshOutboundVerification(), 1000);
+    } else if (!shouldRun && verificationTimer !== null) {
+      clearInterval(verificationTimer);
+      verificationTimer = null;
+      outboundVerification.senderAttached = false;
+      sendState();
+    }
+  }
 
   // --- Self-view counter-flip ---------------------------------------------
   // Meet force-mirrors the presenter's own tile, which would show the baked
@@ -133,6 +242,11 @@
 
   function isArmed() {
     try {
+      // First-install default: Airboard owns the outgoing camera composite as
+      // soon as Meet asks for a video track. An explicit future setting of
+      // "off" remains authoritative.
+      // Media replacement is inert until the consented extension engine sends
+      // overlay-start. A remembered explicit "on" survives normal Meet reloads.
       return window.localStorage.getItem(ARMED_KEY) === "on";
     } catch {
       return false;
@@ -164,14 +278,26 @@
 
   function sendState() {
     postToClient(
-      makeMessage("overlay-state", { armed: isArmed(), engaged: pipelines.length > 0 }),
+      makeMessage("overlay-state", {
+        armed: isArmed(),
+        engaged: pipelines.length > 0,
+        verification: {
+          extensionVersion: EXTENSION_VERSION,
+          framesComposited: overlay.framesComposited,
+          lastCompositeAt: overlay.lastCompositeAt,
+          senderAttached: outboundVerification.senderAttached,
+          framesEncoded: outboundVerification.framesEncoded,
+          bytesSent: outboundVerification.bytesSent,
+          lastVerifiedAt: outboundVerification.lastVerifiedAt,
+        },
+      }),
     );
   }
 
-  function makeCompositedStream(cameraStream) {
+  function makeCompositedStream(cameraStream, options = {}) {
     const sourceTrack = cameraStream.getVideoTracks()[0];
     if (!sourceTrack) {
-      return cameraStream;
+      return { stream: cameraStream, pipeline: null };
     }
 
     const video = document.createElement("video");
@@ -182,7 +308,7 @@
     const canvas = document.createElement("canvas");
     const context = canvas.getContext("2d");
     if (!context) {
-      return cameraStream;
+      return { stream: cameraStream, pipeline: null };
     }
 
     let stopped = false;
@@ -211,6 +337,8 @@
           }
           if (overlay.bitmap) {
             context.drawImage(overlay.bitmap, 0, 0, canvas.width, canvas.height);
+            overlay.framesComposited += 1;
+            overlay.lastCompositeAt = Date.now();
           }
         } else {
           context.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -229,21 +357,25 @@
 
     let outputTrackId = null;
     const pipeline = {
-      stop() {
+      stop(preserveSource = false) {
         if (stopped) {
           return;
         }
         stopped = true;
-        sourceTrack.stop();
+        if (!preserveSource && options.stopSource !== false) {
+          sourceTrack.stop();
+        }
         video.srcObject = null;
         if (outputTrackId) {
           outputTrackIds.delete(outputTrackId);
+          outputTrackInfo.delete(outputTrackId);
         }
         const index = pipelines.indexOf(pipeline);
         if (index >= 0) {
           pipelines.splice(index, 1);
         }
         updateSelfViewWatcher();
+        updateVerificationWatcher();
         sendState();
       },
     };
@@ -257,12 +389,14 @@
       outputTrackId = outputTrack.id;
       outputTrackIds.add(outputTrackId);
       const originalStop = outputTrack.stop.bind(outputTrack);
+      outputTrackInfo.set(outputTrackId, { sourceTrack, pipeline, stopOutput: originalStop });
       outputTrack.stop = () => {
         pipeline.stop();
         originalStop();
       };
     }
     updateSelfViewWatcher();
+    updateVerificationWatcher();
     sourceTrack.addEventListener("ended", () => {
       pipeline.stop();
       if (outputTrack) {
@@ -270,7 +404,59 @@
       }
     });
 
-    return output;
+    return { stream: output, pipeline };
+  }
+
+  async function retrofitSender(sender) {
+    if (!overlay.active || !nativeReplaceTrack || replacementPending.has(sender)) return;
+    let track;
+    try {
+      track = sender.track;
+    } catch {
+      return;
+    }
+    if (!track || track.kind === "audio" || outputTrackIds.has(track.id)) return;
+    replacementPending.add(sender);
+    let composed = null;
+    try {
+      composed = makeCompositedStream(new MediaStream([track]), { stopSource: false });
+      const outputTrack = composed.stream.getVideoTracks()[0];
+      if (!composed.pipeline || !outputTrack) return;
+      await nativeReplaceTrack.call(sender, outputTrack);
+      sendState();
+    } catch {
+      composed?.pipeline?.stop(true);
+    } finally {
+      replacementPending.delete(sender);
+    }
+  }
+
+  async function retrofitObservedSenders() {
+    await Promise.all([...observedSenders].map((sender) => retrofitSender(sender)));
+  }
+
+  async function restoreObservedSenders() {
+    if (!nativeReplaceTrack) return;
+    const restorations = [];
+    for (const sender of observedSenders) {
+      let info;
+      try {
+        info = sender.track ? outputTrackInfo.get(sender.track.id) : null;
+      } catch {
+        info = null;
+      }
+      if (!info) continue;
+      restorations.push(
+        Promise.resolve(nativeReplaceTrack.call(sender, info.sourceTrack))
+          .catch(() => undefined)
+          .finally(() => {
+            info.pipeline.stop(true);
+            info.stopOutput();
+          }),
+      );
+    }
+    await Promise.all(restorations);
+    sendState();
   }
 
   const mediaDevices = navigator.mediaDevices;
@@ -282,7 +468,7 @@
         return stream;
       }
       try {
-        return makeCompositedStream(stream);
+        return makeCompositedStream(stream).stream;
       } catch {
         return stream;
       }
@@ -309,8 +495,14 @@
       setArmed(true);
       overlay.active = true;
       overlay.inFlight = 0;
+      overlay.framesComposited = 0;
+      overlay.lastCompositeAt = 0;
+      outboundVerification.framesEncoded = 0;
+      outboundVerification.bytesSent = 0;
+      outboundVerification.lastVerifiedAt = 0;
       syncSelfViewMirror();
       sendState();
+      void retrofitObservedSenders();
       return;
     }
     if (data.type === "overlay-frame") {
@@ -332,6 +524,7 @@
     if (data.type === "overlay-stop") {
       setArmed(false);
       overlay.active = false;
+      void restoreObservedSenders();
       if (overlay.bitmap) {
         overlay.bitmap.close();
         overlay.bitmap = null;

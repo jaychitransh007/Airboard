@@ -6,7 +6,7 @@ import type {
   StrokePoint,
 } from "@airboard/core";
 import { getConnectorRoutePoints, getRouteMidpoint } from "./connectorGeometry.ts";
-import { adaptInkForDarkBoard } from "./neonInk.ts";
+import { adaptFillForDarkBoard, adaptInkForDarkBoard } from "./neonInk.ts";
 
 export type AnnotationRenderObject = {
   annotation: StrokeAnnotation;
@@ -32,6 +32,22 @@ export type BoardRenderView = {
 
 export type BoardRenderTheme = "classic" | "lightboard";
 
+export type ContrastPlate = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type ContrastPlateOptions = {
+  /** Darkness of the local glass behind diagram content. */
+  opacity?: number;
+  /** Space between diagram ink and the plate edge, in board units. */
+  padding?: number;
+  /** Nearby plates within this distance are combined into one cluster. */
+  mergeGap?: number;
+};
+
 export type BoardRenderOptions = {
   background: "white" | "dark" | "transparent";
   /**
@@ -53,6 +69,10 @@ export type BoardRenderOptions = {
   ghostAnnotation?: AnnotationRenderObject | null;
   ghostAnnotations?: readonly AnnotationRenderObject[];
   alignmentGuides?: readonly BoardAlignmentGuide[];
+  /** Suppress collaboration cursors in audience-facing renders. */
+  hideCursors?: boolean;
+  /** Draw local dark glass behind diagram clusters without dimming the full underlay. */
+  contrastPlates?: ContrastPlateOptions | null;
 };
 
 export function resizeCanvasToDisplaySize(canvas: HTMLCanvasElement): {
@@ -81,9 +101,15 @@ export function resizeCanvasToDisplaySize(canvas: HTMLCanvasElement): {
 const identityInk = (color: string): string => color;
 // Set per renderBoard call; drawing helpers route content colors through it.
 let inkTransform: (color: string) => string = identityInk;
+let fillTransform: (color: string) => string = identityInk;
 
 function themedInk(color: string): string {
   return inkTransform(color);
+}
+
+/** Shape-body fills only: light paper fills become dark glass on lightboard. */
+function themedFill(color: string): string {
+  return fillTransform(color);
 }
 
 const glowLayerCache = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>();
@@ -130,6 +156,13 @@ export function renderBoard(
   context.clearRect(0, 0, width, height);
   paintBackground(context, width, height, options.background);
 
+  // Contrast plates belong below the neon/glow layer. Drawing them into the
+  // additive layer would brighten the captured screen instead of locally
+  // darkening it.
+  if (options.contrastPlates && (options.theme ?? "classic") === "lightboard") {
+    drawContrastPlates(context, state, options.contrastPlates, options.view);
+  }
+
   // Lightboard: draw content into an offscreen layer, then composite it as a
   // blurred additive halo under a sharp core so every primitive glows without
   // touching the individual draw functions.
@@ -145,12 +178,14 @@ export function renderBoard(
       target = layerContext;
     }
     inkTransform = adaptInkForDarkBoard;
+    fillTransform = adaptFillForDarkBoard;
   }
 
   try {
     renderBoardContent(target, state, options, width, height);
   } finally {
     inkTransform = identityInk;
+    fillTransform = identityInk;
   }
 
   if (layer && target !== context) {
@@ -221,12 +256,120 @@ function renderBoardContent(
     drawAlignmentGuides(context, options.alignmentGuides, width, height);
   }
 
-  for (const cursor of Object.values(state.cursors)) {
-    drawCursor(context, cursor);
+  if (!options.hideCursors) {
+    for (const cursor of Object.values(state.cursors)) {
+      drawCursor(context, cursor);
+    }
   }
   if (options.view) {
     context.restore();
   }
+}
+
+const CONTRAST_PLATE_ANNOTATIONS = new Set<StrokeAnnotation["type"]>([
+  "ellipse",
+  "rectangle",
+  "flow_node",
+  "text_label",
+  "sticky_note",
+  "freehand",
+]);
+
+function platesTouch(a: ContrastPlate, b: ContrastPlate, gap: number): boolean {
+  return !(
+    a.x + a.width + gap < b.x ||
+    b.x + b.width + gap < a.x ||
+    a.y + a.height + gap < b.y ||
+    b.y + b.height + gap < a.y
+  );
+}
+
+function unionPlate(a: ContrastPlate, b: ContrastPlate): ContrastPlate {
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  const right = Math.max(a.x + a.width, b.x + b.width);
+  const bottom = Math.max(a.y + a.height, b.y + b.height);
+  return { x, y, width: right - x, height: bottom - y };
+}
+
+/**
+ * Returns stable local contrast regions for committed diagram objects.
+ * Connectors, arrows, highlights, group containers, and deleted objects do
+ * not create large plates; their bright ink remains supported by nearby node
+ * plates without obscuring the shared screen between clusters.
+ */
+export function calculateContrastPlates(
+  state: BoardState,
+  options: Pick<ContrastPlateOptions, "padding" | "mergeGap"> = {},
+): ContrastPlate[] {
+  const padding = Math.max(0, options.padding ?? 14);
+  const mergeGap = Math.max(0, options.mergeGap ?? 18);
+  const plates: ContrastPlate[] = [];
+
+  for (const stroke of Object.values(state.strokes)) {
+    const annotation = stroke.annotation;
+    const bounds = annotation?.bounds;
+    if (
+      stroke.status !== "committed" ||
+      !annotation ||
+      !bounds ||
+      !CONTRAST_PLATE_ANNOTATIONS.has(annotation.type) ||
+      annotation.groupMemberStrokeIds?.length ||
+      bounds.width <= 0 ||
+      bounds.height <= 0
+    ) {
+      continue;
+    }
+    plates.push({
+      x: bounds.x - padding,
+      y: bounds.y - padding,
+      width: bounds.width + padding * 2,
+      height: bounds.height + padding * 2,
+    });
+  }
+
+  // Repeated passes handle transitive clusters (A touches B, B touches C).
+  let merged = plates;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const next: ContrastPlate[] = [];
+    for (const plate of merged) {
+      const match = next.findIndex((candidate) => platesTouch(candidate, plate, mergeGap));
+      if (match === -1) {
+        next.push(plate);
+      } else {
+        next[match] = unionPlate(next[match]!, plate);
+        changed = true;
+      }
+    }
+    merged = next;
+  }
+  return merged;
+}
+
+function drawContrastPlates(
+  context: CanvasRenderingContext2D,
+  state: BoardState,
+  options: ContrastPlateOptions,
+  view?: BoardRenderView,
+): void {
+  const plates = calculateContrastPlates(state, options);
+  if (!plates.length) {
+    return;
+  }
+  context.save();
+  if (view) {
+    context.transform(view.scale, 0, 0, view.scale, view.x, view.y);
+  }
+  context.fillStyle = `rgba(3, 8, 13, ${Math.min(0.92, Math.max(0, options.opacity ?? 0.72))})`;
+  context.shadowColor = "rgba(3, 8, 13, 0.78)";
+  context.shadowBlur = 18;
+  for (const plate of plates) {
+    roundRectPath(context, plate.x, plate.y, plate.width, plate.height, 18);
+    context.fill();
+  }
+  context.restore();
 }
 
 function drawAlignmentGuides(
@@ -322,7 +465,7 @@ function drawAnnotationStroke(
   context.lineCap = "round";
   context.lineJoin = "round";
   context.strokeStyle = themedInk(annotation.strokeColor ?? stroke.color);
-  context.fillStyle = themedInk(annotation.fillColor ?? "transparent");
+  context.fillStyle = themedFill(annotation.fillColor ?? "transparent");
   context.lineWidth = stroke.thickness;
 
   if ((annotation.type === "ellipse" || annotation.type === "pointer") && annotation.bounds) {
@@ -358,7 +501,7 @@ function drawAnnotationStroke(
 
   if (annotation.type === "highlight" && annotation.bounds) {
     context.globalAlpha = alpha * (annotation.opacity ?? 0.28);
-    context.fillStyle = themedInk(annotation.fillColor ?? "#fde68a");
+    context.fillStyle = themedFill(annotation.fillColor ?? "#fde68a");
     context.strokeStyle = themedInk(annotation.strokeColor ?? "rgba(202, 138, 4, 0.45)");
     roundRectPath(
       context,
@@ -410,7 +553,7 @@ function drawNodeShape(context: CanvasRenderingContext2D, stroke: Stroke): void 
     return;
   }
 
-  context.fillStyle = themedInk(annotation.fillColor ?? "#f8fafc");
+  context.fillStyle = themedFill(annotation.fillColor ?? "#f8fafc");
   context.strokeStyle = themedInk(annotation.strokeColor ?? stroke.color);
   context.lineWidth = stroke.thickness;
 

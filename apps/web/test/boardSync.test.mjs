@@ -60,7 +60,7 @@ function fakeFetchRouter(routes) {
 
 const noTimers = { setTimer: () => 0, clearTimer: () => {} };
 
-test("create path: owner header, standalone provider, ws to the session", async () => {
+test("create path: bearer auth, standalone provider, ws to the session", async () => {
   const clients = [];
   const { fetchImpl, calls } = fakeFetchRouter([
     {
@@ -68,11 +68,13 @@ test("create path: owner header, standalone provider, ws to the session", async 
       body: {
         session: { id: "session-9" },
         ownerParticipant: { id: "owner-p", role: "owner" },
+        realtimeTicket: "realtime-9",
+        joinToken: "join-9",
       },
     },
   ]);
   const result = await startBoardSync(
-    { apiBaseUrl: "http://127.0.0.1:4600", ownerUserId: "user-1", title: "Test board" },
+    { apiBaseUrl: "http://127.0.0.1:4600", ownerUserId: "user-1", accessToken: "account-9", title: "Test board" },
     { onRemoteEvent: () => {} },
     {
       fetchImpl,
@@ -87,9 +89,11 @@ test("create path: owner header, standalone provider, ws to the session", async 
   assert.equal(result.outcome, "created");
   assert.equal(result.initialState, null);
   assert.equal(result.handle.boardSessionId, "session-9");
-  assert.equal(calls[0].init.headers["x-airboard-user-id"], "user-1");
+  assert.equal(calls[0].init.headers.Authorization, "Bearer account-9");
+  assert.equal(calls[0].init.headers["x-airboard-user-id"], undefined);
   assert.equal(JSON.parse(calls[0].init.body).provider, "standalone");
   assert.equal(clients[0].options.url, "ws://127.0.0.1:4600/ws");
+  assert.equal(clients[0].options.realtimeTicket, "realtime-9");
   assert.equal(clients[0].connected, true);
 });
 

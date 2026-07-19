@@ -3,10 +3,10 @@
 // The Airboard add-on runs in a cross-origin iframe that Google does not
 // delegate camera permission to, so it can never capture video itself. This
 // script runs in the Meet page — the origin the user already granted camera
-// access to — and, only when the Airboard frame asks (an explicit click inside
-// Airboard), captures the camera here and streams downscaled frames into the
-// Airboard frame as transferable ImageBitmaps. Chrome's camera indicator is
-// visible for the whole session; stopping in Airboard stops capture here.
+// access to. On a meeting URL it mounts an invisible, extension-owned Airboard
+// engine and streams downscaled camera frames plus microphone PCM into it. The
+// visible result is only Meet's camera tile with the neon board composited on
+// top; no Airboard main-stage activity is required.
 //
 // Protocol (mirrored by apps/web/src/features/meet/meetMediaBridge.ts):
 //   frame -> host: hello | start-video {maxWidth} | frame-ack {id} | stop-video
@@ -28,11 +28,93 @@ const ALLOWED_ORIGINS = new Set([
 ]);
 
 const MAX_IN_FLIGHT = 2;
+const ENGINE_HOST_ID = "airboard-overlay-engine-host";
+const MEETING_PATH = /^\/[a-z]{3}-[a-z]{4}-[a-z]{3}\/?$/i;
 
 /** @type {{sourceWin: MessageEventSource, origin: string, stream: MediaStream, video: HTMLVideoElement, inFlight: number, nextId: number, stopped: boolean} | null} */
 let active = null;
 /** @type {{sourceWin: MessageEventSource, origin: string, stream: MediaStream, reader: ReadableStreamDefaultReader | null, stopped: boolean} | null} */
 let activeAudio = null;
+let extensionState = {
+  linked: false,
+  consented: false,
+  entitled: false,
+  settings: { overlayEnabled: true, videoEnabled: true, audioEnabled: true },
+};
+let lastMeetContext = "";
+
+function reportMeetContext(error) {
+  const next = JSON.stringify({
+    meetingDetected: isMeetingPage(),
+    engineMounted: Boolean(document.getElementById(ENGINE_HOST_ID)),
+    error: error || null,
+  });
+  if (next === lastMeetContext) return;
+  lastMeetContext = next;
+  chrome.runtime.sendMessage({ type: "AIRBOARD_MEET_CONTEXT", ...JSON.parse(next) }).catch(() => {});
+}
+
+function isMeetingPage() {
+  return MEETING_PATH.test(window.location.pathname);
+}
+
+function removeOverlayEngine() {
+  document.getElementById(ENGINE_HOST_ID)?.remove();
+  stopActive("meeting-left", true);
+  stopActiveAudio("meeting-left", true);
+  reportMeetContext();
+}
+
+function syncOverlayEngine() {
+  const existing = document.getElementById(ENGINE_HOST_ID);
+  const allowed =
+    extensionState.linked &&
+    extensionState.consented &&
+    extensionState.entitled &&
+    extensionState.settings?.overlayEnabled !== false;
+  if (!isMeetingPage() || !allowed) {
+    if (existing) {
+      removeOverlayEngine();
+    }
+    reportMeetContext();
+    return;
+  }
+  if (existing || !document.documentElement) {
+    return;
+  }
+  const engine = document.createElement("iframe");
+  engine.id = ENGINE_HOST_ID;
+  engine.src = chrome.runtime.getURL("engine.html");
+  engine.title = "Airboard camera overlay engine";
+  engine.setAttribute("aria-hidden", "true");
+  engine.tabIndex = -1;
+  Object.assign(engine.style, {
+    position: "fixed",
+    left: "-10000px",
+    top: "0",
+    width: "1280px",
+    height: "720px",
+    border: "0",
+    opacity: "0",
+    pointerEvents: "none",
+  });
+  document.documentElement.appendChild(engine);
+  reportMeetContext();
+}
+
+// Meet changes routes without a full page load. Keep the private engine tied
+// to meeting-code URLs and release both capture channels when the user leaves.
+chrome.runtime.sendMessage({ type: "AIRBOARD_GET_STATE" }, (state) => {
+  if (state) extensionState = state;
+  syncOverlayEngine();
+});
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type === "AIRBOARD_STATE_CHANGED" && message.state) {
+    extensionState = message.state;
+    syncOverlayEngine();
+  }
+});
+setInterval(syncOverlayEngine, 1000);
 
 // ~85ms of audio per message at 48kHz; batches the small AudioData frames
 // MediaStreamTrackProcessor yields so postMessage traffic stays low.
@@ -81,6 +163,10 @@ function stopActiveAudio(reason, notifyFrame) {
 }
 
 async function startAudio(sourceWin, origin) {
+  if (!extensionState.consented || extensionState.settings?.audioEnabled === false) {
+    post(sourceWin, origin, makeMessage("error", { message: "audio-disabled-by-user", channel: "audio" }));
+    return;
+  }
   if (activeAudio) {
     if (activeAudio.sourceWin === sourceWin) {
       stopActiveAudio("restarted", false);
@@ -104,6 +190,7 @@ async function startAudio(sourceWin, origin) {
     // meet.google.com already holds the user's microphone grant; no prompt.
     stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
   } catch (error) {
+    reportMeetContext(`microphone-unavailable: ${error && error.name}`);
     post(
       sourceWin,
       origin,
@@ -190,6 +277,10 @@ async function startAudio(sourceWin, origin) {
 }
 
 async function startVideo(sourceWin, origin, request) {
+  if (!extensionState.consented || extensionState.settings?.videoEnabled === false) {
+    post(sourceWin, origin, makeMessage("error", { message: "video-disabled-by-user", channel: "video" }));
+    return;
+  }
   if (active) {
     if (active.sourceWin === sourceWin) {
       stopActive("restarted", false);
@@ -212,6 +303,7 @@ async function startVideo(sourceWin, origin, request) {
       audio: false,
     });
   } catch (error) {
+    reportMeetContext(`camera-unavailable: ${error && error.name}`);
     post(
       sourceWin,
       origin,
@@ -311,6 +403,8 @@ window.addEventListener("message", (event) => {
 });
 
 window.addEventListener("pagehide", () => {
+  document.getElementById(ENGINE_HOST_ID)?.remove();
   stopActive("page-hidden", true);
   stopActiveAudio("page-hidden", true);
+  reportMeetContext();
 });

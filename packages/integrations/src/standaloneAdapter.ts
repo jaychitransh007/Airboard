@@ -42,7 +42,7 @@ export class StandaloneWebAdapter implements MeetingAdapter {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-airboard-user-id": "local-owner",
+        Authorization: `Bearer ${this.requireAccessToken()}`,
       },
       body: JSON.stringify({
         provider: "standalone",
@@ -58,11 +58,11 @@ export class StandaloneWebAdapter implements MeetingAdapter {
     return (await response.json()).session as BoardSession;
   }
 
-  async joinBoardSession(sessionId: string): Promise<BoardSession> {
+  async joinBoardSession(sessionId: string, joinToken?: string): Promise<BoardSession> {
     const response = await fetch(`${this.requireConfig().apiBaseUrl}/sessions/${sessionId}/join`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ displayName: "Guest" }),
+      body: JSON.stringify({ displayName: "Guest", joinToken }),
     });
 
     if (!response.ok) {
@@ -103,5 +103,11 @@ export class StandaloneWebAdapter implements MeetingAdapter {
       throw new Error("StandaloneWebAdapter is not initialized");
     }
     return this.config;
+  }
+
+  private requireAccessToken(): string {
+    const token = this.requireConfig().accessToken;
+    if (!token) throw new Error("Airboard account authentication is required");
+    return token;
   }
 }

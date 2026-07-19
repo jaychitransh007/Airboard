@@ -191,6 +191,40 @@ test("overlay probe resolves null when no compositor answers", async () => {
   assert.equal(await probeMeetCameraOverlay(env, () => {}), null);
 });
 
+test("overlay state carries bounded real-Meet outbound verification metrics", async () => {
+  const { env, emit, hostMessage } = makeEnv();
+  env.onHostReceived = (message) => {
+    if (message.type === "overlay-hello") {
+      emit(
+        hostMessage("overlay-state", {
+          armed: true,
+          engaged: true,
+          verification: {
+            extensionVersion: "0.5.0",
+            framesComposited: 140,
+            lastCompositeAt: 1234,
+            senderAttached: true,
+            framesEncoded: 120,
+            bytesSent: 456789,
+            lastVerifiedAt: 1250,
+          },
+        }),
+      );
+    }
+  };
+  const states = [];
+  await probeMeetCameraOverlay(env, (state) => states.push(state));
+  assert.deepEqual(states[0].verification, {
+    extensionVersion: "0.5.0",
+    framesComposited: 140,
+    lastCompositeAt: 1234,
+    senderAttached: true,
+    framesEncoded: 120,
+    bytesSent: 456789,
+    lastVerifiedAt: 1250,
+  });
+});
+
 test("overlay frames respect the in-flight cap until acked; start/stop reach the host", async () => {
   const { env, emit, hostMessage, sentToHost } = makeEnv();
   env.onHostReceived = (message) => {

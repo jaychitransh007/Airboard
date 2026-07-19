@@ -72,6 +72,8 @@ export type RealtimeSpeechOptions = {
   apiBaseUrl?: string;
   /** Explicit WebSocket URL. Takes precedence over apiBaseUrl. */
   url?: string;
+  /** Verified user token, carried only in the WebSocket upgrade query. */
+  accessToken?: string;
   language?: string;
   /** Provider model identifier selected for this session. */
   model?: string | undefined;
@@ -139,6 +141,10 @@ export type RealtimeAudioSourceLike = {
   disconnect(): void;
 };
 
+export type RealtimePcmInputSession = {
+  stop(): void;
+};
+
 export type RealtimeAudioContextLike = {
   readonly sampleRate: number;
   readonly destination: unknown;
@@ -158,6 +164,16 @@ export type RealtimeAudioContextLike = {
 
 export type RealtimeSpeechDependencies = {
   createWebSocket?: (url: string) => RealtimeWebSocketLike;
+  /**
+   * Direct mono PCM source for hosts that already expose decoded microphone
+   * samples (for example the Meet extension bridge). This bypasses
+   * AudioContext entirely, so default-on capture is not blocked by iframe
+   * autoplay/user-activation policy.
+   */
+  startPcmInput?: (handlers: {
+    onChunk: (samples: Float32Array, sampleRate: number) => void;
+    onEnded: (reason: string) => void;
+  }) => Promise<RealtimePcmInputSession>;
   getUserMedia?: (constraints: MediaStreamConstraints) => Promise<MediaStream>;
   createAudioContext?: () => RealtimeAudioContextLike;
   createAudioWorkletNode?: (
@@ -212,6 +228,7 @@ export function supportsRealtimeSpeech(): boolean {
 export function buildRealtimeTranscriptionWebSocketUrl(
   apiBaseUrl?: string,
   path = DEFAULT_REALTIME_TRANSCRIPTION_PATH,
+  accessToken?: string,
 ): string {
   const fallbackOrigin = typeof window === "undefined" ? "http://localhost:4000" : window.location.origin;
   const baseUrl = new URL(apiBaseUrl || fallbackOrigin);
@@ -221,9 +238,8 @@ export function buildRealtimeTranscriptionWebSocketUrl(
   baseUrl.hash = "";
   // Browsers cannot set headers on WebSocket upgrades; the shared API token
   // (when configured) travels as a query parameter instead.
-  const apiToken = process.env.NEXT_PUBLIC_AIRBOARD_API_TOKEN?.trim();
-  if (apiToken) {
-    baseUrl.searchParams.set("token", apiToken);
+  if (accessToken) {
+    baseUrl.searchParams.set("access_token", accessToken);
   }
   return baseUrl.toString();
 }
@@ -259,6 +275,7 @@ export function createRealtimeSpeechSession(
   dependencies: RealtimeSpeechDependencies = {},
 ): RealtimeSpeechSession | null {
   const createWebSocket = dependencies.createWebSocket ?? defaultCreateWebSocket();
+  const startPcmInput = dependencies.startPcmInput;
   const getUserMedia = dependencies.getUserMedia ?? defaultGetUserMedia();
   const createAudioContext = dependencies.createAudioContext ?? defaultCreateAudioContext();
   const createAudioWorkletNode =
@@ -267,11 +284,15 @@ export function createRealtimeSpeechSession(
     dependencies.createAudioWorkletModuleUrl ?? defaultCreateAudioWorkletModuleUrl();
   const revokeAudioWorkletModuleUrl =
     dependencies.revokeAudioWorkletModuleUrl ?? defaultRevokeAudioWorkletModuleUrl();
-  if (!createWebSocket || !getUserMedia || !createAudioContext) {
+  if (!createWebSocket || (!startPcmInput && (!getUserMedia || !createAudioContext))) {
     return null;
   }
 
-  const url = options.url ?? buildRealtimeTranscriptionWebSocketUrl(options.apiBaseUrl);
+  const url = options.url ?? buildRealtimeTranscriptionWebSocketUrl(
+    options.apiBaseUrl,
+    DEFAULT_REALTIME_TRANSCRIPTION_PATH,
+    options.accessToken,
+  );
   const requestedModel = cleanOptionalString(options.model);
   const targetSampleRate = positiveInteger(
     options.sampleRate,
@@ -288,6 +309,7 @@ export function createRealtimeSpeechSession(
 
   let socket: RealtimeWebSocketLike | null = null;
   let stream: MediaStream | null = null;
+  let pcmInputSession: RealtimePcmInputSession | null = null;
   let audioContext: RealtimeAudioContextLike | null = null;
   let source: RealtimeAudioSourceLike | null = null;
   let processor: RealtimeAudioProcessorLike | null = null;
@@ -320,6 +342,8 @@ export function createRealtimeSpeechSession(
 
   const releaseAudio = () => {
     setListening(false);
+    pcmInputSession?.stop();
+    pcmInputSession = null;
     if (processor) {
       processor.onaudioprocess = null;
       try {
@@ -467,6 +491,15 @@ export function createRealtimeSpeechSession(
     }
     audioCaptureStarting = true;
     try {
+      if (startPcmInput) {
+        if (!pcmInputSession) {
+          fail("Meet microphone capture was not prepared before transcription started.", "MICROPHONE_UNAVAILABLE");
+          return;
+        }
+        state = "active";
+        setListening(true);
+        return;
+      }
       if (!audioContext || !stream) {
         fail("Microphone capture was not prepared before transcription started.", "MICROPHONE_UNAVAILABLE");
         return;
@@ -645,13 +678,37 @@ export function createRealtimeSpeechSession(
 
   const prepareSession = async () => {
     try {
+      if (startPcmInput) {
+        const nextPcmInputSession = await startPcmInput({
+          onChunk: (samples, sampleRate) => {
+            if (sampleRate <= 0 || state === "ended" || state === "stopping") {
+              return;
+            }
+            inputSampleRate = sampleRate;
+            ingestAudio(samples);
+          },
+          onEnded: (reason) => {
+            if (state === "ended" || state === "stopping") {
+              return;
+            }
+            fail(`The Meet microphone bridge stopped: ${reason}.`, "MICROPHONE_UNAVAILABLE");
+          },
+        });
+        if (state !== "starting") {
+          nextPcmInputSession.stop();
+          return;
+        }
+        pcmInputSession = nextPcmInputSession;
+        openSocket();
+        return;
+      }
       // Construct/resume the context synchronously from the caller's click so
       // browsers preserve user activation. Do not start a paid provider stream
       // until microphone permission succeeds.
-      audioContext = createAudioContext();
+      audioContext = createAudioContext!();
       const resumePromise =
         audioContext.state === "suspended" ? audioContext.resume?.() : undefined;
-      const nextStream = await getUserMedia({
+      const nextStream = await getUserMedia!({
         audio: {
           channelCount: 1,
           echoCancellation: true,

@@ -16,7 +16,10 @@ export default defineConfig({
     {
       // Dedicated API instance for E2E: real sessions + board sync, in-memory
       // store, no provider keys needed for the flows under test.
-      command: "pnpm --filter @airboard/api dev",
+      // The API does not need file watching during a deterministic E2E run.
+      // Avoiding `node --watch` also prevents macOS's per-process file watcher
+      // limit from turning a valid browser suite into an EMFILE startup error.
+      command: "pnpm --filter @airboard/api build && pnpm --filter @airboard/api start",
       url: "http://127.0.0.1:4600/health",
       reuseExistingServer: false,
       timeout: 120_000,

@@ -304,6 +304,59 @@ test("streams exact 80ms frames, emits live callbacks, and releases resources on
   assert.ok(events.some(([type, value]) => type === "end" && value === "stopped"));
 });
 
+test("streams bridged PCM without creating an AudioContext or requiring user activation", async () => {
+  const socket = new FakeSocket();
+  const events = [];
+  let pcmHandlers;
+  let stopCalls = 0;
+  const session = createRealtimeSpeechSession(
+    {
+      onFinal() {},
+      onListening: (listening) => events.push(["listening", listening]),
+    },
+    { url: "ws://localhost/transcription/ws" },
+    {
+      createWebSocket: () => socket,
+      startPcmInput: async (handlers) => {
+        pcmHandlers = handlers;
+        // The first bridge chunk can arrive before the server is ready. It is
+        // intentionally dropped instead of being queued as stale speech.
+        handlers.onChunk(new Float32Array(1_280).fill(0.1), 16_000);
+        return { stop: () => (stopCalls += 1) };
+      },
+      getUserMedia: async () => {
+        throw new Error("direct PCM must not request iframe microphone access");
+      },
+      createAudioContext: () => {
+        throw new Error("direct PCM must not create an autoplay-gated AudioContext");
+      },
+    },
+  );
+
+  assert.ok(session);
+  session.start();
+  await new Promise((resolve) => setImmediate(resolve));
+  socket.open();
+  socket.serverMessage({
+    type: "transcription.ready",
+    provider: "test",
+    model: "pcm-bridge",
+    sampleRate: 16_000,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(session.isListening(), true);
+  pcmHandlers.onChunk(new Float32Array(1_280).fill(0.25), 16_000);
+  assert.equal(socket.sent.filter((entry) => entry instanceof ArrayBuffer).length, 1);
+
+  session.abort();
+  assert.equal(stopCalls, 1);
+  assert.deepEqual(events, [
+    ["listening", true],
+    ["listening", false],
+  ]);
+});
+
 test("drops audio while websocket backpressure exceeds the bounded latency queue", async () => {
   const socket = new FakeSocket();
   const media = createMediaStreamHarness();

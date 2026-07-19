@@ -25,6 +25,7 @@ export type VoiceTraceEvent = {
 
 export type PostVoiceTraceOptions = {
   apiBaseUrl: string;
+  accessToken?: string;
   voiceTurnId: string;
   stage: VoiceTraceStage;
   data?: Record<string, unknown>;
@@ -73,7 +74,10 @@ export async function postVoiceTrace(
   }
   const response = await fetchImpl(new URL("/voice/trace", options.apiBaseUrl), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.accessToken ? { Authorization: `Bearer ${options.accessToken}` } : {}),
+    },
     body,
     keepalive: true,
   });
@@ -85,13 +89,25 @@ export async function postVoiceTrace(
 export function createVoiceTraceReporter(
   apiBaseUrl: string,
   fetchImpl: typeof fetch = fetch,
+  accessToken?: string,
 ): (voiceTurnId: string, stage: VoiceTraceStage, data?: Record<string, unknown>) => void {
   const pendingByTurn = new Map<string, Promise<void>>();
   return (voiceTurnId, stage, data = {}) => {
     const previous = pendingByTurn.get(voiceTurnId) ?? Promise.resolve();
     const next = previous
       .catch(() => undefined)
-      .then(() => postVoiceTrace({ apiBaseUrl, voiceTurnId, stage, data }, fetchImpl))
+      .then(() =>
+        postVoiceTrace(
+          {
+            apiBaseUrl,
+            voiceTurnId,
+            stage,
+            data,
+            ...(accessToken ? { accessToken } : {}),
+          },
+          fetchImpl,
+        ),
+      )
       .catch(() => {
         // Observability must never make the voice agent fail.
       })

@@ -20,6 +20,33 @@ The first implementation is local-first:
 
 The local slice focuses on proving the Intent Canvas interaction before meeting-platform integration.
 
+## Screen-overlay presentation
+
+On the standalone surface, **Use screen** lets the presenter choose a screen or window as the live background. Airboard renders a light global dim plus local dark-glass plates behind diagram clusters, keeping slides readable without sacrificing neon contrast. **Present** opens a source/readiness workflow, automatically enables Lightboard, and requires both a local composite check and confirmation of the meeting share preview before starting strict broadcast-safe output. That output contains no command dock, exit button, selection handles, collaboration cursors, onboarding, recording badge, or other presenter feedback; press Esc to return. The selected screen is never uploaded by this flow, capture ends when the user stops it or the source ends, and studio recording uses the same unmirrored full-frame composition.
+
+Camera AR now uses the same centered `object-fit: cover` transform for the visible video, hand landmarks, two-hand navigation, and the hybrid controller, so a cropped 16:9 camera remains aligned at every canvas aspect ratio. A vendored on-device MediaPipe person-segmentation model creates a feathered foreground mask at a bounded rate: local preview and recordings redraw the presenter above the diagram, while the Meet overlay cuts the person out of the transmitted board layer so its camera compositor produces the same depth ordering. The feature is enabled by default and can be disabled under Appearance.
+
+This browser flow is an audience-facing composite rather than an operating-system overlay. For the literal desktop experience, Airboard now also includes a native Electron shell in `apps/desktop`. It opens the same live board as a transparent, frameless, always-on-top window and passes mouse events through to arbitrary apps underneath.
+
+## Native desktop overlay
+
+Start the Airboard web surface and desktop shell in separate terminals:
+
+```sh
+pnpm dev:web
+pnpm dev:desktop
+```
+
+The native overlay starts in broadcast-safe click-through mode on the display containing the pointer. Use the Airboard tray/menu-bar item to change displays or quit. `Cmd/Ctrl+Shift+O` temporarily turns pointer control on so you can enable hands or Airo, type a command, undo, or change the dark-overlay strength; **Return to click-through** removes the setup HUD and gives mouse focus back to the app underneath. `Cmd/Ctrl+Shift+H` shows or hides Airboard.
+
+The desktop shell defaults to `http://127.0.0.1:3000`. Point it at a deployed Airboard web origin with `AIRBOARD_DESKTOP_URL=https://your-airboard-host pnpm dev:desktop`. The renderer bridge is sandboxed and exposes only overlay state, click-through, and hide operations.
+
+## Meet camera overlay
+
+Version 0.8.0 of the Meet extension removes the dedicated Airboard canvas from Meet. On meeting-code URLs the extension mounts a private 1280×720 engine offscreen, enables the neon overlay plus gesture-camera and Airo microphone inputs by default after affirmative media confirmation, and composites only the transparent diagram plane onto the outgoing Meet camera. If Meet already has a camera sender when setup finishes, Airboard upgrades that sender in place—no camera restart is required. Opening the legacy Meet add-on side panel closes it; opening an activity created by an older revision ends it. Settings, account controls, and six-step readiness diagnostics belong in the extension popup and standalone Airboard page rather than in the audience surface.
+
+The main-world hook still tracks the composited output through `RTCRtpSender` and reads outbound WebRTC stats. A remote participant must confirm the receiver-side image; use the evidence checklist in [Docs/Meet Camera Composite Verification.md](Docs/Meet%20Camera%20Composite%20Verification.md).
+
 ## Realtime Voice
 
 Airo now sends microphone audio to the Airboard API over a provider-neutral WebSocket instead of relying on Chrome's opaque speech-recognition model. The first provider adapter uses Deepgram Flux. Provider credentials remain in the API process, partial transcripts update the UI as speech arrives, and only a provider-finalized turn can reach the deterministic diagram-command parser.
@@ -105,3 +132,13 @@ Airboard uses a separate local Supabase port range so it can run beside other lo
 - Mailpit: `http://127.0.0.1:56324`
 
 The API uses Supabase persistence when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are present. Without those variables, it falls back to the in-memory local store.
+
+## Commercial platform
+
+Airboard now includes the public acquisition site, Supabase-backed account and tenant bootstrap, invitation acceptance, three-day value-triggered trial, persistent/versioned boards, Stripe checkout/webhook/portal integration, organization administration, installation health, SAML/OIDC configuration, SCIM 2.0 provisioning, privacy requests, support intake, consent records, content-free product events, audit logs, request tracing and lifecycle jobs.
+
+The implemented routes, data contract, environment variables, acceptance test and honest external launch gates are documented in [Commercial Platform Runbook](Docs/Commercial%20Platform%20Runbook.md). Run the complete local control-plane journey with a local API and Supabase stack using:
+
+```sh
+pnpm smoke:commercial
+```

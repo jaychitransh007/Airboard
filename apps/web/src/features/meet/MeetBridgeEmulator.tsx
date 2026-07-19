@@ -235,14 +235,36 @@ export function MeetBridgeEmulator() {
         __overlayFrames?: number;
         __overlayArmed?: boolean;
       };
+      const overlayVerification = () => {
+        const frames = testWindow.__overlayFrames ?? 0;
+        return {
+          extensionVersion: "0.8.0-test",
+          framesComposited: frames,
+          lastCompositeAt: frames > 0 ? Date.now() : 0,
+          senderAttached: frames > 0,
+          framesEncoded: frames,
+          bytesSent: frames * 4_096,
+          lastVerifiedAt: frames > 0 ? Date.now() : 0,
+        };
+      };
       if (data.type === "overlay-hello") {
-        post({ type: "overlay-state", armed: testWindow.__overlayArmed === true, engaged: true });
+        post({
+          type: "overlay-state",
+          armed: testWindow.__overlayArmed === true,
+          engaged: true,
+          verification: overlayVerification(),
+        });
         return;
       }
       if (data.type === "overlay-start") {
         testWindow.__overlayArmed = true;
         testWindow.__overlayFrames = testWindow.__overlayFrames ?? 0;
-        post({ type: "overlay-state", armed: true, engaged: true });
+        post({
+          type: "overlay-state",
+          armed: true,
+          engaged: true,
+          verification: overlayVerification(),
+        });
         return;
       }
       if (data.type === "overlay-frame") {
@@ -250,11 +272,24 @@ export function MeetBridgeEmulator() {
         testWindow.__overlayFrames = (testWindow.__overlayFrames ?? 0) + 1;
         frame.bitmap?.close();
         post({ type: "overlay-ack", id: frame.id });
+        if (testWindow.__overlayFrames === 1 || testWindow.__overlayFrames % 5 === 0) {
+          post({
+            type: "overlay-state",
+            armed: true,
+            engaged: true,
+            verification: overlayVerification(),
+          });
+        }
         return;
       }
       if (data.type === "overlay-stop") {
         testWindow.__overlayArmed = false;
-        post({ type: "overlay-state", armed: false, engaged: true });
+        post({
+          type: "overlay-state",
+          armed: false,
+          engaged: true,
+          verification: overlayVerification(),
+        });
       }
     };
 

@@ -25,6 +25,8 @@ export type RealtimeClientOptions = {
   url: string;
   boardSessionId: string;
   participantId: string;
+  /** Short-lived server-signed admission ticket; identifiers alone are never trusted. */
+  realtimeTicket?: string;
   reconnect?: boolean;
 };
 
@@ -92,8 +94,14 @@ export class AirboardRealtimeClient {
     this.rejectedByServer = false;
     this.setStatus(this.reconnectAttempt > 0 ? "reconnecting" : "connecting");
     const url = new URL(this.options.url);
-    url.searchParams.set("boardSessionId", this.options.boardSessionId);
-    url.searchParams.set("participantId", this.options.participantId);
+    if (this.options.realtimeTicket) {
+      url.searchParams.set("ticket", this.options.realtimeTicket);
+    } else {
+      // Compatibility for dependency-injected local tests. Production session
+      // responses always include a ticket and the API rejects bare ids.
+      url.searchParams.set("boardSessionId", this.options.boardSessionId);
+      url.searchParams.set("participantId", this.options.participantId);
+    }
 
     const socket = this.createWebSocket(url.toString());
     this.socket = socket;

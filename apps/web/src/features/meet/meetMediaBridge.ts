@@ -361,7 +361,44 @@ export function probeMeetMediaBridgeInWindow(): Promise<MeetMediaBridge | null> 
  * streams transparent neon board frames to the extension's MAIN-world
  * compositor, which blends them onto the presenter's outgoing Meet camera.
  */
-export type MeetCameraOverlayState = { armed: boolean; engaged: boolean };
+export type MeetCameraOverlayVerification = {
+  extensionVersion: string;
+  framesComposited: number;
+  lastCompositeAt: number;
+  senderAttached: boolean;
+  framesEncoded: number;
+  bytesSent: number;
+  lastVerifiedAt: number;
+};
+
+export type MeetCameraOverlayState = {
+  armed: boolean;
+  engaged: boolean;
+  verification?: MeetCameraOverlayVerification;
+};
+
+function finiteMetric(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+function parseOverlayVerification(value: unknown): MeetCameraOverlayVerification | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const verification = value as Record<string, unknown>;
+  return {
+    extensionVersion:
+      typeof verification.extensionVersion === "string"
+        ? verification.extensionVersion.slice(0, 24)
+        : "unknown",
+    framesComposited: finiteMetric(verification.framesComposited),
+    lastCompositeAt: finiteMetric(verification.lastCompositeAt),
+    senderAttached: verification.senderAttached === true,
+    framesEncoded: finiteMetric(verification.framesEncoded),
+    bytesSent: finiteMetric(verification.bytesSent),
+    lastVerifiedAt: finiteMetric(verification.lastVerifiedAt),
+  };
+}
 
 export type MeetCameraOverlay = {
   /** Arms the compositor and begins accepting frames. */
@@ -398,7 +435,12 @@ export function probeMeetCameraOverlay(
         return;
       }
       if (message.type === "overlay-state") {
-        onState({ armed: message.armed === true, engaged: message.engaged === true });
+        const verification = parseOverlayVerification(message.verification);
+        onState({
+          armed: message.armed === true,
+          engaged: message.engaged === true,
+          ...(verification ? { verification } : {}),
+        });
         if (!settled) {
           settled = true;
           if (timer) {

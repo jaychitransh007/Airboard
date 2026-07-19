@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  containRect,
   coverRect,
   recordingDimensions,
   recordingFileName,
@@ -26,6 +27,21 @@ test("cover geometry fills the target and centers the overflow", () => {
 
   // Matching aspect maps exactly.
   assert.deepEqual(coverRect(1280, 720, 640, 360), { x: 0, y: 0, width: 640, height: 360 });
+});
+
+test("contain geometry preserves the whole shared screen", () => {
+  const wide = containRect(1600, 900, 1000, 800);
+  assert.equal(wide.width, 1000);
+  assert.ok(wide.height < 800);
+  assert.equal(wide.x, 0);
+  assert.ok(wide.y > 0);
+
+  assert.deepEqual(containRect(1280, 720, 640, 360), {
+    x: 0,
+    y: 0,
+    width: 640,
+    height: 360,
+  });
 });
 
 test("recording file names are sortable and second-precise", () => {

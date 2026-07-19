@@ -10,7 +10,11 @@ export type MediaPipeHandTrackerOptions = {
 };
 
 export class MediaPipeHandTracker {
-  private constructor(private readonly handLandmarker: any) {}
+  private readonly handLandmarker: any;
+
+  private constructor(handLandmarker: any) {
+    this.handLandmarker = handLandmarker;
+  }
 
   static async create(options: MediaPipeHandTrackerOptions = {}): Promise<MediaPipeHandTracker> {
     installMediaPipeConsoleFilter();

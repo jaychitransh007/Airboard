@@ -12,7 +12,7 @@ import { MeetBridgeEmulator } from "../../../src/features/meet/MeetBridgeEmulato
 export default async function MeetTestHarnessPage({
   searchParams,
 }: {
-  searchParams: Promise<{ surface?: string; media?: string; bridge?: string }>;
+  searchParams: Promise<{ surface?: string; media?: string; bridge?: string; headless?: string }>;
 }) {
   if (process.env.NEXT_PUBLIC_AIRBOARD_TEST_HOOKS !== "1") {
     notFound();
@@ -21,7 +21,7 @@ export default async function MeetTestHarnessPage({
   // permission to the add-on frame; the default emulates no delegation.
   // bridge=emulate answers the media-bridge protocol in-page, standing in for
   // the Meet Media Bridge extension.
-  const { surface, media, bridge } = await searchParams;
+  const { surface, media, bridge, headless } = await searchParams;
   return (
     <>
       {bridge === "emulate" ? <MeetBridgeEmulator /> : null}
@@ -30,6 +30,7 @@ export default async function MeetTestHarnessPage({
         meetingProvider="google_meet"
         providerMeetingId="test-harness-meeting"
         embeddedMediaCapture={media === "embedded"}
+        headlessMeetOverlay={headless === "1"}
       />
     </>
   );

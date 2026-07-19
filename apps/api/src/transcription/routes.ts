@@ -1,7 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import WebSocket, { type RawData } from "ws";
 import type { ApiConfig } from "../config";
-import { apiTokenAllowed } from "../security";
 import { createTranscriptionProvider } from "./factory";
 import { parseTranscriptionControlMessage, resolveTranscriptionStart } from "./protocol";
 import { publicTranscriptionConfig } from "./publicConfig";
@@ -10,6 +9,8 @@ import type {
   TranscriptionProviderEvent,
   TranscriptionServerMessage,
 } from "./types";
+import type { AuthService } from "../auth";
+import { configuredApiTokenAllowed } from "../security";
 
 const MAX_PCM16_FRAME_BYTES = 256 * 1024;
 const MAX_STARTUP_BUFFER_BYTES = 384 * 1024;
@@ -20,7 +21,7 @@ type ActiveTranscription = {
   stopReason: "completed" | "aborted" | "provider_closed";
 };
 
-export function registerTranscriptionRoutes(server: FastifyInstance, config: ApiConfig): void {
+export function registerTranscriptionRoutes(server: FastifyInstance, config: ApiConfig, auth?: AuthService): void {
   const provider = createTranscriptionProvider(config.transcription);
   let concurrentStreams = 0;
 
@@ -31,10 +32,10 @@ export function registerTranscriptionRoutes(server: FastifyInstance, config: Api
       socket.close(1008, "Origin is not allowed");
       return;
     }
-    if (!apiTokenAllowed(request, config.apiToken)) {
-      socket.close(1008, "API token required");
-      return;
-    }
+    const authorize = async () => {
+      if (configuredApiTokenAllowed(request, config.apiToken) || config.localEntitlements) return true;
+      return Boolean(auth && (await auth.authenticate(request)));
+    };
 
     const clientSocket = socket as unknown as WebSocket;
     let active: ActiveTranscription | null = null;
@@ -315,12 +316,29 @@ export function registerTranscriptionRoutes(server: FastifyInstance, config: Api
       );
     };
 
-    clientSocket.on("message", (rawMessage: RawData, isBinary: boolean) => {
+    let authorized = false;
+    const pendingMessages: Array<{ rawMessage: RawData; isBinary: boolean }> = [];
+    const receive = (rawMessage: RawData, isBinary: boolean) => {
       if (isBinary) {
         receiveAudio(rawMessage);
         return;
       }
       void start(rawMessage.toString());
+    };
+    clientSocket.on("message", (rawMessage: RawData, isBinary: boolean) => {
+      if (!authorized) {
+        if (pendingMessages.length < 4) pendingMessages.push({ rawMessage, isBinary });
+        return;
+      }
+      receive(rawMessage, isBinary);
+    });
+    void authorize().then((allowed) => {
+      if (!allowed) {
+        socket.close(1008, "Airboard authentication required");
+        return;
+      }
+      authorized = true;
+      for (const pending of pendingMessages.splice(0)) receive(pending.rawMessage, pending.isBinary);
     });
 
     clientSocket.on("close", () => {

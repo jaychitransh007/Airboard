@@ -63,7 +63,23 @@ import {
   type LightboardRecorderHandle,
 } from "./lightboardRecorder";
 import {
-  createBridgedMicStream,
+  describeScreenUnderlayError,
+  requestScreenUnderlay,
+  stopMediaStream,
+} from "./screenUnderlay";
+import {
+  assessPresentationReadiness,
+  SCREEN_PRESENTATION_SCRIM,
+  screenFriendlyScrim,
+  type PresentationSource,
+} from "./presentationWorkflow";
+import {
+  MediaPipePersonSegmenter,
+  renderBoardBehindPerson,
+  renderPersonForeground,
+  updatePersonMaskCanvas,
+} from "./personOcclusion";
+import {
   probeMeetCameraOverlayInWindow,
   probeMeetMediaBridgeInWindow,
   type MeetCameraOverlay,
@@ -113,7 +129,10 @@ import {
   frictionPresets,
   GesturePipeline,
   HybridGestureController,
+  mapLandmarkToCanvas,
+  mapLandmarkToFittedCanvas,
   MediaPipeHandTracker,
+  type CanvasMapping,
   type DetectedHand,
   type FrictionPreset,
   type FrictionStrokePoint,
@@ -164,10 +183,16 @@ import {
   type ParsedIntentCanvasCommand,
 } from "./intentCanvasParser";
 import { createVoiceTraceReporter } from "./voiceTrace";
+import {
+  DEFAULT_DESKTOP_OVERLAY_STATE,
+  type DesktopOverlayState,
+} from "./desktopOverlay";
 
 type Surface = "standalone" | "meet-side-panel" | "meet-main-stage";
 
 type CameraStatus = "idle" | "starting" | "tracker_loading" | "active" | "blocked" | "tracker_error" | "error";
+type ScreenUnderlayStatus = "idle" | "starting" | "active" | "blocked" | "error";
+type PersonOcclusionStatus = "idle" | "loading" | "ready" | "active" | "error";
 
 type Stats = {
   strokes: number;
@@ -308,7 +333,6 @@ const PARTICIPANT_ID = "local-owner-participant";
 const OWNER_USER_ID = "local-owner";
 const AIRBOARD_API_URL =
   process.env.NEXT_PUBLIC_AIRBOARD_API_URL?.trim() || "http://127.0.0.1:4000";
-const reportVoiceTrace = createVoiceTraceReporter(AIRBOARD_API_URL);
 const BROWSER_SPEECH_FALLBACK_ENABLED =
   process.env.NEXT_PUBLIC_AIRBOARD_SPEECH_FALLBACK === "browser";
 const ERASER_RADIUS = 42;
@@ -426,6 +450,15 @@ export function AirboardPrototype({
   initialBoardSessionId,
   onBoardSessionReady,
   embeddedMediaCapture = false,
+  desktopOverlay = false,
+  headlessMeetOverlay = false,
+  accessToken,
+  accountUserId,
+  persistentBoardId,
+  persistentWorkspaceId,
+  initialBoardState,
+  onPersistentBoardChange,
+  initialPreferences,
 }: {
   surface: Surface;
   meetingProvider?: MeetingProvider;
@@ -442,7 +475,58 @@ export function AirboardPrototype({
    * can run embedded. False routes gesture/voice to the companion window.
    */
   embeddedMediaCapture?: boolean;
+  /**
+   * Standalone native shell only: render the board as a full-screen transparent
+   * desktop layer. The Electron host owns topmost placement and OS click-through.
+   */
+  desktopOverlay?: boolean;
+  /**
+   * Extension-owned Meet renderer. It keeps a stable 16:9 canvas offscreen,
+   * starts the camera overlay plus gesture/voice inputs automatically, and
+   * never renders presenter controls into the outgoing composite.
+   */
+  headlessMeetOverlay?: boolean;
+  /** Verified account access used for durable sessions; never persisted by the board. */
+  accessToken?: string;
+  accountUserId?: string;
+  /** Durable standalone board record associated with this live editing session. */
+  persistentBoardId?: string;
+  persistentWorkspaceId?: string;
+  initialBoardState?: BoardState;
+  /** Debounced committed-content snapshot; ephemeral cursors and media never leave the canvas. */
+  onPersistentBoardChange?: (state: BoardState) => void;
+  initialPreferences?: {
+    neonTheme?: boolean;
+    videoEnabled?: boolean;
+    audioEnabled?: boolean;
+    personOcclusion?: boolean;
+  };
 }) {
+  const [bridgedAccessToken, setBridgedAccessToken] = useState<string | undefined>();
+  const effectiveAccessToken = accessToken ?? bridgedAccessToken;
+  const syncAuthenticationReady = !headlessMeetOverlay || Boolean(effectiveAccessToken);
+  useEffect(() => {
+    if (typeof window === "undefined" || accessToken) return;
+    const receiveHostAuthentication = (event: MessageEvent) => {
+      const data = event.data as Record<string, unknown> | null;
+      if (
+        event.source === window.parent &&
+        event.origin.startsWith("chrome-extension://") &&
+        data?.bridge === "airboard-extension-auth" &&
+        data.type === "installation-token" &&
+        typeof data.token === "string" &&
+        data.token.length <= 4_096
+      ) {
+        setBridgedAccessToken(data.token);
+      }
+    };
+    window.addEventListener("message", receiveHostAuthentication);
+    return () => window.removeEventListener("message", receiveHostAuthentication);
+  }, [accessToken]);
+  const reportVoiceTrace = useMemo(
+    () => createVoiceTraceReporter(AIRBOARD_API_URL, fetch, effectiveAccessToken),
+    [effectiveAccessToken],
+  );
   const isMeetSurface = surface !== "standalone";
   // The Meet media bridge extension (a meet.google.com content script) can
   // stream the meeting origin's camera and microphone into this frame when
@@ -452,14 +536,23 @@ export function AirboardPrototype({
   const voiceCaptureAvailable = !isMeetSurface || embeddedMediaCapture || meetMediaBridge !== null;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const screenUnderlayVideoRef = useRef<HTMLVideoElement | null>(null);
+  const screenUnderlayStreamRef = useRef<MediaStream | null>(null);
+  const screenUnderlayStartInProgressRef = useRef(false);
   const meetBridgeSessionRef = useRef<MeetMediaBridgeVideoSession | null>(null);
   const meetBridgeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const labelInputRef = useRef<HTMLInputElement | null>(null);
   const trackerRef = useRef<MediaPipeHandTracker | null>(null);
+  const personSegmenterRef = useRef<MediaPipePersonSegmenter | null>(null);
+  const personMaskCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const personForegroundCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const cameraOverlayFrameCanvasRef = useRef<HTMLCanvasElement | null>(null);
   // Synchronous guard against a double-start race (state updates lag within a tick).
   const cameraStartInProgressRef = useRef(false);
   // Flipped on unmount so an in-flight startCamera can release what it acquires.
   const cameraMountedRef = useRef(true);
+  const headlessCameraRequestedRef = useRef(false);
+  const headlessVoiceRequestedRef = useRef(false);
   const pipelineRef = useRef(new GesturePipeline());
   const hybridGestureControllerRef = useRef<HybridGestureController | null>(null);
   const hybridGestureCanvasSizeRef = useRef({ width: 0, height: 0, minTrackingConfidence: 0 });
@@ -503,7 +596,16 @@ export function AirboardPrototype({
   // Gesture lasso: close the hand on EMPTY canvas (Select tool) and drag a
   // selection rectangle. Board-space origin while active.
   const lassoOriginRef = useRef<{ x: number; y: number } | null>(null);
-  const boardRef = useRef<BoardState>(createInitialBoardState(BOARD_SESSION_ID));
+  const boardRef = useRef<BoardState>(
+    initialBoardState ?? createInitialBoardState(persistentBoardId ?? BOARD_SESSION_ID),
+  );
+  const persistenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingPersistenceRef = useRef<BoardState | null>(null);
+  const lastPersistenceHashRef = useRef("");
+  const persistenceCallbackRef = useRef(onPersistentBoardChange);
+  useEffect(() => {
+    persistenceCallbackRef.current = onPersistentBoardChange;
+  }, [onPersistentBoardChange]);
   // Board sync: a live server session id takes over from the local fallback
   // once a session is created/joined; every event addresses whichever id is
   // current so the server accepts and rebroadcasts it.
@@ -576,23 +678,49 @@ export function AirboardPrototype({
   // Rendered by the companion-window link on meeting surfaces; the ref alone
   // would not re-render when the session becomes available.
   const [activeBoardSessionId, setActiveBoardSessionId] = useState<string | null>(null);
+  const [activeJoinToken, setActiveJoinToken] = useState<string | null>(null);
   // Lightboard (neon-on-dark) appearance. Defaults here; stored preferences
   // load after mount so server and client render the same initial tree.
-  const [boardTheme, setBoardTheme] = useState<"classic" | "lightboard">("classic");
-  const [cameraUnderlayEnabled, setCameraUnderlayEnabled] = useState(true);
-  const [scrimOpacity, setScrimOpacity] = useState(0.85);
-  const underlayVideoRef = useRef<HTMLVideoElement | null>(null);
+  const [boardTheme, setBoardTheme] = useState<"classic" | "lightboard">(
+    desktopOverlay || headlessMeetOverlay || initialPreferences?.neonTheme !== false
+      ? "lightboard"
+      : "classic",
+  );
+  const [cameraUnderlayEnabled, setCameraUnderlayEnabled] = useState(
+    !desktopOverlay && initialPreferences?.videoEnabled !== false,
+  );
+  const [personOcclusionEnabled, setPersonOcclusionEnabled] = useState(
+    initialPreferences?.personOcclusion !== false,
+  );
+  const [personOcclusionStatus, setPersonOcclusionStatus] =
+    useState<PersonOcclusionStatus>("idle");
+  const [scrimOpacity, setScrimOpacity] = useState(
+    headlessMeetOverlay ? SCREEN_PRESENTATION_SCRIM : 0.85,
+  );
+  const cameraUnderlayVideoRef = useRef<HTMLVideoElement | null>(null);
+  const [screenUnderlayStatus, setScreenUnderlayStatus] =
+    useState<ScreenUnderlayStatus>("idle");
+  const [screenUnderlayNotice, setScreenUnderlayNotice] = useState<string | null>(null);
   // Studio recording. Refs mirror theme/scrim so the recorder's per-frame
   // compositor reads current values without re-starting on every change.
   // Presenting: a clean stage for tab-sharing — chrome hidden, board full-bleed.
   const [presenting, setPresenting] = useState(false);
+  const [presentationSetupOpen, setPresentationSetupOpen] = useState(false);
+  const [presentationSource, setPresentationSource] =
+    useState<PresentationSource>("screen");
+  const [presentationVerification, setPresentationVerification] =
+    useState<"idle" | "passed" | "failed">("idle");
+  const [presentationAudienceConfirmed, setPresentationAudienceConfirmed] = useState(false);
+  const [localContrastPlatesEnabled, setLocalContrastPlatesEnabled] = useState(true);
+  const [desktopOverlayState, setDesktopOverlayState] =
+    useState<DesktopOverlayState>(DEFAULT_DESKTOP_OVERLAY_STATE);
   // Camera overlay: the extension's MAIN-world compositor blends neon board
   // frames onto the outgoing Meet camera (main stage only).
   const [cameraOverlay, setCameraOverlay] = useState<MeetCameraOverlay | null>(null);
   const [cameraOverlayState, setCameraOverlayState] = useState<MeetCameraOverlayState | null>(
     null,
   );
-  const [cameraOverlayEnabled, setCameraOverlayEnabled] = useState(false);
+  const [cameraOverlayEnabled, setCameraOverlayEnabled] = useState(headlessMeetOverlay);
   const [recordingState, setRecordingState] = useState<"idle" | "recording">("idle");
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [recordingNotice, setRecordingNotice] = useState<string | null>(null);
@@ -697,6 +825,17 @@ export function AirboardPrototype({
     [autoLiftEnabled, frictionPreset, inputMode, strokeCleanupEnabled],
   );
 
+  const broadcastSafe =
+    headlessMeetOverlay || presenting || (desktopOverlay && desktopOverlayState.clickThrough);
+  const personOcclusionNeeded =
+    personOcclusionEnabled &&
+    boardTheme === "lightboard" &&
+    cameraStatus === "active" &&
+    ((surface === "standalone" &&
+      cameraUnderlayEnabled &&
+      screenUnderlayStatus !== "active") ||
+      (surface === "meet-main-stage" && cameraOverlayEnabled));
+
   const render = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) {
@@ -709,19 +848,31 @@ export function AirboardPrototype({
       // the canvas itself stays transparent there.
       background: boardTheme === "lightboard" ? "transparent" : "white",
       theme: boardTheme,
-      selectedStrokeId: selectedAnnotationId,
-      selectedStrokeIds: selectedAnnotationIds,
-      hoverStrokeId,
-      ghostAnnotation,
-      ghostAnnotations,
-      alignmentGuides,
+      selectedStrokeId: broadcastSafe ? null : selectedAnnotationId,
+      selectedStrokeIds: broadcastSafe ? [] : selectedAnnotationIds,
+      hoverStrokeId: broadcastSafe ? null : hoverStrokeId,
+      ghostAnnotation: broadcastSafe ? null : ghostAnnotation,
+      ghostAnnotations: broadcastSafe ? [] : ghostAnnotations,
+      alignmentGuides: broadcastSafe ? [] : alignmentGuides,
+      hideCursors: broadcastSafe,
+      contrastPlates:
+        boardTheme === "lightboard" &&
+        localContrastPlatesEnabled &&
+        (desktopOverlay || headlessMeetOverlay || screenUnderlayStatus === "active")
+          ? { opacity: 0.72, padding: 14, mergeGap: 18 }
+          : null,
     });
   }, [
     alignmentGuides,
     boardTheme,
+    broadcastSafe,
+    desktopOverlay,
+    headlessMeetOverlay,
     ghostAnnotation,
     ghostAnnotations,
     hoverStrokeId,
+    localContrastPlatesEnabled,
+    screenUnderlayStatus,
     selectedAnnotationId,
     selectedAnnotationIds,
   ]);
@@ -735,6 +886,39 @@ export function AirboardPrototype({
       active: Object.keys(state.activeStrokes).length,
       handsDetected: currentStats.handsDetected,
     }));
+  }, []);
+
+  const schedulePersistentSnapshot = useCallback((state: BoardState) => {
+    const callback = persistenceCallbackRef.current;
+    if (!callback || !persistentBoardId) return;
+    const snapshot: BoardState = {
+      ...state,
+      boardId: persistentBoardId,
+      activeStrokes: {},
+      participants: {},
+      cursors: {},
+    };
+    const hash = JSON.stringify({
+      strokes: snapshot.strokes,
+      eraseActions: snapshot.eraseActions,
+      clearedAt: snapshot.clearedAt,
+    });
+    if (hash === lastPersistenceHashRef.current) return;
+    pendingPersistenceRef.current = snapshot;
+    if (persistenceTimerRef.current) clearTimeout(persistenceTimerRef.current);
+    persistenceTimerRef.current = setTimeout(() => {
+      const pending = pendingPersistenceRef.current;
+      if (!pending) return;
+      pendingPersistenceRef.current = null;
+      lastPersistenceHashRef.current = hash;
+      persistenceCallbackRef.current?.(pending);
+    }, 800);
+  }, [persistentBoardId]);
+
+  useEffect(() => () => {
+    if (persistenceTimerRef.current) clearTimeout(persistenceTimerRef.current);
+    const pending = pendingPersistenceRef.current;
+    if (pending) persistenceCallbackRef.current?.(pending);
   }, []);
 
   /**
@@ -763,8 +947,11 @@ export function AirboardPrototype({
       render();
       updateStats();
       publishBoardEvent(event);
+      if (event.type !== "cursor.moved" && !event.type.startsWith("participant.")) {
+        schedulePersistentSnapshot(boardRef.current);
+      }
     },
-    [publishBoardEvent, render, updateStats],
+    [publishBoardEvent, render, schedulePersistentSnapshot, updateStats],
   );
 
   /** A peer's event: apply and render, never re-publish (that would loop). */
@@ -773,8 +960,11 @@ export function AirboardPrototype({
       boardRef.current = applyBoardEvent(boardRef.current, event);
       render();
       updateStats();
+      if (event.type !== "cursor.moved" && !event.type.startsWith("participant.")) {
+        schedulePersistentSnapshot(boardRef.current);
+      }
     },
-    [render, updateStats],
+    [render, schedulePersistentSnapshot, updateStats],
   );
   const applyRemoteEventRef = useRef(applyRemoteEvent);
   useEffect(() => {
@@ -832,8 +1022,9 @@ export function AirboardPrototype({
     };
   }, [embeddedMediaCapture, isMeetSurface]);
 
-  // Camera-overlay compositor probe (main stage only). Leaving the surface
-  // disarms the compositor so a stale overlay can never ride the camera.
+  // Camera-overlay compositor probe. Every renderer that arms the compositor
+  // also disarms it on teardown so disabling the extension cannot leave a
+  // stale bitmap on the user's outgoing camera.
   useEffect(() => {
     if (surface !== "meet-main-stage") {
       return;
@@ -859,7 +1050,103 @@ export function AirboardPrototype({
       handle?.stop();
       handle?.dispose();
     };
-  }, [surface]);
+  }, [headlessMeetOverlay, surface]);
+
+  useEffect(() => {
+    if (!headlessMeetOverlay || !cameraOverlay) {
+      return;
+    }
+    setBoardTheme("lightboard");
+    setCameraOverlayEnabled(true);
+    cameraOverlay.start();
+  }, [cameraOverlay, headlessMeetOverlay]);
+
+  // Person segmentation is independent from hand tracking so camera startup
+  // remains responsive. It runs only when an audience-facing camera composite
+  // can actually use the mask.
+  useEffect(() => {
+    if (!personOcclusionNeeded) {
+      personSegmenterRef.current?.close();
+      personSegmenterRef.current = null;
+      setPersonOcclusionStatus("idle");
+      const foreground = personForegroundCanvasRef.current;
+      foreground?.getContext("2d")?.clearRect(0, 0, foreground.width, foreground.height);
+      return;
+    }
+    let cancelled = false;
+    let segmenter: MediaPipePersonSegmenter | null = null;
+    setPersonOcclusionStatus("loading");
+    if (!personMaskCanvasRef.current) {
+      personMaskCanvasRef.current = document.createElement("canvas");
+    }
+    void MediaPipePersonSegmenter.create()
+      .then((created) => {
+        if (cancelled) {
+          created.close();
+          return;
+        }
+        segmenter = created;
+        personSegmenterRef.current = created;
+        setPersonOcclusionStatus("ready");
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPersonOcclusionStatus("error");
+        }
+      });
+    return () => {
+      cancelled = true;
+      if (personSegmenterRef.current === segmenter) {
+        personSegmenterRef.current = null;
+      }
+      segmenter?.close();
+    };
+  }, [personOcclusionNeeded]);
+
+  // The 244 KB landscape model is intentionally capped around 12fps. The
+  // latest feathered mask is reused between inferences by both the DOM depth
+  // layer and the Meet overlay-frame pump.
+  useEffect(() => {
+    if (!personOcclusionNeeded) {
+      return;
+    }
+    let animationFrame = 0;
+    let lastSegmentationAt = 0;
+    let failed = false;
+    const loop = (timestampMs: number) => {
+      const segmenter = personSegmenterRef.current;
+      const video = videoRef.current;
+      const maskCanvas = personMaskCanvasRef.current;
+      if (
+        !failed &&
+        segmenter &&
+        video &&
+        maskCanvas &&
+        video.videoWidth > 0 &&
+        timestampMs - lastSegmentationAt >= 83
+      ) {
+        lastSegmentationAt = timestampMs;
+        try {
+          segmenter.segment(video, timestampMs, (mask) => {
+            updatePersonMaskCanvas(maskCanvas, mask);
+            const foreground = personForegroundCanvasRef.current;
+            if (foreground && surface === "standalone") {
+              renderPersonForeground({ targetCanvas: foreground, maskCanvas, video });
+            }
+            setPersonOcclusionStatus((current) =>
+              current === "active" ? current : "active",
+            );
+          });
+        } catch {
+          failed = true;
+          setPersonOcclusionStatus("error");
+        }
+      }
+      animationFrame = requestAnimationFrame(loop);
+    };
+    animationFrame = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(animationFrame);
+  }, [personOcclusionNeeded, surface]);
 
   // Overlay frame pump: ~15fps of the neon board, downscaled for transfer.
   useEffect(() => {
@@ -874,9 +1161,29 @@ export function AirboardPrototype({
         return;
       }
       busy = true;
-      const width = Math.min(1280, canvas.width);
+      const maskCanvas = personMaskCanvasRef.current;
+      const video = videoRef.current;
+      let overlayCanvas = canvas;
+      if (
+        personOcclusionNeeded &&
+        maskCanvas?.width &&
+        video?.videoWidth &&
+        video.videoHeight
+      ) {
+        const target =
+          cameraOverlayFrameCanvasRef.current ?? document.createElement("canvas");
+        cameraOverlayFrameCanvasRef.current = target;
+        overlayCanvas = renderBoardBehindPerson({
+          targetCanvas: target,
+          boardCanvas: canvas,
+          maskCanvas,
+          videoWidth: video.videoWidth,
+          videoHeight: video.videoHeight,
+        });
+      }
+      const width = Math.min(1280, overlayCanvas.width);
       const height = Math.max(2, Math.round((canvas.height * width) / canvas.width));
-      void createImageBitmap(canvas, { resizeWidth: width, resizeHeight: height })
+      void createImageBitmap(overlayCanvas, { resizeWidth: width, resizeHeight: height })
         .then((bitmap) => {
           if (cancelled || !cameraOverlay.trySendFrame(bitmap, scrimOpacityRef.current)) {
             bitmap.close();
@@ -891,24 +1198,67 @@ export function AirboardPrototype({
       cancelled = true;
       clearInterval(timer);
     };
-  }, [cameraOverlay, cameraOverlayEnabled]);
+  }, [cameraOverlay, cameraOverlayEnabled, personOcclusionNeeded]);
 
   // Load stored appearance preferences after mount (SSR-safe).
   useEffect(() => {
     try {
-      if (window.localStorage.getItem("airboard.theme.v1") === "lightboard") {
+      if (
+        desktopOverlay ||
+        headlessMeetOverlay ||
+        window.localStorage.getItem("airboard.theme.v1") === "lightboard"
+      ) {
         setBoardTheme("lightboard");
       }
-      if (window.localStorage.getItem("airboard.underlay.v1") === "off") {
+      if (desktopOverlay || window.localStorage.getItem("airboard.underlay.v1") === "off") {
         setCameraUnderlayEnabled(false);
       }
-      const scrim = Number(window.localStorage.getItem("airboard.scrim.v1"));
-      if (Number.isFinite(scrim) && scrim >= 0 && scrim <= 1) {
-        setScrimOpacity(scrim);
+      const storedScrim = window.localStorage.getItem("airboard.scrim.v1");
+      if (storedScrim !== null) {
+        const scrim = Number(storedScrim);
+        if (Number.isFinite(scrim) && scrim >= 0 && scrim <= 1) {
+          setScrimOpacity(scrim);
+        }
+      }
+      if (window.localStorage.getItem("airboard.contrast-plates.v1") === "off") {
+        setLocalContrastPlatesEnabled(false);
+      }
+      if (window.localStorage.getItem("airboard.person-occlusion.v1") === "off") {
+        setPersonOcclusionEnabled(false);
       }
     } catch {
       // Storage may be unavailable; keep defaults.
     }
+  }, [desktopOverlay, headlessMeetOverlay]);
+
+  useEffect(() => {
+    if (!desktopOverlay) {
+      return;
+    }
+    document.body.classList.add("airboard-desktop-overlay");
+    const bridge = window.airboardDesktop;
+    if (!bridge) {
+      // Direct browser visits to ?desktopOverlay=1 are a safe visual preview;
+      // no native host exists there, so keep its controls usable.
+      setDesktopOverlayState((current) => ({ ...current, clickThrough: false }));
+      return () => document.body.classList.remove("airboard-desktop-overlay");
+    }
+    setDesktopOverlayState(bridge.initialState);
+    const unsubscribe = bridge.onStateChanged(setDesktopOverlayState);
+    void bridge.getState().then(setDesktopOverlayState).catch(() => {});
+    return () => {
+      unsubscribe();
+      document.body.classList.remove("airboard-desktop-overlay");
+    };
+  }, [desktopOverlay]);
+
+  const restoreDesktopClickThrough = useCallback(() => {
+    const bridge = window.airboardDesktop;
+    if (!bridge) {
+      setDesktopOverlayState((current) => ({ ...current, clickThrough: true }));
+      return;
+    }
+    void bridge.setClickThrough(true).then(setDesktopOverlayState).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -930,6 +1280,124 @@ export function AirboardPrototype({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [presenting]);
 
+  const stopScreenUnderlay = useCallback(
+    (notice: string | null = null, leavePresenting = false) => {
+      screenUnderlayStartInProgressRef.current = false;
+      const stream = screenUnderlayStreamRef.current;
+      screenUnderlayStreamRef.current = null;
+      const video = screenUnderlayVideoRef.current;
+      if (video) {
+        video.pause();
+        video.srcObject = null;
+      }
+      stopMediaStream(stream);
+      setScreenUnderlayStatus("idle");
+      setScreenUnderlayNotice(notice);
+      if (leavePresenting) {
+        setPresenting(false);
+        setPresentationSetupOpen(true);
+        setPresentationVerification("idle");
+        setPresentationAudienceConfirmed(false);
+      }
+    },
+    [],
+  );
+
+  const startScreenUnderlay = useCallback(async () => {
+    if (
+      surface !== "standalone" ||
+      screenUnderlayStartInProgressRef.current ||
+      screenUnderlayStatus === "starting" ||
+      screenUnderlayStatus === "active"
+    ) {
+      return;
+    }
+    screenUnderlayStartInProgressRef.current = true;
+    setScreenUnderlayStatus("starting");
+    setScreenUnderlayNotice(
+      "Choose the screen or window containing your content — not this Airboard tab.",
+    );
+    if (boardTheme !== "lightboard") {
+      setBoardTheme("lightboard");
+      try {
+        window.localStorage.setItem("airboard.theme.v1", "lightboard");
+      } catch {
+        // Preference persistence is best-effort.
+      }
+    }
+    setLocalContrastPlatesEnabled(true);
+    const nextScrim = screenFriendlyScrim(scrimOpacityRef.current);
+    if (nextScrim !== scrimOpacityRef.current) {
+      setScrimOpacity(nextScrim);
+    }
+    try {
+      window.localStorage.setItem("airboard.contrast-plates.v1", "on");
+      window.localStorage.setItem("airboard.scrim.v1", String(nextScrim));
+    } catch {
+      // Preference persistence is best-effort.
+    }
+
+    let stream: MediaStream | null = null;
+    try {
+      stream = await requestScreenUnderlay();
+      if (!cameraMountedRef.current) {
+        stopMediaStream(stream);
+        return;
+      }
+      const video = screenUnderlayVideoRef.current;
+      if (!video) {
+        throw new Error("The Airboard screen layer is unavailable.");
+      }
+      screenUnderlayStreamRef.current = stream;
+      video.srcObject = stream;
+      const track = stream.getVideoTracks()[0]!;
+      track.addEventListener(
+        "ended",
+        () => {
+          if (screenUnderlayStreamRef.current === stream) {
+            stopScreenUnderlay(
+              "Screen sharing ended. Choose a screen or window again to restore the background.",
+              true,
+            );
+          }
+        },
+        { once: true },
+      );
+      await video.play();
+      if (screenUnderlayStreamRef.current !== stream) {
+        stopMediaStream(stream);
+        return;
+      }
+      setScreenUnderlayStatus("active");
+      setScreenUnderlayNotice(
+        "Screen background is live with a light global dim and local contrast behind diagram clusters. Present this Airboard tab to share the composite.",
+      );
+    } catch (error) {
+      // The source may have ended while video.play() was still resolving. Its
+      // ended handler already restored the correct idle state and notice.
+      if (stream && screenUnderlayStreamRef.current !== stream) {
+        stopMediaStream(stream);
+        return;
+      }
+      if (screenUnderlayStreamRef.current === stream) {
+        screenUnderlayStreamRef.current = null;
+      }
+      stopMediaStream(stream);
+      const video = screenUnderlayVideoRef.current;
+      if (video) {
+        video.srcObject = null;
+      }
+      const name =
+        error && typeof error === "object" && "name" in error
+          ? String((error as { name?: unknown }).name ?? "")
+          : "";
+      setScreenUnderlayStatus(name === "NotAllowedError" ? "blocked" : "error");
+      setScreenUnderlayNotice(describeScreenUnderlayError(error));
+    } finally {
+      screenUnderlayStartInProgressRef.current = false;
+    }
+  }, [boardTheme, screenUnderlayStatus, stopScreenUnderlay, surface]);
+
   // Stop an in-flight recording if the board unmounts.
   useEffect(() => {
     return () => {
@@ -948,9 +1416,16 @@ export function AirboardPrototype({
     }
     setRecordingNotice(null);
     try {
+      const useScreenUnderlay =
+        screenUnderlayStatus === "active" &&
+        Boolean(screenUnderlayVideoRef.current?.videoWidth);
       const handle = await startLightboardRecording({
         boardCanvas: canvas,
-        underlayVideo: underlayVideoRef.current,
+        underlayVideo: useScreenUnderlay
+          ? screenUnderlayVideoRef.current
+          : cameraUnderlayVideoRef.current,
+        underlayMode: useScreenUnderlay ? "screen" : "camera",
+        foregroundCanvas: useScreenUnderlay ? null : personForegroundCanvasRef.current,
         getScrimOpacity: () => scrimOpacityRef.current,
         getTheme: () => boardThemeRef.current,
       });
@@ -968,7 +1443,7 @@ export function AirboardPrototype({
         error instanceof Error ? error.message : "Recording could not start.",
       );
     }
-  }, []);
+  }, [screenUnderlayStatus]);
 
   const stopStudioRecording = useCallback(async () => {
     const handle = recorderRef.current;
@@ -991,9 +1466,10 @@ export function AirboardPrototype({
     setRecordingNotice("Recording saved to your downloads.");
   }, []);
 
-  // The underlay video mirrors whatever stream feeds the hand tracker.
+  // The camera underlay mirrors whatever stream feeds the hand tracker. A
+  // selected screen/window is a separate, unmirrored video layer above it.
   useEffect(() => {
-    const underlay = underlayVideoRef.current;
+    const underlay = cameraUnderlayVideoRef.current;
     if (!underlay) {
       return;
     }
@@ -1008,6 +1484,10 @@ export function AirboardPrototype({
 
   // First-run onboarding: the gesture vocabulary is invisible until taught.
   useEffect(() => {
+    if (headlessMeetOverlay) {
+      setOnboardingVisible(false);
+      return;
+    }
     if (!cameraCaptureAvailable) {
       setOnboardingVisible(false);
       return;
@@ -1019,7 +1499,7 @@ export function AirboardPrototype({
     } catch {
       // Storage may be unavailable; skip onboarding rather than block.
     }
-  }, [cameraCaptureAvailable]);
+  }, [cameraCaptureAvailable, headlessMeetOverlay]);
 
   /**
    * Board sync bootstrap. With ?boardSessionId=… in the URL we join that
@@ -1029,13 +1509,14 @@ export function AirboardPrototype({
    * stays local — every feature works, nothing syncs.
    */
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === "undefined" || !syncAuthenticationReady) {
       return;
     }
     let cancelled = false;
     const requestedSessionId =
       initialBoardSessionId ??
       new URLSearchParams(window.location.search).get("boardSessionId");
+    const requestedJoinToken = new URLSearchParams(window.location.search).get("joinToken");
     boardSyncStatusRef.current = "connecting";
     setBoardSyncStatus("connecting");
 
@@ -1066,9 +1547,13 @@ export function AirboardPrototype({
       {
         apiBaseUrl: AIRBOARD_API_URL,
         boardSessionId: requestedSessionId,
-        ownerUserId: OWNER_USER_ID,
+        ownerUserId: accountUserId ?? OWNER_USER_ID,
+        ...(effectiveAccessToken ? { accessToken: effectiveAccessToken } : {}),
+        ...(requestedJoinToken ? { joinToken: requestedJoinToken } : {}),
         provider: meetingProvider,
         ...(providerMeetingId ? { providerMeetingId } : {}),
+        ...(persistentWorkspaceId ? { workspaceId: persistentWorkspaceId } : {}),
+        ...(persistentBoardId ? { boardId: persistentBoardId } : {}),
         displayName: requestedSessionId ? "Guest" : "Owner",
         title: "Airboard",
       },
@@ -1106,6 +1591,7 @@ export function AirboardPrototype({
         boardSyncRef.current = result.handle;
         boardSessionIdRef.current = result.handle.boardSessionId;
         setActiveBoardSessionId(result.handle.boardSessionId);
+        setActiveJoinToken(result.handle.joinToken ?? requestedJoinToken);
         if (result.outcome === "joined") {
           boardRef.current = result.initialState;
           undoStackRef.current = [];
@@ -1123,6 +1609,9 @@ export function AirboardPrototype({
         }
         const url = new URL(window.location.href);
         url.searchParams.set("boardSessionId", result.handle.boardSessionId);
+        if (result.handle.joinToken) {
+          url.searchParams.set("joinToken", result.handle.joinToken);
+        }
         window.history.replaceState(null, "", url.toString());
         onBoardSessionReady?.({
           boardSessionId: result.handle.boardSessionId,
@@ -1148,9 +1637,10 @@ export function AirboardPrototype({
       boardSyncRef.current?.stop();
       boardSyncRef.current = null;
     };
-    // Mount-once by design: session lifetime == page lifetime.
+    // Starts once for normal surfaces. The extension-owned engine waits until
+    // its scoped installation credential arrives, then starts exactly once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [syncAuthenticationReady]);
 
   const makePoint = useCallback((x: number, y: number, confidence?: number): StrokePoint => {
     const point: StrokePoint = {
@@ -3018,6 +3508,7 @@ export function AirboardPrototype({
       try {
         const resolution = await resolveSemanticIntent({
           apiBaseUrl: AIRBOARD_API_URL,
+          ...(effectiveAccessToken ? { accessToken: effectiveAccessToken } : {}),
           voiceTurnId: voiceTurnId ?? crypto.randomUUID(),
           transcript: instruction,
           parserIssue,
@@ -3730,6 +4221,7 @@ export function AirboardPrototype({
         },
         {
           apiBaseUrl: AIRBOARD_API_URL,
+          ...(effectiveAccessToken ? { accessToken: effectiveAccessToken } : {}),
           language: typeof navigator === "undefined" ? "en-US" : navigator.language,
           model:
             selectedSpeechModelRef.current ||
@@ -3742,7 +4234,12 @@ export function AirboardPrototype({
         // On Meet surfaces the iframe cannot capture the microphone itself;
         // the bridge extension streams it from the meeting page instead.
         isMeetSurface && !embeddedMediaCapture && meetMediaBridge
-          ? { getUserMedia: () => createBridgedMicStream(meetMediaBridge) }
+          ? {
+              startPcmInput: (handlers: {
+                onChunk: (samples: Float32Array, sampleRate: number) => void;
+                onEnded: (reason: string) => void;
+              }) => meetMediaBridge.startAudio(handlers),
+            }
           : {},
       );
       if (!realtimeSession) {
@@ -4049,6 +4546,35 @@ export function AirboardPrototype({
       cameraStartInProgressRef.current = false;
     }
   }, [cameraCaptureAvailable, cameraStatus, embeddedMediaCapture, isMeetSurface, meetMediaBridge, stopCamera]);
+
+  // The extension-owned engine has no visible controls by design. Once its
+  // bridge and transcription configuration are ready, enable both Airboard
+  // inputs using the same lifecycle paths as the former buttons.
+  useEffect(() => {
+    if (
+      headlessMeetOverlay &&
+      meetMediaBridge &&
+      cameraStatus === "idle" &&
+      !headlessCameraRequestedRef.current
+    ) {
+      headlessCameraRequestedRef.current = true;
+      void startCamera();
+    }
+  }, [cameraStatus, headlessMeetOverlay, meetMediaBridge, startCamera]);
+
+  useEffect(() => {
+    if (
+      headlessMeetOverlay &&
+      meetMediaBridge &&
+      speechSupported &&
+      speechEngine === "realtime" &&
+      !speechSessionRef.current &&
+      !headlessVoiceRequestedRef.current
+    ) {
+      headlessVoiceRequestedRef.current = true;
+      startVoiceCommand();
+    }
+  }, [headlessMeetOverlay, meetMediaBridge, speechEngine, speechSupported, startVoiceCommand]);
 
   const clearBoard = useCallback(() => {
     semanticIntentRequestIdRef.current += 1;
@@ -4460,6 +4986,15 @@ export function AirboardPrototype({
           handsDetected: hands.length,
         }));
         const rect = canvas.getBoundingClientRect();
+        const cameraMapping: CanvasMapping = {
+          canvasWidth: rect.width,
+          canvasHeight: rect.height,
+          sourceWidth: video.videoWidth,
+          sourceHeight: video.videoHeight,
+          fitMode: "cover",
+          mirrorInput: true,
+          sensitivity,
+        };
         const result = pipelineRef.current.process({
           hands,
           timestampMs,
@@ -4468,12 +5003,7 @@ export function AirboardPrototype({
           frictionPreset,
           markerInputMode,
           paused: inputPaused,
-          mapping: {
-            canvasWidth: rect.width,
-            canvasHeight: rect.height,
-            mirrorInput: true,
-            sensitivity,
-          },
+          mapping: cameraMapping,
         });
         let hybridOutput: HybridGestureControllerOutput | undefined;
         if (inputMode === "gesture") {
@@ -4511,7 +5041,7 @@ export function AirboardPrototype({
             };
           }
 
-          const signal = getHybridHandSignal(hands, result?.hand);
+          const signal = getHybridHandSignal(hands, result?.hand, cameraMapping);
           captureLandmarkFrame(hands, timestampMs);
 
           // Two-hand canvas navigation outranks every single-hand gesture:
@@ -4519,7 +5049,7 @@ export function AirboardPrototype({
           // so pan/zoom can never grab an object or open the mic.
           const navTracker = canvasNavTrackerRef.current!;
           const navUpdate = navTracker.update({
-            hands: collectNavHands(hands, rect.width, rect.height),
+            hands: collectNavHands(hands, cameraMapping),
             timestampMs,
           });
           if (navTracker.engaged) {
@@ -4817,6 +5347,12 @@ export function AirboardPrototype({
       const video = videoRef.current;
       const stream = video?.srcObject as MediaStream | null;
       stream?.getTracks().forEach((track) => track.stop());
+      screenUnderlayStartInProgressRef.current = false;
+      stopMediaStream(screenUnderlayStreamRef.current);
+      screenUnderlayStreamRef.current = null;
+      if (screenUnderlayVideoRef.current) {
+        screenUnderlayVideoRef.current.srcObject = null;
+      }
     };
   }, []);
 
@@ -5252,6 +5788,122 @@ export function AirboardPrototype({
           ? "checking"
           : "not configured";
 
+  const presentationReadiness = useMemo(
+    () =>
+      assessPresentationReadiness({
+        theme: boardTheme,
+        source: presentationSource,
+        canvasReady: Boolean(canvasRef.current?.width && canvasRef.current?.height),
+        screenReady:
+          screenUnderlayStatus === "active" &&
+          Boolean(screenUnderlayVideoRef.current?.videoWidth) &&
+          screenUnderlayStreamRef.current?.getVideoTracks()[0]?.readyState === "live",
+        cameraReady:
+          cameraStatus === "active" &&
+          Boolean(videoRef.current?.videoWidth) &&
+          ((videoRef.current?.srcObject as MediaStream | null)?.getVideoTracks()[0]?.readyState ===
+            "live"),
+        localContrastPlates: localContrastPlatesEnabled,
+        pendingPreview: Boolean(pendingIntent),
+      }),
+    [
+      boardTheme,
+      cameraStatus,
+      localContrastPlatesEnabled,
+      pendingIntent,
+      presentationSource,
+      screenUnderlayStatus,
+    ],
+  );
+
+  const openPresentationSetup = useCallback(() => {
+    if (boardTheme !== "lightboard") {
+      setBoardTheme("lightboard");
+      try {
+        window.localStorage.setItem("airboard.theme.v1", "lightboard");
+      } catch {
+        // Preference persistence is best-effort.
+      }
+    }
+    const nextSource: PresentationSource =
+      screenUnderlayStatus === "active"
+        ? "screen"
+        : cameraStatus === "active" && cameraUnderlayEnabled
+          ? "camera"
+          : "screen";
+    setPresentationSource(nextSource);
+    if (nextSource === "screen") {
+      setLocalContrastPlatesEnabled(true);
+      const nextScrim = screenFriendlyScrim(scrimOpacityRef.current);
+      setScrimOpacity(nextScrim);
+      try {
+        window.localStorage.setItem("airboard.contrast-plates.v1", "on");
+        window.localStorage.setItem("airboard.scrim.v1", String(nextScrim));
+      } catch {
+        // Preference persistence is best-effort.
+      }
+    }
+    setPresentationVerification("idle");
+    setPresentationAudienceConfirmed(false);
+    setPresentationSetupOpen(true);
+  }, [boardTheme, cameraStatus, cameraUnderlayEnabled, screenUnderlayStatus]);
+
+  const choosePresentationSource = useCallback(
+    (source: PresentationSource) => {
+      setPresentationSource(source);
+      setPresentationVerification("idle");
+      setPresentationAudienceConfirmed(false);
+      if (source !== "screen" && screenUnderlayStatus === "active") {
+        stopScreenUnderlay("Screen background stopped for this presentation source.");
+      }
+      if (source === "camera") {
+        setCameraUnderlayEnabled(true);
+        try {
+          window.localStorage.setItem("airboard.underlay.v1", "on");
+        } catch {
+          // Preference persistence is best-effort.
+        }
+      } else if (source === "dark") {
+        setCameraUnderlayEnabled(false);
+      } else {
+        setLocalContrastPlatesEnabled(true);
+        const nextScrim = screenFriendlyScrim(scrimOpacityRef.current);
+        setScrimOpacity(nextScrim);
+        try {
+          window.localStorage.setItem("airboard.contrast-plates.v1", "on");
+          window.localStorage.setItem("airboard.scrim.v1", String(nextScrim));
+        } catch {
+          // Preference persistence is best-effort.
+        }
+      }
+    },
+    [screenUnderlayStatus, stopScreenUnderlay],
+  );
+
+  const startCleanPresentation = useCallback(() => {
+    if (
+      !presentationReadiness.ready ||
+      presentationVerification !== "passed" ||
+      !presentationAudienceConfirmed
+    ) {
+      return;
+    }
+    setSelectedAnnotationId(null);
+    setSelectedAnnotationIds([]);
+    setHoverStrokeId(null);
+    setGhostAnnotation(null);
+    setGhostAnnotations([]);
+    setAlignmentGuides([]);
+    setOpenCatalogId(null);
+    setEditingAnnotationId(null);
+    setVoiceGate(null);
+    setActionToast(null);
+    setObjectGestureState("hover");
+    canvasRef.current?.blur();
+    setPresentationSetupOpen(false);
+    setPresenting(true);
+  }, [presentationAudienceConfirmed, presentationReadiness.ready, presentationVerification]);
+
   if (surface === "meet-side-panel") {
     return (
       <main className="airboard-meet-panel">
@@ -5302,7 +5954,7 @@ export function AirboardPrototype({
                 board — gestures and voice commands there appear for everyone in Meet. Installing
                 the Airboard extension brings gesture directly into Meet.
               </p>
-              <CompanionMediaLink boardSessionId={activeBoardSessionId} />
+              <CompanionMediaLink boardSessionId={activeBoardSessionId} joinToken={activeJoinToken} />
             </>
           )}
         </section>
@@ -5322,9 +5974,193 @@ export function AirboardPrototype({
   return (
     <main
       className={`airboard-shell${isMeetSurface ? " airboard-meet-embedded" : ""}${
-        presenting ? " presenting" : ""
+        presenting ? " presenting broadcast-safe" : ""
+      }${desktopOverlay ? " desktop-overlay" : ""}${
+        desktopOverlay && !desktopOverlayState.clickThrough ? " desktop-overlay-interactive" : ""
+      }${desktopOverlay && desktopOverlayState.clickThrough ? " broadcast-safe" : ""}${
+        headlessMeetOverlay ? " meet-overlay-engine broadcast-safe" : ""
       }`}
     >
+      {presentationSetupOpen && !presenting ? (
+        <div className="presentation-setup-backdrop" data-testid="presentation-setup">
+          <section
+            className="presentation-setup"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="presentation-setup-title"
+          >
+            <div className="presentation-setup-heading">
+              <div>
+                <span className="eyebrow">Presentation workflow</span>
+                <h2 id="presentation-setup-title">Prepare the audience composite</h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close presentation setup"
+                onClick={() => setPresentationSetupOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <p>
+              Airboard has enabled the lightboard theme. Choose what sits below the diagram,
+              verify the local composite, then confirm the preview in your meeting before the
+              audience-safe output starts.
+            </p>
+
+            <fieldset className="presentation-source-picker">
+              <legend>1. Choose the background source</legend>
+              <label className={presentationSource === "screen" ? "selected" : undefined}>
+                <input
+                  type="radio"
+                  name="presentation-source"
+                  value="screen"
+                  checked={presentationSource === "screen"}
+                  onChange={() => choosePresentationSource("screen")}
+                />
+                <span>
+                  <strong>Screen or window</strong>
+                  <small>Best for drawing over slides, documents, or another app.</small>
+                </span>
+              </label>
+              <label className={presentationSource === "camera" ? "selected" : undefined}>
+                <input
+                  type="radio"
+                  name="presentation-source"
+                  value="camera"
+                  checked={presentationSource === "camera"}
+                  onChange={() => choosePresentationSource("camera")}
+                />
+                <span>
+                  <strong>Camera</strong>
+                  <small>Place the presenter behind the glowing diagram.</small>
+                </span>
+              </label>
+              <label className={presentationSource === "dark" ? "selected" : undefined}>
+                <input
+                  type="radio"
+                  name="presentation-source"
+                  value="dark"
+                  checked={presentationSource === "dark"}
+                  onChange={() => choosePresentationSource("dark")}
+                />
+                <span>
+                  <strong>Dark canvas</strong>
+                  <small>Show the diagram without a live source below it.</small>
+                </span>
+              </label>
+            </fieldset>
+
+            <div className="presentation-source-action">
+              {presentationSource === "screen" ? (
+                <button
+                  type="button"
+                  className="primary"
+                  data-testid="presentation-choose-screen"
+                  disabled={screenUnderlayStatus === "starting" || screenUnderlayStatus === "active"}
+                  onClick={() => void startScreenUnderlay()}
+                >
+                  {screenUnderlayStatus === "starting"
+                    ? "Choosing screen…"
+                    : screenUnderlayStatus === "active"
+                      ? "Screen/window is live"
+                      : "Choose screen or window"}
+                </button>
+              ) : presentationSource === "camera" ? (
+                <button
+                  type="button"
+                  className="primary"
+                  data-testid="presentation-enable-camera"
+                  disabled={
+                    cameraStatus === "starting" ||
+                    cameraStatus === "tracker_loading" ||
+                    cameraStatus === "active"
+                  }
+                  onClick={() => void startCamera()}
+                >
+                  {cameraStatus === "starting" || cameraStatus === "tracker_loading"
+                    ? "Starting camera…"
+                    : cameraStatus === "active"
+                      ? "Camera is live"
+                      : "Enable camera"}
+                </button>
+              ) : (
+                <span className="pill">No capture permission needed</span>
+              )}
+              {presentationSource === "screen" ? (
+                <small>Global dim {Math.round(scrimOpacity * 100)}% · local contrast plates on</small>
+              ) : null}
+            </div>
+
+            <div className="presentation-verification">
+              <div>
+                <strong>2. Verify this tab’s composite</strong>
+                <ul data-testid="presentation-readiness">
+                  {presentationReadiness.checks.map((check) => (
+                    <li className={check.passed ? "passed" : "waiting"} key={check.id}>
+                      <span aria-hidden="true">{check.passed ? "✓" : "○"}</span>
+                      {check.label}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <button
+                type="button"
+                data-testid="presentation-verify"
+                onClick={() =>
+                  setPresentationVerification(presentationReadiness.ready ? "passed" : "failed")
+                }
+              >
+                Verify composite
+              </button>
+              {presentationVerification === "passed" ? (
+                <span className="presentation-check-result passed" role="status">
+                  Local composite ready
+                </span>
+              ) : presentationVerification === "failed" ? (
+                <span className="presentation-check-result failed" role="status">
+                  Finish the waiting checks above
+                </span>
+              ) : null}
+            </div>
+
+            <label className="presentation-audience-check" htmlFor="presentation-audience-confirmed">
+              <input
+                id="presentation-audience-confirmed"
+                data-testid="presentation-audience-confirmed"
+                type="checkbox"
+                checked={presentationAudienceConfirmed}
+                disabled={presentationVerification !== "passed" || !presentationReadiness.ready}
+                onChange={(event) => setPresentationAudienceConfirmed(event.target.checked)}
+              />
+              <span>
+                <strong>3. I confirmed the meeting’s shared-content preview is receiving this Airboard tab.</strong>
+                <small>
+                  Browsers cannot inspect a remote attendee’s player. This explicit preview check
+                  verifies the meeting is receiving the composite rather than only the source.
+                </small>
+              </span>
+            </label>
+
+            <div className="presentation-setup-footer">
+              <span>Clean output hides every control and pointer. Press Esc to return.</span>
+              <button
+                type="button"
+                className="primary"
+                data-testid="presentation-start-clean"
+                disabled={
+                  !presentationReadiness.ready ||
+                  presentationVerification !== "passed" ||
+                  !presentationAudienceConfirmed
+                }
+                onClick={startCleanPresentation}
+              >
+                Start clean output
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
       <header className="topbar">
         <div className="brand">
           <h1>Airboard</h1>
@@ -5368,12 +6204,43 @@ export function AirboardPrototype({
               {speechArmed ? "Stop Airo" : "Start Airo"}
             </button>
           ) : null}
-          {surface === "standalone" ? (
+          {surface === "standalone" && !desktopOverlay ? (
+            <button
+              type="button"
+              className={screenUnderlayStatus === "active" ? "screen-underlay-active" : undefined}
+              data-testid="screen-underlay-toggle"
+              disabled={
+                screenUnderlayStatus === "starting" || recordingState === "recording"
+              }
+              aria-label={
+                screenUnderlayStatus === "active"
+                  ? "Stop using the shared screen behind Airboard"
+                  : "Choose a screen or window to show behind Airboard"
+              }
+              title={
+                screenUnderlayStatus === "active"
+                  ? "Stop the captured screen background"
+                  : "Choose a screen or window; Airboard remains the tab you present"
+              }
+              onClick={() =>
+                screenUnderlayStatus === "active"
+                  ? stopScreenUnderlay("Screen background stopped.")
+                  : void startScreenUnderlay()
+              }
+            >
+              {screenUnderlayStatus === "starting"
+                ? "Choosing screen…"
+                : screenUnderlayStatus === "active"
+                  ? "Stop screen"
+                  : "Use screen"}
+            </button>
+          ) : null}
+          {surface === "standalone" && !desktopOverlay ? (
             <button
               type="button"
               data-testid="present-toggle"
-              title="Hide the app chrome for tab-sharing or a clean stage (Esc exits)"
-              onClick={() => setPresenting(true)}
+              title="Choose a source, verify the meeting preview, and start a clean output"
+              onClick={openPresentationSetup}
             >
               Present
             </button>
@@ -5403,11 +6270,28 @@ export function AirboardPrototype({
           className={`board-area${boardTheme === "lightboard" ? " lightboard" : ""}`}
           aria-label="Airboard canvas"
         >
-          {boardTheme === "lightboard" && surface === "standalone" && cameraUnderlayEnabled ? (
+          {boardTheme === "lightboard" &&
+          surface === "standalone" &&
+          !desktopOverlay &&
+          cameraUnderlayEnabled ? (
             <video
-              ref={underlayVideoRef}
+              ref={cameraUnderlayVideoRef}
               className="lightboard-underlay"
               data-testid="lightboard-underlay"
+              aria-hidden="true"
+              muted
+              playsInline
+            />
+          ) : null}
+          {surface === "standalone" && !desktopOverlay ? (
+            <video
+              ref={screenUnderlayVideoRef}
+              className={`lightboard-underlay lightboard-screen-underlay${
+                boardTheme === "lightboard" && screenUnderlayStatus === "active"
+                  ? " active"
+                  : ""
+              }`}
+              data-testid="screen-underlay"
               aria-hidden="true"
               muted
               playsInline
@@ -5421,65 +6305,88 @@ export function AirboardPrototype({
               aria-hidden="true"
             />
           ) : null}
-          {recordingState === "recording" ? (
+          {recordingState === "recording" && !broadcastSafe ? (
             <div className="recording-badge" data-testid="recording-badge" role="status">
               <span className="recording-dot" aria-hidden="true" />
               REC {formatRecordingClock(recordingSeconds)}
             </div>
           ) : null}
-          {presenting ? (
-            <>
-              <button
-                type="button"
-                className="present-exit"
-                data-testid="present-exit"
-                title="Exit presenting (Esc)"
-                onClick={() => setPresenting(false)}
-              >
-                Exit presenting
-              </button>
-              <div className="present-command-dock">
-                <form
-                  className="intent-command-form"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    if (speechRecognitionStatus !== "interpreting") {
-                      runIntentCommand(intentCommandText);
-                    }
-                  }}
-                >
-                  <input
-                    data-testid="present-command-input"
-                    type="text"
-                    value={intentCommandText}
-                    onChange={(event) => {
-                      semanticIntentRequestIdRef.current += 1;
-                      if (speechRecognitionStatus === "interpreting") {
-                        setSpeechRecognitionStatus(speechSessionRef.current ? "waiting" : "idle");
-                      }
-                      setIntentCommandText(event.target.value);
-                    }}
-                    placeholder="Type a command — or gesture and speak"
-                    aria-label="Typed board command while presenting"
-                  />
-                  <button
-                    className="primary"
-                    data-testid="present-command-run"
-                    type="submit"
-                    disabled={
-                      !intentCommandText.trim() || speechRecognitionStatus === "interpreting"
-                    }
-                  >
-                    {speechRecognitionStatus === "interpreting" ? "…" : "Run"}
-                  </button>
-                </form>
-                {commandFeedback ? (
-                  <p className="present-feedback" aria-live="polite">
-                    {commandFeedback}
-                  </p>
-                ) : null}
+          {desktopOverlay && !desktopOverlayState.clickThrough ? (
+            <div className="desktop-overlay-controls" data-testid="desktop-overlay-controls">
+              <div className="desktop-overlay-controls-header">
+                <div>
+                  <strong>Airboard overlay controls</strong>
+                  <span>Pointer control is temporarily on</span>
+                </div>
+                <button className="primary" type="button" onClick={restoreDesktopClickThrough}>
+                  Return to click-through
+                </button>
               </div>
-            </>
+              <div className="desktop-overlay-actions">
+                <button
+                  type="button"
+                  onClick={cameraStatus === "active" ? stopCamera : startCamera}
+                  disabled={cameraStatus === "starting" || cameraStatus === "tracker_loading"}
+                >
+                  {cameraStatus === "active" ? "Turn off hands" : "Enable hands"}
+                </button>
+                <button type="button" onClick={startVoiceCommand} disabled={!speechSupported}>
+                  {speechArmed ? "Stop Airo" : "Start Airo"}
+                </button>
+                <button type="button" onClick={undoLastAction}>Undo</button>
+                <label className="desktop-overlay-scrim-control" htmlFor="desktop-scrim-opacity">
+                  <span>Dark overlay</span>
+                  <input
+                    id="desktop-scrim-opacity"
+                    data-testid="desktop-scrim-opacity"
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={scrimOpacity}
+                    onChange={(event) => {
+                      const next = Number(event.target.value);
+                      setScrimOpacity(next);
+                      try {
+                        window.localStorage.setItem("airboard.scrim.v1", String(next));
+                      } catch {
+                        // Preference persistence is best-effort.
+                      }
+                    }}
+                  />
+                  <output htmlFor="desktop-scrim-opacity">{Math.round(scrimOpacity * 100)}%</output>
+                </label>
+              </div>
+              <form
+                className="intent-command-form desktop-overlay-command"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (speechRecognitionStatus !== "interpreting") {
+                    runIntentCommand(intentCommandText);
+                  }
+                }}
+              >
+                <input
+                  type="text"
+                  value={intentCommandText}
+                  onChange={(event) => setIntentCommandText(event.target.value)}
+                  placeholder="Type a diagram command"
+                  aria-label="Desktop overlay diagram command"
+                />
+                <button
+                  className="primary"
+                  type="submit"
+                  disabled={!intentCommandText.trim() || speechRecognitionStatus === "interpreting"}
+                >
+                  {speechRecognitionStatus === "interpreting" ? "…" : "Run"}
+                </button>
+              </form>
+              <small>
+                {desktopOverlayState.shortcuts.toggleInteraction
+                  ? `${desktopOverlayState.shortcuts.toggleInteraction} toggles these controls.`
+                  : "Use the Airboard tray menu to return to click-through mode."}
+              </small>
+            </div>
           ) : null}
           {inputMode === "gesture" ? (
             <div ref={dockRef} className="object-dock catalog-dock" role="toolbar" aria-label="Shape catalog">
@@ -5570,7 +6477,7 @@ export function AirboardPrototype({
               </button>
             </div>
           ) : null}
-          {voiceCaptureAvailable && voiceGate ? (
+          {voiceCaptureAvailable && voiceGate && !broadcastSafe ? (
             <div
               className={`voice-gate-pill ${speechArmed ? "armed" : "unarmed"}`}
               role="status"
@@ -5586,7 +6493,11 @@ export function AirboardPrototype({
                   : `Holding “${voiceGate.label}” — press Start Airo once to enable voice edits`}
             </div>
           ) : null}
-          {cameraCaptureAvailable && onboardingVisible && inputMode === "gesture" ? (
+          {cameraCaptureAvailable &&
+          onboardingVisible &&
+          !presenting &&
+          !desktopOverlay &&
+          inputMode === "gesture" ? (
             <div className="onboarding-overlay" role="dialog" aria-label="How to use Airboard">
               <div className="onboarding-card">
                 <h2>Talk to the board, not to software</h2>
@@ -5629,7 +6540,7 @@ export function AirboardPrototype({
               </div>
             </div>
           ) : null}
-          {actionToast ? (
+          {actionToast && !broadcastSafe ? (
             <div className="action-toast" role="status" data-testid="action-toast">
               <span>{actionToast.message}</span>
               <button
@@ -5693,7 +6604,19 @@ export function AirboardPrototype({
             }}
             onWheel={handleWheel}
           />
-          {debugVisible && gestureResult?.rawCursorPoint ? (
+          {surface === "standalone" &&
+          boardTheme === "lightboard" &&
+          cameraUnderlayEnabled &&
+          screenUnderlayStatus !== "active" &&
+          personOcclusionEnabled ? (
+            <canvas
+              ref={personForegroundCanvasRef}
+              className="lightboard-person-occlusion"
+              data-testid="person-occlusion-layer"
+              aria-hidden="true"
+            />
+          ) : null}
+          {debugVisible && !broadcastSafe && gestureResult?.rawCursorPoint ? (
             <span
               className="debug-point raw"
               style={{
@@ -5702,7 +6625,7 @@ export function AirboardPrototype({
               }}
             />
           ) : null}
-          {debugVisible && gestureResult?.diagnostics?.rawTipX !== undefined ? (
+          {debugVisible && !broadcastSafe && gestureResult?.diagnostics?.rawTipX !== undefined ? (
             <span
               className="debug-point tip"
               style={{
@@ -5711,7 +6634,7 @@ export function AirboardPrototype({
               }}
             />
           ) : null}
-          {debugVisible && gestureResult?.diagnostics?.gripCenterX !== undefined ? (
+          {debugVisible && !broadcastSafe && gestureResult?.diagnostics?.gripCenterX !== undefined ? (
             <span
               className="debug-point grip"
               style={{
@@ -5720,7 +6643,7 @@ export function AirboardPrototype({
               }}
             />
           ) : null}
-          {debugVisible && gestureResult?.cursorPoint ? (
+          {debugVisible && !broadcastSafe && gestureResult?.cursorPoint ? (
             <span
               className="debug-point virtual"
               style={{
@@ -5729,7 +6652,7 @@ export function AirboardPrototype({
               }}
             />
           ) : null}
-          {debugVisible && gestureResult?.rawCursorPoint ? (
+          {debugVisible && !broadcastSafe && gestureResult?.rawCursorPoint ? (
             <svg className="debug-spring" aria-hidden="true">
               <line
                 x1={gestureResult.rawCursorPoint.x + 14}
@@ -5745,13 +6668,18 @@ export function AirboardPrototype({
             // because the tracker reads its frames.
             cameraStatus !== "idle" &&
             !isMeetSurface &&
-            !(boardTheme === "lightboard" && cameraUnderlayEnabled) ? (
+            !desktopOverlay &&
+            !broadcastSafe &&
+            !(
+              boardTheme === "lightboard" &&
+              (cameraUnderlayEnabled || screenUnderlayStatus === "active")
+            ) ? (
               <video ref={videoRef} className="camera-preview" muted playsInline />
             ) : (
               <video ref={videoRef} className="camera-preview hidden" muted playsInline />
             )
           ) : null}
-          {showFloatingLabelEditor && floatingLabelStyle ? (
+          {showFloatingLabelEditor && floatingLabelStyle && !broadcastSafe ? (
             <div className="floating-label-editor" style={floatingLabelStyle}>
               <label htmlFor="floating-annotation-label">Say or type label</label>
               <input
@@ -5942,6 +6870,9 @@ export function AirboardPrototype({
                 checked={boardTheme === "lightboard"}
                 onChange={(event) => {
                   const nextTheme = event.target.checked ? "lightboard" : "classic";
+                  if (nextTheme === "classic" && screenUnderlayStatus === "active") {
+                    stopScreenUnderlay("Screen background stopped because Lightboard was turned off.");
+                  }
                   setBoardTheme(nextTheme);
                   try {
                     window.localStorage.setItem("airboard.theme.v1", nextTheme);
@@ -5987,14 +6918,54 @@ export function AirboardPrototype({
                 ) : null}
                 {cameraOverlayEnabled && cameraOverlayState?.engaged ? (
                   <p className="hint" data-testid="camera-overlay-live">
-                    Everyone — including your own tile — now sees the same correct-reading
-                    lightboard on your camera.
+                    {cameraOverlayState.verification?.senderAttached &&
+                    cameraOverlayState.verification.framesEncoded > 0 &&
+                    cameraOverlayState.verification.bytesSent > 0
+                      ? "Verified in this Meet client: the composited camera track is attached to Meet and encoding outbound video."
+                      : cameraOverlayState.verification
+                        ? "The compositor is engaged. Waiting for Meet to attach and encode its output track…"
+                        : "The compositor is engaged. Reload extension 0.5.0 for real outbound-track verification."}
                   </p>
+                ) : null}
+                {cameraOverlayEnabled && cameraOverlayState?.verification ? (
+                  <div
+                    className="status-grid camera-overlay-verification"
+                    data-testid="camera-overlay-verification"
+                  >
+                    <span>Extension</span>
+                    <strong>{cameraOverlayState.verification.extensionVersion}</strong>
+                    <span>Composite frames</span>
+                    <strong>{Math.round(cameraOverlayState.verification.framesComposited)}</strong>
+                    <span>Meet sender</span>
+                    <strong>
+                      {cameraOverlayState.verification.senderAttached ? "attached" : "waiting"}
+                    </strong>
+                    <span>Encoded frames</span>
+                    <strong>{Math.round(cameraOverlayState.verification.framesEncoded)}</strong>
+                    <span>Outbound bytes</span>
+                    <strong>{Math.round(cameraOverlayState.verification.bytesSent)}</strong>
+                  </div>
                 ) : null}
               </>
             ) : null}
             {boardTheme === "lightboard" ? (
               <>
+                {surface === "standalone" ? (
+                  <div className="status-grid screen-underlay-status" data-testid="screen-underlay-status">
+                    <span>Screen/window</span>
+                    <strong
+                      className={
+                        screenUnderlayStatus === "active"
+                          ? "pill"
+                          : screenUnderlayStatus === "blocked" || screenUnderlayStatus === "error"
+                            ? "pill warning"
+                            : undefined
+                      }
+                    >
+                      {screenUnderlayStatusLabel(screenUnderlayStatus)}
+                    </strong>
+                  </div>
+                ) : null}
                 {surface === "standalone" ? (
                   <label className="check-row" htmlFor="camera-underlay">
                     <input
@@ -6013,31 +6984,103 @@ export function AirboardPrototype({
                         }
                       }}
                     />
-                    <span>Camera behind board</span>
+                    <span>Camera behind board when no screen is selected</span>
+                  </label>
+                ) : null}
+                {cameraCaptureAvailable &&
+                (surface === "standalone" || surface === "meet-main-stage") ? (
+                  <>
+                    <label className="check-row" htmlFor="person-occlusion">
+                      <input
+                        id="person-occlusion"
+                        data-testid="person-occlusion-toggle"
+                        type="checkbox"
+                        checked={personOcclusionEnabled}
+                        onChange={(event) => {
+                          setPersonOcclusionEnabled(event.target.checked);
+                          try {
+                            window.localStorage.setItem(
+                              "airboard.person-occlusion.v1",
+                              event.target.checked ? "on" : "off",
+                            );
+                          } catch {
+                            // Preference persistence is best-effort.
+                          }
+                        }}
+                      />
+                      <span>Keep the presenter in front of diagram ink</span>
+                    </label>
+                    {personOcclusionEnabled ? (
+                      <p className="hint" data-testid="person-occlusion-status">
+                        {personOcclusionStatus === "active"
+                          ? "Person depth is active — diagram ink passes behind the presenter."
+                          : personOcclusionStatus === "loading"
+                            ? "Loading the on-device person depth model…"
+                            : personOcclusionStatus === "ready"
+                              ? "Person depth is ready; waiting for the next camera frame."
+                              : personOcclusionStatus === "error"
+                                ? "Person depth could not start. The diagram remains fully in front."
+                                : cameraStatus === "active"
+                                  ? "Turn on the camera background or camera overlay to activate person depth."
+                                  : "Enable hands to activate on-device person depth with the camera."}
+                      </p>
+                    ) : null}
+                  </>
+                ) : null}
+                {surface === "standalone" ? (
+                  <label className="check-row" htmlFor="local-contrast-plates">
+                    <input
+                      id="local-contrast-plates"
+                      data-testid="local-contrast-plates"
+                      type="checkbox"
+                      checked={localContrastPlatesEnabled}
+                      onChange={(event) => {
+                        setLocalContrastPlatesEnabled(event.target.checked);
+                        try {
+                          window.localStorage.setItem(
+                            "airboard.contrast-plates.v1",
+                            event.target.checked ? "on" : "off",
+                          );
+                        } catch {
+                          // Preference persistence is best-effort.
+                        }
+                      }}
+                    />
+                    <span>Local contrast behind diagram clusters</span>
                   </label>
                 ) : null}
                 <div className="control-row">
-                  <label htmlFor="scrim-opacity">Board dimming</label>
-                  <input
-                    id="scrim-opacity"
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={scrimOpacity}
-                    onChange={(event) => {
-                      const next = Number(event.target.value);
-                      setScrimOpacity(next);
-                      try {
-                        window.localStorage.setItem("airboard.scrim.v1", String(next));
-                      } catch {
-                        // Preference persistence is best-effort.
-                      }
-                    }}
-                  />
+                  <label htmlFor="scrim-opacity">Dark overlay</label>
+                  <div className="range-with-value">
+                    <input
+                      id="scrim-opacity"
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={scrimOpacity}
+                      onChange={(event) => {
+                        const next = Number(event.target.value);
+                        setScrimOpacity(next);
+                        try {
+                          window.localStorage.setItem("airboard.scrim.v1", String(next));
+                        } catch {
+                          // Preference persistence is best-effort.
+                        }
+                      }}
+                    />
+                    <output htmlFor="scrim-opacity" data-testid="scrim-value">
+                      {Math.round(scrimOpacity * 100)}%
+                    </output>
+                  </div>
                 </div>
-                {surface === "standalone" && cameraUnderlayEnabled && cameraStatus === "idle" ? (
-                  <p className="hint">Enable hands to appear behind the board.</p>
+                {surface === "standalone" ? (
+                  <p className="hint" data-testid="screen-underlay-notice">
+                    {screenUnderlayNotice ??
+                      (cameraUnderlayEnabled && cameraStatus === "active"
+                        ? "Camera is behind the board. Use screen to replace it with a screen or window."
+                        : "No live background is selected, so the dark overlay appears solid. Click Use screen, or enable hands for the camera background.")}
+                  </p>
                 ) : null}
               </>
             ) : null}
@@ -6047,8 +7090,8 @@ export function AirboardPrototype({
             <section className="section">
               <h2>Studio</h2>
               <p className="hint">
-                Record what a viewer sees — you behind the glowing board, with your microphone —
-                as a local WebM file. Nothing is uploaded.
+                Record what a viewer sees — your selected screen or camera behind the glowing
+                board, with your microphone — as a local WebM file. Nothing is uploaded.
               </p>
               <button
                 type="button"
@@ -6191,7 +7234,7 @@ export function AirboardPrototype({
                         This meeting surface cannot capture camera or microphone, so gesture and
                         voice run in a companion window connected to this same board.
                       </p>
-                      <CompanionMediaLink boardSessionId={activeBoardSessionId} />
+                      <CompanionMediaLink boardSessionId={activeBoardSessionId} joinToken={activeJoinToken} />
                       <label className="check-row" htmlFor="auto-snap-connectors">
                         <input
                           id="auto-snap-connectors"
@@ -6448,6 +7491,21 @@ function cameraStatusLabel(status: CameraStatus): string {
       return "Tracker failed";
     case "error":
       return "Unavailable";
+  }
+}
+
+function screenUnderlayStatusLabel(status: ScreenUnderlayStatus): string {
+  switch (status) {
+    case "idle":
+      return "not selected";
+    case "starting":
+      return "choosing…";
+    case "active":
+      return "live";
+    case "blocked":
+      return "cancelled / blocked";
+    case "error":
+      return "unavailable";
   }
 }
 
@@ -6717,6 +7775,7 @@ function getAnnotationHandleAtPoint(
 function getHybridHandSignal(
   hands: readonly DetectedHand[],
   preferredHand: GestureResult["hand"],
+  mapping: CanvasMapping,
 ): {
   point: { x: number; y: number };
   trackingConfidence: number;
@@ -6741,10 +7800,19 @@ function getHybridHandSignal(
   }
 
   const grab = estimateGrabStrength(hand.landmarks);
-  return {
-    point: {
+  const fitted = mapLandmarkToFittedCanvas(
+    {
       x: (indexMcp.x + middleMcp.x + ringMcp.x + pinkyMcp.x) / 4,
       y: (indexMcp.y + middleMcp.y + ringMcp.y + pinkyMcp.y) / 4,
+    },
+    mapping,
+  );
+  return {
+    point: {
+      // The hybrid controller owns selfie mirroring and its compact control
+      // zone. Feed it crop-correct normalized visible-camera coordinates.
+      x: fitted.x / mapping.canvasWidth,
+      y: fitted.y / mapping.canvasHeight,
     },
     trackingConfidence: hand.handednessScore,
     // Report the real strength; the controller decides how to treat a
@@ -6770,8 +7838,7 @@ function dockButtonClass(selected: boolean, gestureHover: boolean): string | und
 
 function collectNavHands(
   hands: readonly DetectedHand[],
-  canvasWidth: number,
-  canvasHeight: number,
+  mapping: CanvasMapping,
 ): { point: { x: number; y: number }; grabStrength: number }[] {
   const tracked = hands.filter((hand) => hand.landmarks.length >= 21);
   if (tracked.length !== 2) {
@@ -6782,11 +7849,16 @@ function collectNavHands(
     const middleMcp = hand.landmarks[9]!;
     const ringMcp = hand.landmarks[13]!;
     const pinkyMcp = hand.landmarks[17]!;
-    return {
-      point: {
-        x: (1 - (indexMcp.x + middleMcp.x + ringMcp.x + pinkyMcp.x) / 4) * canvasWidth,
-        y: ((indexMcp.y + middleMcp.y + ringMcp.y + pinkyMcp.y) / 4) * canvasHeight,
+    const point = mapLandmarkToCanvas(
+      {
+        x: (indexMcp.x + middleMcp.x + ringMcp.x + pinkyMcp.x) / 4,
+        y: (indexMcp.y + middleMcp.y + ringMcp.y + pinkyMcp.y) / 4,
       },
+      { ...mapping, mirrorInput: true, sensitivity: 1 },
+      0,
+    );
+    return {
+      point: { x: point.x, y: point.y },
       grabStrength: estimateGrabStrength(hand.landmarks).strength,
     };
   });
@@ -6931,14 +8003,22 @@ function surfaceLabel(surface: Surface): string {
  * meeting surfaces that cannot capture media, this window is where gesture
  * and voice run; edits sync back to the shared stage for everyone.
  */
-function CompanionMediaLink({ boardSessionId }: { boardSessionId: string | null }) {
+function CompanionMediaLink({
+  boardSessionId,
+  joinToken,
+}: {
+  boardSessionId: string | null;
+  joinToken?: string | null;
+}) {
   if (!boardSessionId) {
     return <p className="hint">The companion link appears once the board connects.</p>;
   }
   return (
     <a
       className="companion-link"
-      href={`/?boardSessionId=${encodeURIComponent(boardSessionId)}`}
+      href={`/app/boards/live?boardSessionId=${encodeURIComponent(boardSessionId)}${
+        joinToken ? `&joinToken=${encodeURIComponent(joinToken)}` : ""
+      }`}
       target="_blank"
       rel="noopener noreferrer"
       data-testid="companion-media-link"

@@ -20,6 +20,10 @@ import { createSessionStore } from "./storeFactory";
 import { registerTranscriptionRoutes } from "./transcription/routes";
 import { VoiceTraceBuffer } from "./voiceTrace/buffer";
 import { registerVoiceTraceRoutes } from "./voiceTrace/routes";
+import { AuthService } from "./auth";
+import { registerControlPlaneRoutes } from "./controlPlaneRoutes";
+import { bearerToken, issueSignedToken, verifySignedToken } from "./signedTokens";
+import { AIRBOARD_CORS_METHODS } from "./cors";
 
 type RoomClient = {
   participantId: string;
@@ -80,28 +84,110 @@ const AUTH_CACHE_TTL_MS = 1000;
 export async function buildServer(config: ApiConfig) {
   const server = Fastify({ logger: true });
   const store = createSessionStore(config);
+  const auth = new AuthService(config);
   const rooms = new Map<string, Set<RoomClient>>();
   // At most one pending owner-absence lock timer per session, so repeated owner
   // disconnects (flapping) cannot pile up timers.
   const ownerLockTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const voiceTraceBuffer = new VoiceTraceBuffer();
+  const requestStartedAt = new WeakMap<object, number>();
+  const requestMetrics = new Map<string, { count: number; durationMs: number }>();
+
+  server.addHook("onRequest", async (request, reply) => {
+    requestStartedAt.set(request, performance.now());
+    reply.header("x-request-id", request.id);
+    const traceparent = request.headers.traceparent;
+    if (typeof traceparent === "string" && /^[\da-f]{2}-[\da-f]{32}-[\da-f]{16}-[\da-f]{2}$/i.test(traceparent)) {
+      reply.header("traceparent", traceparent);
+    }
+  });
+  server.addHook("onResponse", async (request, reply) => {
+    const durationMs = Math.max(0, performance.now() - (requestStartedAt.get(request) ?? performance.now()));
+    const route = request.routeOptions.url || "unmatched";
+    const statusClass = `${Math.floor(reply.statusCode / 100)}xx`;
+    const key = `${request.method} ${route} ${statusClass}`;
+    const metric = requestMetrics.get(key) ?? { count: 0, durationMs: 0 };
+    metric.count += 1; metric.durationMs += durationMs; requestMetrics.set(key, metric);
+    request.log.info({ requestId: request.id, route, statusCode: reply.statusCode, durationMs: Math.round(durationMs * 10) / 10 }, "request completed");
+  });
 
   await server.register(cors, {
     origin: config.allowedOrigins,
+    methods: [...AIRBOARD_CORS_METHODS],
   });
+  // Preserve Stripe's exact request bytes for signature verification while
+  // continuing to parse every other JSON request normally.
+  server.removeContentTypeParser("application/json");
+  server.addContentTypeParser(
+    "application/json",
+    { parseAs: "string" },
+    (request, body, done) => {
+      if (request.url.startsWith("/webhooks/stripe")) {
+        done(null, body);
+        return;
+      }
+      try {
+        done(null, body ? JSON.parse(String(body)) : {});
+      } catch (error) {
+        done(error as Error, undefined);
+      }
+    },
+  );
   await server.register(websocket);
   const sessionStartLimiter = createRateLimiter({
     windowMs: 60_000,
     max: config.rateLimits.sessionStartPerMinute,
   });
-  registerTranscriptionRoutes(server, config);
-  registerSemanticIntentRoutes(server, config, voiceTraceBuffer);
-  registerVoiceTraceRoutes(server, config, voiceTraceBuffer);
+  registerTranscriptionRoutes(server, config, auth);
+  registerSemanticIntentRoutes(server, config, voiceTraceBuffer, auth);
+  registerVoiceTraceRoutes(server, config, voiceTraceBuffer, auth);
+  registerControlPlaneRoutes(server, config, auth);
 
   server.get("/health", async () => ({
     ok: true,
     service: "airboard-api",
   }));
+
+  server.get("/ready", async (_request, reply) => {
+    if (!auth.client) {
+      return {
+        ready: config.localEntitlements,
+        service: "airboard-api",
+        dependencies: { database: "not_configured", billing: Boolean(config.stripe.secretKey) },
+      };
+    }
+    const { error } = await auth.client.from("profiles").select("id", { head: true, count: "exact" }).limit(1);
+    if (error) {
+      return reply.code(503).send({
+        ready: false,
+        service: "airboard-api",
+        dependencies: { database: "unavailable", billing: Boolean(config.stripe.secretKey) },
+      });
+    }
+    return {
+      ready: true,
+      service: "airboard-api",
+      dependencies: {
+        database: "ready",
+        billing: config.stripe.secretKey ? "configured" : "not_configured",
+        transcription: Boolean(config.transcription.apiKey),
+        semanticIntent: Boolean(config.semanticIntent.apiKey),
+      },
+    };
+  });
+
+  server.get("/metrics", async (request, reply) => {
+    const expected = config.cronSecret ?? config.apiToken;
+    if (!expected || bearerToken(request.headers) !== expected) return reply.code(401).send({ error: "METRICS_AUTH_REQUIRED" });
+    const lines = ["# HELP airboard_http_requests_total HTTP requests by route and status class.", "# TYPE airboard_http_requests_total counter", "# HELP airboard_http_request_duration_ms_total Cumulative HTTP request duration.", "# TYPE airboard_http_request_duration_ms_total counter"];
+    for (const [key, value] of requestMetrics) {
+      const [method, route, status] = key.split(" ");
+      const labels = `method="${method}",route="${String(route).replaceAll('"', '')}",status="${status}"`;
+      lines.push(`airboard_http_requests_total{${labels}} ${value.count}`);
+      lines.push(`airboard_http_request_duration_ms_total{${labels}} ${value.durationMs.toFixed(3)}`);
+    }
+    return reply.type("text/plain; version=0.0.4").send(`${lines.join("\n")}\n`);
+  });
 
   server.get("/", async () => ({
     ok: true,
@@ -124,14 +210,16 @@ export async function buildServer(config: ApiConfig) {
       provider?: MeetingProvider;
       providerMeetingId?: string;
       title?: string;
+      workspaceId?: string;
+      boardId?: string;
       allowParticipantDrawing?: boolean;
     };
   }>("/sessions/start", async (request, reply) => {
     if (!sessionStartLimiter.allow(clientKey(request))) {
       return reply.code(429).send({ error: "RATE_LIMITED" });
     }
-    const ownerUserId = request.headers["x-airboard-user-id"];
-    if (!ownerUserId || Array.isArray(ownerUserId)) {
+    const account = await auth.authenticate(request);
+    if (!account) {
       return reply.code(401).send({ error: "OWNER_AUTH_REQUIRED" });
     }
     // JSON off the wire is untyped: bound provider, meeting binding, and
@@ -143,10 +231,28 @@ export async function buildServer(config: ApiConfig) {
 
     try {
       const result = await store.startSession({
-        ownerUserId,
+        ownerUserId: account.profileId,
+        organizationId: account.organizationId,
         ...validation.value,
       });
-      return result;
+      return {
+        ...result,
+        realtimeTicket: issueSignedToken(config.sessionSigningSecret, {
+          purpose: "realtime",
+          sub: account.profileId,
+          organizationId: account.organizationId,
+          sessionId: result.session.id,
+          participantId: result.ownerParticipant.id,
+          ttlSeconds: 30 * 60,
+        }),
+        joinToken: issueSignedToken(config.sessionSigningSecret, {
+          purpose: "join",
+          sub: account.profileId,
+          organizationId: account.organizationId,
+          sessionId: result.session.id,
+          ttlSeconds: 6 * 60 * 60,
+        }),
+      };
     } catch (error) {
       return reply.code(403).send({ error: error instanceof Error ? error.message : "FORBIDDEN" });
     }
@@ -154,13 +260,30 @@ export async function buildServer(config: ApiConfig) {
 
   server.post<{
     Params: { sessionId: string };
-    Body: { displayName?: string };
+    Body: { displayName?: string; joinToken?: string };
   }>("/sessions/:sessionId/join", async (request, reply) => {
+    const join = request.body.joinToken
+      ? verifySignedToken(config.sessionSigningSecret, request.body.joinToken, "join")
+      : null;
+    if (!join || join.sessionId !== request.params.sessionId) {
+      return reply.code(401).send({ error: "VALID_JOIN_TOKEN_REQUIRED" });
+    }
     try {
-      return await store.joinSession({
+      const result = await store.joinSession({
         sessionId: request.params.sessionId,
         displayName: request.body.displayName ?? "Guest",
       });
+      return {
+        ...result,
+        realtimeTicket: issueSignedToken(config.sessionSigningSecret, {
+          purpose: "realtime",
+          sub: result.participant.id,
+          ...(join.organizationId ? { organizationId: join.organizationId } : {}),
+          sessionId: result.session.id,
+          participantId: result.participant.id,
+          ttlSeconds: 30 * 60,
+        }),
+      };
     } catch (error) {
       return reply.code(404).send({ error: error instanceof Error ? error.message : "NOT_FOUND" });
     }
@@ -168,11 +291,19 @@ export async function buildServer(config: ApiConfig) {
 
   server.post<{
     Params: { sessionId: string };
-    Body: { participantId: string };
+    Body: { realtimeTicket: string };
   }>("/sessions/:sessionId/heartbeat", async (request, reply) => {
+    const ticket = verifySignedToken(
+      config.sessionSigningSecret,
+      request.body.realtimeTicket,
+      "realtime",
+    );
+    if (!ticket?.participantId || ticket.sessionId !== request.params.sessionId) {
+      return reply.code(401).send({ error: "REALTIME_TICKET_REQUIRED" });
+    }
     try {
       return {
-        session: await store.heartbeat(request.params.sessionId, request.body.participantId),
+        session: await store.heartbeat(request.params.sessionId, ticket.participantId),
       };
     } catch (error) {
       return reply.code(404).send({ error: error instanceof Error ? error.message : "NOT_FOUND" });
@@ -181,7 +312,14 @@ export async function buildServer(config: ApiConfig) {
 
   server.get<{
     Params: { sessionId: string };
+    Querystring: { ticket?: string };
   }>("/sessions/:sessionId/state", async (request, reply) => {
+    const ticket = request.query.ticket
+      ? verifySignedToken(config.sessionSigningSecret, request.query.ticket, "realtime")
+      : null;
+    if (!ticket || ticket.sessionId !== request.params.sessionId) {
+      return reply.code(401).send({ error: "REALTIME_TICKET_REQUIRED" });
+    }
     try {
       return {
         session: await store.getSession(request.params.sessionId),
@@ -194,11 +332,15 @@ export async function buildServer(config: ApiConfig) {
 
   server.get("/ws", { websocket: true }, (socket, request) => {
     const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
-    const boardSessionId = url.searchParams.get("boardSessionId");
-    const participantId = url.searchParams.get("participantId");
+    const ticketValue = url.searchParams.get("ticket");
+    const ticket = ticketValue
+      ? verifySignedToken(config.sessionSigningSecret, ticketValue, "realtime")
+      : null;
+    const boardSessionId = ticket?.sessionId ?? null;
+    const participantId = ticket?.participantId ?? null;
 
     if (!boardSessionId || !participantId) {
-      socket.close(1008, "boardSessionId and participantId are required");
+      socket.close(1008, "A valid realtime ticket is required");
       return;
     }
 
