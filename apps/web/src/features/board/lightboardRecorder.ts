@@ -16,8 +16,6 @@ export type LightboardRecorderInput = {
   underlayVideo: HTMLVideoElement | null;
   /** Cameras are mirrored/cover-fit; screens are unmirrored/contain-fit. */
   underlayMode?: "camera" | "screen";
-  /** Segmented presenter pixels drawn after board ink for AR occlusion. */
-  foregroundCanvas?: HTMLCanvasElement | null;
   getScrimOpacity: () => number;
   getTheme: () => RecorderTheme;
   /** Longest output edge; the recording canvas keeps the board aspect. */
@@ -142,13 +140,6 @@ export async function startLightboardRecording(
     }
 
     context.drawImage(input.boardCanvas, 0, 0, width, height);
-    if (
-      input.underlayMode !== "screen" &&
-      input.foregroundCanvas &&
-      input.foregroundCanvas.width > 0
-    ) {
-      context.drawImage(input.foregroundCanvas, 0, 0, width, height);
-    }
     requestAnimationFrame(drawFrame);
   };
   requestAnimationFrame(drawFrame);

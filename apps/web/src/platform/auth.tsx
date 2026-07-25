@@ -28,7 +28,6 @@ export type AirboardAccount = {
       neonTheme?: boolean;
       videoEnabled?: boolean;
       audioEnabled?: boolean;
-      personOcclusion?: boolean;
     };
     notificationPreferences?: {
       product?: boolean;

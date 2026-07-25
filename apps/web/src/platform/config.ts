@@ -6,7 +6,7 @@ export const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim
 
 export const AUTH_CONFIGURED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 
-export function safeAppPath(value: string | null | undefined, fallback = "/onboarding"): string {
+export function safeAppPath(value: string | null | undefined, fallback = "/app"): string {
   const candidate = value?.trim();
   if (!candidate || !candidate.startsWith("/") || candidate.startsWith("//")) return fallback;
   try {

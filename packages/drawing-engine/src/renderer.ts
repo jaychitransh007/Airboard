@@ -1,10 +1,12 @@
 import type {
+  AnnotationBounds,
   BoardState,
   CursorState,
   Stroke,
   StrokeAnnotation,
   StrokePoint,
 } from "@airboard/core";
+import { nodeVisualKind } from "@airboard/core";
 import { getConnectorRoutePoints, getRouteMidpoint } from "./connectorGeometry.ts";
 import { adaptFillForDarkBoard, adaptInkForDarkBoard } from "./neonInk.ts";
 
@@ -557,29 +559,213 @@ function drawNodeShape(context: CanvasRenderingContext2D, stroke: Stroke): void 
   context.strokeStyle = themedInk(annotation.strokeColor ?? stroke.color);
   context.lineWidth = stroke.thickness;
 
-  if (annotation.nodeType === "database") {
-    drawDatabaseShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
-  } else if (annotation.nodeType === "decision") {
-    drawDiamondShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
-  } else if (annotation.nodeType === "terminator") {
-    drawStadiumShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
-  } else if (annotation.nodeType === "io") {
-    drawParallelogramShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
-  } else if (annotation.nodeType === "document") {
-    drawDocumentShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
-  } else {
-    roundRectPath(context, bounds.x, bounds.y, bounds.width, bounds.height, 8);
-    context.fill();
-    context.stroke();
+  const visualKind = annotation.nodeType ? nodeVisualKind(annotation.nodeType) : "box";
+  switch (visualKind) {
+    case "database":
+      drawDatabaseShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
+      break;
+    case "decision":
+      drawDiamondShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
+      break;
+    case "terminator":
+      drawStadiumShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
+      break;
+    case "io":
+      drawParallelogramShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
+      break;
+    case "document":
+      drawDocumentShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
+      break;
+    case "note":
+      drawNoteShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
+      break;
+    case "actor":
+      drawActorShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
+      break;
+    case "queue":
+      drawQueueShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
+      break;
+    case "service":
+      drawContainerShape(context, bounds, 8);
+      drawServiceMarker(context, bounds);
+      break;
+    case "api":
+      drawContainerShape(context, bounds, 8);
+      drawApiMarker(context, bounds);
+      break;
+    case "process":
+      drawContainerShape(context, bounds, 2);
+      break;
+    case "ellipse":
+      drawEllipseShape(context, bounds);
+      break;
+    case "box":
+      drawContainerShape(context, bounds, 0);
+      break;
   }
 
   drawAnnotationLabel(
     context,
     annotation.label,
     bounds.x + bounds.width / 2,
-    bounds.y + bounds.height / 2,
-    bounds.width - 12,
+    visualKind === "actor"
+      ? bounds.y + bounds.height * 0.88
+      : bounds.y + bounds.height / 2,
+    visualKind === "actor" ? bounds.width - 6 : bounds.width - 20,
   );
+}
+
+function drawContainerShape(
+  context: CanvasRenderingContext2D,
+  bounds: AnnotationBounds,
+  radius: number,
+): void {
+  roundRectPath(context, bounds.x, bounds.y, bounds.width, bounds.height, radius);
+  context.fill();
+  context.stroke();
+}
+
+function drawEllipseShape(
+  context: CanvasRenderingContext2D,
+  bounds: AnnotationBounds,
+): void {
+  context.beginPath();
+  context.ellipse(
+    bounds.x + bounds.width / 2,
+    bounds.y + bounds.height / 2,
+    bounds.width / 2,
+    bounds.height / 2,
+    0,
+    0,
+    Math.PI * 2,
+  );
+  context.fill();
+  context.stroke();
+}
+
+function drawServiceMarker(
+  context: CanvasRenderingContext2D,
+  bounds: AnnotationBounds,
+): void {
+  const x = bounds.x + 18;
+  const y = bounds.y + 18;
+  const radius = Math.min(7, bounds.height * 0.1);
+  context.save();
+  context.fillStyle = "transparent";
+  context.lineWidth = Math.max(1.2, context.lineWidth * 0.6);
+  context.beginPath();
+  context.arc(x, y, radius, 0, Math.PI * 2);
+  context.stroke();
+  for (let index = 0; index < 8; index += 1) {
+    const angle = (Math.PI * 2 * index) / 8;
+    context.beginPath();
+    context.moveTo(x + Math.cos(angle) * (radius + 1), y + Math.sin(angle) * (radius + 1));
+    context.lineTo(x + Math.cos(angle) * (radius + 4), y + Math.sin(angle) * (radius + 4));
+    context.stroke();
+  }
+  context.restore();
+}
+
+function drawApiMarker(
+  context: CanvasRenderingContext2D,
+  bounds: AnnotationBounds,
+): void {
+  const x = bounds.x + 14;
+  const y = bounds.y + 14;
+  context.save();
+  context.lineWidth = Math.max(1.2, context.lineWidth * 0.6);
+  context.beginPath();
+  context.moveTo(x + 5, y);
+  context.lineTo(x, y + 5);
+  context.lineTo(x + 5, y + 10);
+  context.moveTo(x + 11, y);
+  context.lineTo(x + 16, y + 5);
+  context.lineTo(x + 11, y + 10);
+  context.stroke();
+  context.restore();
+}
+
+function drawQueueShape(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): void {
+  const gap = Math.min(8, width * 0.06);
+  const laneHeight = (height - gap) / 2;
+  roundRectPath(context, x, y, width - gap, laneHeight, 4);
+  context.fill();
+  context.stroke();
+  roundRectPath(context, x + gap, y + laneHeight + gap, width - gap, laneHeight, 4);
+  context.fill();
+  context.stroke();
+  context.save();
+  context.lineWidth = Math.max(1.2, context.lineWidth * 0.65);
+  context.beginPath();
+  context.moveTo(x + width - 22, y + laneHeight / 2);
+  context.lineTo(x + width - 8, y + laneHeight / 2);
+  context.lineTo(x + width - 13, y + laneHeight / 2 - 4);
+  context.moveTo(x + width - 8, y + laneHeight / 2);
+  context.lineTo(x + width - 13, y + laneHeight / 2 + 4);
+  context.stroke();
+  context.restore();
+}
+
+function drawActorShape(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): void {
+  const centerX = x + width / 2;
+  const headRadius = Math.min(width * 0.12, height * 0.1);
+  const headY = y + height * 0.18;
+  const shoulderY = y + height * 0.4;
+  const hipY = y + height * 0.62;
+  const footY = y + height * 0.76;
+  context.save();
+  context.fillStyle = themedFill("#f8fafc");
+  context.beginPath();
+  context.arc(centerX, headY, headRadius, 0, Math.PI * 2);
+  context.fill();
+  context.stroke();
+  context.beginPath();
+  context.moveTo(centerX, headY + headRadius);
+  context.lineTo(centerX, hipY);
+  context.moveTo(x + width * 0.22, shoulderY);
+  context.lineTo(x + width * 0.78, shoulderY);
+  context.moveTo(centerX, hipY);
+  context.lineTo(x + width * 0.3, footY);
+  context.moveTo(centerX, hipY);
+  context.lineTo(x + width * 0.7, footY);
+  context.stroke();
+  context.restore();
+}
+
+function drawNoteShape(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): void {
+  const fold = Math.min(width, height) * 0.2;
+  context.beginPath();
+  context.moveTo(x, y);
+  context.lineTo(x + width, y);
+  context.lineTo(x + width, y + height - fold);
+  context.lineTo(x + width - fold, y + height);
+  context.lineTo(x, y + height);
+  context.closePath();
+  context.fill();
+  context.stroke();
+  context.beginPath();
+  context.moveTo(x + width, y + height - fold);
+  context.lineTo(x + width - fold, y + height - fold);
+  context.lineTo(x + width - fold, y + height);
+  context.stroke();
 }
 
 function drawDatabaseShape(
@@ -880,14 +1066,7 @@ function drawAnnotationOverlay(
   context.setLineDash(mode === "selected" || mode === "multi-selected" ? [5, 4] : [4, 4]);
 
   if (annotation.bounds) {
-    roundRectPath(
-      context,
-      annotation.bounds.x - 5,
-      annotation.bounds.y - 5,
-      annotation.bounds.width + 10,
-      annotation.bounds.height + 10,
-      8,
-    );
+    traceAnnotationSelectionBoundary(context, annotation, 5);
     context.stroke();
 
     if (mode === "selected") {
@@ -922,6 +1101,167 @@ function drawAnnotationOverlay(
   }
 
   context.restore();
+}
+
+function traceAnnotationSelectionBoundary(
+  context: CanvasRenderingContext2D,
+  annotation: StrokeAnnotation,
+  padding: number,
+): void {
+  const source = annotation.bounds;
+  if (!source) return;
+  const bounds = {
+    x: source.x - padding,
+    y: source.y - padding,
+    width: source.width + padding * 2,
+    height: source.height + padding * 2,
+  };
+  const kind = annotation.nodeType ? nodeVisualKind(annotation.nodeType) : null;
+  if (kind === "ellipse" || (!kind && annotation.type === "ellipse")) {
+    context.beginPath();
+    context.ellipse(
+      bounds.x + bounds.width / 2,
+      bounds.y + bounds.height / 2,
+      bounds.width / 2,
+      bounds.height / 2,
+      0,
+      0,
+      Math.PI * 2,
+    );
+    return;
+  }
+  if (kind === "decision") {
+    context.beginPath();
+    context.moveTo(bounds.x + bounds.width / 2, bounds.y);
+    context.lineTo(bounds.x + bounds.width, bounds.y + bounds.height / 2);
+    context.lineTo(bounds.x + bounds.width / 2, bounds.y + bounds.height);
+    context.lineTo(bounds.x, bounds.y + bounds.height / 2);
+    context.closePath();
+    return;
+  }
+  if (kind === "terminator") {
+    traceStadiumPath(context, bounds);
+    return;
+  }
+  if (kind === "io") {
+    const skew = Math.min(bounds.width * 0.18, 26);
+    context.beginPath();
+    context.moveTo(bounds.x + skew, bounds.y);
+    context.lineTo(bounds.x + bounds.width, bounds.y);
+    context.lineTo(bounds.x + bounds.width - skew, bounds.y + bounds.height);
+    context.lineTo(bounds.x, bounds.y + bounds.height);
+    context.closePath();
+    return;
+  }
+  if (kind === "document") {
+    traceDocumentPath(context, bounds);
+    return;
+  }
+  if (kind === "note") {
+    const fold = Math.min(bounds.width, bounds.height) * 0.2;
+    context.beginPath();
+    context.moveTo(bounds.x, bounds.y);
+    context.lineTo(bounds.x + bounds.width, bounds.y);
+    context.lineTo(bounds.x + bounds.width, bounds.y + bounds.height - fold);
+    context.lineTo(bounds.x + bounds.width - fold, bounds.y + bounds.height);
+    context.lineTo(bounds.x, bounds.y + bounds.height);
+    context.closePath();
+    return;
+  }
+  if (kind === "actor") {
+    context.beginPath();
+    context.moveTo(bounds.x + bounds.width / 2, bounds.y);
+    context.lineTo(bounds.x + bounds.width * 0.65, bounds.y + bounds.height * 0.22);
+    context.lineTo(bounds.x + bounds.width * 0.82, bounds.y + bounds.height * 0.4);
+    context.lineTo(bounds.x + bounds.width * 0.62, bounds.y + bounds.height * 0.62);
+    context.lineTo(bounds.x + bounds.width * 0.72, bounds.y + bounds.height * 0.78);
+    context.lineTo(bounds.x + bounds.width * 0.28, bounds.y + bounds.height * 0.78);
+    context.lineTo(bounds.x + bounds.width * 0.38, bounds.y + bounds.height * 0.62);
+    context.lineTo(bounds.x + bounds.width * 0.18, bounds.y + bounds.height * 0.4);
+    context.lineTo(bounds.x + bounds.width * 0.35, bounds.y + bounds.height * 0.22);
+    context.closePath();
+    return;
+  }
+  if (kind === "database") {
+    const capHeight = Math.min(16, bounds.height * 0.22);
+    context.beginPath();
+    context.ellipse(
+      bounds.x + bounds.width / 2,
+      bounds.y + capHeight,
+      bounds.width / 2,
+      capHeight,
+      0,
+      Math.PI,
+      0,
+    );
+    context.lineTo(bounds.x + bounds.width, bounds.y + bounds.height - capHeight);
+    context.ellipse(
+      bounds.x + bounds.width / 2,
+      bounds.y + bounds.height - capHeight,
+      bounds.width / 2,
+      capHeight,
+      0,
+      0,
+      Math.PI,
+    );
+    context.closePath();
+    return;
+  }
+  roundRectPath(
+    context,
+    bounds.x,
+    bounds.y,
+    bounds.width,
+    bounds.height,
+    kind === "box" || kind === "process" ? 2 : 8,
+  );
+}
+
+function traceStadiumPath(
+  context: CanvasRenderingContext2D,
+  bounds: AnnotationBounds,
+): void {
+  const radius = Math.min(bounds.height / 2, bounds.width / 2);
+  context.beginPath();
+  context.moveTo(bounds.x + radius, bounds.y);
+  context.lineTo(bounds.x + bounds.width - radius, bounds.y);
+  context.arc(
+    bounds.x + bounds.width - radius,
+    bounds.y + bounds.height / 2,
+    radius,
+    -Math.PI / 2,
+    Math.PI / 2,
+  );
+  context.lineTo(bounds.x + radius, bounds.y + bounds.height);
+  context.arc(
+    bounds.x + radius,
+    bounds.y + bounds.height / 2,
+    radius,
+    Math.PI / 2,
+    (3 * Math.PI) / 2,
+  );
+  context.closePath();
+}
+
+function traceDocumentPath(
+  context: CanvasRenderingContext2D,
+  bounds: AnnotationBounds,
+): void {
+  const wave = Math.min(14, bounds.height * 0.18);
+  const bottom = bounds.y + bounds.height - wave;
+  context.beginPath();
+  context.moveTo(bounds.x, bounds.y);
+  context.lineTo(bounds.x + bounds.width, bounds.y);
+  context.lineTo(bounds.x + bounds.width, bottom);
+  context.bezierCurveTo(
+    bounds.x + bounds.width * 0.72,
+    bottom + wave * 1.6,
+    bounds.x + bounds.width * 0.28,
+    bottom - wave * 1.2,
+    bounds.x,
+    bottom + wave * 0.6,
+  );
+  context.closePath();
 }
 
 function drawHandle(context: CanvasRenderingContext2D, x: number, y: number): void {

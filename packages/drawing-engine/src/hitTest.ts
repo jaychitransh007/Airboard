@@ -1,4 +1,9 @@
-import type { BoardState, Stroke, StrokePoint } from "@airboard/core";
+import {
+  nodeVisualContainsPoint,
+  type BoardState,
+  type Stroke,
+  type StrokePoint,
+} from "@airboard/core";
 import { getConnectorRoutePoints } from "./connectorGeometry.ts";
 
 export function findIntersectingStrokeIds(
@@ -95,21 +100,22 @@ function annotationContainsPoint(
     const radiusX = halfWidth + padding;
     const radiusY = halfHeight + padding;
 
-    // Match the rendered geometry so a node's transparent bounding-box corners
-    // are not grabbable: ellipses use a radial test and decision diamonds use a
-    // rhombus test. Everything else keeps the padded bounding box.
+    if (annotation.nodeType) {
+      return nodeVisualContainsPoint(
+        annotation.bounds,
+        annotation.nodeType,
+        point,
+        padding,
+      );
+    }
+
+    // Match the rendered geometry so a generic ellipse's transparent
+    // bounding-box corners are not grabbable.
     if (annotation.type === "ellipse" || annotation.type === "pointer") {
       if (!(radiusX > 0) || !(radiusY > 0)) {
         return false;
       }
       return (dx * dx) / (radiusX * radiusX) + (dy * dy) / (radiusY * radiusY) <= 1;
-    }
-
-    if (annotation.nodeType === "decision") {
-      if (!(radiusX > 0) || !(radiusY > 0)) {
-        return false;
-      }
-      return Math.abs(dx) / radiusX + Math.abs(dy) / radiusY <= 1;
     }
 
     return (

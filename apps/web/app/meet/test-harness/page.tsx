@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
-import { AirboardPrototype } from "../../../src/features/board/AirboardPrototype";
 import { MeetBridgeEmulator } from "../../../src/features/meet/MeetBridgeEmulator";
+import { TestAirboardHarness } from "../../../src/features/board/TestAirboardHarness";
 
 /**
  * E2E-only mount of the Meet-surface board. The real Meet routes require the
@@ -25,7 +25,7 @@ export default async function MeetTestHarnessPage({
   return (
     <>
       {bridge === "emulate" ? <MeetBridgeEmulator /> : null}
-      <AirboardPrototype
+      <TestAirboardHarness
         surface={surface === "side-panel" ? "meet-side-panel" : "meet-main-stage"}
         meetingProvider="google_meet"
         providerMeetingId="test-harness-meeting"

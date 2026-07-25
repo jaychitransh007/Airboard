@@ -24,6 +24,7 @@ import { AuthService } from "./auth";
 import { registerControlPlaneRoutes } from "./controlPlaneRoutes";
 import { bearerToken, issueSignedToken, verifySignedToken } from "./signedTokens";
 import { AIRBOARD_CORS_METHODS } from "./cors";
+import { redactSensitiveRequestUrl } from "./requestLogging";
 
 type RoomClient = {
   participantId: string;
@@ -82,7 +83,29 @@ function invalidBoardEventReason(event: unknown): string | null {
 const AUTH_CACHE_TTL_MS = 1000;
 
 export async function buildServer(config: ApiConfig) {
-  const server = Fastify({ logger: true });
+  const server = Fastify({
+    logger: {
+      serializers: {
+        req(request) {
+          return {
+            method: request.method,
+            url: redactSensitiveRequestUrl(request.url),
+            host: request.hostname,
+            remoteAddress: request.ip,
+            remotePort: request.socket.remotePort ?? 0,
+          };
+        },
+      },
+      redact: {
+        paths: [
+          "req.headers.authorization",
+          "req.headers.cookie",
+          "req.headers['stripe-signature']",
+        ],
+        censor: "[REDACTED]",
+      },
+    },
+  });
   const store = createSessionStore(config);
   const auth = new AuthService(config);
   const rooms = new Map<string, Set<RoomClient>>();
@@ -149,11 +172,18 @@ export async function buildServer(config: ApiConfig) {
   }));
 
   server.get("/ready", async (_request, reply) => {
+    const billingReady = Boolean(
+      config.stripe.enabled &&
+      config.stripe.secretKey &&
+      config.stripe.webhookSecret &&
+      config.stripe.personalPriceId &&
+      config.stripe.teamPriceId,
+    );
     if (!auth.client) {
       return {
         ready: config.localEntitlements,
         service: "airboard-api",
-        dependencies: { database: "not_configured", billing: Boolean(config.stripe.secretKey) },
+        dependencies: { database: "not_configured", billing: billingReady ? "configured" : "not_configured" },
       };
     }
     const { error } = await auth.client.from("profiles").select("id", { head: true, count: "exact" }).limit(1);
@@ -161,7 +191,7 @@ export async function buildServer(config: ApiConfig) {
       return reply.code(503).send({
         ready: false,
         service: "airboard-api",
-        dependencies: { database: "unavailable", billing: Boolean(config.stripe.secretKey) },
+        dependencies: { database: "unavailable", billing: billingReady ? "configured" : "not_configured" },
       });
     }
     return {
@@ -169,7 +199,7 @@ export async function buildServer(config: ApiConfig) {
       service: "airboard-api",
       dependencies: {
         database: "ready",
-        billing: config.stripe.secretKey ? "configured" : "not_configured",
+        billing: billingReady ? "configured" : "not_configured",
         transcription: Boolean(config.transcription.apiKey),
         semanticIntent: Boolean(config.semanticIntent.apiKey),
       },
@@ -581,6 +611,7 @@ export async function buildServer(config: ApiConfig) {
 
   return server;
 }
+
 
 // ws.readyState OPEN. Kept as a literal to avoid importing the ws runtime value.
 const WS_OPEN = 1;

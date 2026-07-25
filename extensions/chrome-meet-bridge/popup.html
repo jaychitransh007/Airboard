@@ -23,7 +23,7 @@
       <section id="consent-panel" hidden>
         <p class="kicker">Your live inputs</p>
         <h1>Confirm before capture.</h1>
-        <p>When Airboard is enabled in Meet, camera frames support gesture alignment and person occlusion; microphone audio supports Airo commands. Raw media is processed live and is not stored by Airboard.</p>
+        <p>When Airboard is enabled in Meet, camera frames support gesture alignment and the outgoing overlay; microphone audio supports Airo commands. Raw media is processed live and is not stored by Airboard.</p>
         <label class="consent"><input id="confirm-check" type="checkbox" /> <span>I understand and want to enable Airboard camera, microphone and voice processing.</span></label>
         <button id="confirm" class="primary" disabled>Enable Airboard</button>
       </section>
@@ -45,7 +45,7 @@
 
         <div class="toggles">
           <label><span><strong>Meeting overlay</strong><small>Neon diagram on outgoing camera</small></span><input data-setting="overlayEnabled" type="checkbox" /></label>
-          <label><span><strong>Airboard camera</strong><small>Gestures and person occlusion</small></span><input data-setting="videoEnabled" type="checkbox" /></label>
+          <label><span><strong>Airboard camera</strong><small>Gestures and outgoing composite</small></span><input data-setting="videoEnabled" type="checkbox" /></label>
           <label><span><strong>Airo microphone</strong><small>Voice commands only</small></span><input data-setting="audioEnabled" type="checkbox" /></label>
         </div>
         <p id="verification" class="verification"></p>

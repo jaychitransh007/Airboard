@@ -11,6 +11,8 @@ COPY packages packages
 RUN pnpm install --frozen-lockfile --filter @airboard/web...
 
 COPY apps/web apps/web
+COPY scripts/verify-camera-layer-contract.mjs scripts/verify-camera-layer-contract.mjs
+COPY scripts/verify-automated-command-contract.mjs scripts/verify-automated-command-contract.mjs
 
 ARG NEXT_PUBLIC_AIRBOARD_API_URL
 ARG NEXT_PUBLIC_GOOGLE_MEET_CLOUD_PROJECT_NUMBER

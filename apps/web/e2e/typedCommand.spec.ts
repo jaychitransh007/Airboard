@@ -7,7 +7,7 @@ import { expect, test } from "@playwright/test";
  */
 
 test("typing a command creates and edits objects instantly", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?testStandalone=1");
 
   // First run shows the onboarding overlay; dismissing it is part of the flow.
   const onboarding = page.getByRole("button", { name: "Got it — let me try" });
@@ -23,8 +23,9 @@ test("typing a command creates and edits objects instantly", async ({ page }) =>
   await expect(page.locator(".intent-feedback")).toContainText("Applied:", {
     timeout: 15_000,
   });
-  // Instant-commit feedback layer: the undo toast appears.
-  await expect(page.getByTestId("action-toast")).toBeVisible();
+  // Instant-commit feedback remains in the command panel without an
+  // obstructive floating action toast.
+  await expect(page.getByTestId("action-toast")).toHaveCount(0);
 
   // Edit the selected object by typed command (no confirmation anywhere).
   await input.fill("rename selected to Payments");
@@ -50,11 +51,11 @@ test("typing a command creates and edits objects instantly", async ({ page }) =>
   await page.getByTestId("intent-primary-action").click();
   await expect(page.locator(".intent-feedback")).toContainText("Applied: Select every object");
 
-  // Undo from the toast reverts the rename.
+  // Undo remains available from the persistent canvas toolbar.
   await input.fill("delete selected");
   await page.getByTestId("intent-primary-action").click();
   await expect(page.locator(".intent-feedback")).toContainText("Applied: Delete");
-  await page.getByTestId("action-toast").getByRole("button", { name: "Undo" }).click();
+  await page.locator(".canvas-toolbar").getByRole("button", { name: "Undo" }).click();
   const restored = await page.evaluate(() =>
     (window as never as { __airboardTestHooks: { getBoardSummary(): { objectCount: number } } })
       .__airboardTestHooks.getBoardSummary(),

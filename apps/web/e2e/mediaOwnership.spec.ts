@@ -5,9 +5,10 @@ import { expect, test, type Page } from "@playwright/test";
  * gesture/voice entry points only when the host client delegates
  * camera/microphone permission to the add-on frame ("embedded"); otherwise
  * the companion window — bound to the same board session — is the
- * gesture/voice surface. Capture never auto-starts anywhere, and the
- * standalone surface keeps full media input. The harness emulates both
- * delegation outcomes because the real Meet iframe cannot run in Playwright.
+ * gesture/voice surface. Meeting capture never auto-starts. Standalone
+ * capture resumes only after the user enabled it and the browser reports an
+ * existing persistent grant. The harness emulates both delegation outcomes
+ * because the real Meet iframe cannot run in Playwright.
  */
 
 declare global {
@@ -45,7 +46,7 @@ test("undelegated main stage offers the companion window instead of media button
   // The companion link binds to the live board session once sync connects.
   const companion = page.getByTestId("companion-media-link").first();
   await expect(companion).toBeVisible({ timeout: 15_000 });
-  await expect(companion).toHaveAttribute("href", /\/\?boardSessionId=.+/);
+  await expect(companion).toHaveAttribute("href", /\/app\/boards\/live\?boardSessionId=.+/);
 
   // The typed fallback is a working input path, not a dead end.
   const input = page.getByTestId("intent-command-input");
@@ -101,7 +102,7 @@ test("delegated side panel stays compact and points at the shared board", async 
 
 test("standalone keeps its camera and voice entry points", async ({ page }) => {
   await spyOnGetUserMedia(page);
-  await page.goto("/");
+  await page.goto("/?testStandalone=1");
 
   const onboarding = page.getByRole("button", { name: "Got it — let me try" });
   await expect(onboarding).toBeVisible();
@@ -110,5 +111,55 @@ test("standalone keeps its camera and voice entry points", async ({ page }) => {
   await expect(page.getByRole("button", { name: /Enable hand tracking/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Airo listening/ })).toBeVisible();
   // Nothing auto-starts capture; media remains user-initiated on standalone.
+  expect(await page.evaluate(() => window.__gumCalls)).toBe(0);
+});
+
+test("standalone resumes a previously enabled camera when site permission is already granted", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    window.__gumCalls = 0;
+    window.localStorage.setItem("airboard.media-resume.v1.camera", "enabled");
+    Object.defineProperty(navigator.permissions, "query", {
+      configurable: true,
+      value: async ({ name }: PermissionDescriptor) => ({
+        state: name === "camera" ? "granted" : "prompt",
+      }),
+    });
+    Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
+      configurable: true,
+      value: async () => {
+        window.__gumCalls += 1;
+        throw new DOMException("Synthetic device failure after acquisition attempt", "NotReadableError");
+      },
+    });
+  });
+
+  await page.goto("/?testStandalone=1");
+  await expect.poll(() => page.evaluate(() => window.__gumCalls)).toBe(1);
+});
+
+test("standalone never opens a surprise prompt when remembered permission is not granted", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    window.__gumCalls = 0;
+    window.localStorage.setItem("airboard.media-resume.v1.camera", "enabled");
+    Object.defineProperty(navigator.permissions, "query", {
+      configurable: true,
+      value: async () => ({ state: "prompt" }),
+    });
+    Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
+      configurable: true,
+      value: async () => {
+        window.__gumCalls += 1;
+        throw new Error("getUserMedia must not run while permission is prompt");
+      },
+    });
+  });
+
+  await page.goto("/?testStandalone=1");
+  await expect(page.getByRole("button", { name: /Enable hand tracking/ })).toBeVisible();
+  await page.waitForTimeout(500);
   expect(await page.evaluate(() => window.__gumCalls)).toBe(0);
 });

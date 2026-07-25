@@ -4,7 +4,7 @@ Intent-driven diagram canvas for meetings, with typed, voice, pointer, and hand-
 
 ## Current Product Slice
 
-The current prototype is **Intent Canvas**: users describe a diagram change and it is applied instantly — by voice, gesture, or typed command — with no confirmation step. Undo is the safety net. To edit an existing element, grab it (or select it) and say what you want (e.g. "Airo, rename this to Payments"). Pointer and camera gestures are used for placement, selection, and precise object manipulation rather than mid-air freehand drawing.
+The current prototype is **Intent Canvas**: users describe a diagram change and it is applied instantly — by voice, gesture, or typed command — with no confirmation step. A finalized voice turn executes automatically; the collapsible translucent Airo panel on the right shows the live transcript, current system action, recent board-tool activity, and an optional typed composer. Undo is the safety net: use the toolbar, `Cmd/Ctrl+Z`, say “Airo, undo”, or show one open palm and swipe left. To edit an existing element, grab it (or select it) and say what you want (e.g. "Airo, rename this to Payments"). Pointer and camera gestures are used for placement, selection, and precise object manipulation rather than mid-air freehand drawing.
 
 See [Intent Canvas Implementation Notes](Docs/Intent%20Canvas%20Implementation%20Notes.md) for the supported commands, interaction model, test path, and current browser/hardware limits.
 
@@ -20,11 +20,13 @@ The first implementation is local-first:
 
 The local slice focuses on proving the Intent Canvas interaction before meeting-platform integration.
 
-## Screen-overlay presentation
+## Screen and camera composition
 
-On the standalone surface, **Use screen** lets the presenter choose a screen or window as the live background. Airboard renders a light global dim plus local dark-glass plates behind diagram clusters, keeping slides readable without sacrificing neon contrast. **Present** opens a source/readiness workflow, automatically enables Lightboard, and requires both a local composite check and confirmation of the meeting share preview before starting strict broadcast-safe output. That output contains no command dock, exit button, selection handles, collaboration cursors, onboarding, recording badge, or other presenter feedback; press Esc to return. The selected screen is never uploaded by this flow, capture ends when the user stops it or the source ends, and studio recording uses the same unmirrored full-frame composition.
+On the standalone surface, **Use screen** lets the user choose a screen or window as the live background. Airboard renders a light global dim plus local dark-glass plates behind diagram clusters, keeping slides readable without sacrificing neon contrast. There is no separate presentation wizard or clean-output mode: the regular canvas is the only standalone mode. Source selection is automatic—selected screen first, otherwise active camera, otherwise dark canvas. The selected screen is never uploaded by this flow, capture ends when the user stops it or the source ends, and studio recording uses the same unmirrored full-frame composition.
 
-Camera AR now uses the same centered `object-fit: cover` transform for the visible video, hand landmarks, two-hand navigation, and the hybrid controller, so a cropped 16:9 camera remains aligned at every canvas aspect ratio. A vendored on-device MediaPipe person-segmentation model creates a feathered foreground mask at a bounded rate: local preview and recordings redraw the presenter above the diagram, while the Meet overlay cuts the person out of the transmitted board layer so its camera compositor produces the same depth ordering. The feature is enabled by default and can be disabled under Appearance.
+Camera mode uses one fixed compositing contract everywhere: camera video at the bottom, a full-frame dark transparent scrim above it, and the diagram canvas on top. The visible video, scrim, hand landmarks, two-hand navigation, and hybrid controller share the same centered `object-fit: cover` geometry, so a cropped 16:9 camera remains aligned at every canvas aspect ratio. Airboard does not segment or redraw the presenter above diagram ink.
+
+A visual thumb–middle-finger snap hides or restores the diagram and scrim while leaving the camera or selected screen running. The same local action is available from the overflow menu, with `Shift+H`, and through “hide canvas” / “bring the diagram back” voice commands. Hidden diagrams suspend board-editing gestures and commands. Saved canvases can be renamed inline or from their action menu and moved to recoverable Trash; deletion saves the latest board state first.
 
 This browser flow is an audience-facing composite rather than an operating-system overlay. For the literal desktop experience, Airboard now also includes a native Electron shell in `apps/desktop`. It opens the same live board as a transparent, frameless, always-on-top window and passes mouse events through to arbitrary apps underneath.
 

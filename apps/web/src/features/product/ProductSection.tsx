@@ -36,9 +36,88 @@ function ActivityView() {
 }
 
 function BoardCollection({ title, description, scope }: { title: string; description: string; scope: "shared" | "trash" }) {
-  const auth = useAirboardAuth(); const [boards, setBoards] = useState<Board[]>([]);
-  const reload = async () => { if (!auth.accessToken) return; const result = await airboardApi<{ boards: Board[] }>(`/boards?scope=${scope}`, { accessToken: auth.accessToken }); setBoards(result.boards); };
-  useEffect(() => { void reload(); }, [auth.accessToken, scope]);
-  const restore = async (id: string) => { if (!auth.accessToken) return; await airboardApi(`/boards/${id}/restore`, { method: "POST", accessToken: auth.accessToken }); await reload(); };
-  return <div><section className="app-page-heading"><p className="eyebrow">Workspace</p><h1>{title}</h1><p>{description}</p></section>{boards.length ? <div className="board-grid large">{boards.map((board) => <article className="board-card" key={board.id}><div className="board-thumbnail"><span>{board.title[0]}</span></div><strong>{board.title}</strong><small>{new Date(board.updated_at).toLocaleString()}</small>{scope === "trash" ? <button onClick={() => void restore(board.id)}>Restore</button> : <Link href={`/app/boards/${board.id}`}>Open</Link>}</article>)}</div> : <div className="empty-panel"><h3>Nothing here</h3><p>{scope === "trash" ? "Deleted boards will appear here." : "Share a board with your organization to see it here."}</p></div>}</div>;
+  const auth = useAirboardAuth();
+  const [boards, setBoards] = useState<Board[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const reload = async () => {
+    if (!auth.accessToken) return;
+    try {
+      const result = await airboardApi<{ boards: Board[] }>(`/boards?scope=${scope}`, {
+        accessToken: auth.accessToken,
+      });
+      setBoards(result.boards);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void reload();
+  }, [auth.accessToken, scope]);
+
+  const restore = async (id: string) => {
+    if (!auth.accessToken) return;
+    await airboardApi(`/boards/${id}/restore`, {
+      method: "POST",
+      accessToken: auth.accessToken,
+    });
+    await reload();
+  };
+
+  const isTrash = scope === "trash";
+
+  return (
+    <div>
+      <section className={`app-page-heading${isTrash ? " inline" : ""}`}>
+        <div>
+          <p className="eyebrow">Workspace</p>
+          <h1>{title}</h1>
+          <p>{description}</p>
+        </div>
+        {isTrash ? (
+          <Link className="button button-quiet" href="/app/boards">
+            ← Back to Boards
+          </Link>
+        ) : null}
+      </section>
+
+      {loading ? (
+        <div className="empty-panel">Loading boards…</div>
+      ) : boards.length ? (
+        <div className="board-grid large">
+          {boards.map((board) => (
+            <article className="board-card" key={board.id}>
+              <div className="board-thumbnail">
+                <span>{board.title[0]}</span>
+              </div>
+              <strong>{board.title}</strong>
+              <small>{new Date(board.updated_at).toLocaleString()}</small>
+              {isTrash ? (
+                <button className="button button-quiet" onClick={() => void restore(board.id)}>
+                  Restore
+                </button>
+              ) : (
+                <Link href={`/app/boards/${board.id}`}>Open</Link>
+              )}
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div className="empty-panel">
+          <h3>Nothing here</h3>
+          <p>
+            {isTrash
+              ? "Deleted boards will appear here."
+              : "Share a board with your organization to see it here."}
+          </p>
+          {isTrash ? (
+            <Link className="button button-primary" href="/app/boards">
+              View your Airboards
+            </Link>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
 }

@@ -1,4 +1,5 @@
 import { applyBoardEvent, reduceBoardEvents } from "./boardReducer.ts";
+import { nodeVisualDefaultSize, pointOnNodeBoundary } from "./nodeVisuals.ts";
 import type {
   AnnotationBounds,
   AnnotationNodeType,
@@ -37,6 +38,13 @@ export type ConnectNodesCommand = {
   label?: string;
   source?: AnnotationSource;
   style?: Pick<DiagramObjectStyle, "strokeColor" | "opacity" | "thickness">;
+};
+
+export type ReverseConnectionCommand = {
+  type: "connection.reverse";
+  connectorId: string;
+  /** Omit to preserve the connector's existing label. */
+  label?: string;
 };
 
 export type MoveObjectsCommand = {
@@ -117,6 +125,7 @@ export type LayoutObjectsCommand = {
 export type DiagramCommand =
   | CreateNodeCommand
   | ConnectNodesCommand
+  | ReverseConnectionCommand
   | MoveObjectsCommand
   | ResizeObjectCommand
   | RenameObjectCommand
@@ -166,8 +175,6 @@ type EventPayload =
   | { type: "stroke.deleted"; strokeIds: string[] }
   | { type: "stroke.restored"; strokeIds: string[] };
 
-const DEFAULT_NODE_WIDTH = 160;
-const DEFAULT_NODE_HEIGHT = 80;
 const DEFAULT_GROUP_PADDING = 28;
 const DEFAULT_LAYOUT_GAP = 48;
 
@@ -188,6 +195,9 @@ export function planDiagramCommand(
       break;
     case "nodes.connect":
       planConnectNodes(planner, command);
+      break;
+    case "connection.reverse":
+      planReverseConnection(planner, command);
       break;
     case "objects.move":
       planMoveObjects(planner, command);
@@ -450,9 +460,16 @@ function planConnectNodes(planner: CommandPlanner, command: ConnectNodesCommand)
   if (command.fromId === command.toId) {
     throw new DiagramCommandError("nodes.connect requires two different objects");
   }
-  const from = requireBounds(planner.getStroke(command.fromId));
-  const to = requireBounds(planner.getStroke(command.toId));
-  const endpoints = connectorEndpoints(from, to);
+  const fromStroke = planner.getStroke(command.fromId);
+  const toStroke = planner.getStroke(command.toId);
+  const from = requireBounds(fromStroke);
+  const to = requireBounds(toStroke);
+  const endpoints = connectorEndpoints(
+    from,
+    to,
+    fromStroke.annotation?.nodeType,
+    toStroke.annotation?.nodeType,
+  );
   const id = planner.objectId(command.connectorId);
   const annotation: StrokeAnnotation = {
     type: "connector",
@@ -467,6 +484,50 @@ function planConnectNodes(planner: CommandPlanner, command: ConnectNodesCommand)
   if (command.style?.opacity !== undefined) annotation.opacity = command.style.opacity;
   planner.createStroke(
     semanticStroke(planner, id, annotation, command.style?.thickness ?? 3),
+  );
+}
+
+function planReverseConnection(
+  planner: CommandPlanner,
+  command: ReverseConnectionCommand,
+): void {
+  const connector = planner.getStroke(command.connectorId);
+  const annotation = connector.annotation;
+  if (
+    !annotation ||
+    (annotation.type !== "connector" && annotation.type !== "arrow") ||
+    !annotation.snappedStartStrokeId ||
+    !annotation.snappedEndStrokeId
+  ) {
+    throw new DiagramCommandError(
+      `connection.reverse requires a snapped connector: ${command.connectorId}`,
+    );
+  }
+
+  const reversedFromId = annotation.snappedEndStrokeId;
+  const reversedToId = annotation.snappedStartStrokeId;
+  const reversedFromStroke = planner.getStroke(reversedFromId);
+  const reversedToStroke = planner.getStroke(reversedToId);
+  const reversedFrom = requireBounds(reversedFromStroke);
+  const reversedTo = requireBounds(reversedToStroke);
+  const endpoints = connectorEndpoints(
+    reversedFrom,
+    reversedTo,
+    reversedFromStroke.annotation?.nodeType,
+    reversedToStroke.annotation?.nodeType,
+  );
+  const updated = cloneAnnotation(annotation);
+  updated.snappedStartStrokeId = reversedFromId;
+  updated.snappedEndStrokeId = reversedToId;
+  updated.start = endpoints.start;
+  updated.end = endpoints.end;
+  if (command.label !== undefined) {
+    updated.label = command.label;
+  }
+  planner.updateAnnotation(
+    connector.id,
+    updated,
+    pointsForAnnotation(updated, planner.timestampMs),
   );
 }
 
@@ -752,7 +813,12 @@ function syncAttachedConnectors(
     const from = planner.getStroke(fromId);
     const to = planner.getStroke(toId);
     if (!from.annotation?.bounds || !to.annotation?.bounds) continue;
-    const endpoints = connectorEndpoints(from.annotation.bounds, to.annotation.bounds);
+    const endpoints = connectorEndpoints(
+      from.annotation.bounds,
+      to.annotation.bounds,
+      from.annotation.nodeType,
+      to.annotation.nodeType,
+    );
     const updated = cloneAnnotation(annotation);
     updated.start = endpoints.start;
     updated.end = endpoints.end;
@@ -832,6 +898,8 @@ function diagramPoint(x: number, y: number, t: number): StrokePoint {
 function connectorEndpoints(
   from: AnnotationBounds,
   to: AnnotationBounds,
+  fromNodeType?: AnnotationNodeType,
+  toNodeType?: AnnotationNodeType,
 ): { start: AnnotationPoint; end: AnnotationPoint } {
   const fromCenter = centerOf(from);
   const toCenter = centerOf(to);
@@ -842,20 +910,9 @@ function connectorEndpoints(
     };
   }
   return {
-    start: pointOnBounds(from, toCenter),
-    end: pointOnBounds(to, fromCenter),
+    start: pointOnNodeBoundary(from, fromNodeType, toCenter),
+    end: pointOnNodeBoundary(to, toNodeType, fromCenter),
   };
-}
-
-function pointOnBounds(bounds: AnnotationBounds, toward: AnnotationPoint): AnnotationPoint {
-  const center = centerOf(bounds);
-  const dx = toward.x - center.x;
-  const dy = toward.y - center.y;
-  const scale = 1 / Math.max(
-    Math.abs(dx) / Math.max(bounds.width / 2, 0.0001),
-    Math.abs(dy) / Math.max(bounds.height / 2, 0.0001),
-  );
-  return { x: center.x + dx * scale, y: center.y + dy * scale };
 }
 
 function translateAnnotation(annotation: StrokeAnnotation, dx: number, dy: number): void {
@@ -1045,12 +1102,7 @@ function boundsAroundCenter(
 }
 
 function defaultNodeSize(nodeType: AnnotationNodeType): { width: number; height: number } {
-  if (nodeType === "circle") return { width: 120, height: 120 };
-  if (nodeType === "decision") return { width: 120, height: 88 };
-  if (nodeType === "database") return { width: 144, height: 96 };
-  if (nodeType === "note") return { width: 176, height: 108 };
-  if (nodeType === "user") return { width: 128, height: 88 };
-  return { width: DEFAULT_NODE_WIDTH, height: DEFAULT_NODE_HEIGHT };
+  return nodeVisualDefaultSize(nodeType);
 }
 
 function centerOf(bounds: AnnotationBounds): AnnotationPoint {

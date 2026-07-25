@@ -57,9 +57,9 @@ test("creates annotation-compatible nodes and snapped connectors through BoardEv
   assert.equal(first.state.strokes.api.annotation.type, "flow_node");
   assert.equal(first.state.strokes.api.annotation.source, "voice");
   assert.deepEqual(first.state.strokes.api.annotation.bounds, {
-    x: 20,
+    x: 24,
     y: 60,
-    width: 160,
+    width: 152,
     height: 80,
   });
 
@@ -67,9 +67,57 @@ test("creates annotation-compatible nodes and snapped connectors through BoardEv
   assert.equal(connector.annotation.type, "connector");
   assert.equal(connector.annotation.snappedStartStrokeId, "api");
   assert.equal(connector.annotation.snappedEndStrokeId, "database");
-  assert.deepEqual(connector.annotation.start, { x: 180, y: 100 });
-  assert.deepEqual(connector.annotation.end, { x: 320, y: 100 });
+  assert.deepEqual(connector.annotation.start, { x: 176, y: 100 });
+  assert.deepEqual(connector.annotation.end, { x: 324, y: 100 });
   assert.equal(connector.points.length, 2);
+});
+
+test("reverses a connector in place as one undoable annotation update", () => {
+  let state = createInitialBoardState("board-1");
+  state = createNode(state, "user-one", { x: 100, y: 100 }, "User One").state;
+  state = createNode(state, "user-two", { x: 400, y: 100 }, "User Two").state;
+  state = applyDiagramCommand(
+    state,
+    {
+      type: "nodes.connect",
+      connectorId: "calls",
+      fromId: "user-one",
+      toId: "user-two",
+      label: "calls",
+    },
+    context(),
+  ).state;
+  const before = structuredClone(state.strokes.calls.annotation);
+
+  const reversed = applyDiagramCommand(
+    state,
+    {
+      type: "connection.reverse",
+      connectorId: "calls",
+      label: "calls",
+    },
+    context("2026-07-11T00:00:01.000Z"),
+  );
+
+  assert.deepEqual(reversed.events.map((event) => event.type), [
+    "stroke.annotation_updated",
+  ]);
+  assert.equal(reversed.state.strokes.calls.id, "calls", "connector identity is preserved");
+  assert.equal(
+    reversed.state.strokes.calls.annotation.snappedStartStrokeId,
+    "user-two",
+  );
+  assert.equal(
+    reversed.state.strokes.calls.annotation.snappedEndStrokeId,
+    "user-one",
+  );
+
+  const undone = applyDiagramUndo(
+    reversed.state,
+    reversed,
+    context("2026-07-11T00:00:02.000Z"),
+  );
+  assert.deepEqual(undone.state.strokes.calls.annotation, before);
 });
 
 test("creates semantic circles as true ellipse annotations", () => {
@@ -123,7 +171,7 @@ test("moving a node keeps attached connectors bound and compensating events undo
     context("2026-07-11T00:00:01.000Z"),
   );
 
-  assert.equal(moved.state.strokes.one.annotation.bounds.x, 80);
+  assert.equal(moved.state.strokes.one.annotation.bounds.x, 84);
   assert.equal(moved.state.strokes.one.annotation.bounds.y, 100);
   assert.notDeepEqual(moved.state.strokes.edge.annotation.start, beforeConnector.start);
   assert.equal(moved.state.strokes.edge.annotation.snappedStartStrokeId, "one");

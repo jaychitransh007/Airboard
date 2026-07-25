@@ -8,6 +8,7 @@ export function PublicShell({ children }: { children: ReactNode }) {
         <Link className="marketing-brand" href="/" aria-label="Airboard home">
           <span className="brand-orbit" aria-hidden="true" />
           Airboard
+          <small className="release-stage">Controlled pilot</small>
         </Link>
         <nav aria-label="Main navigation">
           <Link href="/product">Product</Link>
@@ -17,7 +18,7 @@ export function PublicShell({ children }: { children: ReactNode }) {
         </nav>
         <div className="marketing-actions">
           <Link className="button button-quiet" href="/login">Sign in</Link>
-          <Link className="button button-primary" href="/signup">Start free</Link>
+          <Link className="button button-primary" href="/signup">Join pilot</Link>
         </div>
       </header>
       <main>{children}</main>
@@ -37,7 +38,7 @@ export function PublicShell({ children }: { children: ReactNode }) {
           <Link href="/subprocessors">Subprocessors</Link>
           <Link href="/accessibility">Accessibility</Link>
         </div>
-        <small>© {new Date().getFullYear()} Airboard. Media is processed live and is not stored by default.</small>
+        <small>© {new Date().getFullYear()} Airboard. Controlled pilot: standalone web is available; meeting and desktop integrations are previews. Raw media is processed live and is not stored by Airboard.</small>
       </footer>
     </div>
   );

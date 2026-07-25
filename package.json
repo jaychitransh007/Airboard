@@ -15,6 +15,8 @@
     "eval:false-accepts": "node scripts/eval-false-accepts.mjs",
     "eval:grammar": "node scripts/eval-grammar.mjs",
     "smoke:commercial": "node scripts/smoke-commercial-journey.mjs",
+    "launch:check": "node --env-file-if-exists=.env scripts/launch-ready-check.mjs",
+    "launch:check:paid": "node --env-file-if-exists=.env scripts/launch-ready-check.mjs --scope=paid-ga",
     "supabase:start": "supabase start",
     "supabase:status": "supabase status",
     "supabase:reset": "supabase db reset"

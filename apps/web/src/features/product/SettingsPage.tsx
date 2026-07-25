@@ -5,11 +5,11 @@ import { useEffect, useState } from "react";
 import { airboardApi } from "../../platform/api";
 import { useAirboardAuth } from "../../platform/auth";
 
-type Preferences = { overlayEnabled: boolean; neonTheme: boolean; videoEnabled: boolean; audioEnabled: boolean; personOcclusion: boolean };
+type Preferences = { overlayEnabled: boolean; neonTheme: boolean; videoEnabled: boolean; audioEnabled: boolean };
 type DataRequest = { id: string; request_type: string; status: string; requested_at: string; execute_after: string | null; completed_at: string | null; error_code: string | null };
 type AirboardSession = { id: string; provider: string; title: string | null; status: string; created_at: string; updated_at: string };
 
-const DEFAULT_PREFERENCES: Preferences = { overlayEnabled: true, neonTheme: true, videoEnabled: true, audioEnabled: true, personOcclusion: true };
+const DEFAULT_PREFERENCES: Preferences = { overlayEnabled: true, neonTheme: true, videoEnabled: true, audioEnabled: true };
 
 export function SettingsPage({ section }: { section: string }) {
   const auth = useAirboardAuth();
@@ -38,7 +38,7 @@ export function SettingsPage({ section }: { section: string }) {
       <aside><h2>Settings</h2>{[["profile","Profile"],["preferences","Preferences"],["connected-accounts","Connected accounts"],["notifications","Notifications"],["privacy-data","Privacy & data"],["sessions","Sessions"]].map(([id,label]) => <Link className={section === id ? "active" : ""} href={`/app/settings/${id}`} key={id}>{label}</Link>)}</aside>
       <section className="settings-panel">
         {section === "profile" ? <><p className="eyebrow">Personal account</p><h1>Profile</h1><label>Display name<input value={name} onChange={(event) => setName(event.target.value)} /></label><label>Email<input disabled value={auth.account?.profile.email ?? ""} /></label><label>Timezone<input disabled value={auth.account?.profile.timezone ?? "UTC"} /></label><button className="button button-primary" onClick={() => void saveProfile()}>Save profile</button></> : null}
-        {section === "preferences" ? <><p className="eyebrow">Default experience</p><h1>Meeting and canvas preferences</h1><p>These defaults follow your account. Media capture still requires affirmative confirmation on the first installation.</p><Toggle label="Enable Airboard overlay" detail="Composite the diagram into supported meeting cameras." value={preferences.overlayEnabled} set={(value) => setPreferences({ ...preferences, overlayEnabled: value })} /><Toggle label="Neon lightboard theme" detail="Use high-contrast glowing strokes over video and screens." value={preferences.neonTheme} set={(value) => setPreferences({ ...preferences, neonTheme: value })} /><Toggle label="Airboard video input" detail="Use the meeting camera for gesture alignment and occlusion." value={preferences.videoEnabled} set={(value) => setPreferences({ ...preferences, videoEnabled: value })} /><Toggle label="Airboard audio input" detail="Use the microphone for Airo commands when policy allows." value={preferences.audioEnabled} set={(value) => setPreferences({ ...preferences, audioEnabled: value })} /><Toggle label="Keep presenter in front" detail="On-device person segmentation places diagram ink behind you." value={preferences.personOcclusion} set={(value) => setPreferences({ ...preferences, personOcclusion: value })} /><button className="button button-primary" onClick={() => void savePreferences()}>Save defaults</button></> : null}
+        {section === "preferences" ? <><p className="eyebrow">Default experience</p><h1>Meeting and canvas preferences</h1><p>These defaults follow your account. Media capture still requires affirmative confirmation on the first installation.</p><Toggle label="Enable Airboard overlay" detail="Composite the diagram into supported meeting cameras." value={preferences.overlayEnabled} set={(value) => setPreferences({ ...preferences, overlayEnabled: value })} /><Toggle label="Neon lightboard theme" detail="Use high-contrast glowing strokes over video and screens." value={preferences.neonTheme} set={(value) => setPreferences({ ...preferences, neonTheme: value })} /><Toggle label="Airboard video input" detail="Use the meeting camera for gesture alignment and the camera composite." value={preferences.videoEnabled} set={(value) => setPreferences({ ...preferences, videoEnabled: value })} /><Toggle label="Airboard audio input" detail="Use the microphone for Airo commands when policy allows." value={preferences.audioEnabled} set={(value) => setPreferences({ ...preferences, audioEnabled: value })} /><button className="button button-primary" onClick={() => void savePreferences()}>Save defaults</button></> : null}
         {section === "connected-accounts" ? <ConnectedAccounts /> : null}
         {section === "notifications" ? <NotificationSettings /> : null}
         {section === "privacy-data" ? <PrivacySettings /> : null}
@@ -76,7 +76,38 @@ function PrivacySettings() {
   const request = async (requestType: "export" | "delete_account") => { if (!auth.accessToken) return; const result = await airboardApi<{ id: string }>("/privacy/data-requests", { method: "POST", accessToken: auth.accessToken, body: JSON.stringify({ requestType, ...(requestType === "delete_account" ? { confirmation } : {}) }) }); setMessage(requestType === "export" ? `Export queued: ${result.id}` : "Deletion scheduled with a seven-day cancellation window."); setConfirmation(""); await reload(); };
   const cancel = async (id: string) => { if (!auth.accessToken) return; await airboardApi(`/privacy/data-requests/${id}`, { method: "DELETE", accessToken: auth.accessToken }); await reload(); };
   const download = async (id: string) => { if (!auth.accessToken) return; const result = await airboardApi<Record<string, unknown>>(`/privacy/data-requests/${id}/export`, { accessToken: auth.accessToken }); const url = URL.createObjectURL(new Blob([JSON.stringify(result, null, 2)], { type: "application/json" })); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `airboard-data-${id}.json`; anchor.click(); URL.revokeObjectURL(url); };
-  return <><p className="eyebrow">Your information</p><h1>Privacy & data</h1><div className="privacy-card"><strong>Raw media is not stored</strong><p>Camera and microphone data is processed live. Product analytics excludes board content, labels, transcripts and meeting URLs.</p></div><div className="settings-action-row"><div><strong>Export my data</strong><span>Create a portable JSON export of account, board, consent and integration data.</span></div><button onClick={() => void request("export")}>Request export</button></div><div className="settings-action-row danger"><div><strong>Close my account</strong><span>Type DELETE to schedule account removal. You can cancel for seven days.</span><input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="Type DELETE" /></div><button disabled={confirmation !== "DELETE"} onClick={() => void request("delete_account")}>Schedule deletion</button></div>{message ? <p className="form-message">{message}</p> : null}<div className="data-table"><div className="table-head"><span>Request</span><span>Status</span><span>Action</span></div>{requests.map((item) => <div key={item.id}><span><strong>{item.request_type.replaceAll("_", " ")}</strong><small>{new Date(item.requested_at).toLocaleString()}</small></span><span>{item.status}</span><span>{item.request_type === "export" && item.status === "completed" ? <button onClick={() => void download(item.id)}>Download</button> : item.status === "queued" ? <button onClick={() => void cancel(item.id)}>Cancel</button> : "—"}</span></div>)}</div></>;
+  const createDiagnosticBundle = async () => {
+    if (!auth.accessToken) return;
+    await airboardApi("/consents", {
+      method: "POST",
+      accessToken: auth.accessToken,
+      body: JSON.stringify({ consentType: "support_diagnostics", granted: true, documentVersion: "2026-07-25", source: "privacy_settings" }),
+    });
+    const result = await airboardApi<{ id: string; expiresAt: string | null }>("/support/diagnostics", {
+      method: "POST",
+      accessToken: auth.accessToken,
+      body: JSON.stringify({
+        includesContent: false,
+        diagnostics: {
+          appVersion: "web-pilot",
+          platform: "standalone",
+          browser: navigator.userAgent,
+          operatingSystem: navigator.platform,
+          permissionStates: {},
+          capabilities: {
+            mediaDevices: Boolean(navigator.mediaDevices),
+            displayCapture: Boolean(navigator.mediaDevices?.getDisplayMedia),
+          },
+          errorCodes: [],
+          traceIds: [],
+          timings: {},
+          featureFlags: {},
+        },
+      }),
+    });
+    setMessage(`Sanitized diagnostic bundle ${result.id} created${result.expiresAt ? `; it expires ${new Date(result.expiresAt).toLocaleString()}` : ""}.`);
+  };
+  return <><p className="eyebrow">Your information</p><h1>Privacy & data</h1><div className="privacy-card"><strong>Raw media is not stored by Airboard</strong><p>Camera and microphone data is processed live. Deepgram receives audio only while Airo transcription is active. OpenAI may receive bounded command text and board context only when deterministic command parsing cannot safely finish. Product analytics excludes board content, labels, transcripts and meeting URLs and is retained for 90 days; content-free voice stage and outcome metadata expires within 14 days.</p></div><div className="settings-action-row"><div><strong>Create a support diagnostic</strong><span>Share browser, capability, permission-state, timing and error metadata for seven days. Board content, transcript, meeting URLs and raw media are excluded.</span></div><button onClick={() => void createDiagnosticBundle()}>Create bundle</button></div><div className="settings-action-row"><div><strong>Export my data</strong><span>Create a portable JSON export of account, board, consent and integration data.</span></div><button onClick={() => void request("export")}>Request export</button></div><div className="settings-action-row danger"><div><strong>Close my account</strong><span>Type DELETE to schedule account removal. You can cancel for seven days.</span><input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="Type DELETE" /></div><button disabled={confirmation !== "DELETE"} onClick={() => void request("delete_account")}>Schedule deletion</button></div>{message ? <p className="form-message">{message}</p> : null}<div className="data-table"><div className="table-head"><span>Request</span><span>Status</span><span>Action</span></div>{requests.map((item) => <div key={item.id}><span><strong>{item.request_type.replaceAll("_", " ")}</strong><small>{new Date(item.requested_at).toLocaleString()}</small></span><span>{item.status}</span><span>{item.request_type === "export" && item.status === "completed" ? <button onClick={() => void download(item.id)}>Download</button> : item.status === "queued" ? <button onClick={() => void cancel(item.id)}>Cancel</button> : "—"}</span></div>)}</div></>;
 }
 
 function SessionSettings() {

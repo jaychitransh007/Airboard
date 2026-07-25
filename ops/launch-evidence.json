@@ -1,0 +1,251 @@
+{
+  "releaseTarget": "controlled-pilot",
+  "lastReviewed": "2026-07-25",
+  "gates": {
+    "release-owner": {
+      "description": "A named business and technical release owner accepts the controlled-pilot scope and stop-ship authority.",
+      "status": "pending",
+      "owner": "Founder",
+      "evidence": "",
+      "notes": "Name the accountable owner and record approval."
+    },
+    "support-path": {
+      "description": "The published pilot inbox is monitored and has an escalation owner.",
+      "status": "pending",
+      "owner": "Founder",
+      "evidence": "",
+      "notes": "Verify hellosigmascience@gmail.com monitoring and response ownership."
+    },
+    "public-claims": {
+      "description": "Public product, channel, pricing, privacy, legal and status pages describe the implemented release without GA overclaims.",
+      "status": "verified",
+      "owner": "Product",
+      "evidence": "apps/web/app/[marketingSlug]/page.tsx; apps/web/src/features/product/PublicShell.tsx; apps/web/src/features/product/BillingPage.tsx",
+      "notes": ""
+    },
+    "privacy-retention": {
+      "description": "Voice traces are content-redacted and operational retention is enforced by the lifecycle job.",
+      "status": "verified",
+      "owner": "Engineering",
+      "evidence": "apps/api/src/voiceTrace/redaction.ts; apps/api/src/controlPlaneRoutes.ts; supabase/migrations/20260725120000_launch_privacy_and_retention.sql; supabase/migrations/20260725123000_operational_retention.sql",
+      "notes": ""
+    },
+    "database-migrations": {
+      "description": "Every production migration is applied and verified against the target database.",
+      "status": "pending",
+      "owner": "Engineering",
+      "evidence": "",
+      "notes": "Apply migrations to production and attach the migration-list output."
+    },
+    "automated-regression": {
+      "description": "Type checks, unit tests, builds, voice evaluations and browser journeys pass on the release commit.",
+      "status": "pending",
+      "owner": "Engineering",
+      "evidence": "",
+      "notes": "Run the complete verification matrix and record the commit and outputs."
+    },
+    "commercial-smoke": {
+      "description": "The commercial customer journey passes against the release database.",
+      "status": "pending",
+      "owner": "Engineering",
+      "evidence": "",
+      "notes": "Run pnpm smoke:commercial against a disposable release organization."
+    },
+    "deployment-smoke": {
+      "description": "Production web, API, authentication, readiness, board save/export/delete and rollback smoke checks pass.",
+      "status": "pending",
+      "owner": "Engineering",
+      "evidence": "",
+      "notes": "Deploy the release commit and attach endpoint and browser smoke evidence."
+    },
+    "lifecycle-schedule": {
+      "description": "The authenticated lifecycle endpoint is scheduled, monitored and has a failed-run alert.",
+      "status": "pending",
+      "owner": "Engineering",
+      "evidence": "",
+      "notes": "Configure the scheduler and prove one successful and one alerted failed run."
+    },
+    "legal-approval": {
+      "description": "Counsel approves the legal entity details, privacy notice, terms, DPA and deletion obligations.",
+      "status": "pending",
+      "owner": "Legal",
+      "evidence": "",
+      "notes": "Do not relabel draft pages until signed approval exists."
+    },
+    "subprocessor-review": {
+      "description": "Contractual provider entities, locations, transfer terms and notification process are approved.",
+      "status": "pending",
+      "owner": "Legal",
+      "evidence": "",
+      "notes": "Confirm Supabase, Google Cloud, Deepgram, OpenAI, Stripe and Resend details."
+    },
+    "threat-model": {
+      "description": "A reviewed data-flow and abuse-case threat model covers all production channels and providers.",
+      "status": "pending",
+      "owner": "Security",
+      "evidence": "",
+      "notes": "Complete review with owners and remediation dates."
+    },
+    "independent-security-test": {
+      "description": "Independent testing has no unresolved critical or high finding.",
+      "status": "pending",
+      "owner": "Security",
+      "evidence": "",
+      "notes": "Commission testing after the release candidate is stable."
+    },
+    "backup-restore": {
+      "description": "A production-like backup restore proves the stated recovery point and recovery time.",
+      "status": "pending",
+      "owner": "Engineering",
+      "evidence": "",
+      "notes": "Run and time a restore; record data validation."
+    },
+    "incident-exercise": {
+      "description": "The team completes an incident and breach-notification tabletop exercise.",
+      "status": "pending",
+      "owner": "Founder",
+      "evidence": "",
+      "notes": "Record roles, contacts, decisions and improvements."
+    },
+    "browser-matrix": {
+      "description": "The promised standalone desktop browser and OS matrix passes with documented exclusions.",
+      "status": "pending",
+      "owner": "Product",
+      "evidence": "",
+      "notes": "Test Chrome, Edge and Safari only where explicitly promised."
+    },
+    "accessibility-audit": {
+      "description": "Core non-media workflows pass an accessibility audit and published limitations are accurate.",
+      "status": "pending",
+      "owner": "Product",
+      "evidence": "",
+      "notes": "Audit keyboard, focus, reduced motion, contrast and screen-reader paths."
+    },
+    "monitoring-alerts": {
+      "description": "Web, API, database, provider, error-rate, latency and lifecycle alerts route to an accountable responder.",
+      "status": "pending",
+      "owner": "Engineering",
+      "evidence": "",
+      "notes": "Prove alert delivery and escalation."
+    },
+    "public-status-process": {
+      "description": "A real public incident page and update process replace the current placeholder.",
+      "status": "pending",
+      "owner": "Operations",
+      "evidence": "",
+      "notes": "Connect a status provider before making uptime claims."
+    },
+    "support-sla": {
+      "description": "Published support hours and response targets match actual staffing.",
+      "status": "pending",
+      "owner": "Founder",
+      "evidence": "",
+      "notes": "Set a target only after coverage is staffed."
+    },
+    "email-domain": {
+      "description": "The production sending domain, SPF, DKIM, DMARC and lifecycle templates are verified.",
+      "status": "pending",
+      "owner": "Operations",
+      "evidence": "",
+      "notes": "Attach Resend domain and delivery-test evidence."
+    },
+    "auth-production": {
+      "description": "Magic-link and every advertised OAuth provider pass production redirect, logout, expiry and recovery tests.",
+      "status": "pending",
+      "owner": "Engineering",
+      "evidence": "",
+      "notes": "Advertise only the providers returned by /auth/config."
+    },
+    "paid-offer-approval": {
+      "description": "Packaging, currency, geography, contract, trial, renewal and cancellation language are approved.",
+      "status": "pending",
+      "owner": "Founder",
+      "evidence": "",
+      "notes": "Replace proposed pricing copy only after approval."
+    },
+    "tax-refund-policy": {
+      "description": "Tax collection, invoices, refunds and chargeback ownership are operational.",
+      "status": "pending",
+      "owner": "Finance",
+      "evidence": "",
+      "notes": "Confirm supported countries before accepting payment."
+    },
+    "stripe-live-journey": {
+      "description": "Live-mode checkout, webhook, entitlement, invoice, portal, failure and cancellation paths pass.",
+      "status": "pending",
+      "owner": "Engineering",
+      "evidence": "",
+      "notes": "Use a controlled live transaction and reconcile every resulting record."
+    },
+    "billing-reconciliation": {
+      "description": "Daily Stripe-to-Airboard reconciliation and failed-webhook alerting are owned.",
+      "status": "pending",
+      "owner": "Finance",
+      "evidence": "",
+      "notes": "Implement reconciliation before paid GA."
+    },
+    "chrome-store-approval": {
+      "description": "The production Chrome extension is approved and publicly installable.",
+      "status": "pending",
+      "owner": "Product",
+      "evidence": "",
+      "notes": "Record the reviewed store URL and version."
+    },
+    "meet-receiver-matrix": {
+      "description": "Two-account receiver-side Meet tests pass across the promised role and device matrix.",
+      "status": "pending",
+      "owner": "Engineering",
+      "evidence": "",
+      "notes": "Verify the audience result, reconnect and fail-safe behavior."
+    },
+    "chrome-permission-review": {
+      "description": "Chrome permissions and privacy disclosures exactly match runtime behavior.",
+      "status": "pending",
+      "owner": "Security",
+      "evidence": "",
+      "notes": "Review the packaged artifact, not only source."
+    },
+    "chrome-rollback": {
+      "description": "Extension kill switch, version rollback and user communication are proven.",
+      "status": "pending",
+      "owner": "Engineering",
+      "evidence": "",
+      "notes": "Exercise a disabled or withdrawn release."
+    },
+    "desktop-signing": {
+      "description": "Production desktop artifacts are signed with controlled keys.",
+      "status": "pending",
+      "owner": "Engineering",
+      "evidence": "",
+      "notes": "Record key custody and signature verification."
+    },
+    "desktop-notarization": {
+      "description": "macOS notarization and Windows reputation/install checks pass.",
+      "status": "pending",
+      "owner": "Engineering",
+      "evidence": "",
+      "notes": "Attach platform verification results."
+    },
+    "desktop-updater": {
+      "description": "Signed automatic updates, staged rollout and downgrade behavior pass.",
+      "status": "pending",
+      "owner": "Engineering",
+      "evidence": "",
+      "notes": "Do not distribute generally without an update path."
+    },
+    "desktop-os-matrix": {
+      "description": "The promised desktop OS, display, permission and presentation matrix passes.",
+      "status": "pending",
+      "owner": "Product",
+      "evidence": "",
+      "notes": "Document excluded operating systems and display configurations."
+    },
+    "desktop-rollback": {
+      "description": "Desktop release rollback and revoked-build communication are proven.",
+      "status": "pending",
+      "owner": "Engineering",
+      "evidence": "",
+      "notes": "Exercise before public distribution."
+    }
+  }
+}

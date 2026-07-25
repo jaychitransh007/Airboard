@@ -1,4 +1,5 @@
 import { AirboardPrototype } from "../src/features/board/AirboardPrototype";
+import { TestAirboardHarness } from "../src/features/board/TestAirboardHarness";
 import { LandingPage } from "../src/features/product/LandingPage";
 
 export default async function Home({
@@ -17,7 +18,9 @@ export default async function Home({
     (Array.isArray(testStandaloneValue)
       ? testStandaloneValue.includes("1")
       : testStandaloneValue === "1");
-  return desktopOverlay || testStandalone ? (
+  return testStandalone ? (
+    <TestAirboardHarness surface="standalone" />
+  ) : desktopOverlay ? (
     <AirboardPrototype surface="standalone" {...(desktopOverlay ? { desktopOverlay: true } : {})} />
   ) : (
     <LandingPage />

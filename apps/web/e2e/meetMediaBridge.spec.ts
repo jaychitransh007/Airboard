@@ -130,3 +130,57 @@ test("the extension engine is control-free and starts the camera overlay automat
     )
     .toBeGreaterThan(0);
 });
+
+test("hidden diagram restores raw Meet camera and resumes the compositor without recapturing", async ({
+  page,
+}) => {
+  await page.goto("/meet/test-harness?bridge=emulate&headless=1");
+  await page.waitForFunction(() => "__airboardTestHooks" in window);
+  await expect
+    .poll(() => page.evaluate(() => (window as { __overlayFrames?: number }).__overlayFrames ?? 0), {
+      timeout: 10_000,
+    })
+    .toBeGreaterThan(3);
+
+  await page.evaluate(() =>
+    (
+      window as unknown as {
+        __airboardTestHooks: { setDiagramVisible(visible: boolean): void };
+      }
+    ).__airboardTestHooks.setDiagramVisible(false),
+  );
+  await expect
+    .poll(() => page.evaluate(() => (window as { __overlayArmed?: boolean }).__overlayArmed))
+    .toBe(false);
+  const hiddenFrameCount = await page.evaluate(
+    () => (window as { __overlayFrames?: number }).__overlayFrames ?? 0,
+  );
+  await page.waitForTimeout(250);
+  expect(
+    await page.evaluate(() => (window as { __overlayFrames?: number }).__overlayFrames ?? 0),
+  ).toBe(hiddenFrameCount);
+  await expect
+    .poll(() =>
+      page
+        .locator("video.camera-preview")
+        .evaluate((element) =>
+          ((element as HTMLVideoElement).srcObject as MediaStream | null)
+            ?.getVideoTracks()[0]?.readyState,
+        ),
+    )
+    .toBe("live");
+
+  await page.evaluate(() =>
+    (
+      window as unknown as {
+        __airboardTestHooks: { setDiagramVisible(visible: boolean): void };
+      }
+    ).__airboardTestHooks.setDiagramVisible(true),
+  );
+  await expect
+    .poll(() => page.evaluate(() => (window as { __overlayArmed?: boolean }).__overlayArmed))
+    .toBe(true);
+  await expect
+    .poll(() => page.evaluate(() => (window as { __overlayFrames?: number }).__overlayFrames ?? 0))
+    .toBeGreaterThan(hiddenFrameCount);
+});

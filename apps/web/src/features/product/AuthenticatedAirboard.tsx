@@ -13,8 +13,10 @@ export function AuthenticatedAirboard({ boardId }: { boardId?: string }) {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveWarning, setSaveWarning] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "error">("saved");
   const [board, setBoard] = useState<DurableBoard | null>(null);
   const versionRef = useRef(0);
+  const saveRequestRef = useRef(0);
   const saveChainRef = useRef(Promise.resolve());
   useEffect(() => {
     if (!auth.accessToken) return;
@@ -63,9 +65,13 @@ export function AuthenticatedAirboard({ boardId }: { boardId?: string }) {
     void prepare().catch((caught) => setError(caught instanceof Error ? caught.message : "AIRBOARD_PREPARE_FAILED"));
   }, [auth.accessToken, boardId, router]);
 
-  const persist = useCallback((state: BoardState) => {
-    if (!auth.accessToken || !board) return;
-    saveChainRef.current = saveChainRef.current.then(async () => {
+  const saveBoardState = useCallback((state: BoardState): Promise<void> => {
+    if (!auth.accessToken || !board) {
+      return Promise.reject(new Error("The saved canvas is not available."));
+    }
+    const requestId = ++saveRequestRef.current;
+    setSaveStatus("saving");
+    const operation = saveChainRef.current.catch(() => undefined).then(async () => {
       setSaveWarning(null);
       const version = versionRef.current + 1;
       const result = await airboardApi<{ board: { latest_version: number } }>(`/boards/${board.id}`, {
@@ -74,13 +80,46 @@ export function AuthenticatedAirboard({ boardId }: { boardId?: string }) {
         body: JSON.stringify({ state, version }),
       });
       versionRef.current = result.board.latest_version;
-    }).catch((caught) => {
+      if (saveRequestRef.current === requestId) {
+        setSaveStatus("saved");
+      }
+    });
+    saveChainRef.current = operation.catch(() => undefined);
+    return operation.catch((caught) => {
+      if (saveRequestRef.current === requestId) {
+        setSaveStatus("error");
+      }
       setSaveWarning(caught instanceof Error ? `Save interrupted: ${caught.message}` : "Save interrupted. Airboard will retry after your next change.");
+      throw caught;
     });
   }, [auth.accessToken, board]);
+
+  const persist = useCallback((state: BoardState) => {
+    void saveBoardState(state).catch(() => undefined);
+  }, [saveBoardState]);
+
+  const renameBoard = useCallback(async (title: string) => {
+    if (!auth.accessToken || !board) throw new Error("The saved canvas is not available.");
+    const result = await airboardApi<{ board: { title: string } }>(`/boards/${board.id}`, {
+      method: "PATCH",
+      accessToken: auth.accessToken,
+      body: JSON.stringify({ title }),
+    });
+    setBoard((current) => current ? { ...current, title: result.board.title } : current);
+  }, [auth.accessToken, board]);
+
+  const deleteBoard = useCallback(async (latestState: BoardState) => {
+    if (!auth.accessToken || !board) throw new Error("The saved canvas is not available.");
+    await saveBoardState(latestState);
+    await airboardApi(`/boards/${board.id}`, {
+      method: "DELETE",
+      accessToken: auth.accessToken,
+    });
+    router.replace("/app/boards?deleted=1");
+  }, [auth.accessToken, board, router, saveBoardState]);
   if (error) return <div className="product-loading"><strong>Could not prepare this Airboard.</strong><span>{error}</span></div>;
   if (!ready || !auth.accessToken || !auth.account || !board) return <div className="product-loading">Running a private canvas preflight…</div>;
-  return <><AirboardPrototype surface="standalone" accessToken={auth.accessToken} accountUserId={auth.account.profile.id} persistentBoardId={board.id} persistentWorkspaceId={board.workspace_id} initialBoardState={normalizeBoardState(board.latest_state, board.id)} onPersistentBoardChange={persist} {...(auth.account.profile.preferences ? { initialPreferences: auth.account.profile.preferences } : {})} />{saveWarning ? <div className="board-save-warning" role="status">{saveWarning}</div> : null}</>;
+  return <><AirboardPrototype surface="standalone" accessToken={auth.accessToken} accountUserId={auth.account.profile.id} persistentBoardId={board.id} persistentWorkspaceId={board.workspace_id} boardTitle={board.title} persistentSaveStatus={saveStatus} initialBoardState={normalizeBoardState(board.latest_state, board.id)} onPersistentBoardChange={persist} onRenameBoard={renameBoard} onDeleteBoard={deleteBoard} {...(auth.account.profile.preferences ? { initialPreferences: auth.account.profile.preferences } : {})} />{saveWarning ? <div className="board-save-warning" role="status">{saveWarning}</div> : null}</>;
 }
 
 type DurableBoard = {

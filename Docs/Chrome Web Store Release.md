@@ -16,7 +16,7 @@ adjacent SHA-256 file with the release evidence.
 - **Single purpose:** Put a private Airboard neon diagram layer into the
   presenter's outgoing Google Meet camera.
 - **Short description:** Explain ideas on your Meet video with live neon
-  diagrams, Airo voice commands, gestures, and presenter-aware depth.
+  diagrams, Airo voice commands, and gestures.
 - **Category:** Productivity
 - **Language:** English
 

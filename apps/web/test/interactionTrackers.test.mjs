@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { PalmGateTracker } from "../src/features/board/palmGateTracker.ts";
 import { HoldToEditTracker } from "../src/features/board/holdToEditTracker.ts";
+import { UndoGestureTracker } from "../src/features/board/undoGestureTracker.ts";
 
 const P = { x: 0.5, y: 0.4 };
 
@@ -107,4 +108,58 @@ test("hold-to-edit does not re-fire while the element is already scoped", () => 
   tracker.update(grab(0, false));
   assert.deepEqual(tracker.update(grab(700, false)), { type: "scope", strokeId: "s3" });
   assert.equal(tracker.update(grab(1_400, true)), null);
+});
+
+test("a single presented palm swiped left emits one undo", () => {
+  const tracker = new UndoGestureTracker();
+  const frame = (x, timestampMs) => ({
+    score: 0.9,
+    point: { x, y: 0.45 },
+    timestampMs,
+    suppressed: false,
+  });
+  assert.equal(tracker.update(frame(0.2, 0)), null);
+  assert.equal(tracker.update(frame(0.3, 80)), null);
+  assert.equal(
+    tracker.update(frame(0.42, 180)),
+    "undo",
+    "raw camera motion right is a visible swipe left after mirroring",
+  );
+});
+
+test("undo swipe rejects vertical motion, suppression, and repeat firing", () => {
+  const vertical = new UndoGestureTracker();
+  vertical.update({
+    score: 0.9,
+    point: { x: 0.2, y: 0.2 },
+    timestampMs: 0,
+    suppressed: false,
+  });
+  assert.equal(
+    vertical.update({
+      score: 0.9,
+      point: { x: 0.45, y: 0.42 },
+      timestampMs: 180,
+      suppressed: false,
+    }),
+    null,
+    "diagonal motion is not undo",
+  );
+
+  const tracker = new UndoGestureTracker();
+  const frame = (x, timestampMs, suppressed = false) => ({
+    score: 0.9,
+    point: { x, y: 0.45 },
+    timestampMs,
+    suppressed,
+  });
+  tracker.update(frame(0.2, 0, true));
+  assert.equal(tracker.update(frame(0.45, 180, true)), null, "two-hand/navigation suppresses undo");
+  tracker.update(frame(0.2, 300));
+  assert.equal(tracker.update(frame(0.45, 480)), "undo");
+  assert.equal(tracker.update(frame(0.7, 600)), null, "latched palm cannot undo twice");
+  tracker.update({ score: 0.1, point: null, timestampMs: 700, suppressed: false });
+  tracker.update({ score: 0.1, point: null, timestampMs: 900, suppressed: false });
+  tracker.update(frame(0.2, 1_800));
+  assert.equal(tracker.update(frame(0.45, 2_000)), "undo", "release and cooldown re-arm");
 });

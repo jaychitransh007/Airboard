@@ -69,6 +69,7 @@ test("extension accepts pending trial access, rotates credentials and persists s
   const refreshed = await sendInternal({ type: "AIRBOARD_REFRESH_STATUS" });
   assert.equal(refreshed.entitled, true, "pending trial access is enough to mount the first-run engine");
   assert.equal(refreshed.consented, true);
+  assert.equal(refreshed.settings.personOcclusion, false, "legacy depth settings cannot change the production layer order");
   assert.equal(stored.installationToken, "rotated-installation-token");
 
   const updated = await sendInternal({ type: "AIRBOARD_SET_SETTINGS", settings: { overlayEnabled: false } });

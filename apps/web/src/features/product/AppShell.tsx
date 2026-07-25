@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { useAirboardAuth } from "../../platform/auth";
 import { airboardApi } from "../../platform/api";
+import { isImmersiveBoardPath } from "./productRouting";
 
 const MAIN_NAV = [
   ["/app", "Overview", "⌂"],
@@ -39,9 +40,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     window.location.assign("/app");
   };
   const isAdmin = ["owner", "admin"].includes(auth.account?.organization.role ?? "");
+  const isBoardWorkspace = isImmersiveBoardPath(pathname);
   return (
-    <div className="app-shell">
-      <aside className="app-sidebar">
+    <div className={`app-shell${isBoardWorkspace ? " board-app-shell" : ""}`}>
+      {!isBoardWorkspace ? <aside className="app-sidebar">
         <Link className="app-brand" href="/app"><span className="brand-orbit" />Airboard</Link>
         <div className="workspace-switcher">
           <span>{auth.account?.organization.kind ?? "workspace"}</span>
@@ -71,22 +73,15 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div><strong>{auth.account?.profile.displayName ?? "Airboard user"}</strong><small>Sign out</small></div>
           </button>
         </div>
-      </aside>
+      </aside> : null}
       <div className="app-main">
-        <header className="app-topbar">
-          <div className="trial-chip">{trialLabel(auth.account)}</div>
-          <div className="app-top-actions">
-            <Link className="button button-quiet" href="/support">Help</Link>
-            <Link className="button button-primary" href="/app/boards/new">New Airboard</Link>
-          </div>
-        </header>
         <main className="app-content">{children}</main>
       </div>
-      <nav className="app-mobile-nav" aria-label="Airboard mobile navigation">
+      {!isBoardWorkspace ? <nav className="app-mobile-nav" aria-label="Airboard mobile navigation">
         {MAIN_NAV.slice(0, 4).map(([href, label, glyph]) => (
           <Link className={navActive(pathname, href) ? "active" : ""} href={href} key={href}><span aria-hidden="true">{glyph}</span><small>{label}</small></Link>
         ))}
-      </nav>
+      </nav> : null}
     </div>
   );
 }
@@ -101,14 +96,4 @@ function initials(value?: string): string {
 
 function navActive(pathname: string, href: string): boolean {
   return href === "/app" ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
-}
-
-function trialLabel(account: ReturnType<typeof useAirboardAuth>["account"]): string {
-  if (!account) return "Account loading";
-  if (account.entitlement?.status === "active") return `${account.entitlement.plan} plan`;
-  if (account.trial?.status === "activated" && account.trial.expiresAt) {
-    const hours = Math.max(0, Math.ceil((new Date(account.trial.expiresAt).getTime() - Date.now()) / 3_600_000));
-    return `${hours}h left in trial`;
-  }
-  return "3-day trial ready";
 }

@@ -77,15 +77,15 @@ export function AuthPage({ mode }: { mode: "login" | "signup" }) {
       <Link className="marketing-brand" href="/"><span className="brand-orbit" />Airboard</Link>
       <div className="auth-layout">
         <section className="auth-message">
-          <p className="eyebrow">{mode === "signup" ? "Start the 3-day trial" : "Welcome back"}</p>
+          <p className="eyebrow">{mode === "signup" ? "Join the controlled pilot" : "Welcome back"}</p>
           <h1>{mode === "signup" ? "Make the idea visible." : "Continue your Airboard."}</h1>
           <p>
-            Your trial begins only after your first successful standalone board or meeting preflight.
-            No payment card is required.
+            Your 72-hour pilot trial begins only after your first successful standalone board or
+            supported preview preflight. Paid checkout is not open unless the billing page says so.
           </p>
           <ul>
             <li>Standalone visual workspace</li>
-            <li>Neon Google Meet camera overlay</li>
+            <li>Google Meet camera overlay (private preview)</li>
             <li>Pointer, voice and gesture controls</li>
           </ul>
         </section>
@@ -114,7 +114,7 @@ export function AuthPage({ mode }: { mode: "login" | "signup" }) {
           ) : null}
           <p className="auth-switch">
             {mode === "signup" ? "Already have an account?" : "New to Airboard?"}{" "}
-            <Link href={mode === "signup" ? "/login" : "/signup"}>{mode === "signup" ? "Sign in" : "Start free"}</Link>
+            <Link href={mode === "signup" ? "/login" : "/signup"}>{mode === "signup" ? "Sign in" : "Join pilot"}</Link>
           </p>
           <small>By continuing, you accept the <Link href="/terms">Terms</Link> and acknowledge the <Link href="/privacy">Privacy Notice</Link>.</small>
         </section>

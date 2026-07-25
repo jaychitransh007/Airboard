@@ -55,6 +55,8 @@ export type VoiceCommandRouterConfig = {
   scopedGraceMs?: number;
   /** How long a gate's claim on a transcript blocks re-routing of it. */
   claimWindowMs?: number;
+  /** Maximum time an utterance that began inside a gate may take to finalize. */
+  utteranceClaimMs?: number;
 };
 
 type GateState = {
@@ -69,9 +71,11 @@ export class VoiceCommandRouter {
   private readonly pttGraceMs: number;
   private readonly scopedGraceMs: number;
   private readonly claimWindowMs: number;
+  private readonly utteranceClaimMs: number;
   private readonly wakeRouter: BrowserWakeCommandRouter;
 
   private gate: GateState | null = null;
+  private utteranceGate: { gate: GateState; capturedAt: number } | null = null;
   private claims: { transcript: string; at: number }[] = [];
   private collectingWake: VoiceRouteDecision[] | null = null;
 
@@ -80,6 +84,7 @@ export class VoiceCommandRouter {
     this.pttGraceMs = config.pttGraceMs ?? 1_600;
     this.scopedGraceMs = config.scopedGraceMs ?? 8_000;
     this.claimWindowMs = config.claimWindowMs ?? 5_000;
+    this.utteranceClaimMs = config.utteranceClaimMs ?? 15_000;
     this.wakeRouter = createBrowserWakeCommandRouter(
       {
         onCommand: ({ command, transcript, wakePhrase }) => {
@@ -93,6 +98,25 @@ export class VoiceCommandRouter {
       },
       { now: () => this.now() },
     );
+  }
+
+  /**
+   * Claims the in-progress speech turn for the current gesture gate.
+   *
+   * Speech providers often emit the final transcript several seconds after
+   * the user has lowered their palm. Capturing the gate on the first interim
+   * result keeps that same utterance automatic without extending the general
+   * post-gesture grace window for unrelated room speech.
+   */
+  noteSpeechActivity(): void {
+    this.expire();
+    if (!this.gate || this.utteranceGate) {
+      return;
+    }
+    this.utteranceGate = {
+      gate: { ...this.gate },
+      capturedAt: this.now(),
+    };
   }
 
   get snapshot(): VoiceGateSnapshot {
@@ -168,7 +192,13 @@ export class VoiceCommandRouter {
    */
   routeGatedOnly(transcript: string): VoiceRouteDecision | null {
     this.expire();
-    const gate = this.gate;
+    const now = this.now();
+    const captured =
+      this.utteranceGate && now - this.utteranceGate.capturedAt <= this.utteranceClaimMs
+        ? this.utteranceGate.gate
+        : null;
+    this.utteranceGate = null;
+    const gate = captured ?? this.gate;
     if (!gate) {
       return null;
     }
@@ -180,7 +210,7 @@ export class VoiceCommandRouter {
     if (gate.mode === "scoped") {
       command = normalizeScopedVoiceUtterance(command);
     }
-    if (gate.closedAt !== null) {
+    if (captured || gate.closedAt !== null) {
       // A grace-window gate routes exactly one utterance.
       this.gate = null;
     }
@@ -223,6 +253,7 @@ export class VoiceCommandRouter {
   reset(): void {
     this.wakeRouter.reset();
     this.gate = null;
+    this.utteranceGate = null;
     this.claims = [];
   }
 

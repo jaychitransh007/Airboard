@@ -4,6 +4,9 @@ import type { VoiceTraceData, VoiceTraceValue } from "./types";
 // still redacting credential-bearing token fields.
 const SENSITIVE_KEY = /(?:authorization|api[_-]?key|(?:access|refresh|auth|bearer)[_-]?token|^token$|secret|password)/iu;
 const BEARER_OR_OPENAI_KEY = /(?:Bearer\s+|sk-)[A-Za-z0-9._-]+/giu;
+const CUSTOMER_CONTENT_KEY =
+  /^(?:transcript|previousTranscript|utterance|command|instruction|normalizedText|label|term|meetingTitle|boardText)$/iu;
+const CONTENT_REDACTION = "[CONTENT_REDACTED]";
 
 export function redactDiagnosticText(input: string, maxCharacters = 500): string {
   const bounded = input.length > maxCharacters ? `${input.slice(0, maxCharacters)}…` : input;
@@ -15,6 +18,19 @@ export function redactDiagnosticData(data: VoiceTraceData | undefined): VoiceTra
     return undefined;
   }
   return redactObject(data);
+}
+
+/**
+ * Voice traces are operational telemetry, not a conversation archive.
+ * Remove finalized speech, command text, board labels, glossary terms, and
+ * semantic-plan labels recursively before an event reaches either the bounded
+ * memory buffer, application logs, or durable diagnostic storage.
+ */
+export function redactVoiceTraceContent(
+  data: VoiceTraceData | undefined,
+): VoiceTraceData | undefined {
+  if (!data) return undefined;
+  return redactVoiceTraceObject(data);
 }
 
 export function redactDiagnosticValue(input: unknown, depth = 0): unknown {
@@ -50,6 +66,30 @@ function redactObject(input: Record<string, VoiceTraceValue>): VoiceTraceData {
     output[key] = SENSITIVE_KEY.test(key) ? "[REDACTED]" : redactValue(value);
   }
   return output;
+}
+
+function redactVoiceTraceObject(input: Record<string, VoiceTraceValue>): VoiceTraceData {
+  const output: VoiceTraceData = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (SENSITIVE_KEY.test(key)) {
+      output[key] = "[REDACTED]";
+    } else if (CUSTOMER_CONTENT_KEY.test(key)) {
+      output[key] = CONTENT_REDACTION;
+    } else {
+      output[key] = redactVoiceTraceValue(value);
+    }
+  }
+  return output;
+}
+
+function redactVoiceTraceValue(value: VoiceTraceValue): VoiceTraceValue {
+  if (Array.isArray(value)) {
+    return value.map(redactVoiceTraceValue);
+  }
+  if (value && typeof value === "object") {
+    return redactVoiceTraceObject(value);
+  }
+  return value;
 }
 
 function redactValue(value: VoiceTraceValue): VoiceTraceValue {

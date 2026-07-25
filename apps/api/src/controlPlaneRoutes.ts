@@ -368,6 +368,9 @@ export function registerControlPlaneRoutes(
       const body = record(request.body);
       const update: JsonRecord = { updated_at: new Date().toISOString() };
       const title = boundedString(body.title, 1, 240);
+      if (body.title !== undefined && !title) {
+        return reply.code(400).send({ error: "INVALID_BOARD_TITLE" });
+      }
       if (title) update.title = title;
       if (typeof body.description === "string") update.description = body.description.slice(0, 2_000);
       if (["private", "organization", "link"].includes(String(body.visibility))) {
@@ -401,6 +404,9 @@ export function registerControlPlaneRoutes(
         .select("id,title,latest_version,visibility,updated_at")
         .maybeSingle();
       if (error || !data) return reply.code(404).send({ error: "BOARD_NOT_FOUND" });
+      if (title) {
+        await writeAudit(auth, context, request, "board.renamed", "board", data.id);
+      }
       return { board: data };
     },
   );
@@ -416,6 +422,7 @@ export function registerControlPlaneRoutes(
       .update({ deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq("id", request.params.boardId)
       .eq("organization_id", context.organizationId)
+      .is("deleted_at", null)
       .select("id")
       .maybeSingle();
     if (error || !data) return reply.code(404).send({ error: "BOARD_NOT_FOUND" });
@@ -1317,10 +1324,31 @@ function registerPrivacyAndTelemetryRoutes(server: FastifyInstance, auth: AuthSe
 }
 
 function registerBillingRoutes(server: FastifyInstance, config: ApiConfig, auth: AuthService) {
+  server.get("/commercial/config", async () => {
+    const checkoutEnabled = Boolean(
+      config.stripe.enabled &&
+      config.stripe.secretKey &&
+      config.stripe.webhookSecret &&
+      config.stripe.personalPriceId &&
+      config.stripe.teamPriceId,
+    );
+    return {
+      releaseStage: checkoutEnabled ? "paid_pilot" : "controlled_pilot",
+      checkoutEnabled,
+      billingPortalEnabled: Boolean(config.stripe.secretKey && auth.client),
+      plans: {
+        personal: { currency: "USD", monthlyAmount: 12 },
+        team: { currency: "USD", monthlyAmount: 18, unit: "member" },
+      },
+    };
+  });
+
   server.post<{ Body: unknown }>("/billing/checkout", async (request, reply) => {
     const context = await requireRole(auth, request, reply, BILLING_ROLES);
     if (!context) return;
-    if (!config.stripe.secretKey) return reply.code(503).send({ error: "BILLING_NOT_CONFIGURED" });
+    if (!config.stripe.enabled || !config.stripe.secretKey || !config.stripe.webhookSecret) {
+      return reply.code(503).send({ error: "BILLING_NOT_CONFIGURED" });
+    }
     const plan = String(record(request.body).plan ?? "personal");
     const priceId = plan === "team" ? config.stripe.teamPriceId : config.stripe.personalPriceId;
     if (!priceId) return reply.code(503).send({ error: "PRICE_NOT_CONFIGURED" });
@@ -1476,8 +1504,15 @@ function registerLifecycleRoutes(server: FastifyInstance, config: ApiConfig, aut
     const dataRequests = await processDataRequests(auth);
     const delivered = await deliverNotifications(config, auth);
     await expireDiagnostics(auth);
-    await expireOperationalData(auth);
-    return { expiredTrials: organizationIds.length, dataRequests, notifications: delivered };
+    const operationalData = await expireOperationalData(auth);
+    const deletedBoards = await purgeExpiredDeletedBoards(auth);
+    return {
+      expiredTrials: organizationIds.length,
+      dataRequests,
+      notifications: delivered,
+      operationalData,
+      deletedBoards,
+    };
   });
 }
 
@@ -1657,28 +1692,63 @@ async function processDataRequests(auth: AuthService) {
     await auth.client.from("data_requests").update({ status: "processing", updated_at: now }).eq("id", item.id).eq("status", "queued");
     try {
       if (item.request_type === "export") {
-        const [profile, memberships, boards, consents, subscriptions, installations] = await Promise.all([
-          auth.client.from("profiles").select("id,email,display_name,avatar_url,locale,timezone,preferences,notification_preferences,created_at").eq("id", item.profile_id).single(),
+        const profile = await auth.client.from("profiles")
+          .select("id,email,display_name,avatar_url,locale,timezone,preferences,notification_preferences,created_at")
+          .eq("id", item.profile_id)
+          .single();
+        const profileEmail = profile.data?.email ?? "";
+        const [memberships, boards, consents, installations, supportRequests, productEvents, auditEvents, notifications, leads] = await Promise.all([
           auth.client.from("organization_memberships").select("organization_id,role,status,joined_at,organizations(name,slug,kind)").eq("profile_id", item.profile_id),
-          auth.client.from("boards").select("id,workspace_id,title,description,latest_state,latest_version,visibility,archived_at,deleted_at,created_at,updated_at").eq("organization_id", item.organization_id).or(`owner_profile_id.eq.${item.profile_id},visibility.neq.private`).limit(500),
+          auth.client.from("boards").select("id,workspace_id,title,description,latest_state,latest_version,visibility,archived_at,deleted_at,created_at,updated_at").eq("organization_id", item.organization_id).eq("owner_profile_id", item.profile_id).limit(500),
           auth.client.from("consent_records").select("consent_type,document_version,granted,source,created_at").eq("profile_id", item.profile_id),
-          auth.client.from("billing_subscriptions").select("plan_key,status,seat_quantity,current_period_start,current_period_end,cancel_at_period_end").eq("organization_id", item.organization_id),
-          auth.client.from("platform_installations").select("platform,status,version,settings,consented_at,last_seen_at,last_success_at,created_at").eq("organization_id", item.organization_id),
+          auth.client.from("platform_installations").select("platform,status,version,settings,consented_at,last_seen_at,last_success_at,created_at").eq("organization_id", item.organization_id).eq("installed_by", item.profile_id),
+          auth.client.from("support_requests").select("category,subject,message,status,created_at,updated_at").eq("profile_id", item.profile_id),
+          auth.client.from("product_events").select("event_name,properties,occurred_at,received_at").eq("profile_id", item.profile_id).limit(5_000),
+          auth.client.from("audit_events").select("actor_type,action,target_type,target_id,metadata,occurred_at").eq("actor_profile_id", item.profile_id).limit(5_000),
+          auth.client.from("notification_jobs").select("template_key,status,send_after,created_at,sent_at").eq("profile_id", item.profile_id).limit(1_000),
+          auth.client.from("marketing_leads").select("name,email,company,company_size_band,use_case,source,status,created_at").eq("email", profileEmail).limit(100),
         ]);
         const result = {
-          schemaVersion: 1,
+          schemaVersion: 2,
           profile: profile.data,
           memberships: memberships.data ?? [],
           boards: boards.data ?? [],
           consents: consents.data ?? [],
-          subscriptions: subscriptions.data ?? [],
           installations: installations.data ?? [],
+          supportRequests: supportRequests.data ?? [],
+          productEvents: productEvents.data ?? [],
+          auditEvents: auditEvents.data ?? [],
+          notifications: notifications.data ?? [],
+          leads: leads.data ?? [],
         };
         await auth.client.from("data_requests").update({ status: "completed", result, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", item.id);
       } else if (item.request_type === "delete_workspace") {
+        await auth.client.from("support_requests").delete().eq("organization_id", item.organization_id);
         await auth.client.from("organizations").delete().eq("id", item.organization_id);
       } else {
-        const { data: profile } = await auth.client.from("profiles").select("auth_user_id").eq("id", item.profile_id).maybeSingle();
+        const { data: profile } = await auth.client.from("profiles").select("auth_user_id,email").eq("id", item.profile_id).maybeSingle();
+        await Promise.all([
+          auth.client.from("support_requests").delete().eq("profile_id", item.profile_id),
+          auth.client.from("product_events").delete().eq("profile_id", item.profile_id),
+          auth.client.from("platform_installations").update({
+            status: "revoked",
+            token_hash: null,
+            previous_token_hash: null,
+            previous_token_expires_at: null,
+            settings: {},
+            capabilities: {},
+            updated_at: new Date().toISOString(),
+          }).eq("installed_by", item.profile_id),
+          auth.client.from("audit_events").update({
+            actor_profile_id: null,
+            ip_hash: null,
+            user_agent_summary: null,
+            metadata: {},
+          }).eq("actor_profile_id", item.profile_id),
+          ...(profile?.email
+            ? [auth.client.from("marketing_leads").delete().eq("email", profile.email)]
+            : []),
+        ]);
         if (profile?.auth_user_id) {
           const { error } = await auth.client.auth.admin.deleteUser(profile.auth_user_id);
           if (error) throw new Error("AUTH_USER_DELETE_FAILED");
@@ -1999,15 +2069,63 @@ async function expireDiagnostics(auth: AuthService) {
 }
 
 async function expireOperationalData(auth: AuthService) {
-  if (!auth.client) return;
+  if (!auth.client) return { attempted: false };
   const now = new Date().toISOString();
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString();
-  await Promise.all([
+  const ninetyDaysAgo = new Date(Date.now() - 90 * 86_400_000).toISOString();
+  const oneYearAgo = new Date(Date.now() - 365 * 86_400_000).toISOString();
+  const results = await Promise.all([
     auth.client.from("voice_trace_events").delete().lt("expires_at", now),
     auth.client.from("diagnostic_bundles").delete().in("status", ["expired", "deleted"]).lt("expires_at", thirtyDaysAgo),
     auth.client.from("webhook_inbox").delete().in("status", ["processed", "ignored"]).lt("received_at", thirtyDaysAgo),
     auth.client.from("board_sessions").update({ status: "ended", ended_at: now, updated_at: now }).in("status", ["active", "owner_disconnected"]).lt("expires_at", now),
+    auth.client.from("data_requests").update({ result: null, updated_at: now }).eq("request_type", "export").eq("status", "completed").lt("completed_at", sevenDaysAgo),
+    auth.client.from("data_requests").delete().in("status", ["completed", "failed", "canceled"]).lt("updated_at", thirtyDaysAgo),
+    auth.client.from("notification_jobs").delete().in("status", ["sent", "canceled"]).lt("created_at", thirtyDaysAgo),
+    auth.client.from("product_events").delete().lt("received_at", ninetyDaysAgo),
+    auth.client.from("marketing_leads").delete().lt("created_at", oneYearAgo),
+    auth.client.from("support_requests").delete().in("status", ["resolved", "closed"]).lt("updated_at", oneYearAgo),
+    auth.client.from("audit_events").delete().lt("occurred_at", oneYearAgo),
   ]);
+  return {
+    attempted: true,
+    failures: results.filter((result) => result.error).length,
+  };
+}
+
+async function purgeExpiredDeletedBoards(auth: AuthService) {
+  if (!auth.client) return { attempted: false, organizations: 0, purged: 0, failures: 0 };
+  const { data: policies, error } = await auth.client
+    .from("organization_policies")
+    .select("organization_id,content_retention_days");
+  if (error) {
+    return { attempted: true, organizations: 0, purged: 0, failures: 1 };
+  }
+  let purged = 0;
+  let failures = 0;
+  for (const policy of policies ?? []) {
+    const retentionDays = Math.min(3650, Math.max(1, Number(policy.content_retention_days ?? 30)));
+    const cutoff = new Date(Date.now() - retentionDays * 86_400_000).toISOString();
+    const { data, error: deleteError } = await auth.client
+      .from("boards")
+      .delete()
+      .eq("organization_id", policy.organization_id)
+      .not("deleted_at", "is", null)
+      .lt("deleted_at", cutoff)
+      .select("id");
+    if (deleteError) {
+      failures += 1;
+    } else {
+      purged += data?.length ?? 0;
+    }
+  }
+  return {
+    attempted: true,
+    organizations: policies?.length ?? 0,
+    purged,
+    failures,
+  };
 }
 
 async function stripeRequest(config: ApiConfig, path: string, body: URLSearchParams) {

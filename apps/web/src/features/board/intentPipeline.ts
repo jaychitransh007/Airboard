@@ -12,12 +12,14 @@ import {
   type AnnotationPoint,
   type BoardState,
   type DiagramCommand,
+  type SemanticConnectionReference,
   type SemanticObjectReference,
   type SemanticPlacement,
   type SemanticPlanAction,
   type StrokeAnnotation,
 } from "@airboard/core";
 import { findAnnotationObjectAtPoint } from "@airboard/drawing-engine";
+import { normalizeSpokenNumberAliases } from "./desiredGraphCorrection.ts";
 import type { IntentCanvasOperation } from "./intentCanvasParser.ts";
 import type { SemanticIntentContext } from "./semanticIntent.ts";
 
@@ -113,10 +115,122 @@ export function resolveSemanticPlanAction(
       if (from.id === to.id) {
         return { error: "The source and target resolve to the same object." };
       }
+      const existing = findDirectedSemanticConnections(
+        context.boardState,
+        from.id,
+        to.id,
+      );
+      if (
+        action.label === null
+          ? existing.length > 0
+          : existing.some(
+              (connection) =>
+                normalizeObjectLookup(connection.label ?? "") ===
+                normalizeObjectLookup(action.label ?? ""),
+            )
+      ) {
+        return { commands: [], selectionAfter: [from.id, to.id] };
+      }
+      if (action.label !== null && existing.length === 1) {
+        return {
+          commands: [
+            {
+              type: "object.rename",
+              objectId: existing[0]!.id,
+              label: action.label,
+            },
+          ],
+          selectionAfter: [from.id, to.id],
+        };
+      }
       return {
         commands: [semanticConnectCommand(from.id, to.id, action.label, context.strokeColor)],
         selectionAfter: [from.id, to.id],
       };
+    }
+    case "reverse_connection": {
+      const endpoints = resolveSemanticConnectionEndpoints(
+        action.connection,
+        context,
+        planHandles,
+      );
+      if ("error" in endpoints) return endpoints;
+      const sourceConnections = selectSemanticConnections(
+        findDirectedSemanticConnections(
+          context.boardState,
+          endpoints.fromId,
+          endpoints.toId,
+        ),
+        action.connection,
+      );
+      if ("error" in sourceConnections) return sourceConnections;
+
+      const desiredConnections = findDirectedSemanticConnections(
+        context.boardState,
+        endpoints.toId,
+        endpoints.fromId,
+      );
+      const desiredAlreadyExists =
+        action.label === null
+          ? desiredConnections.length > 0
+          : desiredConnections.some(
+              (connection) =>
+                normalizeObjectLookup(connection.label ?? "") ===
+                normalizeObjectLookup(action.label ?? ""),
+            );
+
+      if (sourceConnections.connections.length === 0) {
+        return desiredAlreadyExists
+          ? {
+              commands: [],
+              selectionAfter: [endpoints.toId, endpoints.fromId],
+            }
+          : {
+              error: "The connector to reverse does not exist in the stated direction.",
+            };
+      }
+      const source = sourceConnections.connections[0]!;
+      if (desiredAlreadyExists) {
+        return {
+          commands: [
+            {
+              type: "objects.delete",
+              objectIds: [source.id],
+              cascadeConnectors: false,
+            },
+          ],
+          selectionAfter: [endpoints.toId, endpoints.fromId],
+        };
+      }
+      return {
+        commands: [
+          {
+            type: "connection.reverse",
+            connectorId: source.id,
+            ...(action.label !== null ? { label: action.label } : {}),
+          },
+        ],
+        selectionAfter: [endpoints.toId, endpoints.fromId],
+      };
+    }
+    case "delete_connection": {
+      const connection = resolveSemanticConnectionReference(
+        action.connection,
+        context,
+        planHandles,
+      );
+      return "error" in connection
+        ? connection
+        : {
+            commands: [
+              {
+                type: "objects.delete",
+                objectIds: [connection.id],
+                cascadeConnectors: false,
+              },
+            ],
+            selectionAfter: [],
+          };
     }
     case "branch": {
       const from = resolveOne(action.from);
@@ -288,6 +402,100 @@ function semanticConnectCommand(
     source: "voice",
     style: { strokeColor },
   };
+}
+
+type DirectedSemanticConnection = {
+  id: string;
+  label: string | null;
+};
+
+function findDirectedSemanticConnections(
+  state: BoardState,
+  fromId: string,
+  toId: string,
+): DirectedSemanticConnection[] {
+  return Object.values(state.strokes)
+    .flatMap((stroke): DirectedSemanticConnection[] => {
+      const annotation = stroke.annotation;
+      if (
+        stroke.status !== "committed" ||
+        !annotation ||
+        (annotation.type !== "connector" && annotation.type !== "arrow") ||
+        annotation.snappedStartStrokeId !== fromId ||
+        annotation.snappedEndStrokeId !== toId
+      ) {
+        return [];
+      }
+      return [{ id: stroke.id, label: annotation.label?.trim() || null }];
+    })
+    .sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function resolveSemanticConnectionEndpoints(
+  reference: SemanticConnectionReference,
+  context: SemanticIntentResolutionContext,
+  planHandles: ReadonlyMap<string, string[]>,
+): { fromId: string; toId: string } | { error: string } {
+  const from = resolveSingleSemanticReference(reference.from, context, planHandles);
+  if ("error" in from) return from;
+  const to = resolveSingleSemanticReference(reference.to, context, planHandles);
+  if ("error" in to) return to;
+  if (from.id === to.id) {
+    return { error: "A connector reference requires two different endpoints." };
+  }
+  return { fromId: from.id, toId: to.id };
+}
+
+function selectSemanticConnections(
+  connections: DirectedSemanticConnection[],
+  reference: SemanticConnectionReference,
+):
+  | { connections: DirectedSemanticConnection[] }
+  | { error: string } {
+  const matching = reference.label
+    ? connections.filter(
+        (connection) =>
+          normalizeObjectLookup(connection.label ?? "") ===
+          normalizeObjectLookup(reference.label ?? ""),
+      )
+    : connections;
+  if (reference.occurrence !== null) {
+    const connection = matching[reference.occurrence - 1];
+    return connection
+      ? { connections: [connection] }
+      : {
+          error: `There is no matching connector occurrence ${reference.occurrence}.`,
+        };
+  }
+  if (matching.length > 1) {
+    return {
+      error:
+        "More than one connector matches those endpoints. Specify its label or occurrence.",
+    };
+  }
+  return { connections: matching };
+}
+
+function resolveSemanticConnectionReference(
+  reference: SemanticConnectionReference,
+  context: SemanticIntentResolutionContext,
+  planHandles: ReadonlyMap<string, string[]>,
+): { id: string; fromId: string; toId: string } | { error: string } {
+  const endpoints = resolveSemanticConnectionEndpoints(reference, context, planHandles);
+  if ("error" in endpoints) return endpoints;
+  const selected = selectSemanticConnections(
+    findDirectedSemanticConnections(
+      context.boardState,
+      endpoints.fromId,
+      endpoints.toId,
+    ),
+    reference,
+  );
+  if ("error" in selected) return selected;
+  const connection = selected.connections[0];
+  return connection
+    ? { id: connection.id, ...endpoints }
+    : { error: "No connector matches the stated direction, label, and occurrence." };
 }
 
 function resolveSingleSemanticReference(
@@ -573,6 +781,27 @@ function semanticSelectionBounds(
 
 export function describeSemanticPlan(actions: SemanticPlanAction[]): string {
   if (actions.length > 1) {
+    const graphChanges = actions.flatMap((action): string[] => {
+      if (action.type === "reverse_connection") {
+        return [
+          `Reverse ${describeSemanticReference(action.connection.from)} → ${describeSemanticReference(action.connection.to)}`,
+        ];
+      }
+      if (action.type === "connect") {
+        return [
+          `add ${describeSemanticReference(action.from)} → ${describeSemanticReference(action.to)}`,
+        ];
+      }
+      if (action.type === "delete_connection") {
+        return [
+          `remove ${describeSemanticReference(action.connection.from)} → ${describeSemanticReference(action.connection.to)}`,
+        ];
+      }
+      return [];
+    });
+    if (graphChanges.length === actions.length) {
+      return `${graphChanges.join(" and ")}.`;
+    }
     return `Build and edit the diagram with ${actions.length} coordinated actions.`;
   }
   const action = actions[0];
@@ -581,7 +810,11 @@ export function describeSemanticPlan(actions: SemanticPlanAction[]): string {
     case "create":
       return `Create ${action.label ? `“${action.label}”` : `a ${action.nodeType}`} node.`;
     case "connect":
-      return `Connect two diagram objects${action.label ? ` as “${action.label}”` : ""}.`;
+      return `Add ${describeSemanticReference(action.from)} → ${describeSemanticReference(action.to)}${action.label ? ` as “${action.label}”` : ""}.`;
+    case "reverse_connection":
+      return `Reverse ${describeSemanticReference(action.connection.from)} → ${describeSemanticReference(action.connection.to)}.`;
+    case "delete_connection":
+      return `Remove ${describeSemanticReference(action.connection.from)} → ${describeSemanticReference(action.connection.to)}.`;
     case "branch":
       return `Create ${action.branches.length} labelled decision branches.`;
     case "rename":
@@ -607,6 +840,27 @@ export function describeSemanticPlan(actions: SemanticPlanAction[]): string {
     case "cancel":
       return "Cancel the pending board action.";
   }
+}
+
+function describeSemanticReference(reference: SemanticObjectReference): string {
+  switch (reference.kind) {
+    case "visible_label":
+      return reference.label;
+    case "type_ordinal":
+      return `${reference.nodeType === "api" ? "API" : titleCase(reference.nodeType)} ${reference.ordinal}`;
+    case "current_selection":
+      return "the selection";
+    case "pointer":
+      return "the pointed object";
+    case "plan_handle":
+      return titleCase(reference.handle.replaceAll("_", " "));
+  }
+}
+
+function titleCase(value: string): string {
+  return value.replace(/\b\p{L}/gu, (character) =>
+    character.toLocaleUpperCase("en-US"),
+  );
 }
 
 export function resolveIntentOperation(
@@ -1199,13 +1453,7 @@ function stripTrailingNodeTerm(
 }
 
 function normalizeObjectLookup(value: string): string {
-  return value
-    .normalize("NFKC")
-    .toLocaleLowerCase("en-US")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .replace(/^the\s+/, "")
-    .replace(/\s+/g, " ");
+  return normalizeSpokenNumberAliases(value);
 }
 
 function resolvePlacementCenter(
@@ -1395,6 +1643,7 @@ export function buildSemanticIntentContext(
   const objects = [...summariesById.values()];
   const selected = objects.filter((summary) => summary.selected).slice(0, 20);
   const edges: SemanticIntentContext["edges"] = [];
+  const edgeOccurrences = new Map<string, number>();
   for (const stroke of Object.values(boardState.strokes)) {
     const annotation = stroke.annotation;
     if (
@@ -1412,10 +1661,14 @@ export function buildSemanticIntentContext(
     if (!from || !to) {
       continue;
     }
+    const occurrenceKey = `${annotation.snappedStartStrokeId}\u0000${annotation.snappedEndStrokeId}`;
+    const occurrence = (edgeOccurrences.get(occurrenceKey) ?? 0) + 1;
+    edgeOccurrences.set(occurrenceKey, occurrence);
     edges.push({
       from: { label: from.label, nodeType: from.nodeType, ordinal: from.ordinal },
       to: { label: to.label, nodeType: to.nodeType, ordinal: to.ordinal },
       ...(annotation.label?.trim() ? { label: annotation.label.trim().slice(0, 80) } : {}),
+      occurrence,
     });
   }
 

@@ -26,7 +26,7 @@ registerHooks({
 
 const { VoiceTraceBuffer } = await import("../src/voiceTrace/buffer.ts");
 const { parseVoiceTraceAppend } = await import("../src/voiceTrace/protocol.ts");
-const { redactDiagnosticData, redactDiagnosticValue } = await import(
+const { redactDiagnosticData, redactDiagnosticValue, redactVoiceTraceContent } = await import(
   "../src/voiceTrace/redaction.ts"
 );
 const { registerVoiceTraceRoutes } = await import("../src/voiceTrace/routes.ts");
@@ -65,6 +65,39 @@ test("preserves nested branch references in bounded model-output diagnostics", (
     ],
   };
   assert.deepEqual(redactDiagnosticValue(plan), plan);
+});
+
+test("removes customer speech and board labels from operational voice traces", () => {
+  assert.deepEqual(
+    redactVoiceTraceContent({
+      transcript: "Airo add a payment service",
+      confidence: 0.94,
+      plan: {
+        actions: [
+          {
+            type: "branch",
+            label: "Private customer name",
+            to: { kind: "visible_label", label: "Ledger" },
+          },
+        ],
+      },
+      metrics: { latencyMs: 120 },
+    }),
+    {
+      transcript: "[CONTENT_REDACTED]",
+      confidence: 0.94,
+      plan: {
+        actions: [
+          {
+            type: "branch",
+            label: "[CONTENT_REDACTED]",
+            to: { kind: "visible_label", label: "[CONTENT_REDACTED]" },
+          },
+        ],
+      },
+      metrics: { latencyMs: 120 },
+    },
+  );
 });
 
 test("accepts the bounded client trace envelope and rejects raw audio or secrets", () => {
@@ -171,7 +204,7 @@ test("exposes same-origin append and local diagnostic retrieval routes", async (
   });
   assert.equal(diagnostic.statusCode, 200);
   assert.equal(diagnostic.json().events[0].stage, "stt_final");
-  assert.equal(diagnostic.json().events[0].data.transcript, "Airo add a decision");
+  assert.equal(diagnostic.json().events[0].data.transcript, "[CONTENT_REDACTED]");
   assert.equal(diagnostic.json().droppedEvents, 0);
 
   const missing = await server.inject({

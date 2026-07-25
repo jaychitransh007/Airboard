@@ -276,6 +276,11 @@ test("uses one required strict Responses function tool and captures provider met
   assert.match(payload.instructions, /condition block/i);
   assert.match(payload.instructions, /branch action/i);
   assert.match(payload.instructions, /literal node or edge labels/i);
+  assert.match(payload.instructions, /desired-state correction/i);
+  assert.match(payload.instructions, /reverse_connection/i);
+  assert.match(payload.instructions, /currently, user one is making the call to user two/i);
+  assert.match(payload.instructions, /request is flowing from X to Y/i);
+  assert.match(payload.instructions, /next edge starts at the receiver X/i);
   const modelInput = JSON.parse(payload.input);
   assert.equal(modelInput.transcript, "Airo now add a condition block");
   assert.equal(modelInput.dialogueMode, "clarification_answer");

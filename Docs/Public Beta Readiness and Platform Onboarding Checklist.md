@@ -1,13 +1,13 @@
-# Public Beta Readiness and Platform Onboarding Checklist
+# Historical Public Beta and Platform Feasibility Checklist
 
-> **Status:** Active — source of truth for public-beta work  
-> **Last updated:** 2026-07-16  
-> **Current phase:** Phase 0 — platform feasibility and product commitment  
-> **Initial launch target:** Standalone web app plus Google Meet public beta; Microsoft Teams and Zoom as controlled design-partner pilots until their platform gates pass.
+> **Status:** Historical implementation and feasibility record
+> **Last updated:** 2026-07-25
+> **Current launch authority:** [`Official Launch Readiness.md`](<Official Launch Readiness.md>)
+> **Important:** Statuses below reflect the plan as recorded during the July 2026 feasibility work and are not a current product-support or completion claim.
 
 ## How this checklist must be used
 
-This file is the execution contract for public-beta readiness. Public-beta work must be represented by a task in this file before implementation begins.
+This file preserves the original provider-feasibility work and evidence. New commercial release decisions, current channel claims and launch evidence belong in `Official Launch Readiness.md` and `ops/launch-evidence.json`.
 
 - Reference the task ID in the branch, pull request, commit, or implementation notes.
 - Update the task status in this file in the same change that implements or verifies the task.

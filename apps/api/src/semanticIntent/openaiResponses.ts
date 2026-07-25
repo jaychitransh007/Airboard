@@ -23,7 +23,7 @@ import type {
   SemanticIntentRuntimeConfig,
 } from "./types";
 
-export const AIRBOARD_SEMANTIC_INTENT_PROMPT_VERSION = "2.1" as const;
+export const AIRBOARD_SEMANTIC_INTENT_PROMPT_VERSION = "2.3" as const;
 
 const AIRBOARD_NODE_CATALOG = AIRBOARD_SEMANTIC_NODE_CAPABILITIES.map(
   ({ nodeType, terms }) => `- ${nodeType}: ${terms.join(", ")}`,
@@ -46,6 +46,10 @@ Planning rules:
 - A decision connected to multiple targets with per-edge words such as yes/no is a branch action, not one long target label.
 - If the utterance is cut off or a required branch target/label is missing, return clarification with a short direct clarificationQuestion and exact missingSlots. Do not guess.
 - A narrative diagram request may require several actions. Create nodes before referencing their plan handles. Preserve stated directions and labels; infer a conventional edge direction only when the narrative is clear.
+- Treat contrastive current-state language such as "currently X calls Y, but Y should call X" as a desired-state correction. The "currently" clause describes board state; do not add it. Use reverse_connection when the same relationship must point the other way.
+- Phrases such as "the request is flowing from X to Y; it should be reversed" describe a labelled connector, even when the reversal is restated in a later sentence. In a sequence such as "Y to X, and then it updates Database", the next edge starts at the receiver X unless another actor is named explicitly.
+- Connector references use their visible from/to endpoints, optional label, and optional parallel-edge occurrence from boardContext.edges. Never guess between multiple matching parallel connectors.
+- Compare requested relationships with boardContext.edges and emit only the minimum graph changes. Do not add an edge that already exists in the requested direction with the requested label.
 - Keep plans at ${AIRBOARD_SEMANTIC_PLAN_MAX_ACTIONS} actions or fewer. Use status resolved only with at least one action and issueCode none. Clarification and unsupported plans contain no actions.
 - pendingClarification, when supplied, is authoritative prior dialogue. Treat the current transcript as the literal answer to the listed missingSlots and complete the prior request when enough information is now present.
 - In clarification_answer dialogue mode, words such as "yes" and "no" can be literal node or edge labels. They are not confirmation or cancellation commands. Emit cancel or undo only when explicitMetaCommand says so.
@@ -62,7 +66,9 @@ Examples:
 - "Airo change the name of circle to user" -> rename the visible Circle object to User.
 - "connect the decision to user one and user two with yes and no" -> one branch with yes and no labels.
 - "connect the decision to user one and user two with yes and..." -> clarification asking for the missing second branch label.
-- "create a diagram where a user makes an API request and the API updates a database" -> create/reuse the three objects and connect User to API as requests, then API to Database as updates.`;
+- "create a diagram where a user makes an API request and the API updates a database" -> create/reuse the three objects and connect User to API as requests, then API to Database as updates.
+- "diagram connectors from user two to user one. Currently, user one is making the call to user two, but user two should be making the call to user one, and then user two updates the database." -> reverse_connection for User One -> User Two with label calls, then connect User Two -> Database with label updates.
+- "There are two rectangles. Currently, request is flowing from User One to User Two. It should be reversed. Request should flow from User Two to User One, and then it updates Database." -> reverse_connection for User One -> User Two with label request, then connect User One -> Database with label updates.`;
 
 type OpenAiResponse = {
   id?: string;

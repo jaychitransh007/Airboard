@@ -162,7 +162,7 @@ export class AuthService {
           displayName: context.displayName,
           locale: "en",
           timezone: "UTC",
-          onboardingCompletedAt: null,
+          onboardingCompletedAt: new Date().toISOString(),
         },
         organization: {
           id: context.organizationId,

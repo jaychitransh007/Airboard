@@ -24,7 +24,11 @@ async function openStandalone(page: Page) {
   const onboarding = page.getByRole("button", { name: "Got it — let me try" });
   await expect(onboarding).toBeVisible();
   await onboarding.click();
-  await page.getByRole("button", { name: "Necessary only" }).click();
+  const cookieChoice = page.getByRole("button", { name: "Necessary only" });
+  if (await cookieChoice.isVisible()) await cookieChoice.click();
+  // Advanced appearance and studio controls intentionally live in the
+  // closed-by-default board settings drawer.
+  await page.getByRole("button", { name: "Open board settings" }).click();
 }
 
 async function installFakeScreenCapture(page: Page) {
@@ -106,13 +110,13 @@ test("lightboard theme: transparent canvas over a dark stage with neon content",
 test("the board-dimming slider drives the scrim, defaulting to a real dim", async ({ page }) => {
   await openStandalone(page);
   await page.getByLabel("Lightboard (neon) theme").check();
-  // Fresh browser (no stored preference) must keep the 0.85 default — a
-  // Number(null)=0 coercion once silently zeroed it.
-  await expect(page.getByTestId("lightboard-scrim")).toHaveCSS("opacity", "0.85");
-  await expect(page.getByTestId("scrim-value")).toHaveText("85%");
-  await page.getByLabel("Dark overlay").fill("0.3");
-  await expect(page.getByTestId("lightboard-scrim")).toHaveCSS("opacity", "0.3");
-  await expect(page.getByTestId("scrim-value")).toHaveText("30%");
+  // Camera mode uses a bounded dark-glass canvas that keeps both the
+  // presenter and the diagram legible.
+  await expect(page.getByTestId("lightboard-scrim")).toHaveCSS("opacity", "0.6");
+  await expect(page.getByTestId("scrim-value")).toHaveText("60%");
+  await page.getByLabel("Dark overlay").fill("0.55");
+  await expect(page.getByTestId("lightboard-scrim")).toHaveCSS("opacity", "0.55");
+  await expect(page.getByTestId("scrim-value")).toHaveText("55%");
 });
 
 test("a selected screen becomes the unmirrored underlay and survives presentation mode", async ({
@@ -139,24 +143,16 @@ test("a selected screen becomes the unmirrored underlay and survives presentatio
     )
     .toBe(960);
 
-  await page.getByTestId("present-toggle").click();
-  await expect(page.getByTestId("presentation-setup")).toBeVisible();
-  await page.getByTestId("presentation-verify").click();
-  await page.getByTestId("presentation-audience-confirmed").check();
-  await page.getByTestId("presentation-start-clean").click();
   await expect(page.getByTestId("screen-underlay")).toHaveClass(/active/);
-  await expect(page.locator("header.topbar")).not.toBeVisible();
-  await expect(page.locator("main.airboard-shell")).toHaveClass(/broadcast-safe/);
 
   // Browser or OS-level "Stop sharing" must release capture and leave the
-  // otherwise-source-less presentation stage so the presenter sees recovery.
+  // ordinary canvas visible so the presenter sees recovery.
   await page.evaluate(() => {
     const track = (window as unknown as { __airboardFakeDisplayStream?: MediaStream })
       .__airboardFakeDisplayStream?.getVideoTracks()[0];
     track?.dispatchEvent(new Event("ended"));
   });
   await expect(page.locator("header.topbar")).toBeVisible();
-  await expect(page.getByTestId("presentation-setup")).toBeVisible();
   await expect(page.getByTestId("screen-underlay-status")).toContainText("not selected");
   await expect(page.getByTestId("screen-underlay-notice")).toContainText("Screen sharing ended");
   const readyState = await page.evaluate(
@@ -167,12 +163,20 @@ test("a selected screen becomes the unmirrored underlay and survives presentatio
   expect(readyState).toBe("ended");
 });
 
-test("camera underlay puts the presenter behind the board", async ({ page }) => {
+test("camera, dark scrim, and diagrams keep their strict layer order", async ({ page }) => {
+  await page.addInitScript(() => {
+    // Regression: the old shared key was lowered by Use screen and then leaked
+    // into camera mode, producing an almost-undimmed camera.
+    localStorage.setItem("airboard.scrim.v1", "0.25");
+    localStorage.setItem("airboard.underlay.v1", "off");
+  });
   await openStandalone(page);
-  await page.getByLabel("Lightboard (neon) theme").check();
-  await expect(page.getByLabel("Camera behind board")).toBeChecked();
 
   await page.getByRole("button", { name: /Enable hand tracking/ }).click();
+  await expect(page.getByLabel("Lightboard (neon) theme")).toBeChecked();
+  await expect(page.getByLabel("Camera behind the dark canvas")).toBeChecked();
+  await expect(page.getByTestId("scrim-value")).toHaveText("60%");
+  await expect(page.getByTestId("lightboard-scrim")).toHaveCSS("opacity", "0.6");
   await expect
     .poll(
       () =>
@@ -188,8 +192,8 @@ test("camera underlay puts the presenter behind the board", async ({ page }) => 
     "matrix(-1, 0, 0, 1, 0, 0)",
   );
 
-  // The visible camera, scrim, gesture plane, and segmented-person foreground
-  // use one fitted rectangle. A former 10px mismatch made edge gestures drift.
+  // The visible camera, scrim, and gesture plane use one fitted rectangle. A
+  // former 10px mismatch made edge gestures drift.
   const fittedLayers = await page.evaluate(() => {
     const rect = (selector: string) => {
       const bounds = document.querySelector(selector)!.getBoundingClientRect();
@@ -204,18 +208,18 @@ test("camera underlay puts the presenter behind the board", async ({ page }) => 
       board: rect("canvas.board-canvas"),
       camera: rect('[data-testid="lightboard-underlay"]'),
       scrim: rect('[data-testid="lightboard-scrim"]'),
-      person: rect('[data-testid="person-occlusion-layer"]'),
     };
   });
   expect(fittedLayers.camera).toEqual(fittedLayers.board);
   expect(fittedLayers.scrim).toEqual(fittedLayers.board);
-  expect(fittedLayers.person).toEqual(fittedLayers.board);
-
-  await expect(page.getByTestId("person-occlusion-toggle")).toBeChecked();
-  await expect(page.getByTestId("person-occlusion-status")).toContainText(
-    "Person depth is active",
-    { timeout: 30_000 },
-  );
+  await expect(page.getByTestId("person-occlusion-layer")).toHaveCount(0);
+  await expect(page.getByTestId("person-occlusion-toggle")).toHaveCount(0);
+  const layerOrder = await page.evaluate(() => ({
+    camera: Number(getComputedStyle(document.querySelector('[data-testid="lightboard-underlay"]')!).zIndex),
+    scrim: Number(getComputedStyle(document.querySelector('[data-testid="lightboard-scrim"]')!).zIndex),
+    board: Number(getComputedStyle(document.querySelector("canvas.board-canvas")!).zIndex),
+  }));
+  expect(layerOrder).toEqual({ camera: 0, scrim: 2, board: 3 });
   // The corner self-preview is redundant while the underlay is on.
   await expect(page.locator("video.camera-preview")).toHaveClass(/hidden/);
 });
@@ -246,40 +250,11 @@ test("studio records the composite to a local webm download", async ({ page }) =
   await expect(page.getByTestId("recording-badge")).toHaveCount(0);
 });
 
-test("present workflow selects a source, verifies delivery, and starts strict clean output", async ({
-  page,
-}) => {
+test("standalone canvas has no presentation workflow", async ({ page }) => {
   await openStandalone(page);
-  const input = page.getByTestId("intent-command-input");
-  await input.fill("add a circle here");
-  await page.getByTestId("intent-primary-action").click();
-  await expect(page.getByTestId("action-toast")).toBeVisible({ timeout: 15_000 });
-
-  // Present is a workflow, not a direct stage toggle; it also corrects the
-  // classic white board before any output can begin.
-  await page.getByTestId("present-toggle").click();
-  await expect(page.getByTestId("presentation-setup")).toBeVisible();
-  await expect(page.getByLabel("Lightboard (neon) theme")).toBeChecked();
-  await page.getByRole("radio", { name: /Dark canvas/ }).check();
-  await page.getByTestId("presentation-verify").click();
-  await expect(page.getByText("Local composite ready")).toBeVisible();
-  await page.getByTestId("presentation-audience-confirmed").check();
-  await page.getByTestId("presentation-start-clean").click();
-
-  // The stage is broadcast-safe: no toolbar, dock, exit button, feedback,
-  // selection UI, or pointer target — just the composed board.
-  await expect(page.locator("header.topbar")).not.toBeVisible();
-  await expect(page.locator("aside.sidebar")).not.toBeVisible();
-  await expect(page.locator(".catalog-dock")).not.toBeVisible();
-  await expect(page.locator(".present-command-dock")).toHaveCount(0);
-  await expect(page.locator(".present-exit")).toHaveCount(0);
-  await expect(page.getByTestId("action-toast")).toHaveCount(0);
-  await expect(page.locator("canvas.board-canvas")).toHaveCSS("pointer-events", "none");
-  await expect(page.locator("main.airboard-shell")).toHaveCSS("cursor", "none");
-
-  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("present-toggle")).toHaveCount(0);
+  await expect(page.getByTestId("presentation-setup")).toHaveCount(0);
   await expect(page.locator("header.topbar")).toBeVisible();
-  await expect(page.locator("main.airboard-shell")).not.toHaveClass(/broadcast-safe/);
 });
 
 test("local contrast plates darken only diagram clusters over a shared screen", async ({
@@ -330,7 +305,7 @@ test("desktop mode is a full-display transparent canvas with explicit click-thro
   await expect(page.getByTestId("screen-underlay")).toHaveCount(0);
   await expect(page.getByTestId("lightboard-underlay")).toHaveCount(0);
   await expect(page.getByTestId("desktop-overlay-controls")).toBeVisible();
-  await expect(page.getByTestId("lightboard-scrim")).toHaveCSS("opacity", "0.85");
+  await expect(page.getByTestId("lightboard-scrim")).toHaveCSS("opacity", "0.6");
 
   const layout = await page.evaluate(() => {
     const selectors = [
@@ -371,6 +346,7 @@ test("theme choice survives a reload", async ({ page }) => {
   await openStandalone(page);
   await page.getByLabel("Lightboard (neon) theme").check();
   await page.reload();
+  await page.getByRole("button", { name: "Open board settings" }).click();
   await expect(page.getByLabel("Lightboard (neon) theme")).toBeChecked();
   await expect(page.locator("section.board-area.lightboard")).toBeVisible();
 });

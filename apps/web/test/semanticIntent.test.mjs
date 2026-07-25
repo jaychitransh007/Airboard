@@ -94,7 +94,7 @@ const METADATA = {
 };
 
 const CREATE_DECISION_PLAN = {
-  version: "1.0",
+  version: "1.1",
   status: "resolved",
   issueCode: "none",
   clarificationQuestion: null,
@@ -192,7 +192,7 @@ test("posts voice turn, rich board context, and clarification continuity", async
 
 test("accepts typed branch and named rename plans", async () => {
   const plan = {
-    version: "1.0",
+    version: "1.1",
     status: "resolved",
     issueCode: "none",
     clarificationQuestion: null,
@@ -229,7 +229,7 @@ test("accepts typed branch and named rename plans", async () => {
 
 test("accepts structured clarification plans", async () => {
   const plan = {
-    version: "1.0",
+    version: "1.1",
     status: "clarification",
     issueCode: "incomplete_request",
     clarificationQuestion: "What label should the second decision branch use?",

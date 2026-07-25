@@ -29,7 +29,7 @@ const ideaJourney = [
 const surfaces = [
   {
     className: "meeting",
-    eyebrow: "In the meeting",
+    eyebrow: "In the meeting · private preview",
     title: "Your explanation lives on your video.",
     body: "Airboard composites neon diagrams with your camera, so people see you and the idea together—not a second canvas and not your controls.",
     link: "/integrations/google-meet",
@@ -38,7 +38,7 @@ const surfaces = [
   },
   {
     className: "overlay",
-    eyebrow: "Over your screen",
+    eyebrow: "Over your screen · development preview",
     title: "Draw on the thing you are already showing.",
     body: "Use the native click-through overlay to annotate slides, prototypes, dashboards, or any desktop app without moving the audience elsewhere.",
     link: "/download",
@@ -70,7 +70,7 @@ export function LandingPage() {
         />
         <div className="landing-hero-wash" aria-hidden="true" />
         <div className="landing-copy">
-          <p className="eyebrow">Ideas, still in motion</p>
+          <p className="eyebrow">Controlled pilot · ideas, still in motion</p>
           <h1>
             Let the idea flow.
             <br />
@@ -83,13 +83,13 @@ export function LandingPage() {
           </p>
           <div className="hero-actions">
             <Link className="button button-primary button-large" href="/signup">
-              Start creating free
+              Join the standalone pilot
             </Link>
             <Link className="button button-quiet button-large" href="/demo">
               See an idea move
             </Link>
           </div>
-          <small>3-day trial · No card required · Starts after successful setup</small>
+          <small>Standalone web pilot · 3-day trial · No card required · Integrations remain previews</small>
         </div>
         <p className="hero-idea-caption">
           <span aria-hidden="true">✦</span>
@@ -172,11 +172,11 @@ export function LandingPage() {
         </div>
         <div>
           <p>
-            Start with a blank Airboard. Add voice, hands, or a meeting when you need them. The
-            trial clock begins only after your setup works.
+            Start with a blank Airboard. Voice and gesture inputs are available in supported
+            desktop browsers; meeting and native desktop surfaces require preview access.
           </p>
           <Link className="button button-primary button-large" href="/signup">
-            Create your Airboard
+            Join the pilot
           </Link>
         </div>
       </section>

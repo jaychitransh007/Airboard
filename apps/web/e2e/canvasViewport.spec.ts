@@ -39,7 +39,7 @@ test.beforeEach(async ({ context }) => {
 });
 
 test("typed commands land where the user is looking under pan+zoom", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?testStandalone=1");
   await hooks(page);
 
   // Pan far to the right of the origin and zoom in.
@@ -71,7 +71,7 @@ test("typed commands land where the user is looking under pan+zoom", async ({ pa
 });
 
 test("ctrl+wheel zooms; plain wheel pans; limits hold", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?testStandalone=1");
   await hooks(page);
 
   const canvas = page.locator("canvas.board-canvas");

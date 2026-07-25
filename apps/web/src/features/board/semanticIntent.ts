@@ -30,6 +30,8 @@ export type SemanticIntentEdgeSummary = {
   from: SemanticIntentObjectReferenceSummary;
   to: SemanticIntentObjectReferenceSummary;
   label?: string;
+  /** Stable one-based position among parallel connectors with the same endpoints. */
+  occurrence: number;
 };
 
 export type SemanticIntentGlossaryEntry = {

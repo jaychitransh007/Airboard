@@ -13,7 +13,7 @@ const DEFAULT_STATE = {
     neonTheme: true,
     videoEnabled: true,
     audioEnabled: true,
-    personOcclusion: true,
+    personOcclusion: false,
   },
   installationToken: null,
   lastError: null,
@@ -170,7 +170,9 @@ async function refreshStatus() {
       overlayEnabled: serverSettings.overlayEnabled !== false && allowed,
       videoEnabled: serverSettings.videoEnabled !== false && policy.camera_enabled !== false,
       audioEnabled: serverSettings.audioEnabled !== false && policy.voice_enabled !== false,
-      personOcclusion: serverSettings.personOcclusion !== false && policy.camera_enabled !== false,
+      // Retained in persisted schemas for backward compatibility, but the
+      // production composite is always camera -> scrim -> complete diagram.
+      personOcclusion: false,
     };
     return saveState({
       linked: true,

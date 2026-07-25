@@ -35,6 +35,7 @@ export type SemanticIntentEdgeSummary = {
   from: SemanticIntentObjectReferenceSummary;
   to: SemanticIntentObjectReferenceSummary;
   label?: string;
+  occurrence?: number;
 };
 
 export type SemanticIntentGlossaryEntry = {

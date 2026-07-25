@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { AIRBOARD_SEMANTIC_PLAN_CONTRACT_VERSION } from "@airboard/core/semantic-plan";
 import type { ApiConfig } from "../config";
 import { VoiceTraceBuffer } from "../voiceTrace/buffer";
-import { redactDiagnosticText, redactDiagnosticValue } from "../voiceTrace/redaction";
+import { redactDiagnosticValue, redactVoiceTraceContent } from "../voiceTrace/redaction";
 import type { VoiceTraceData, VoiceTraceValue } from "../voiceTrace/types";
 import { createSemanticIntentProvider } from "./factory";
 import { AIRBOARD_SEMANTIC_INTENT_PROMPT_VERSION } from "./openaiResponses";
@@ -83,7 +83,7 @@ export function registerSemanticIntentRoutes(
         voiceTurnId: parsed.value.voiceTurnId,
         semanticProvider: provider.id,
         semanticModel: model,
-        semanticPlan: redactDiagnosticValue(resolution.plan),
+        semanticPlan: semanticPlanSummary(resolution.plan),
         semanticMetadata: resolution.metadata,
       };
       request.log.info(completedLog, "semantic intent completed");
@@ -154,54 +154,38 @@ function semanticRequestLog(request: SemanticIntentRequest, model: string): Reco
     semanticPlanContractVersion: AIRBOARD_SEMANTIC_PLAN_CONTRACT_VERSION,
     semanticPromptVersion: AIRBOARD_SEMANTIC_INTENT_PROMPT_VERSION,
     parserIssue: request.parserIssue,
-    transcript: redactDiagnosticText(request.transcript),
+    transcriptCharacters: request.transcript.length,
     boardContext: {
       selectionCount: request.context.selectionCount,
       objectCount: request.context.objects.length,
       edgeCount: request.context.edges.length,
       pointerAvailable: request.context.pointerAvailable,
-      selected: request.context.selected.map((object) => ({
-        label: redactDiagnosticText(object.label, 120),
-        nodeType: object.nodeType,
-        ordinal: object.ordinal ?? null,
-        selected: object.selected ?? false,
-        position: object.position ?? null,
-        size: object.size ?? null,
-      })),
-      objects: request.context.objects.map((object) => ({
-        label: redactDiagnosticText(object.label, 120),
-        nodeType: object.nodeType,
-        ordinal: object.ordinal ?? null,
-        selected: object.selected ?? false,
-        position: object.position ?? null,
-        size: object.size ?? null,
-      })),
-      edges: request.context.edges.map((edge) => ({
-        from: {
-          label: redactDiagnosticText(edge.from.label, 120),
-          nodeType: edge.from.nodeType,
-          ordinal: edge.from.ordinal ?? null,
-        },
-        to: {
-          label: redactDiagnosticText(edge.to.label, 120),
-          nodeType: edge.to.nodeType,
-          ordinal: edge.to.ordinal ?? null,
-        },
-        label: edge.label ? redactDiagnosticText(edge.label, 120) : null,
-      })),
-      projectGlossary: request.context.projectGlossary.map((entry) => ({
-        term: redactDiagnosticText(entry.term, 120),
-        nodeType: entry.nodeType ?? null,
-      })),
+      selectedNodeTypes: request.context.selected.map((object) => object.nodeType),
+      objectNodeTypes: request.context.objects.map((object) => object.nodeType),
+      labelledEdgeCount: request.context.edges.filter((edge) => Boolean(edge.label)).length,
+      glossaryEntryCount: request.context.projectGlossary.length,
     },
     pendingClarification: request.pendingClarification
-      ? redactDiagnosticValue(request.pendingClarification)
-      : null,
+      ? {
+          present: true,
+          missingSlotCount: request.pendingClarification.missingSlots.length,
+        }
+      : { present: false, missingSlotCount: 0 },
   };
 }
 
 function asTraceData(input: Record<string, unknown>): VoiceTraceData {
-  return redactDiagnosticValue(input) as Record<string, VoiceTraceValue>;
+  const bounded = redactDiagnosticValue(input) as Record<string, VoiceTraceValue>;
+  return redactVoiceTraceContent(bounded) ?? {};
+}
+
+function semanticPlanSummary(plan: SemanticIntentProviderResult["plan"]): Record<string, unknown> {
+  return {
+    resolution: plan.status,
+    actionCount: plan.actions.length,
+    actionTypes: plan.actions.map((action) => action.type),
+    clarificationRequired: plan.status === "clarification",
+  };
 }
 
 function originAllowed(origin: string | undefined, allowedOrigins: string[]): boolean {

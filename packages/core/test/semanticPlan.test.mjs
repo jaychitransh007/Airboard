@@ -24,7 +24,7 @@ const resolved = (actions) => ({
 });
 
 test("capability registry is a versioned source for palette, aliases, and transcription terms", () => {
-  assert.equal(AIRBOARD_SEMANTIC_CAPABILITY_REGISTRY.version, "1.0");
+  assert.equal(AIRBOARD_SEMANTIC_CAPABILITY_REGISTRY.version, "1.2");
   assert.equal(
     AIRBOARD_SEMANTIC_CAPABILITY_REGISTRY.version,
     AIRBOARD_SEMANTIC_CAPABILITY_REGISTRY_VERSION,
@@ -37,6 +37,8 @@ test("capability registry is a versioned source for palette, aliases, and transc
   assert.equal(decision.title, "Decision");
   assert.equal(decision.defaultLabel, "Decision");
   assert.equal(decision.palette.title, "Decision");
+  assert.equal(decision.visual.kind, "decision");
+  assert.deepEqual(decision.visual.defaultSize, { width: 120, height: 88 });
   assert.ok(decision.terms.includes("condition block"));
   assert.ok(decision.terms.includes("conditional block"));
   assert.ok(AIRBOARD_SEMANTIC_TRANSCRIPTION_KEYTERMS.includes("condition block"));
@@ -44,6 +46,12 @@ test("capability registry is a versioned source for palette, aliases, and transc
   assert.equal(
     AIRBOARD_SEMANTIC_TRANSCRIPTION_KEYTERMS.length,
     new Set(AIRBOARD_SEMANTIC_TRANSCRIPTION_KEYTERMS).size,
+  );
+  assert.equal(
+    AIRBOARD_SEMANTIC_NODE_CAPABILITIES.every(
+      ({ visual }) => visual.defaultSize.width > 0 && visual.defaultSize.height > 0,
+    ),
+    true,
   );
 });
 
@@ -112,6 +120,27 @@ test("parses creates, same-plan handles, and labelled branches", () => {
 test("accepts every supported typed action variant", () => {
   const actionPlans = [
     { type: "connect", from: ref("API"), to: ref("Database"), label: "writes" },
+    {
+      type: "reverse_connection",
+      connection: {
+        kind: "connection",
+        from: ref("User One"),
+        to: ref("User Two"),
+        label: null,
+        occurrence: null,
+      },
+      label: "calls",
+    },
+    {
+      type: "delete_connection",
+      connection: {
+        kind: "connection",
+        from: ref("API"),
+        to: ref("Database"),
+        label: "writes",
+        occurrence: 1,
+      },
+    },
     { type: "rename", target: ref("Circle"), label: "User" },
     { type: "delete", targets: [{ kind: "current_selection" }] },
     { type: "duplicate", targets: [ref("API")], placement: { kind: "auto" } },
@@ -138,7 +167,7 @@ test("accepts every supported typed action variant", () => {
 test("accepts clarification and unsupported outcomes without executable actions", () => {
   assert.deepEqual(
     parseSemanticPlan({
-      version: "1.0",
+      version: "1.1",
       status: "clarification",
       issueCode: "incomplete_request",
       clarificationQuestion: "What label should the second branch have?",
@@ -149,7 +178,7 @@ test("accepts clarification and unsupported outcomes without executable actions"
   );
   assert.deepEqual(
     parseSemanticPlan({
-      version: "1.0",
+      version: "1.1",
       status: "unsupported",
       issueCode: "not_board_command",
       clarificationQuestion: null,
@@ -182,7 +211,7 @@ test("enforces resolution and clarification consistency", () => {
   assert.equal(parseSemanticPlan(resolved([])).ok, false);
   assert.equal(
     parseSemanticPlan({
-      version: "1.0",
+      version: "1.1",
       status: "clarification",
       issueCode: "missing_target",
       clarificationQuestion: null,
@@ -193,7 +222,7 @@ test("enforces resolution and clarification consistency", () => {
   );
   assert.equal(
     parseSemanticPlan({
-      version: "1.0",
+      version: "1.1",
       status: "clarification",
       issueCode: "missing_target",
       clarificationQuestion: "Which target?",
@@ -204,7 +233,7 @@ test("enforces resolution and clarification consistency", () => {
   );
   assert.equal(
     parseSemanticPlan({
-      version: "1.0",
+      version: "1.1",
       status: "unsupported",
       issueCode: "unsupported_operation",
       clarificationQuestion: null,

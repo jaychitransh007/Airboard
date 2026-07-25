@@ -1,3 +1,8 @@
+import {
+  nodeVisualKind,
+  type AirboardNodeVisualKind,
+  type AnnotationNodeType,
+} from "@airboard/core";
 import type { ObjectDockTool } from "./gestureAnnotationMode";
 
 /**
@@ -24,6 +29,10 @@ export function CatalogGlyph({ tool }: { tool: ObjectDockTool }) {
 }
 
 function glyphPath(tool: ObjectDockTool) {
+  const nodeType = catalogNodeType(tool);
+  if (nodeType) {
+    return canonicalNodeGlyph(nodeVisualKind(nodeType));
+  }
   switch (tool) {
     case "flow":
       return <rect x={5} y={5} width={30} height={16} rx={3} />;
@@ -105,5 +114,91 @@ function glyphPath(tool: ObjectDockTool) {
       );
     default:
       return <rect x={6} y={5} width={28} height={16} rx={3} />;
+  }
+}
+
+function catalogNodeType(tool: ObjectDockTool): AnnotationNodeType | null {
+  switch (tool) {
+    case "flow":
+      return "process";
+    case "service":
+    case "database":
+    case "queue":
+    case "user":
+    case "api":
+    case "decision":
+    case "terminator":
+    case "io":
+    case "document":
+    case "note":
+    case "circle":
+      return tool;
+    case "box":
+      return "custom";
+    default:
+      return null;
+  }
+}
+
+function canonicalNodeGlyph(kind: AirboardNodeVisualKind) {
+  switch (kind) {
+    case "process":
+      return <rect x={5} y={5} width={30} height={16} rx={1.5} />;
+    case "decision":
+      return <path d="M20 2 L37 13 L20 24 L3 13 Z" />;
+    case "terminator":
+      return <rect x={4} y={6} width={32} height={14} rx={7} />;
+    case "io":
+      return <path d="M11 5 H37 L29 21 H3 Z" />;
+    case "document":
+      return <path d="M6 4 H34 V18 C27 23.5 20 14.5 13 19.5 C10.5 21.3 8 21 6 19.5 Z" />;
+    case "database":
+      return (
+        <>
+          <ellipse cx={20} cy={6.5} rx={12} ry={3.5} />
+          <path d="M8 6.5 V19.5 C8 21.4 13.4 23 20 23 C26.6 23 32 21.4 32 19.5 V6.5" />
+        </>
+      );
+    case "queue":
+      return (
+        <>
+          <rect x={4} y={4} width={24} height={7} rx={1.5} />
+          <rect x={8} y={15} width={24} height={7} rx={1.5} />
+          <path d="M32 8 h5 M35 6 l2 2 -2 2" strokeWidth={1.5} />
+        </>
+      );
+    case "actor":
+      return (
+        <>
+          <circle cx={20} cy={7.5} r={4.5} />
+          <path d="M20 12 V19 M12 15.5 H28 M20 19 L14 24 M20 19 L26 24" />
+        </>
+      );
+    case "service":
+      return (
+        <>
+          <rect x={5} y={4} width={30} height={18} rx={3} />
+          <circle cx={12} cy={10} r={3} />
+          <path d="M12 5.5 v2 M12 12.5 v2 M7.5 10 h2 M14.5 10 h2" strokeWidth={1.3} />
+        </>
+      );
+    case "api":
+      return (
+        <>
+          <rect x={4} y={5} width={32} height={16} rx={3} />
+          <path d="M14 10 l-3.5 3 3.5 3 M26 10 l3.5 3 -3.5 3 M22 9 l-4 8" strokeWidth={1.5} />
+        </>
+      );
+    case "note":
+      return (
+        <>
+          <path d="M7 3 H33 V17 L27 23 H7 Z" />
+          <path d="M33 17 H27 V23" strokeWidth={1.4} />
+        </>
+      );
+    case "ellipse":
+      return <ellipse cx={20} cy={13} rx={14} ry={10} />;
+    case "box":
+      return <rect x={6} y={5} width={28} height={16} />;
   }
 }

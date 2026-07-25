@@ -21,6 +21,7 @@ export type ApiConfig = {
   supabaseUrl?: string;
   supabaseServiceRoleKey?: string;
   stripe: {
+    enabled: boolean;
     secretKey?: string;
     webhookSecret?: string;
     personalPriceId?: string;
@@ -82,6 +83,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       ? { supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY }
       : {}),
     stripe: {
+      enabled: env.AIRBOARD_BILLING_ENABLED === "true",
       ...(env.STRIPE_SECRET_KEY?.trim() ? { secretKey: env.STRIPE_SECRET_KEY.trim() } : {}),
       ...(env.STRIPE_WEBHOOK_SECRET?.trim()
         ? { webhookSecret: env.STRIPE_WEBHOOK_SECRET.trim() }

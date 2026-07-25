@@ -22,10 +22,11 @@ test("fails closed for absent social provider configuration", () => {
 });
 
 test("preserves an extension setup return path without allowing an open redirect", () => {
+  assert.equal(safeAppPath(null), "/app");
   assert.equal(
     safeAppPath("/app/integrations?setup=chrome_meet&extensionId=abc12345&version=0.8.0"),
     "/app/integrations?setup=chrome_meet&extensionId=abc12345&version=0.8.0",
   );
-  assert.equal(safeAppPath("https://attacker.example/path"), "/onboarding");
-  assert.equal(safeAppPath("//attacker.example/path"), "/onboarding");
+  assert.equal(safeAppPath("https://attacker.example/path"), "/app");
+  assert.equal(safeAppPath("//attacker.example/path"), "/app");
 });

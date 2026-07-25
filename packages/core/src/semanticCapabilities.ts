@@ -1,6 +1,21 @@
 import type { AnnotationNodeType } from "./types.ts";
 
-export const AIRBOARD_SEMANTIC_CAPABILITY_REGISTRY_VERSION = "1.0" as const;
+export const AIRBOARD_SEMANTIC_CAPABILITY_REGISTRY_VERSION = "1.2" as const;
+
+export type AirboardNodeVisualKind =
+  | "process"
+  | "service"
+  | "database"
+  | "queue"
+  | "actor"
+  | "api"
+  | "decision"
+  | "note"
+  | "terminator"
+  | "io"
+  | "document"
+  | "ellipse"
+  | "box";
 
 export type AirboardSemanticNodeCapability = {
   nodeType: AnnotationNodeType;
@@ -9,6 +24,10 @@ export type AirboardSemanticNodeCapability = {
   palette: {
     title: string;
     order: number;
+  };
+  visual: {
+    kind: AirboardNodeVisualKind;
+    defaultSize: { width: number; height: number };
   };
   terms: readonly string[];
 };
@@ -24,6 +43,7 @@ export const AIRBOARD_SEMANTIC_NODE_CAPABILITIES = [
     title: "Process",
     defaultLabel: "Process",
     palette: { title: "Flow", order: 0 },
+    visual: { kind: "process", defaultSize: { width: 144, height: 72 } },
     terms: ["process", "process node", "step", "task", "flow", "flow block"],
   },
   {
@@ -31,6 +51,7 @@ export const AIRBOARD_SEMANTIC_NODE_CAPABILITIES = [
     title: "Service",
     defaultLabel: "Service",
     palette: { title: "Service", order: 1 },
+    visual: { kind: "service", defaultSize: { width: 152, height: 80 } },
     terms: ["service", "services", "microservice", "microservices", "server", "servers"],
   },
   {
@@ -38,6 +59,7 @@ export const AIRBOARD_SEMANTIC_NODE_CAPABILITIES = [
     title: "Database",
     defaultLabel: "Database",
     palette: { title: "Database", order: 2 },
+    visual: { kind: "database", defaultSize: { width: 144, height: 96 } },
     terms: [
       "database",
       "databases",
@@ -53,6 +75,7 @@ export const AIRBOARD_SEMANTIC_NODE_CAPABILITIES = [
     title: "Queue",
     defaultLabel: "Queue",
     palette: { title: "Queue", order: 3 },
+    visual: { kind: "queue", defaultSize: { width: 152, height: 82 } },
     terms: [
       "queue",
       "queues",
@@ -68,6 +91,7 @@ export const AIRBOARD_SEMANTIC_NODE_CAPABILITIES = [
     title: "User",
     defaultLabel: "User",
     palette: { title: "User", order: 4 },
+    visual: { kind: "actor", defaultSize: { width: 128, height: 104 } },
     terms: ["user", "users", "person", "people", "actor", "actors", "client", "clients"],
   },
   {
@@ -75,6 +99,7 @@ export const AIRBOARD_SEMANTIC_NODE_CAPABILITIES = [
     title: "API",
     defaultLabel: "API",
     palette: { title: "API", order: 5 },
+    visual: { kind: "api", defaultSize: { width: 152, height: 80 } },
     terms: ["api", "apis", "a p i", "endpoint", "endpoints", "gateway", "api gateway"],
   },
   {
@@ -82,6 +107,7 @@ export const AIRBOARD_SEMANTIC_NODE_CAPABILITIES = [
     title: "Decision",
     defaultLabel: "Decision",
     palette: { title: "Decision", order: 6 },
+    visual: { kind: "decision", defaultSize: { width: 120, height: 88 } },
     terms: [
       "decision",
       "decisions",
@@ -100,6 +126,7 @@ export const AIRBOARD_SEMANTIC_NODE_CAPABILITIES = [
     title: "Note",
     defaultLabel: "Note",
     palette: { title: "Note", order: 7 },
+    visual: { kind: "note", defaultSize: { width: 176, height: 108 } },
     terms: ["note", "notes", "sticky", "sticky note", "sticky notes"],
   },
   {
@@ -107,6 +134,7 @@ export const AIRBOARD_SEMANTIC_NODE_CAPABILITIES = [
     title: "Start / End",
     defaultLabel: "Start",
     palette: { title: "Start / End", order: 7.1 },
+    visual: { kind: "terminator", defaultSize: { width: 150, height: 58 } },
     terms: [
       "terminator",
       "start",
@@ -123,6 +151,7 @@ export const AIRBOARD_SEMANTIC_NODE_CAPABILITIES = [
     title: "Input / Output",
     defaultLabel: "Input",
     palette: { title: "Input / Output", order: 7.2 },
+    visual: { kind: "io", defaultSize: { width: 152, height: 72 } },
     terms: ["input", "output", "input output", "io", "i o", "data input", "data output"],
   },
   {
@@ -130,6 +159,7 @@ export const AIRBOARD_SEMANTIC_NODE_CAPABILITIES = [
     title: "Document",
     defaultLabel: "Document",
     palette: { title: "Document", order: 7.3 },
+    visual: { kind: "document", defaultSize: { width: 144, height: 86 } },
     terms: ["document", "documents"],
   },
   {
@@ -137,6 +167,7 @@ export const AIRBOARD_SEMANTIC_NODE_CAPABILITIES = [
     title: "Circle",
     defaultLabel: "Circle",
     palette: { title: "Circle", order: 8 },
+    visual: { kind: "ellipse", defaultSize: { width: 120, height: 120 } },
     terms: ["circle", "circles", "ellipse", "ellipses", "oval", "ovals"],
   },
   {
@@ -144,6 +175,7 @@ export const AIRBOARD_SEMANTIC_NODE_CAPABILITIES = [
     title: "Box",
     defaultLabel: "Box",
     palette: { title: "Box", order: 9 },
+    visual: { kind: "box", defaultSize: { width: 144, height: 72 } },
     terms: ["component", "components", "custom node", "node", "nodes", "box", "boxes"],
   },
 ] as const satisfies readonly AirboardSemanticNodeCapability[];
@@ -152,6 +184,8 @@ export type AirboardSemanticActionCapability = {
   actionType:
     | "create"
     | "connect"
+    | "reverse_connection"
+    | "delete_connection"
     | "branch"
     | "rename"
     | "delete"
@@ -171,6 +205,16 @@ export type AirboardSemanticActionCapability = {
 export const AIRBOARD_SEMANTIC_ACTION_CAPABILITIES = [
   { actionType: "create", title: "Create", terms: ["add", "create", "insert", "make", "put"] },
   { actionType: "connect", title: "Connect", terms: ["connect", "link", "arrow", "route"] },
+  {
+    actionType: "reverse_connection",
+    title: "Reverse connector",
+    terms: ["reverse connector", "reverse connection", "opposite direction", "should call instead"],
+  },
+  {
+    actionType: "delete_connection",
+    title: "Delete connector",
+    terms: ["delete connector", "remove connection", "disconnect"],
+  },
   { actionType: "branch", title: "Branch", terms: ["branch", "branches", "yes", "no", "otherwise"] },
   { actionType: "rename", title: "Rename", terms: ["rename", "relabel", "change the name"] },
   { actionType: "delete", title: "Delete", terms: ["delete", "remove"] },
@@ -215,6 +259,8 @@ export const AIRBOARD_SEMANTIC_TRANSCRIPTION_KEYTERMS = uniqueNormalizedTerms([
 export const AIRBOARD_SEMANTIC_OPERATION_CAPABILITIES = [
   "create nodes",
   "connect named or pointed nodes with labelled arrows",
+  "reverse a specific existing connector while preserving or changing its label",
+  "delete a specific existing connector",
   "create labelled branches from a decision",
   "rename a named, pointed, or selected object",
   "delete or duplicate named, pointed, or selected objects",
@@ -231,6 +277,8 @@ export const AIRBOARD_SEMANTIC_OPERATION_CAPABILITIES = [
 export const AIRBOARD_SEMANTIC_CANONICAL_FORMS = [
   "add/create [one to twenty] <node type> [named <label>] [placement]",
   "connect <visible label|this|that> to <visible label|this|that> [as <connector label>]",
+  "reverse the connector from <source> to <target> [as <connector label>]",
+  "delete the connector from <source> to <target>",
   "rename selected to <label>",
   "delete selected",
   "duplicate selected",

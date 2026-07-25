@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   AIRBOARD_SEMANTIC_NODE_CAPABILITIES,
   applyDiagramCommand,
@@ -40,6 +41,7 @@ import {
   resolveIntentOperation,
   resolveSemanticPlanAction,
 } from "./intentPipeline";
+import { parseDesiredGraphCorrection } from "./desiredGraphCorrection";
 import {
   snapshotBoardEvents,
   startBoardSync,
@@ -68,17 +70,12 @@ import {
   stopMediaStream,
 } from "./screenUnderlay";
 import {
-  assessPresentationReadiness,
+  CAMERA_PRESENTATION_SCRIM,
+  cameraCanvasScrim,
+  MIN_CAMERA_PRESENTATION_SCRIM,
   SCREEN_PRESENTATION_SCRIM,
   screenFriendlyScrim,
-  type PresentationSource,
-} from "./presentationWorkflow";
-import {
-  MediaPipePersonSegmenter,
-  renderBoardBehindPerson,
-  renderPersonForeground,
-  updatePersonMaskCanvas,
-} from "./personOcclusion";
+} from "./lightboardComposition";
 import {
   probeMeetCameraOverlayInWindow,
   probeMeetMediaBridgeInWindow,
@@ -88,8 +85,19 @@ import {
   type MeetMediaBridgeVideoSession,
 } from "../meet/meetMediaBridge";
 import { CatalogGlyph } from "./catalogGlyphs";
+import { boardDeletionSnapshot, validateBoardTitle } from "./boardLifecycle";
 import { HoldToEditTracker } from "./holdToEditTracker";
 import { PalmGateTracker } from "./palmGateTracker";
+import {
+  UndoGestureTracker,
+  type UndoGestureFrame,
+} from "./undoGestureTracker";
+import {
+  SnapGestureTracker,
+  snapLandmarkFrameConfidence,
+  type SnapGestureFrame,
+  type SnapGestureTrackerResult,
+} from "./snapGestureTracker";
 import {
   VoiceCommandRouter,
   type VoiceGateMode,
@@ -117,7 +125,6 @@ import {
   exportCanvasPng,
   findAnnotationObjectAtPoint,
   findIntersectingStrokeIds,
-  getConnectorRoutePoints,
   renderBoard,
   type AnnotationRenderObject,
 } from "@airboard/drawing-engine";
@@ -136,7 +143,6 @@ import {
   type DetectedHand,
   type FrictionPreset,
   type FrictionStrokePoint,
-  type GestureTarget,
   type GestureConfig,
   type GestureResult,
   type HybridGestureControllerOutput,
@@ -178,6 +184,11 @@ import {
   type ObjectDockTool,
 } from "./gestureAnnotationMode";
 import {
+  buildGestureManipulationTargets,
+  estimatePrecisionResizePinch,
+  parseGestureHandleTargetId,
+} from "./gestureObjectManipulation";
+import {
   parseIntentCanvasCommand,
   type IntentCanvasOperation,
   type ParsedIntentCanvasCommand,
@@ -187,12 +198,19 @@ import {
   DEFAULT_DESKTOP_OVERLAY_STATE,
   type DesktopOverlayState,
 } from "./desktopOverlay";
+import {
+  mediaPermissionLabel,
+  mediaResumeEnabled,
+  queryMediaPermission,
+  setMediaResumeEnabled,
+  shouldResumeMedia,
+  type MediaPermissionState,
+} from "./mediaPermissionPreference";
 
 type Surface = "standalone" | "meet-side-panel" | "meet-main-stage";
 
 type CameraStatus = "idle" | "starting" | "tracker_loading" | "active" | "blocked" | "tracker_error" | "error";
 type ScreenUnderlayStatus = "idle" | "starting" | "active" | "blocked" | "error";
-type PersonOcclusionStatus = "idle" | "loading" | "ready" | "active" | "error";
 
 type Stats = {
   strokes: number;
@@ -225,6 +243,14 @@ type SpeechRecognitionStatus =
   | "confirmation-needed"
   | "command-rejected"
   | "error";
+
+type CopilotActivityEntry = {
+  id: number;
+  source: "Voice" | "Airo" | "Board" | "You";
+  title: string;
+  detail: string;
+  tone: "neutral" | "active" | "success" | "warning";
+};
 
 type PrepareIntentCommandResult = "previewed" | "applied" | "rejected";
 
@@ -443,6 +469,28 @@ function collectBoardVoiceKeyterms(state: BoardState): string[] {
   return [...labels];
 }
 
+function parseDiagramVisibilityIntent(text: string): "hide" | "show" | null {
+  const normalized = text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (
+    /^(?:please )?hide (?:the )?(?:canvas|diagram)$/.test(normalized) ||
+    /^(?:please )?turn (?:the )?(?:canvas|diagram) off$/.test(normalized)
+  ) {
+    return "hide";
+  }
+  if (
+    /^(?:please )?(?:show|restore) (?:the )?(?:canvas|diagram)$/.test(normalized) ||
+    /^(?:please )?bring (?:the )?(?:canvas|diagram) back$/.test(normalized) ||
+    /^(?:please )?turn (?:the )?(?:canvas|diagram) on$/.test(normalized)
+  ) {
+    return "show";
+  }
+  return null;
+}
+
 export function AirboardPrototype({
   surface,
   meetingProvider = "standalone",
@@ -458,6 +506,10 @@ export function AirboardPrototype({
   persistentWorkspaceId,
   initialBoardState,
   onPersistentBoardChange,
+  onRenameBoard,
+  onDeleteBoard,
+  boardTitle = "Untitled Airboard",
+  persistentSaveStatus = "saved",
   initialPreferences,
 }: {
   surface: Surface;
@@ -494,12 +546,17 @@ export function AirboardPrototype({
   persistentWorkspaceId?: string;
   initialBoardState?: BoardState;
   /** Debounced committed-content snapshot; ephemeral cursors and media never leave the canvas. */
-  onPersistentBoardChange?: (state: BoardState) => void;
+  onPersistentBoardChange?: (state: BoardState) => void | Promise<void>;
+  /** Durable board lifecycle is controlled by the authenticated route owner. */
+  onRenameBoard?: (title: string) => Promise<void>;
+  onDeleteBoard?: (latestState: BoardState) => Promise<void>;
+  /** Durable board identity and persistence state shown in the standalone editor chrome. */
+  boardTitle?: string;
+  persistentSaveStatus?: "saved" | "saving" | "error";
   initialPreferences?: {
     neonTheme?: boolean;
     videoEnabled?: boolean;
     audioEnabled?: boolean;
-    personOcclusion?: boolean;
   };
 }) {
   const [bridgedAccessToken, setBridgedAccessToken] = useState<string | undefined>();
@@ -542,19 +599,19 @@ export function AirboardPrototype({
   const meetBridgeSessionRef = useRef<MeetMediaBridgeVideoSession | null>(null);
   const meetBridgeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const labelInputRef = useRef<HTMLInputElement | null>(null);
+  const intentCommandInputRef = useRef<HTMLTextAreaElement | null>(null);
   const trackerRef = useRef<MediaPipeHandTracker | null>(null);
-  const personSegmenterRef = useRef<MediaPipePersonSegmenter | null>(null);
-  const personMaskCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const personForegroundCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const cameraOverlayFrameCanvasRef = useRef<HTMLCanvasElement | null>(null);
   // Synchronous guard against a double-start race (state updates lag within a tick).
   const cameraStartInProgressRef = useRef(false);
   // Flipped on unmount so an in-flight startCamera can release what it acquires.
   const cameraMountedRef = useRef(true);
   const headlessCameraRequestedRef = useRef(false);
   const headlessVoiceRequestedRef = useRef(false);
+  const standaloneCameraResumeAttemptedRef = useRef(false);
+  const standaloneVoiceResumeAttemptedRef = useRef(false);
   const pipelineRef = useRef(new GesturePipeline());
   const hybridGestureControllerRef = useRef<HybridGestureController | null>(null);
+  const hybridResizeGestureControllerRef = useRef<HybridGestureController | null>(null);
   const hybridGestureCanvasSizeRef = useRef({ width: 0, height: 0, minTrackingConfidence: 0 });
   const hybridPinchClosedRef = useRef(false);
   const speechSessionRef = useRef<ActiveSpeechSession | null>(null);
@@ -587,6 +644,14 @@ export function AirboardPrototype({
   const palmGateTrackerRef = useRef<PalmGateTracker | null>(null);
   if (palmGateTrackerRef.current === null) {
     palmGateTrackerRef.current = new PalmGateTracker();
+  }
+  const undoGestureTrackerRef = useRef<UndoGestureTracker | null>(null);
+  if (undoGestureTrackerRef.current === null) {
+    undoGestureTrackerRef.current = new UndoGestureTracker();
+  }
+  const snapGestureTrackerRef = useRef<SnapGestureTracker | null>(null);
+  if (snapGestureTrackerRef.current === null) {
+    snapGestureTrackerRef.current = new SnapGestureTracker();
   }
   const holdToEditTrackerRef = useRef<HoldToEditTracker | null>(null);
   if (holdToEditTrackerRef.current === null) {
@@ -689,28 +754,13 @@ export function AirboardPrototype({
   const [cameraUnderlayEnabled, setCameraUnderlayEnabled] = useState(
     !desktopOverlay && initialPreferences?.videoEnabled !== false,
   );
-  const [personOcclusionEnabled, setPersonOcclusionEnabled] = useState(
-    initialPreferences?.personOcclusion !== false,
-  );
-  const [personOcclusionStatus, setPersonOcclusionStatus] =
-    useState<PersonOcclusionStatus>("idle");
-  const [scrimOpacity, setScrimOpacity] = useState(
-    headlessMeetOverlay ? SCREEN_PRESENTATION_SCRIM : 0.85,
-  );
+  const [scrimOpacity, setScrimOpacity] = useState(CAMERA_PRESENTATION_SCRIM);
   const cameraUnderlayVideoRef = useRef<HTMLVideoElement | null>(null);
   const [screenUnderlayStatus, setScreenUnderlayStatus] =
     useState<ScreenUnderlayStatus>("idle");
   const [screenUnderlayNotice, setScreenUnderlayNotice] = useState<string | null>(null);
   // Studio recording. Refs mirror theme/scrim so the recorder's per-frame
   // compositor reads current values without re-starting on every change.
-  // Presenting: a clean stage for tab-sharing — chrome hidden, board full-bleed.
-  const [presenting, setPresenting] = useState(false);
-  const [presentationSetupOpen, setPresentationSetupOpen] = useState(false);
-  const [presentationSource, setPresentationSource] =
-    useState<PresentationSource>("screen");
-  const [presentationVerification, setPresentationVerification] =
-    useState<"idle" | "passed" | "failed">("idle");
-  const [presentationAudienceConfirmed, setPresentationAudienceConfirmed] = useState(false);
   const [localContrastPlatesEnabled, setLocalContrastPlatesEnabled] = useState(true);
   const [desktopOverlayState, setDesktopOverlayState] =
     useState<DesktopOverlayState>(DEFAULT_DESKTOP_OVERLAY_STATE);
@@ -721,6 +771,8 @@ export function AirboardPrototype({
     null,
   );
   const [cameraOverlayEnabled, setCameraOverlayEnabled] = useState(headlessMeetOverlay);
+  const [diagramVisible, setDiagramVisible] = useState(true);
+  const diagramVisibleRef = useRef(true);
   const [recordingState, setRecordingState] = useState<"idle" | "recording">("idle");
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [recordingNotice, setRecordingNotice] = useState<string | null>(null);
@@ -728,19 +780,61 @@ export function AirboardPrototype({
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const boardThemeRef = useRef(boardTheme);
   const scrimOpacityRef = useRef(scrimOpacity);
+  const enforceCameraCanvas = useCallback(() => {
+    const nextScrim = cameraCanvasScrim(scrimOpacityRef.current);
+    boardThemeRef.current = "lightboard";
+    scrimOpacityRef.current = nextScrim;
+    setBoardTheme("lightboard");
+    setScrimOpacity(nextScrim);
+    if (surface === "standalone" && !desktopOverlay) {
+      setCameraUnderlayEnabled(true);
+    }
+    try {
+      window.localStorage.setItem("airboard.theme.v1", "lightboard");
+      window.localStorage.setItem("airboard.underlay.v1", "on");
+      window.localStorage.setItem("airboard.scrim.camera.v1", String(nextScrim));
+    } catch {
+      // Preference persistence is best-effort.
+    }
+  }, [desktopOverlay, surface]);
   const [landmarkRecordingActive, setLandmarkRecordingActive] = useState(false);
   const [onboardingVisible, setOnboardingVisible] = useState(false);
   const [viewportScale, setViewportScale] = useState(1);
   const [canvasNavMode, setCanvasNavMode] = useState<"pan" | "zoom" | null>(null);
   const [dockGestureHover, setDockGestureHover] = useState<string | null>(null);
   const dockRef = useRef<HTMLDivElement | null>(null);
-  const [actionToast, setActionToast] = useState<{ id: number; message: string } | null>(null);
+  const [copilotOpen, setCopilotOpen] = useState(true);
+  const copilotActivitySequenceRef = useRef(1);
+  const [copilotActivity, setCopilotActivity] = useState<CopilotActivityEntry[]>([
+    {
+      id: 1,
+      source: "Airo",
+      title: "Ready",
+      detail: "Raise one open palm and speak, say “Airo…”, or type below.",
+      tone: "neutral",
+    },
+  ]);
   const [openCatalogId, setOpenCatalogId] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [titleEditing, setTitleEditing] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(boardTitle);
+  const [titleStatus, setTitleStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [titleError, setTitleError] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteStatus, setDeleteStatus] = useState<"idle" | "deleting" | "error">("idle");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const titleCancelPendingRef = useRef(false);
+  const titleCommitInFlightRef = useRef(false);
   const [clearArmed, setClearArmed] = useState(false);
   const clearArmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [speechSupported, setSpeechSupported] = useState(false);
   const [speechArmed, setSpeechArmed] = useState(false);
   const [speechListening, setSpeechListening] = useState(false);
+  const [microphonePermission, setMicrophonePermission] =
+    useState<MediaPermissionState>("unsupported");
+  const [cameraPermission, setCameraPermission] =
+    useState<MediaPermissionState>("unsupported");
   const [speechEngine, setSpeechEngine] = useState<SpeechEngine>("loading");
   const [realtimeTranscriptionConfig, setRealtimeTranscriptionConfig] =
     useState<RealtimeTranscriptionConfig | null>(null);
@@ -754,6 +848,7 @@ export function AirboardPrototype({
   const [speechHeardText, setSpeechHeardText] = useState("");
   const [speechRecognitionStatus, setSpeechRecognitionStatus] =
     useState<SpeechRecognitionStatus>("idle");
+  const speechRecognitionStatusRef = useRef<SpeechRecognitionStatus>("idle");
   const [handControlDiagnostics, setHandControlDiagnostics] = useState<HandControlDiagnostics>({
     trackingConfidence: 0,
     grabStrength: 0,
@@ -785,6 +880,9 @@ export function AirboardPrototype({
     active: 0,
     handsDetected: 0,
   });
+  useEffect(() => {
+    if (!titleEditing) setTitleDraft(boardTitle);
+  }, [boardTitle, titleEditing]);
   useEffect(() => {
     selectedAnnotationIdsRef.current = selectedAnnotationIds;
   }, [selectedAnnotationIds]);
@@ -826,16 +924,84 @@ export function AirboardPrototype({
   );
 
   const broadcastSafe =
-    headlessMeetOverlay || presenting || (desktopOverlay && desktopOverlayState.clickThrough);
-  const personOcclusionNeeded =
-    personOcclusionEnabled &&
-    boardTheme === "lightboard" &&
-    cameraStatus === "active" &&
-    ((surface === "standalone" &&
-      cameraUnderlayEnabled &&
-      screenUnderlayStatus !== "active") ||
-      (surface === "meet-main-stage" && cameraOverlayEnabled));
-
+    headlessMeetOverlay || (desktopOverlay && desktopOverlayState.clickThrough);
+  const standaloneEditor = surface === "standalone" && !desktopOverlay;
+  const setCopilotVisibility = useCallback((visible: boolean) => {
+    setCopilotOpen(visible);
+    try {
+      window.localStorage.setItem("airboard.copilot.v1", visible ? "open" : "closed");
+    } catch {
+      // Preference persistence is best-effort.
+    }
+  }, []);
+  const appendCopilotActivity = useCallback(
+    (entry: Omit<CopilotActivityEntry, "id">) => {
+      copilotActivitySequenceRef.current += 1;
+      const nextEntry = { ...entry, id: copilotActivitySequenceRef.current };
+      setCopilotActivity((current) => {
+        const previous = current[current.length - 1];
+        if (
+          previous?.source === nextEntry.source &&
+          previous.title === nextEntry.title &&
+          previous.detail === nextEntry.detail
+        ) {
+          return current;
+        }
+        return [...current, nextEntry].slice(-8);
+      });
+    },
+    [],
+  );
+  useEffect(() => {
+    speechRecognitionStatusRef.current = speechRecognitionStatus;
+  }, [speechRecognitionStatus]);
+  useEffect(() => {
+    if (!standaloneEditor) {
+      return;
+    }
+    try {
+      setCopilotOpen(window.localStorage.getItem("airboard.copilot.v1") !== "closed");
+    } catch {
+      // Keep the default-open copilot when storage is unavailable.
+    }
+  }, [standaloneEditor]);
+  const refreshStandaloneMediaPermissions = useCallback(async () => {
+    if (!standaloneEditor) return;
+    const [microphone, camera] = await Promise.all([
+      queryMediaPermission("microphone"),
+      queryMediaPermission("camera"),
+    ]);
+    setMicrophonePermission(microphone);
+    setCameraPermission(camera);
+  }, [standaloneEditor]);
+  useEffect(() => {
+    if (!standaloneEditor) return;
+    let cancelled = false;
+    const refresh = () => {
+      void Promise.all([
+        queryMediaPermission("microphone"),
+        queryMediaPermission("camera"),
+      ]).then(([microphone, camera]) => {
+        if (cancelled) return;
+        setMicrophonePermission(microphone);
+        setCameraPermission(camera);
+      });
+    };
+    refresh();
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [standaloneEditor]);
+  const cameraCanvasLocked =
+    headlessMeetOverlay ||
+    cameraOverlayEnabled ||
+    cameraStatus === "starting" ||
+    cameraStatus === "tracker_loading" ||
+    cameraStatus === "active";
   const render = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) {
@@ -1053,100 +1219,13 @@ export function AirboardPrototype({
   }, [headlessMeetOverlay, surface]);
 
   useEffect(() => {
-    if (!headlessMeetOverlay || !cameraOverlay) {
+    if (!headlessMeetOverlay || !cameraOverlay || !diagramVisibleRef.current) {
       return;
     }
-    setBoardTheme("lightboard");
+    enforceCameraCanvas();
     setCameraOverlayEnabled(true);
     cameraOverlay.start();
-  }, [cameraOverlay, headlessMeetOverlay]);
-
-  // Person segmentation is independent from hand tracking so camera startup
-  // remains responsive. It runs only when an audience-facing camera composite
-  // can actually use the mask.
-  useEffect(() => {
-    if (!personOcclusionNeeded) {
-      personSegmenterRef.current?.close();
-      personSegmenterRef.current = null;
-      setPersonOcclusionStatus("idle");
-      const foreground = personForegroundCanvasRef.current;
-      foreground?.getContext("2d")?.clearRect(0, 0, foreground.width, foreground.height);
-      return;
-    }
-    let cancelled = false;
-    let segmenter: MediaPipePersonSegmenter | null = null;
-    setPersonOcclusionStatus("loading");
-    if (!personMaskCanvasRef.current) {
-      personMaskCanvasRef.current = document.createElement("canvas");
-    }
-    void MediaPipePersonSegmenter.create()
-      .then((created) => {
-        if (cancelled) {
-          created.close();
-          return;
-        }
-        segmenter = created;
-        personSegmenterRef.current = created;
-        setPersonOcclusionStatus("ready");
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setPersonOcclusionStatus("error");
-        }
-      });
-    return () => {
-      cancelled = true;
-      if (personSegmenterRef.current === segmenter) {
-        personSegmenterRef.current = null;
-      }
-      segmenter?.close();
-    };
-  }, [personOcclusionNeeded]);
-
-  // The 244 KB landscape model is intentionally capped around 12fps. The
-  // latest feathered mask is reused between inferences by both the DOM depth
-  // layer and the Meet overlay-frame pump.
-  useEffect(() => {
-    if (!personOcclusionNeeded) {
-      return;
-    }
-    let animationFrame = 0;
-    let lastSegmentationAt = 0;
-    let failed = false;
-    const loop = (timestampMs: number) => {
-      const segmenter = personSegmenterRef.current;
-      const video = videoRef.current;
-      const maskCanvas = personMaskCanvasRef.current;
-      if (
-        !failed &&
-        segmenter &&
-        video &&
-        maskCanvas &&
-        video.videoWidth > 0 &&
-        timestampMs - lastSegmentationAt >= 83
-      ) {
-        lastSegmentationAt = timestampMs;
-        try {
-          segmenter.segment(video, timestampMs, (mask) => {
-            updatePersonMaskCanvas(maskCanvas, mask);
-            const foreground = personForegroundCanvasRef.current;
-            if (foreground && surface === "standalone") {
-              renderPersonForeground({ targetCanvas: foreground, maskCanvas, video });
-            }
-            setPersonOcclusionStatus((current) =>
-              current === "active" ? current : "active",
-            );
-          });
-        } catch {
-          failed = true;
-          setPersonOcclusionStatus("error");
-        }
-      }
-      animationFrame = requestAnimationFrame(loop);
-    };
-    animationFrame = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(animationFrame);
-  }, [personOcclusionNeeded, surface]);
+  }, [cameraOverlay, enforceCameraCanvas, headlessMeetOverlay]);
 
   // Overlay frame pump: ~15fps of the neon board, downscaled for transfer.
   useEffect(() => {
@@ -1161,29 +1240,11 @@ export function AirboardPrototype({
         return;
       }
       busy = true;
-      const maskCanvas = personMaskCanvasRef.current;
-      const video = videoRef.current;
-      let overlayCanvas = canvas;
-      if (
-        personOcclusionNeeded &&
-        maskCanvas?.width &&
-        video?.videoWidth &&
-        video.videoHeight
-      ) {
-        const target =
-          cameraOverlayFrameCanvasRef.current ?? document.createElement("canvas");
-        cameraOverlayFrameCanvasRef.current = target;
-        overlayCanvas = renderBoardBehindPerson({
-          targetCanvas: target,
-          boardCanvas: canvas,
-          maskCanvas,
-          videoWidth: video.videoWidth,
-          videoHeight: video.videoHeight,
-        });
-      }
-      const width = Math.min(1280, overlayCanvas.width);
+      // Send the complete transparent board. Meet draws camera -> dark scrim ->
+      // this bitmap, so diagrams always remain the topmost audience layer.
+      const width = Math.min(1280, canvas.width);
       const height = Math.max(2, Math.round((canvas.height * width) / canvas.width));
-      void createImageBitmap(overlayCanvas, { resizeWidth: width, resizeHeight: height })
+      void createImageBitmap(canvas, { resizeWidth: width, resizeHeight: height })
         .then((bitmap) => {
           if (cancelled || !cameraOverlay.trySendFrame(bitmap, scrimOpacityRef.current)) {
             bitmap.close();
@@ -1198,7 +1259,7 @@ export function AirboardPrototype({
       cancelled = true;
       clearInterval(timer);
     };
-  }, [cameraOverlay, cameraOverlayEnabled, personOcclusionNeeded]);
+  }, [cameraOverlay, cameraOverlayEnabled]);
 
   // Load stored appearance preferences after mount (SSR-safe).
   useEffect(() => {
@@ -1213,18 +1274,18 @@ export function AirboardPrototype({
       if (desktopOverlay || window.localStorage.getItem("airboard.underlay.v1") === "off") {
         setCameraUnderlayEnabled(false);
       }
-      const storedScrim = window.localStorage.getItem("airboard.scrim.v1");
-      if (storedScrim !== null) {
-        const scrim = Number(storedScrim);
-        if (Number.isFinite(scrim) && scrim >= 0 && scrim <= 1) {
-          setScrimOpacity(scrim);
-        }
-      }
+      // Camera and screen sources intentionally do not share dimming state.
+      // Migrate a legacy global value through the camera bounds so a 25%
+      // screen preference can never wash out the camera canvas again.
+      const storedCameraScrim = window.localStorage.getItem("airboard.scrim.camera.v1");
+      const legacyScrim = window.localStorage.getItem("airboard.scrim.v1");
+      const cameraScrim = cameraCanvasScrim(
+        Number(storedCameraScrim ?? legacyScrim ?? CAMERA_PRESENTATION_SCRIM),
+      );
+      scrimOpacityRef.current = cameraScrim;
+      setScrimOpacity(cameraScrim);
       if (window.localStorage.getItem("airboard.contrast-plates.v1") === "off") {
         setLocalContrastPlatesEnabled(false);
-      }
-      if (window.localStorage.getItem("airboard.person-occlusion.v1") === "off") {
-        setPersonOcclusionEnabled(false);
       }
     } catch {
       // Storage may be unavailable; keep defaults.
@@ -1266,22 +1327,33 @@ export function AirboardPrototype({
     scrimOpacityRef.current = scrimOpacity;
   }, [boardTheme, scrimOpacity]);
 
-  // Escape leaves presenting mode unless a command preview owns the key.
+  // Returning from screen capture (including cancellation or OS-level stop)
+  // must restore the darker camera glass instead of leaving the screen's 25%
+  // dimming over the presenter.
   useEffect(() => {
-    if (!presenting) {
-      return;
+    const cameraCanvasVisible =
+      headlessMeetOverlay ||
+      (surface === "standalone" &&
+        !desktopOverlay &&
+        cameraStatus === "active" &&
+        cameraUnderlayEnabled &&
+        ["idle", "blocked", "error"].includes(screenUnderlayStatus));
+    if (cameraCanvasVisible) {
+      enforceCameraCanvas();
     }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !pendingIntentRef.current) {
-        setPresenting(false);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [presenting]);
+  }, [
+    cameraStatus,
+    cameraUnderlayEnabled,
+    boardTheme,
+    desktopOverlay,
+    enforceCameraCanvas,
+    headlessMeetOverlay,
+    screenUnderlayStatus,
+    surface,
+  ]);
 
   const stopScreenUnderlay = useCallback(
-    (notice: string | null = null, leavePresenting = false) => {
+    (notice: string | null = null) => {
       screenUnderlayStartInProgressRef.current = false;
       const stream = screenUnderlayStreamRef.current;
       screenUnderlayStreamRef.current = null;
@@ -1293,12 +1365,6 @@ export function AirboardPrototype({
       stopMediaStream(stream);
       setScreenUnderlayStatus("idle");
       setScreenUnderlayNotice(notice);
-      if (leavePresenting) {
-        setPresenting(false);
-        setPresentationSetupOpen(true);
-        setPresentationVerification("idle");
-        setPresentationAudienceConfirmed(false);
-      }
     },
     [],
   );
@@ -1326,13 +1392,22 @@ export function AirboardPrototype({
       }
     }
     setLocalContrastPlatesEnabled(true);
-    const nextScrim = screenFriendlyScrim(scrimOpacityRef.current);
+    let nextScrim = SCREEN_PRESENTATION_SCRIM;
+    try {
+      const storedScreenScrim = window.localStorage.getItem("airboard.scrim.screen.v1");
+      if (storedScreenScrim !== null) {
+        nextScrim = screenFriendlyScrim(Number(storedScreenScrim));
+      }
+    } catch {
+      // Use the screen default when storage is unavailable.
+    }
     if (nextScrim !== scrimOpacityRef.current) {
+      scrimOpacityRef.current = nextScrim;
       setScrimOpacity(nextScrim);
     }
     try {
       window.localStorage.setItem("airboard.contrast-plates.v1", "on");
-      window.localStorage.setItem("airboard.scrim.v1", String(nextScrim));
+      window.localStorage.setItem("airboard.scrim.screen.v1", String(nextScrim));
     } catch {
       // Preference persistence is best-effort.
     }
@@ -1357,7 +1432,6 @@ export function AirboardPrototype({
           if (screenUnderlayStreamRef.current === stream) {
             stopScreenUnderlay(
               "Screen sharing ended. Choose a screen or window again to restore the background.",
-              true,
             );
           }
         },
@@ -1370,7 +1444,7 @@ export function AirboardPrototype({
       }
       setScreenUnderlayStatus("active");
       setScreenUnderlayNotice(
-        "Screen background is live with a light global dim and local contrast behind diagram clusters. Present this Airboard tab to share the composite.",
+        "Screen background is live with a light global dim and local contrast behind diagram clusters. Share this Airboard tab when you want others to see the composite.",
       );
     } catch (error) {
       // The source may have ended while video.play() was still resolving. Its
@@ -1400,6 +1474,10 @@ export function AirboardPrototype({
 
   // Stop an in-flight recording if the board unmounts.
   useEffect(() => {
+    // React development Strict Mode runs an effect setup/cleanup/setup cycle.
+    // Re-arm the lifecycle guard on setup so the second mount is not mistaken
+    // for a permanently unmounted camera/screen surface.
+    cameraMountedRef.current = true;
     return () => {
       if (recordingTimerRef.current) {
         clearInterval(recordingTimerRef.current);
@@ -1425,7 +1503,6 @@ export function AirboardPrototype({
           ? screenUnderlayVideoRef.current
           : cameraUnderlayVideoRef.current,
         underlayMode: useScreenUnderlay ? "screen" : "camera",
-        foregroundCanvas: useScreenUnderlay ? null : personForegroundCanvasRef.current,
         getScrimOpacity: () => scrimOpacityRef.current,
         getTheme: () => boardThemeRef.current,
       });
@@ -2128,8 +2205,12 @@ export function AirboardPrototype({
         return;
       }
 
-      const selectedStroke = selectedAnnotationId
-        ? boardRef.current.strokes[selectedAnnotationId]
+      const interactionSelectionId =
+        options.forcedHandle && options.forcedStrokeId
+          ? options.forcedStrokeId
+          : selectedAnnotationId;
+      const selectedStroke = interactionSelectionId
+        ? boardRef.current.strokes[interactionSelectionId]
         : undefined;
       const handle =
         options.forcedHandle ??
@@ -2398,6 +2479,90 @@ export function AirboardPrototype({
     }
   }, []);
 
+  const setDiagramVisibility = useCallback(
+    (visible: boolean, _source: "snap" | "keyboard" | "voice" | "menu" | "test") => {
+      if (diagramVisibleRef.current === visible) return;
+
+      if (!visible) {
+        const activeStrokeId = activeStrokeIdRef.current;
+        if (activeStrokeId) {
+          commitStroke(activeStrokeId, { discard: true });
+          activeStrokeIdRef.current = null;
+        }
+        pointerStrokeIdRef.current = null;
+        gesturePathRef.current = [];
+        touchpadPointsRef.current = [];
+        cancelLasso();
+        cancelObjectInteraction();
+        setSelectedAnnotationId(null);
+        setSelectedAnnotationIds([]);
+        setHoverStrokeId(null);
+        setGhostAnnotation(null);
+        setGhostAnnotations([]);
+        setAlignmentGuides([]);
+        setEditingAnnotationId(null);
+        setOpenCatalogId(null);
+        semanticIntentRequestIdRef.current += 1;
+        pendingSemanticClarificationRef.current = null;
+        pendingIntentRef.current = null;
+        applyPendingIntentRef.current = null;
+        setPendingIntent(null);
+        voiceRouter.reset();
+        setVoiceGate(null);
+        palmGateTrackerRef.current!.reset();
+        undoGestureTrackerRef.current!.reset();
+        hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
+        hybridResizeGestureControllerRef.current?.reset({ requirePinchRelease: true });
+        hybridPinchClosedRef.current = false;
+      }
+
+      diagramVisibleRef.current = visible;
+      setDiagramVisible(visible);
+      if (headlessMeetOverlay && cameraOverlay) {
+        setCameraOverlayEnabled(visible);
+        if (visible) {
+          cameraOverlay.start();
+        } else {
+          cameraOverlay.stop();
+        }
+      }
+      setCommandFeedback(
+        visible
+          ? "Diagram visible. Board editing is active."
+          : "Diagram hidden. Camera or shared screen remains live; snap again or press Shift+H to restore it.",
+      );
+    },
+    [
+      cameraOverlay,
+      cancelLasso,
+      cancelObjectInteraction,
+      commitStroke,
+      headlessMeetOverlay,
+      voiceRouter,
+    ],
+  );
+
+  const processSnapGestureFrame = useCallback(
+    (frame: SnapGestureFrame): SnapGestureTrackerResult => {
+      const voiceSnapshot = voiceRouter.snapshot;
+      const result = snapGestureTrackerRef.current!.update({
+        ...frame,
+        // A palm push-to-talk gate may misclassify the beginning of a snap.
+        // Snap visibility outranks that global gate; only a scoped object
+        // voice edit remains exclusive.
+        suppressed:
+          frame.suppressed ||
+          Boolean(voiceSnapshot?.mode === "scoped" && voiceSnapshot.open),
+      });
+      if (result === "snap") {
+        setDiagramVisibility(!diagramVisibleRef.current, "snap");
+        setLastGestureIntent({ intent: "visibility", confidence: 1 });
+      }
+      return result;
+    },
+    [setDiagramVisibility, voiceRouter],
+  );
+
   const finalizeLasso = useCallback(
     (point: { x: number; y: number }) => {
       const origin = lassoOriginRef.current;
@@ -2486,6 +2651,7 @@ export function AirboardPrototype({
 
       if (inputPaused) {
         hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
+        hybridResizeGestureControllerRef.current?.reset({ requirePinchRelease: true });
         hybridPinchClosedRef.current = false;
         const lastPoint = lastGesturePointerRef.current;
         if (cameraPlacementActiveRef.current) {
@@ -2514,6 +2680,9 @@ export function AirboardPrototype({
           // opens/picks instead of grabbing whatever object sits beneath.
           if (screenPoint && handleDockGesture(screenPoint, pinchJustClosed)) {
             hybridGestureControllerRef.current?.reset({ requirePinchRelease: pinchJustClosed });
+            hybridResizeGestureControllerRef.current?.reset({
+              requirePinchRelease: pinchJustClosed,
+            });
             setObjectGestureState("hover");
             return;
           }
@@ -2564,6 +2733,7 @@ export function AirboardPrototype({
             // no confirmation gate. Undo remains the safety net.
             applyPendingIntentRef.current?.();
             hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
+            hybridResizeGestureControllerRef.current?.reset({ requirePinchRelease: true });
             hybridPinchClosedRef.current = true;
             setObjectGestureState("hover");
             return;
@@ -2608,15 +2778,19 @@ export function AirboardPrototype({
 
           if (action?.type === "grab_started") {
             cameraGrabActiveRef.current = true;
-            const handleTarget = parseHandleTargetId(action.targetId);
+            const handleTarget = parseGestureHandleTargetId(action.targetId);
             if (handleTarget) {
-              // Grabbing a resize handle of the selected object: same
-              // resizing interaction the pointer path uses.
+              // Precision pinch owns resize for the entire interaction. The
+              // closed-hand movement controller cannot acquire handle targets.
               setObjectGestureState("grab");
               beginObjectInteraction(point, {
                 inputSource: "air_gesture",
+                forcedStrokeId: handleTarget.strokeId,
                 forcedHandle: handleTarget.handle,
               });
+              setCommandFeedback(
+                "Resize locked — keep thumb and index pinched, then release to finish.",
+              );
               return;
             }
             selectAnnotationObject(action.targetId);
@@ -2626,6 +2800,7 @@ export function AirboardPrototype({
               inputSource: "air_gesture",
               forcedStrokeId: action.targetId,
             });
+            setCommandFeedback("Move locked — keep your hand closed, then reopen to drop.");
             return;
           }
 
@@ -2637,9 +2812,15 @@ export function AirboardPrototype({
           }
 
           if (action?.type === "grab_ended") {
+            const resized = Boolean(parseGestureHandleTargetId(action.targetId));
             endObjectInteraction(point);
             cameraGrabActiveRef.current = false;
             setObjectGestureState("hover");
+            setCommandFeedback(
+              resized
+                ? "Resize complete. Close your hand over the object body to move it."
+                : "Move complete. Precision-pinch a corner handle only when you want to resize.",
+            );
             return;
           }
 
@@ -2963,6 +3144,53 @@ export function AirboardPrototype({
     setCommandFeedback("Restored the erased objects.");
   }, [applyLocalEvent, render, updateStats]);
 
+  const processUndoGestureFrame = useCallback(
+    (frame: UndoGestureFrame): boolean => {
+      if (undoGestureTrackerRef.current!.update(frame) !== "undo") {
+        return false;
+      }
+
+      const wasInterpreting = speechRecognitionStatusRef.current === "interpreting";
+      semanticIntentRequestIdRef.current += 1;
+      pendingSemanticClarificationRef.current = null;
+      voiceCorrectionPendingRef.current = null;
+      voiceRouter.reset();
+      setVoiceGate(null);
+      palmGateTrackerRef.current!.reset();
+      hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
+      hybridResizeGestureControllerRef.current?.reset({ requirePinchRelease: true });
+      setLastGestureIntent({ intent: "undo", confidence: 1 });
+
+      if (wasInterpreting) {
+        setSpeechRecognitionStatus(speechSessionRef.current ? "waiting" : "idle");
+        setCommandFeedback("Swipe-left undo stopped the command before it changed the board.");
+        appendCopilotActivity({
+          source: "Board",
+          title: "Command stopped",
+          detail: "Open-palm swipe left cancelled the in-progress Airo request.",
+          tone: "success",
+        });
+        return true;
+      }
+
+      const hadUndo = undoStackRef.current.length > 0;
+      undoLastAction();
+      setCommandFeedback(
+        hadUndo
+          ? "Open-palm swipe left recognized — undid the last board change."
+          : "Open-palm swipe left recognized, but there is nothing to undo yet.",
+      );
+      appendCopilotActivity({
+        source: "Board",
+        title: hadUndo ? "Undo gesture applied" : "Nothing to undo",
+        detail: "Recognized one open palm swiping left.",
+        tone: hadUndo ? "success" : "warning",
+      });
+      return true;
+    },
+    [appendCopilotActivity, undoLastAction, voiceRouter],
+  );
+
   const cancelPendingIntent = useCallback((message = "Cancelled the pending command.") => {
     semanticIntentRequestIdRef.current += 1;
     voiceCorrectionPendingRef.current = null;
@@ -3111,6 +3339,15 @@ export function AirboardPrototype({
           ...(voiceTurnId ? { voiceTurnId } : {}),
         };
         pendingIntentRef.current = pending;
+        setPendingIntent(pending);
+        setGhostAnnotations(ghosts);
+        setCommandFeedback(message);
+        appendCopilotActivity({
+          source: "Airo",
+          title: "Applying graph changes",
+          detail: message,
+          tone: "active",
+        });
         if (voiceTurnId) {
           reportVoiceTrace(voiceTurnId, "preview", {
             source,
@@ -3319,9 +3556,14 @@ export function AirboardPrototype({
             requiresExplicitConfirmation: false,
           });
         }
-        // No confirmation gate: commit the grounded semantic plan immediately.
-        applyPendingIntentRef.current?.();
-        return "applied";
+        // Render the exact graph-change summary once before committing. The
+        // complete command list still lands as one undo-stack transaction.
+        requestAnimationFrame(() => {
+          if (pendingIntentRef.current === pending) {
+            applyPendingIntentRef.current?.();
+          }
+        });
+        return "previewed";
       } catch (error) {
         if (voiceTurnId) {
           reportVoiceTrace(voiceTurnId, "action_failed", {
@@ -3336,6 +3578,7 @@ export function AirboardPrototype({
       }
     },
     [
+      appendCopilotActivity,
       cancelPendingIntent,
       hoverStrokeId,
       selectedAnnotationId,
@@ -3347,6 +3590,23 @@ export function AirboardPrototype({
 
   const prepareIntentCommand = useCallback(
     (text: string, voiceTurnId?: string): PrepareIntentCommandResult => {
+      const visibilityIntent = parseDiagramVisibilityIntent(text);
+      if (visibilityIntent) {
+        setDiagramVisibility(visibilityIntent === "show", "voice");
+        setIntentCommandText("");
+        if (voiceTurnId) {
+          reportVoiceTrace(voiceTurnId, "turn_completed", {
+            outcome: visibilityIntent === "show" ? "diagram_shown" : "diagram_hidden",
+          });
+        }
+        return "applied";
+      }
+      if (!diagramVisibleRef.current) {
+        cancelPendingIntent(
+          "The diagram is hidden, so board-editing commands are suspended. Say “show canvas” or press Shift+H first.",
+        );
+        return "rejected";
+      }
       if (
         cameraPlacementActiveRef.current ||
         cameraPlacementArmedToolRef.current ||
@@ -3356,7 +3616,28 @@ export function AirboardPrototype({
         cameraPlacementActiveRef.current = false;
         cameraGrabActiveRef.current = false;
         hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
+        hybridResizeGestureControllerRef.current?.reset({ requirePinchRelease: true });
         hybridPinchClosedRef.current = true;
+      }
+      const linkedCreate = expandSpokenCreateAndConnect(text);
+      if (linkedCreate) {
+        const parsedSteps = linkedCreate.map((step) =>
+          parseIntentCanvasCommand(step, {
+            activationPolicy: "externally_activated",
+          }),
+        );
+        if (
+          parsedSteps.every(
+            (step): step is ParsedIntentCanvasCommand => step.status === "parsed",
+          )
+        ) {
+          return prepareParsedIntentPlan(
+            parsedSteps,
+            text.trim(),
+            "deterministic",
+            voiceTurnId,
+          );
+        }
       }
       const parsed = parseIntentCanvasCommand(text, {
         activationPolicy: "externally_activated",
@@ -3397,6 +3678,7 @@ export function AirboardPrototype({
       cancelPendingIntent,
       cancelObjectInteraction,
       prepareParsedIntentPlan,
+      setDiagramVisibility,
       undoLastAction,
     ],
   );
@@ -3411,6 +3693,39 @@ export function AirboardPrototype({
   const prepareIntentCommandWithSemantic = useCallback(
     async (text: string, voiceTurnId?: string): Promise<IntentPreparationOutcome> => {
       const instruction = text.trim();
+      const visibilityIntent = parseDiagramVisibilityIntent(instruction);
+      if (visibilityIntent || !diagramVisibleRef.current) {
+        const visibilityResult = prepareIntentCommand(instruction, voiceTurnId);
+        return {
+          result: visibilityResult,
+          preparedText: instruction,
+          source: "deterministic",
+          stepCount: visibilityIntent ? 1 : 0,
+        };
+      }
+      const desiredGraphCorrection = parseDesiredGraphCorrection(instruction);
+      if (desiredGraphCorrection) {
+        pendingSemanticClarificationRef.current = null;
+        setIntentCommandText(instruction);
+        if (voiceTurnId) {
+          reportVoiceTrace(voiceTurnId, "parser_outcome", {
+            status: "parsed",
+            operationKind: "desired_graph_correction",
+            confidence: 1,
+          });
+        }
+        const correctionResult = prepareSemanticActionPlan(
+          desiredGraphCorrection,
+          instruction,
+          voiceTurnId,
+        );
+        return {
+          result: correctionResult,
+          preparedText: instruction,
+          source: "deterministic",
+          stepCount: desiredGraphCorrection.actions.length,
+        };
+      }
       const directResult = prepareIntentCommand(instruction, voiceTurnId);
       if (directResult !== "rejected") {
         pendingSemanticClarificationRef.current = null;
@@ -3704,12 +4019,41 @@ export function AirboardPrototype({
   // promise rejection.
   const runIntentCommand = useCallback(
     (text: string) => {
-      prepareIntentCommandWithSemantic(text).catch(() => {
-        setSpeechRecognitionStatus("command-rejected");
-        setCommandFeedback("Something went wrong preparing that command. Please try again.");
+      const instruction = text.trim();
+      if (!instruction) {
+        return;
+      }
+      appendCopilotActivity({
+        source: "You",
+        title: "Typed command",
+        detail: instruction,
+        tone: "neutral",
       });
+      prepareIntentCommandWithSemantic(instruction)
+        .then((outcome) => {
+          if (outcome.result === "rejected") {
+            appendCopilotActivity({
+              source: "Airo",
+              title: outcome.clarificationPending ? "Needs clarification" : "Could not apply",
+              detail: outcome.clarificationPending
+                ? "Answer the current question to continue."
+                : "The board was not changed. Edit the command and try again.",
+              tone: "warning",
+            });
+          }
+        })
+        .catch(() => {
+          setSpeechRecognitionStatus("command-rejected");
+          setCommandFeedback("Something went wrong preparing that command. Please try again.");
+          appendCopilotActivity({
+            source: "Airo",
+            title: "Command failed",
+            detail: "Something went wrong while preparing the board update.",
+            tone: "warning",
+          });
+        });
     },
-    [prepareIntentCommandWithSemantic],
+    [appendCopilotActivity, prepareIntentCommandWithSemantic],
   );
 
   const applyPendingIntent = useCallback(() => {
@@ -3771,9 +4115,12 @@ export function AirboardPrototype({
       setActiveObjectTool("select");
       setIntentCommandText("");
       setCommandFeedback(`Applied: ${pending.message}`);
-      // Instant-commit's confirmation substitute: show what happened with a
-      // one-tap escape hatch.
-      setActionToast({ id: Date.now(), message: pending.message });
+      appendCopilotActivity({
+        source: "Board",
+        title: "Board updated",
+        detail: pending.message,
+        tone: "success",
+      });
       voiceCorrectionPendingRef.current = null;
       pendingIntentRef.current = null;
       setPendingIntent(null);
@@ -3799,7 +4146,13 @@ export function AirboardPrototype({
       }
       setCommandFeedback(error instanceof Error ? error.message : "The diagram command failed.");
     }
-  }, [cancelPendingIntent, render, selectedAnnotationIds, updateStats]);
+  }, [
+    appendCopilotActivity,
+    cancelPendingIntent,
+    render,
+    selectedAnnotationIds,
+    updateStats,
+  ]);
 
   useEffect(() => {
     applyPendingIntentRef.current = applyPendingIntent;
@@ -3807,17 +4160,6 @@ export function AirboardPrototype({
       applyPendingIntentRef.current = null;
     };
   }, [applyPendingIntent]);
-
-  useEffect(() => {
-    if (!actionToast) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      setActionToast((current) => (current?.id === actionToast.id ? null : current));
-    }, 6_000);
-    return () => clearTimeout(timer);
-  }, [actionToast]);
-
 
   const queueVoiceCommand = useCallback((command: string, traceContext?: VoiceCommandTraceContext) => {
     const voiceTurnId = traceContext?.voiceTurnId;
@@ -3843,6 +4185,12 @@ export function AirboardPrototype({
     wakeCommandQueueRef.current = wakeCommandQueueRef.current
       .then(async () => {
         const instruction = command.trim();
+        appendCopilotActivity({
+          source: "Voice",
+          title: "Final transcript",
+          detail: traceContext?.transcript?.trim() || instruction,
+          tone: "neutral",
+        });
         if (
           pendingIntentRef.current &&
           isAirboardVoiceConfirmation(instruction)
@@ -3866,6 +4214,16 @@ export function AirboardPrototype({
 
         voiceCorrectionPendingRef.current = null;
         setIntentCommandText(instruction);
+        setSpeechRecognitionStatus("interpreting");
+        setCommandFeedback(
+          `Understanding “${truncateSpeechTranscript(instruction)}” and applying it automatically…`,
+        );
+        appendCopilotActivity({
+          source: "Airo",
+          title: "Understanding command",
+          detail: instruction,
+          tone: "active",
+        });
         const outcome =
           (await prepareIntentCommandWithSemanticRef.current?.(instruction, voiceTurnId)) ?? {
             result: "rejected" as const,
@@ -3894,13 +4252,30 @@ export function AirboardPrototype({
           });
           reportVoiceTrace(voiceTurnId, "turn_completed", { outcome: "rejected" });
         }
+        if (outcome.result === "rejected") {
+          appendCopilotActivity({
+            source: "Airo",
+            title: outcome.clarificationPending ? "Needs clarification" : "Could not apply",
+            detail:
+              outcome.clarificationPending
+                ? "Answer the question shown above by voice, or edit the transcript and send it."
+                : "Edit the transcript below or repeat the command.",
+            tone: "warning",
+          });
+        }
         await nextAnimationFrame();
       })
       .catch(() => {
         setSpeechRecognitionStatus("command-rejected");
         setCommandFeedback("Airo could not apply that command. Try the typed command field.");
+        appendCopilotActivity({
+          source: "Airo",
+          title: "Automatic command failed",
+          detail: "The transcript is still available to edit and send.",
+          tone: "warning",
+        });
       });
-  }, []);
+  }, [appendCopilotActivity]);
 
   /** Mirrors the router's gate state into the pill UI. */
   const syncVoiceGateUi = useCallback(() => {
@@ -4016,9 +4391,18 @@ export function AirboardPrototype({
     }
     const target = window as unknown as { __airboardTestHooks?: unknown };
     target.__airboardTestHooks = {
-      emitFinalTranscript: (transcript: string) =>
-        routeFinalTranscript(transcript, { engine: "realtime" }),
+      emitFinalTranscript: (transcript: string) => {
+        setSpeechHeardText(transcript);
+        return routeFinalTranscript(transcript, { engine: "realtime" });
+      },
       openPttGate: () => openVoiceGate({ mode: "ptt" }),
+      emitUndoGestureFrame: (frame: UndoGestureFrame) =>
+        processUndoGestureFrame(frame),
+      emitSnapGestureFrame: (frame: SnapGestureFrame) =>
+        processSnapGestureFrame(frame) === "snap",
+      setDiagramVisible: (visible: boolean) =>
+        setDiagramVisibility(visible, "test"),
+      getDiagramVisible: () => diagramVisibleRef.current,
       resetVoiceRouting: () => {
         voiceRouter.reset();
         setVoiceGate(null);
@@ -4051,7 +4435,16 @@ export function AirboardPrototype({
     return () => {
       delete target.__airboardTestHooks;
     };
-  }, [currentViewportLimits, openVoiceGate, render, routeFinalTranscript, voiceRouter]);
+  }, [
+    currentViewportLimits,
+    openVoiceGate,
+    processSnapGestureFrame,
+    processUndoGestureFrame,
+    render,
+    routeFinalTranscript,
+    setDiagramVisibility,
+    voiceRouter,
+  ]);
 
   const startVoiceCommand = useCallback(() => {
     if (!voiceCaptureAvailable) {
@@ -4151,6 +4544,10 @@ export function AirboardPrototype({
           onListening: (listening) => {
             setSpeechListening(listening);
             if (listening) {
+              if (standaloneEditor) {
+                setMediaResumeEnabled("microphone", true, window.localStorage);
+                void refreshStandaloneMediaPermissions();
+              }
               setSpeechRecognitionStatus("waiting");
               const metadata = realtimeSession?.getMetadata();
               setCommandFeedback(
@@ -4159,6 +4556,7 @@ export function AirboardPrototype({
             }
           },
           onInterim: (transcript) => {
+            voiceRouter.noteSpeechActivity();
             setSpeechHeardText(transcript);
             setSpeechRecognitionStatus("hearing");
           },
@@ -4186,6 +4584,9 @@ export function AirboardPrototype({
             }
           },
           onError: (message) => {
+            if (standaloneEditor) {
+              void refreshStandaloneMediaPermissions();
+            }
             setSpeechRecognitionStatus("error");
             setCommandFeedback(message);
           },
@@ -4260,6 +4661,10 @@ export function AirboardPrototype({
 
     const browserSession = createBrowserWakeSpeechSession({
       onStart: () => {
+        if (standaloneEditor) {
+          setMediaResumeEnabled("microphone", true, window.localStorage);
+          void refreshStandaloneMediaPermissions();
+        }
         setSpeechArmed(true);
         setSpeechHeardText("");
         setSpeechRecognitionStatus("waiting");
@@ -4271,6 +4676,7 @@ export function AirboardPrototype({
       onHeard: ({ transcript, isFinal }) => {
         setSpeechHeardText(transcript);
         if (!isFinal) {
+          voiceRouter.noteSpeechActivity();
           setSpeechRecognitionStatus("hearing");
           return;
         }
@@ -4332,6 +4738,9 @@ export function AirboardPrototype({
         }
       },
       onError: (message, code) => {
+        if (standaloneEditor) {
+          void refreshStandaloneMediaPermissions();
+        }
         setSpeechRecognitionStatus(code === "no-speech" ? "waiting" : "error");
         setCommandFeedback(message);
       },
@@ -4355,15 +4764,57 @@ export function AirboardPrototype({
   }, [
     dispatchVoiceDecision,
     realtimeTranscriptionConfig?.defaultModel,
+    refreshStandaloneMediaPermissions,
     routeFinalTranscript,
     speechEngine,
     speechSupported,
+    standaloneEditor,
     embeddedMediaCapture,
     isMeetSurface,
     meetMediaBridge,
     syncVoiceGateUi,
     voiceCaptureAvailable,
     voiceRouter,
+  ]);
+
+  const toggleVoiceInput = useCallback(() => {
+    if (standaloneEditor && (speechSessionRef.current || speechArmed)) {
+      setMediaResumeEnabled("microphone", false, window.localStorage);
+    }
+    startVoiceCommand();
+  }, [speechArmed, standaloneEditor, startVoiceCommand]);
+
+  useEffect(() => {
+    if (
+      !standaloneEditor ||
+      initialPreferences?.audioEnabled === false ||
+      !speechSupported ||
+      speechEngine === "loading" ||
+      speechEngine === "unavailable" ||
+      speechSessionRef.current ||
+      standaloneVoiceResumeAttemptedRef.current
+    ) {
+      return;
+    }
+    standaloneVoiceResumeAttemptedRef.current = true;
+    void queryMediaPermission("microphone").then((permission) => {
+      setMicrophonePermission(permission);
+      if (
+        shouldResumeMedia(
+          permission,
+          mediaResumeEnabled("microphone", window.localStorage),
+        ) &&
+        !speechSessionRef.current
+      ) {
+        startVoiceCommand();
+      }
+    });
+  }, [
+    initialPreferences?.audioEnabled,
+    speechEngine,
+    speechSupported,
+    standaloneEditor,
+    startVoiceCommand,
   ]);
 
   const changeSpeechModel = useCallback((nextModel: string) => {
@@ -4419,6 +4870,7 @@ export function AirboardPrototype({
     }
     trackerRef.current?.close();
     trackerRef.current = null;
+    snapGestureTrackerRef.current?.reset();
     setCameraStatus("idle");
     setCameraError(null);
   }, []);
@@ -4441,6 +4893,7 @@ export function AirboardPrototype({
       return;
     }
     cameraStartInProgressRef.current = true;
+    enforceCameraCanvas();
 
     setCameraStatus("starting");
     setCameraError(null);
@@ -4524,6 +4977,10 @@ export function AirboardPrototype({
       }
       trackerRef.current = tracker;
       setCameraStatus("active");
+      if (standaloneEditor) {
+        setMediaResumeEnabled("camera", true, window.localStorage);
+        void refreshStandaloneMediaPermissions();
+      }
     } catch (error) {
       const isPermissionError = error instanceof DOMException && error.name === "NotAllowedError";
       const hadVideoStream = Boolean(videoRef.current?.srcObject);
@@ -4542,10 +4999,53 @@ export function AirboardPrototype({
       trackerRef.current = null;
       setCameraStatus(isPermissionError ? "blocked" : hadVideoStream ? "tracker_error" : "error");
       setCameraError(describeCameraError(error, hadVideoStream));
+      if (standaloneEditor) {
+        void refreshStandaloneMediaPermissions();
+      }
     } finally {
       cameraStartInProgressRef.current = false;
     }
-  }, [cameraCaptureAvailable, cameraStatus, embeddedMediaCapture, isMeetSurface, meetMediaBridge, stopCamera]);
+  }, [cameraCaptureAvailable, cameraStatus, embeddedMediaCapture, enforceCameraCanvas, isMeetSurface, meetMediaBridge, refreshStandaloneMediaPermissions, standaloneEditor, stopCamera]);
+
+  const toggleCameraInput = useCallback(() => {
+    if (cameraStatus === "active") {
+      if (standaloneEditor) {
+        setMediaResumeEnabled("camera", false, window.localStorage);
+      }
+      stopCamera();
+      return;
+    }
+    void startCamera();
+  }, [cameraStatus, standaloneEditor, startCamera, stopCamera]);
+
+  useEffect(() => {
+    if (
+      !standaloneEditor ||
+      initialPreferences?.videoEnabled === false ||
+      cameraStatus !== "idle" ||
+      standaloneCameraResumeAttemptedRef.current
+    ) {
+      return;
+    }
+    standaloneCameraResumeAttemptedRef.current = true;
+    void queryMediaPermission("camera").then((permission) => {
+      setCameraPermission(permission);
+      if (
+        shouldResumeMedia(
+          permission,
+          mediaResumeEnabled("camera", window.localStorage),
+        ) &&
+        cameraStatus === "idle"
+      ) {
+        void startCamera();
+      }
+    });
+  }, [
+    cameraStatus,
+    initialPreferences?.videoEnabled,
+    standaloneEditor,
+    startCamera,
+  ]);
 
   // The extension-owned engine has no visible controls by design. Once its
   // bridge and transcription configuration are ready, enable both Airboard
@@ -4868,6 +5368,70 @@ export function AirboardPrototype({
     [],
   );
 
+  const updateSnapGesture = useCallback(
+    (
+      hands: readonly DetectedHand[],
+      timestampMs: number,
+    ): SnapGestureTrackerResult => {
+      return processSnapGestureFrame({
+        hands: hands.map((hand) => ({
+          handedness: hand.handedness,
+          confidence: snapLandmarkFrameConfidence(hand.landmarks),
+          landmarks: hand.landmarks,
+        })),
+        timestampMs,
+        suppressed:
+          inputPaused ||
+          canvasNavTrackerRef.current?.engaged === true ||
+          objectInteractionRef.current !== null ||
+          cameraGrabActiveRef.current ||
+          cameraPlacementActiveRef.current ||
+          activeStrokeIdRef.current !== null ||
+          pointerStrokeIdRef.current !== null ||
+          pointerErasingRef.current ||
+          lassoOriginRef.current !== null,
+      });
+    },
+    [inputPaused, processSnapGestureFrame],
+  );
+
+  /**
+   * One open palm moving left is undo. This runs before push-to-talk because
+   * motion is the disambiguator: a moving palm can undo, while the voice gate
+   * only engages after the palm remains still.
+   */
+  const updateUndoGesture = useCallback(
+    (hands: readonly DetectedHand[], timestampMs: number): boolean => {
+      let bestScore = 0;
+      let bestPoint: { x: number; y: number } | null = null;
+      let trackedHands = 0;
+      for (const hand of hands) {
+        if (hand.landmarks.length < 21) {
+          continue;
+        }
+        trackedHands += 1;
+        const estimate = estimatePalmPresentation(hand.landmarks);
+        if (estimate.score > bestScore) {
+          bestScore = estimate.score;
+          const wrist = hand.landmarks[0];
+          bestPoint = wrist ? { x: wrist.x, y: wrist.y } : null;
+        }
+      }
+      return processUndoGestureFrame({
+        score: bestScore,
+        point: bestPoint,
+        timestampMs,
+        suppressed:
+          trackedHands !== 1 ||
+          inputPaused ||
+          objectInteractionRef.current !== null ||
+          activeStrokeIdRef.current !== null ||
+          pointerStrokeIdRef.current !== null,
+      });
+    },
+    [inputPaused, processUndoGestureFrame],
+  );
+
   /**
    * Palm push-to-talk: an open, flat, upright hand held still briefly opens
    * the command mic gate; dropping the pose (with hysteresis) closes it. The
@@ -5012,6 +5576,7 @@ export function AirboardPrototype({
           const controllerSize = hybridGestureCanvasSizeRef.current;
           if (
             !hybridGestureControllerRef.current ||
+            !hybridResizeGestureControllerRef.current ||
             controllerSize.width !== roundedWidth ||
             controllerSize.height !== roundedHeight ||
             controllerSize.minTrackingConfidence !== confidenceThreshold
@@ -5034,6 +5599,26 @@ export function AirboardPrototype({
                 releaseDebounceMs: 90,
               },
             });
+            hybridResizeGestureControllerRef.current = new HybridGestureController({
+              canvasWidth: roundedWidth,
+              canvasHeight: roundedHeight,
+              mirrorX: true,
+              minTrackingConfidence: confidenceThreshold,
+              hoverSmoothingTimeMs: 30,
+              dragGain: 0.68,
+              dragDeadZonePx: 0.5,
+              // Resizing requires a precise corner/end-point acquisition. It
+              // must not inherit the broad closed-hand object grab radius.
+              areaCursorRadiusPx: 12,
+              stickyReleaseRadiusPx: 28,
+              trackingLossTimeoutMs: 260,
+              pinch: {
+                engageThreshold: 0.72,
+                releaseThreshold: 0.4,
+                engageDebounceMs: 110,
+                releaseDebounceMs: 90,
+              },
+            });
             hybridGestureCanvasSizeRef.current = {
               width: roundedWidth,
               height: roundedHeight,
@@ -5043,6 +5628,16 @@ export function AirboardPrototype({
 
           const signal = getHybridHandSignal(hands, result?.hand, cameraMapping);
           captureLandmarkFrame(hands, timestampMs);
+
+          // Visibility remains available while the diagram is hidden, but all
+          // other board gestures stay suspended so no invisible edit can occur.
+          if (!diagramVisibleRef.current) {
+            canvasNavTrackerRef.current!.reset();
+            updateSnapGesture(hands, timestampMs);
+            handleGesture(null, undefined);
+            animationFrame = requestAnimationFrame(loop);
+            return;
+          }
 
           // Two-hand canvas navigation outranks every single-hand gesture:
           // while engaged, the object controller and voice gate are suppressed
@@ -5065,29 +5660,41 @@ export function AirboardPrototype({
               );
             }
             hybridGestureControllerRef.current.reset({ requirePinchRelease: true });
+            hybridResizeGestureControllerRef.current?.reset({ requirePinchRelease: true });
             hybridPinchClosedRef.current = false;
             palmGateTrackerRef.current!.reset();
+            undoGestureTrackerRef.current!.reset();
+            updateSnapGesture(hands, timestampMs);
             handleGesture(null, undefined);
             animationFrame = requestAnimationFrame(loop);
             return;
           }
           setCanvasNavMode((mode) => (mode === null ? mode : null));
 
+          // A pending snap owns its short contact→release window. Do not let
+          // the same curled-hand frames fall through and start an object grab,
+          // resize, lasso, or voice gate before the snap can complete.
+          if (updateSnapGesture(hands, timestampMs) !== null) {
+            handleGesture(null, undefined);
+            animationFrame = requestAnimationFrame(loop);
+            return;
+          }
+          if (updateUndoGesture(hands, timestampMs)) {
+            handleGesture(null, undefined);
+            animationFrame = requestAnimationFrame(loop);
+            return;
+          }
           updatePalmPushToTalk(hands, timestampMs);
           const viewportForTargets = boardViewportRef.current;
-          hybridOutput = hybridGestureControllerRef.current.update({
-            handPoint: signal?.point ?? null,
-            trackingConfidence: signal?.trackingConfidence ?? 0,
-            pinchStrength: signal?.grabStrength ?? 0,
-            grabConfidence: signal?.grabConfidence ?? 0,
-            timestampMs,
-            // The controller hit-tests in screen space; board-space object
-            // bounds go through the viewport transform.
-            targets: buildGestureTargets(
+          const selectedGestureStrokeId =
+            selectedAnnotationIdsRef.current.length === 1
+              ? (selectedAnnotationIdsRef.current[0] ?? null)
+              : null;
+          const screenTargets = (kind: "move" | "resize") =>
+            buildGestureManipulationTargets(
               boardRef.current,
-              selectedAnnotationIdsRef.current.length === 1
-                ? (selectedAnnotationIdsRef.current[0] ?? null)
-                : null,
+              selectedGestureStrokeId,
+              kind,
             ).map((target) => ({
               ...target,
               bounds: {
@@ -5096,8 +5703,40 @@ export function AirboardPrototype({
                 width: target.bounds.width * viewportForTargets.scale,
                 height: target.bounds.height * viewportForTargets.scale,
               },
-            })),
+            }));
+          const moveOutput = hybridGestureControllerRef.current.update({
+            handPoint: signal?.point ?? null,
+            trackingConfidence: signal?.trackingConfidence ?? 0,
+            pinchStrength: signal?.grabStrength ?? 0,
+            grabConfidence: signal?.grabConfidence ?? 0,
+            timestampMs,
+            // Movement sees whole objects only; handles are not addressable by
+            // this closed-hand controller.
+            targets: screenTargets("move"),
           });
+          const resizeOutput = hybridResizeGestureControllerRef.current.update({
+            handPoint: signal?.resizePoint ?? null,
+            trackingConfidence: signal?.trackingConfidence ?? 0,
+            pinchStrength: signal?.resizePinchStrength ?? 0,
+            grabConfidence: signal?.grabConfidence ?? 0,
+            timestampMs,
+            // Precision pinch sees selected-object handles only.
+            targets: screenTargets("resize"),
+          });
+          const resizeTargetId =
+            resizeOutput.action?.targetId ?? resizeOutput.grabbedTargetId;
+          const resizeActive = Boolean(
+            resizeTargetId && parseGestureHandleTargetId(resizeTargetId),
+          );
+          hybridOutput = resizeActive ? resizeOutput : moveOutput;
+          // The winning engage edge locks the interaction class. Resetting the
+          // other controller prevents a pose transition during the same hold
+          // from turning a move into a resize (or the reverse).
+          if (resizeOutput.action?.type === "grab_started") {
+            hybridGestureControllerRef.current.reset({ requirePinchRelease: true });
+          } else if (moveOutput.action?.type === "grab_started") {
+            hybridResizeGestureControllerRef.current.reset({ requirePinchRelease: true });
+          }
           setHandControlDiagnostics({
             trackingConfidence: signal?.trackingConfidence ?? 0,
             grabStrength: signal?.grabStrength ?? 0,
@@ -5131,6 +5770,8 @@ export function AirboardPrototype({
     captureLandmarkFrame,
     currentViewportLimits,
     sensitivity,
+    updateSnapGesture,
+    updateUndoGesture,
     updatePalmPushToTalk,
   ]);
 
@@ -5144,6 +5785,12 @@ export function AirboardPrototype({
         target?.isContentEditable;
 
       if (isEditableTarget) {
+        return;
+      }
+
+      if (event.shiftKey && event.key.toLowerCase() === "h" && !event.repeat) {
+        event.preventDefault();
+        setDiagramVisibility(!diagramVisibleRef.current, "keyboard");
         return;
       }
 
@@ -5333,6 +5980,7 @@ export function AirboardPrototype({
     openVoiceGate,
     prepareIntentCommand,
     selectedAnnotationIds,
+    setDiagramVisibility,
     touchpadState,
     undoLastAction,
     voiceCaptureAvailable,
@@ -5667,6 +6315,7 @@ export function AirboardPrototype({
       if (objectInteractionRef.current || cameraGrabActiveRef.current) {
         cancelObjectInteraction();
         hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
+        hybridResizeGestureControllerRef.current?.reset({ requirePinchRelease: true });
         hybridPinchClosedRef.current = true;
       }
       objectInteractionRef.current = null;
@@ -5788,121 +6437,82 @@ export function AirboardPrototype({
           ? "checking"
           : "not configured";
 
-  const presentationReadiness = useMemo(
-    () =>
-      assessPresentationReadiness({
-        theme: boardTheme,
-        source: presentationSource,
-        canvasReady: Boolean(canvasRef.current?.width && canvasRef.current?.height),
-        screenReady:
-          screenUnderlayStatus === "active" &&
-          Boolean(screenUnderlayVideoRef.current?.videoWidth) &&
-          screenUnderlayStreamRef.current?.getVideoTracks()[0]?.readyState === "live",
-        cameraReady:
-          cameraStatus === "active" &&
-          Boolean(videoRef.current?.videoWidth) &&
-          ((videoRef.current?.srcObject as MediaStream | null)?.getVideoTracks()[0]?.readyState ===
-            "live"),
-        localContrastPlates: localContrastPlatesEnabled,
-        pendingPreview: Boolean(pendingIntent),
-      }),
-    [
-      boardTheme,
-      cameraStatus,
-      localContrastPlatesEnabled,
-      pendingIntent,
-      presentationSource,
-      screenUnderlayStatus,
-    ],
-  );
+  const beginTitleEdit = useCallback(() => {
+    if (!onRenameBoard || titleStatus === "saving") return;
+    titleCancelPendingRef.current = false;
+    setTitleDraft(boardTitle);
+    setTitleError(null);
+    setTitleStatus("idle");
+    setTitleEditing(true);
+  }, [boardTitle, onRenameBoard, titleStatus]);
 
-  const openPresentationSetup = useCallback(() => {
-    if (boardTheme !== "lightboard") {
-      setBoardTheme("lightboard");
-      try {
-        window.localStorage.setItem("airboard.theme.v1", "lightboard");
-      } catch {
-        // Preference persistence is best-effort.
-      }
-    }
-    const nextSource: PresentationSource =
-      screenUnderlayStatus === "active"
-        ? "screen"
-        : cameraStatus === "active" && cameraUnderlayEnabled
-          ? "camera"
-          : "screen";
-    setPresentationSource(nextSource);
-    if (nextSource === "screen") {
-      setLocalContrastPlatesEnabled(true);
-      const nextScrim = screenFriendlyScrim(scrimOpacityRef.current);
-      setScrimOpacity(nextScrim);
-      try {
-        window.localStorage.setItem("airboard.contrast-plates.v1", "on");
-        window.localStorage.setItem("airboard.scrim.v1", String(nextScrim));
-      } catch {
-        // Preference persistence is best-effort.
-      }
-    }
-    setPresentationVerification("idle");
-    setPresentationAudienceConfirmed(false);
-    setPresentationSetupOpen(true);
-  }, [boardTheme, cameraStatus, cameraUnderlayEnabled, screenUnderlayStatus]);
-
-  const choosePresentationSource = useCallback(
-    (source: PresentationSource) => {
-      setPresentationSource(source);
-      setPresentationVerification("idle");
-      setPresentationAudienceConfirmed(false);
-      if (source !== "screen" && screenUnderlayStatus === "active") {
-        stopScreenUnderlay("Screen background stopped for this presentation source.");
-      }
-      if (source === "camera") {
-        setCameraUnderlayEnabled(true);
-        try {
-          window.localStorage.setItem("airboard.underlay.v1", "on");
-        } catch {
-          // Preference persistence is best-effort.
-        }
-      } else if (source === "dark") {
-        setCameraUnderlayEnabled(false);
-      } else {
-        setLocalContrastPlatesEnabled(true);
-        const nextScrim = screenFriendlyScrim(scrimOpacityRef.current);
-        setScrimOpacity(nextScrim);
-        try {
-          window.localStorage.setItem("airboard.contrast-plates.v1", "on");
-          window.localStorage.setItem("airboard.scrim.v1", String(nextScrim));
-        } catch {
-          // Preference persistence is best-effort.
-        }
-      }
-    },
-    [screenUnderlayStatus, stopScreenUnderlay],
-  );
-
-  const startCleanPresentation = useCallback(() => {
+  const commitTitleEdit = useCallback(async () => {
     if (
-      !presentationReadiness.ready ||
-      presentationVerification !== "passed" ||
-      !presentationAudienceConfirmed
+      !onRenameBoard ||
+      titleCancelPendingRef.current ||
+      titleCommitInFlightRef.current
     ) {
       return;
     }
-    setSelectedAnnotationId(null);
-    setSelectedAnnotationIds([]);
-    setHoverStrokeId(null);
-    setGhostAnnotation(null);
-    setGhostAnnotations([]);
-    setAlignmentGuides([]);
-    setOpenCatalogId(null);
-    setEditingAnnotationId(null);
-    setVoiceGate(null);
-    setActionToast(null);
-    setObjectGestureState("hover");
-    canvasRef.current?.blur();
-    setPresentationSetupOpen(false);
-    setPresenting(true);
-  }, [presentationAudienceConfirmed, presentationReadiness.ready, presentationVerification]);
+    const validation = validateBoardTitle(titleDraft);
+    if (!validation.valid) {
+      setTitleStatus("error");
+      setTitleError(validation.message);
+      return;
+    }
+    const nextTitle = validation.title;
+    if (nextTitle === boardTitle) {
+      setTitleEditing(false);
+      setTitleStatus("idle");
+      return;
+    }
+    titleCommitInFlightRef.current = true;
+    setTitleStatus("saving");
+    setTitleError(null);
+    try {
+      await onRenameBoard(nextTitle);
+      setTitleEditing(false);
+      setTitleStatus("saved");
+    } catch (caught) {
+      setTitleStatus("error");
+      setTitleError(
+        caught instanceof Error ? caught.message : "Could not rename this canvas.",
+      );
+    } finally {
+      titleCommitInFlightRef.current = false;
+    }
+  }, [boardTitle, onRenameBoard, titleDraft]);
+
+  const cancelTitleEdit = useCallback(() => {
+    titleCancelPendingRef.current = true;
+    setTitleDraft(boardTitle);
+    setTitleError(null);
+    setTitleStatus("idle");
+    setTitleEditing(false);
+  }, [boardTitle]);
+
+  const confirmDeleteBoard = useCallback(async () => {
+    if (!onDeleteBoard || deleteStatus === "deleting") return;
+    if (persistenceTimerRef.current) {
+      clearTimeout(persistenceTimerRef.current);
+      persistenceTimerRef.current = null;
+    }
+    pendingPersistenceRef.current = null;
+    const latestState = boardDeletionSnapshot(
+      boardRef.current,
+      persistentBoardId ?? boardRef.current.boardId,
+    );
+    setDeleteStatus("deleting");
+    setDeleteError(null);
+    try {
+      await onDeleteBoard(latestState);
+    } catch (caught) {
+      setDeleteStatus("error");
+      setDeleteError(
+        caught instanceof Error ? caught.message : "Could not move this canvas to Trash.",
+      );
+    }
+  }, [deleteStatus, onDeleteBoard, persistentBoardId]);
 
   if (surface === "meet-side-panel") {
     return (
@@ -5974,302 +6584,582 @@ export function AirboardPrototype({
   return (
     <main
       className={`airboard-shell${isMeetSurface ? " airboard-meet-embedded" : ""}${
-        presenting ? " presenting broadcast-safe" : ""
-      }${desktopOverlay ? " desktop-overlay" : ""}${
+        desktopOverlay ? " desktop-overlay" : ""
+      }${
         desktopOverlay && !desktopOverlayState.clickThrough ? " desktop-overlay-interactive" : ""
       }${desktopOverlay && desktopOverlayState.clickThrough ? " broadcast-safe" : ""}${
         headlessMeetOverlay ? " meet-overlay-engine broadcast-safe" : ""
-      }`}
+      }${diagramVisible ? "" : " diagram-hidden"}`}
     >
-      {presentationSetupOpen && !presenting ? (
-        <div className="presentation-setup-backdrop" data-testid="presentation-setup">
+      {deleteDialogOpen ? (
+        <div className="board-lifecycle-backdrop">
           <section
-            className="presentation-setup"
+            className="board-lifecycle-dialog"
             role="dialog"
             aria-modal="true"
-            aria-labelledby="presentation-setup-title"
+            aria-labelledby="delete-canvas-title"
           >
-            <div className="presentation-setup-heading">
-              <div>
-                <span className="eyebrow">Presentation workflow</span>
-                <h2 id="presentation-setup-title">Prepare the audience composite</h2>
-              </div>
-              <button
-                type="button"
-                aria-label="Close presentation setup"
-                onClick={() => setPresentationSetupOpen(false)}
-              >
-                Close
-              </button>
-            </div>
+            <span className="eyebrow">Move to Trash</span>
+            <h2 id="delete-canvas-title">Delete “{boardTitle}”?</h2>
             <p>
-              Airboard has enabled the lightboard theme. Choose what sits below the diagram,
-              verify the local composite, then confirm the preview in your meeting before the
-              audience-safe output starts.
+              This canvas can be restored from Trash until your workspace retention policy
+              permanently purges it.
             </p>
-
-            <fieldset className="presentation-source-picker">
-              <legend>1. Choose the background source</legend>
-              <label className={presentationSource === "screen" ? "selected" : undefined}>
-                <input
-                  type="radio"
-                  name="presentation-source"
-                  value="screen"
-                  checked={presentationSource === "screen"}
-                  onChange={() => choosePresentationSource("screen")}
-                />
-                <span>
-                  <strong>Screen or window</strong>
-                  <small>Best for drawing over slides, documents, or another app.</small>
-                </span>
-              </label>
-              <label className={presentationSource === "camera" ? "selected" : undefined}>
-                <input
-                  type="radio"
-                  name="presentation-source"
-                  value="camera"
-                  checked={presentationSource === "camera"}
-                  onChange={() => choosePresentationSource("camera")}
-                />
-                <span>
-                  <strong>Camera</strong>
-                  <small>Place the presenter behind the glowing diagram.</small>
-                </span>
-              </label>
-              <label className={presentationSource === "dark" ? "selected" : undefined}>
-                <input
-                  type="radio"
-                  name="presentation-source"
-                  value="dark"
-                  checked={presentationSource === "dark"}
-                  onChange={() => choosePresentationSource("dark")}
-                />
-                <span>
-                  <strong>Dark canvas</strong>
-                  <small>Show the diagram without a live source below it.</small>
-                </span>
-              </label>
-            </fieldset>
-
-            <div className="presentation-source-action">
-              {presentationSource === "screen" ? (
-                <button
-                  type="button"
-                  className="primary"
-                  data-testid="presentation-choose-screen"
-                  disabled={screenUnderlayStatus === "starting" || screenUnderlayStatus === "active"}
-                  onClick={() => void startScreenUnderlay()}
-                >
-                  {screenUnderlayStatus === "starting"
-                    ? "Choosing screen…"
-                    : screenUnderlayStatus === "active"
-                      ? "Screen/window is live"
-                      : "Choose screen or window"}
-                </button>
-              ) : presentationSource === "camera" ? (
-                <button
-                  type="button"
-                  className="primary"
-                  data-testid="presentation-enable-camera"
-                  disabled={
-                    cameraStatus === "starting" ||
-                    cameraStatus === "tracker_loading" ||
-                    cameraStatus === "active"
-                  }
-                  onClick={() => void startCamera()}
-                >
-                  {cameraStatus === "starting" || cameraStatus === "tracker_loading"
-                    ? "Starting camera…"
-                    : cameraStatus === "active"
-                      ? "Camera is live"
-                      : "Enable camera"}
-                </button>
-              ) : (
-                <span className="pill">No capture permission needed</span>
-              )}
-              {presentationSource === "screen" ? (
-                <small>Global dim {Math.round(scrimOpacity * 100)}% · local contrast plates on</small>
-              ) : null}
-            </div>
-
-            <div className="presentation-verification">
-              <div>
-                <strong>2. Verify this tab’s composite</strong>
-                <ul data-testid="presentation-readiness">
-                  {presentationReadiness.checks.map((check) => (
-                    <li className={check.passed ? "passed" : "waiting"} key={check.id}>
-                      <span aria-hidden="true">{check.passed ? "✓" : "○"}</span>
-                      {check.label}
-                    </li>
-                  ))}
-                </ul>
-              </div>
+            {deleteError ? <p className="board-lifecycle-error" role="alert">{deleteError}</p> : null}
+            <div className="board-lifecycle-actions">
               <button
                 type="button"
-                data-testid="presentation-verify"
-                onClick={() =>
-                  setPresentationVerification(presentationReadiness.ready ? "passed" : "failed")
-                }
+                disabled={deleteStatus === "deleting"}
+                onClick={() => {
+                  setDeleteDialogOpen(false);
+                  setDeleteStatus("idle");
+                  setDeleteError(null);
+                }}
               >
-                Verify composite
+                Cancel
               </button>
-              {presentationVerification === "passed" ? (
-                <span className="presentation-check-result passed" role="status">
-                  Local composite ready
-                </span>
-              ) : presentationVerification === "failed" ? (
-                <span className="presentation-check-result failed" role="status">
-                  Finish the waiting checks above
-                </span>
-              ) : null}
-            </div>
-
-            <label className="presentation-audience-check" htmlFor="presentation-audience-confirmed">
-              <input
-                id="presentation-audience-confirmed"
-                data-testid="presentation-audience-confirmed"
-                type="checkbox"
-                checked={presentationAudienceConfirmed}
-                disabled={presentationVerification !== "passed" || !presentationReadiness.ready}
-                onChange={(event) => setPresentationAudienceConfirmed(event.target.checked)}
-              />
-              <span>
-                <strong>3. I confirmed the meeting’s shared-content preview is receiving this Airboard tab.</strong>
-                <small>
-                  Browsers cannot inspect a remote attendee’s player. This explicit preview check
-                  verifies the meeting is receiving the composite rather than only the source.
-                </small>
-              </span>
-            </label>
-
-            <div className="presentation-setup-footer">
-              <span>Clean output hides every control and pointer. Press Esc to return.</span>
               <button
                 type="button"
-                className="primary"
-                data-testid="presentation-start-clean"
-                disabled={
-                  !presentationReadiness.ready ||
-                  presentationVerification !== "passed" ||
-                  !presentationAudienceConfirmed
-                }
-                onClick={startCleanPresentation}
+                className="danger"
+                disabled={deleteStatus === "deleting"}
+                onClick={() => void confirmDeleteBoard()}
               >
-                Start clean output
+                {deleteStatus === "deleting" ? "Saving and moving…" : "Move to Trash"}
               </button>
             </div>
           </section>
         </div>
       ) : null}
-      <header className="topbar">
-        <div className="brand">
-          <h1>Airboard</h1>
-          <span className="surface-label">{surfaceLabel(surface)}</span>
-        </div>
-        <div className="toolbar">
-          {cameraCaptureAvailable ? (
-            <button
-              className={inputMode === "touchpad" ? undefined : "primary"}
-              type="button"
-              onClick={cameraStatus === "active" ? stopCamera : startCamera}
-              disabled={cameraStatus === "starting" || cameraStatus === "tracker_loading"}
-              aria-label={
-                cameraStatus === "active"
-                  ? "Turn off the camera"
-                  : "Enable hand tracking with the camera"
-              }
-            >
-              {cameraStatus === "starting" || cameraStatus === "tracker_loading"
-                ? "Starting…"
-                : cameraStatus === "active"
-                  ? "Turn off camera"
-                  : "Enable hands"}
-            </button>
-          ) : null}
-          {voiceCaptureAvailable ? (
-            <button
-              className={speechArmed ? "voice-button listening" : "voice-button"}
-              type="button"
-              onClick={startVoiceCommand}
-              disabled={!speechSupported}
-              title={
-                speechSupported
-                  ? speechArmed
-                    ? "Stop realtime Airo listening"
-                    : `Start Airo with ${voiceEngineLabel}${activeVoiceModel ? ` / ${activeVoiceModel}` : ""}`
-                  : "Realtime voice is not configured; type instead"
-              }
-              aria-label={speechArmed ? "Stop Airo listening" : "Start Airo listening"}
-            >
-              {speechArmed ? "Stop Airo" : "Start Airo"}
-            </button>
-          ) : null}
-          {surface === "standalone" && !desktopOverlay ? (
-            <button
-              type="button"
-              className={screenUnderlayStatus === "active" ? "screen-underlay-active" : undefined}
-              data-testid="screen-underlay-toggle"
-              disabled={
-                screenUnderlayStatus === "starting" || recordingState === "recording"
-              }
-              aria-label={
-                screenUnderlayStatus === "active"
-                  ? "Stop using the shared screen behind Airboard"
-                  : "Choose a screen or window to show behind Airboard"
-              }
-              title={
-                screenUnderlayStatus === "active"
-                  ? "Stop the captured screen background"
-                  : "Choose a screen or window; Airboard remains the tab you present"
-              }
-              onClick={() =>
-                screenUnderlayStatus === "active"
-                  ? stopScreenUnderlay("Screen background stopped.")
-                  : void startScreenUnderlay()
-              }
-            >
-              {screenUnderlayStatus === "starting"
-                ? "Choosing screen…"
-                : screenUnderlayStatus === "active"
-                  ? "Stop screen"
-                  : "Use screen"}
-            </button>
-          ) : null}
-          {surface === "standalone" && !desktopOverlay ? (
-            <button
-              type="button"
-              data-testid="present-toggle"
-              title="Choose a source, verify the meeting preview, and start a clean output"
-              onClick={openPresentationSetup}
-            >
-              Present
-            </button>
-          ) : null}
-          <button type="button" onClick={undoLastAction}>
-            Undo
-          </button>
-          <button type="button" onClick={() => setInputPaused((value) => !value)}>
-            {inputPaused ? "Resume" : "Pause"}
-          </button>
-          <button type="button" onClick={exportPng}>
-            Export PNG
-          </button>
-          <button
-            className="danger"
-            type="button"
-            onClick={handleClearClick}
-            aria-label={clearArmed ? "Confirm clearing the board" : "Clear the board"}
-          >
-            {clearArmed ? "Confirm clear?" : "Clear"}
-          </button>
-        </div>
+      <header className={`topbar${standaloneEditor ? " canvas-topbar" : ""}`}>
+        {standaloneEditor ? (
+          <>
+            <div className="canvas-topbar-identity">
+              <Link className="canvas-back-link" href="/app/boards" aria-label="Back to boards">
+                <span aria-hidden="true">←</span>
+              </Link>
+              <span className="canvas-brand-orbit" aria-hidden="true" />
+              <div className="canvas-title-stack">
+                {titleEditing ? (
+                  <input
+                    className="canvas-title-input"
+                    aria-label="Canvas name"
+                    autoFocus
+                    maxLength={240}
+                    value={titleDraft}
+                    onChange={(event) => setTitleDraft(event.target.value)}
+                    onBlur={() => {
+                      if (titleCancelPendingRef.current) {
+                        titleCancelPendingRef.current = false;
+                        return;
+                      }
+                      void commitTitleEdit();
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void commitTitleEdit();
+                      } else if (event.key === "Escape") {
+                        event.preventDefault();
+                        cancelTitleEdit();
+                      }
+                    }}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="canvas-title-button"
+                    aria-label={`Rename canvas ${boardTitle}`}
+                    title="Rename canvas"
+                    disabled={!onRenameBoard}
+                    onClick={beginTitleEdit}
+                  >
+                    {boardTitle}
+                  </button>
+                )}
+                <span
+                  className={`canvas-save-state ${
+                    titleStatus === "saving"
+                      ? "saving"
+                      : titleStatus === "error"
+                        ? "error"
+                        : persistentSaveStatus
+                  }`}
+                  role="status"
+                  aria-live="polite"
+                >
+                  {titleError ??
+                  (titleStatus === "saving"
+                    ? "Renaming…"
+                    : titleStatus === "saved"
+                      ? "Renamed"
+                  : persistentSaveStatus === "saving"
+                    ? "Saving…"
+                    : persistentSaveStatus === "error"
+                      ? "Save interrupted"
+                      : "Saved")}
+                </span>
+              </div>
+            </div>
+            <div className="toolbar canvas-toolbar">
+              <button type="button" className="toolbar-button" onClick={undoLastAction}>
+                <span aria-hidden="true">↶</span>
+                <span>Undo</span>
+              </button>
+              <button
+                type="button"
+                className="toolbar-button"
+                aria-label={
+                  speechArmed
+                    ? "Stop Airo listening"
+                    : speechSupported
+                      ? "Start Airo listening"
+                      : "Airo listening unavailable; focus the typed command"
+                }
+                onClick={() => {
+                  if (speechSupported) {
+                    toggleVoiceInput();
+                  } else {
+                    setCopilotVisibility(true);
+                    requestAnimationFrame(() => intentCommandInputRef.current?.focus());
+                  }
+                }}
+              >
+                <span aria-hidden="true">✦</span>
+                <span>Airo</span>
+              </button>
+              {cameraCaptureAvailable ? (
+                <button
+                  type="button"
+                  className={`toolbar-button${cameraStatus === "active" ? " active" : ""}`}
+                  disabled={cameraStatus === "starting" || cameraStatus === "tracker_loading"}
+                  aria-label={
+                    cameraStatus === "active"
+                      ? "Turn off the camera"
+                      : "Enable hand tracking with the camera"
+                  }
+                  onClick={toggleCameraInput}
+                >
+                  <span aria-hidden="true">◎</span>
+                  <span>Hands</span>
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className={`toolbar-button${screenUnderlayStatus === "active" ? " active" : ""}`}
+                data-testid="screen-underlay-toggle"
+                disabled={screenUnderlayStatus === "starting" || recordingState === "recording"}
+                aria-label={
+                  screenUnderlayStatus === "active"
+                    ? "Stop using the shared screen behind Airboard"
+                    : "Choose a screen or window to show behind Airboard"
+                }
+                onClick={() =>
+                  screenUnderlayStatus === "active"
+                    ? stopScreenUnderlay("Screen background stopped.")
+                    : void startScreenUnderlay()
+                }
+              >
+                <span aria-hidden="true">▣</span>
+                <span>
+                  {screenUnderlayStatus === "starting"
+                    ? "Choosing…"
+                    : screenUnderlayStatus === "active"
+                      ? "Stop screen"
+                      : "Use screen"}
+                  </span>
+              </button>
+              {!diagramVisible ? (
+                <button
+                  type="button"
+                  className="toolbar-button diagram-visibility-button active"
+                  data-testid="diagram-visibility-status"
+                  onClick={() => setDiagramVisibility(true, "menu")}
+                >
+                  <span aria-hidden="true">◉</span>
+                  <span>Show diagram</span>
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className={`toolbar-icon-button${settingsOpen ? " active" : ""}`}
+                aria-label={settingsOpen ? "Close board settings" : "Open board settings"}
+                aria-expanded={settingsOpen}
+                aria-controls="canvas-settings"
+                onClick={() => {
+                  setSettingsOpen((value) => !value);
+                  setMoreMenuOpen(false);
+                }}
+              >
+                <span aria-hidden="true">⚙</span>
+              </button>
+              <div className="canvas-more">
+                <button
+                  type="button"
+                  className={`toolbar-icon-button${moreMenuOpen ? " active" : ""}`}
+                  aria-label="More board actions"
+                  aria-haspopup="menu"
+                  aria-expanded={moreMenuOpen}
+                  onClick={() => {
+                    setMoreMenuOpen((value) => !value);
+                    setSettingsOpen(false);
+                  }}
+                >
+                  <span aria-hidden="true">•••</span>
+                </button>
+                {moreMenuOpen ? (
+                  <div className="canvas-more-menu" role="menu">
+                    {cameraCaptureAvailable ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        disabled={cameraStatus === "starting" || cameraStatus === "tracker_loading"}
+                        onClick={() => {
+                          setMoreMenuOpen(false);
+                          toggleCameraInput();
+                        }}
+                      >
+                        <span aria-hidden="true">◎</span>
+                        {cameraStatus === "active" ? "Disable hands" : "Enable hands"}
+                      </button>
+                    ) : null}
+                    {voiceCaptureAvailable ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        disabled={!speechSupported}
+                        onClick={() => {
+                          setMoreMenuOpen(false);
+                          toggleVoiceInput();
+                        }}
+                      >
+                        <span aria-hidden="true">◉</span>
+                        {speechArmed ? "Stop Airo listening" : "Start Airo listening"}
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      data-testid="diagram-visibility-menu-action"
+                      onClick={() => {
+                        setDiagramVisibility(!diagramVisibleRef.current, "menu");
+                        setMoreMenuOpen(false);
+                      }}
+                    >
+                      <span aria-hidden="true">{diagramVisible ? "◌" : "◉"}</span>
+                      {diagramVisible ? "Hide diagram" : "Show diagram"}
+                    </button>
+                    {onRenameBoard ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setMoreMenuOpen(false);
+                          beginTitleEdit();
+                        }}
+                      >
+                        <span aria-hidden="true">✎</span>
+                        Rename canvas
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setInputPaused((value) => !value);
+                        setMoreMenuOpen(false);
+                      }}
+                    >
+                      <span aria-hidden="true">{inputPaused ? "▶" : "Ⅱ"}</span>
+                      {inputPaused ? "Resume inputs" : "Pause inputs"}
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        exportPng();
+                        setMoreMenuOpen(false);
+                      }}
+                    >
+                      <span aria-hidden="true">⇩</span>
+                      Export PNG
+                    </button>
+                    {onDeleteBoard ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="danger"
+                        onClick={() => {
+                          setMoreMenuOpen(false);
+                          setDeleteStatus("idle");
+                          setDeleteError(null);
+                          setDeleteDialogOpen(true);
+                        }}
+                      >
+                        <span aria-hidden="true">⌫</span>
+                        Move to Trash
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="danger"
+                      onClick={() => {
+                        handleClearClick();
+                        if (clearArmed) setMoreMenuOpen(false);
+                      }}
+                    >
+                      <span aria-hidden="true">⌫</span>
+                      {clearArmed ? "Confirm clear board" : "Clear board…"}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="brand">
+              <h1>Airboard</h1>
+              <span className="surface-label">{surfaceLabel(surface)}</span>
+            </div>
+            <div className="toolbar">
+              {cameraCaptureAvailable ? (
+                <button
+                  className={inputMode === "touchpad" ? undefined : "primary"}
+                  type="button"
+                  onClick={cameraStatus === "active" ? stopCamera : startCamera}
+                  disabled={cameraStatus === "starting" || cameraStatus === "tracker_loading"}
+                  aria-label={
+                    cameraStatus === "active"
+                      ? "Turn off the camera"
+                      : "Enable hand tracking with the camera"
+                  }
+                >
+                  {cameraStatus === "starting" || cameraStatus === "tracker_loading"
+                    ? "Starting…"
+                    : cameraStatus === "active"
+                      ? "Turn off camera"
+                      : "Enable hands"}
+                </button>
+              ) : null}
+              {voiceCaptureAvailable ? (
+                <button
+                  className={speechArmed ? "voice-button listening" : "voice-button"}
+                  type="button"
+                  onClick={startVoiceCommand}
+                  disabled={!speechSupported}
+                  aria-label={speechArmed ? "Stop Airo listening" : "Start Airo listening"}
+                >
+                  {speechArmed ? "Stop Airo" : "Start Airo"}
+                </button>
+              ) : null}
+              <button type="button" onClick={undoLastAction}>Undo</button>
+              <button type="button" onClick={() => setInputPaused((value) => !value)}>
+                {inputPaused ? "Resume" : "Pause"}
+              </button>
+              <button type="button" onClick={exportPng}>Export PNG</button>
+              <button className="danger" type="button" onClick={handleClearClick}>
+                {clearArmed ? "Confirm clear?" : "Clear"}
+              </button>
+            </div>
+          </>
+        )}
       </header>
 
-      <div className="content">
+      <div
+        className={`content${standaloneEditor ? " canvas-workspace" : ""}${
+          standaloneEditor && settingsOpen ? " settings-open" : ""
+        }${standaloneEditor && copilotOpen ? " copilot-open" : ""}`}
+      >
         <section
           className={`board-area${boardTheme === "lightboard" ? " lightboard" : ""}`}
           aria-label="Airboard canvas"
         >
+          {standaloneEditor && inputMode === "gesture" && !broadcastSafe ? (
+            copilotOpen ? (
+              <aside
+                className="canvas-copilot"
+                data-testid="canvas-copilot"
+                aria-label="Airo copilot"
+              >
+                <header className="canvas-copilot-header">
+                  <div>
+                    <span className="canvas-copilot-orbit" aria-hidden="true">✦</span>
+                    <span>
+                      <strong>Airo</strong>
+                      <small>{speechArmed ? "Listening continuously" : "Voice ready when started"}</small>
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="Hide Airo copilot"
+                    onClick={() => setCopilotVisibility(false)}
+                  >
+                    ›
+                  </button>
+                </header>
+
+                <section className="canvas-copilot-heard" data-testid="copilot-transcript">
+                  <span>What I heard</span>
+                  <p>
+                    {speechHeardText
+                      ? `“${truncateSpeechTranscript(speechHeardText, 180)}”`
+                      : speechArmed
+                        ? "Listening for your next command…"
+                        : "Start Airo, then raise one open palm and speak."}
+                  </p>
+                  <small className={`copilot-status ${speechRecognitionStatus}`}>
+                    {speechRecognitionLabel(speechRecognitionStatus)}
+                  </small>
+                </section>
+
+                <section className="canvas-copilot-progress" aria-live="polite">
+                  <div className="canvas-copilot-section-title">
+                    <span>Activity</span>
+                    <small>What Airo is doing</small>
+                  </div>
+                  <ol data-testid="copilot-activity">
+                    {copilotActivity.map((entry) => (
+                      <li key={entry.id} className={entry.tone}>
+                        <span className="copilot-activity-source">{entry.source}</span>
+                        <div>
+                          <strong>{entry.title}</strong>
+                          <p>{entry.detail}</p>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                </section>
+
+                <section className="canvas-copilot-current">
+                  <span>Current status</span>
+                  <p
+                    id="canvas-command-feedback"
+                    className="intent-feedback"
+                  >
+                    {commandFeedback}
+                  </p>
+                </section>
+
+                <form
+                  className="canvas-copilot-composer"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    if (speechRecognitionStatus !== "interpreting") {
+                      runIntentCommand(intentCommandText);
+                    }
+                  }}
+                >
+                  <label className="sr-only" htmlFor="canvas-command-input">
+                    Type a board command
+                  </label>
+                  <textarea
+                    id="canvas-command-input"
+                    ref={intentCommandInputRef}
+                    data-testid="intent-command-input"
+                    value={intentCommandText}
+                    rows={2}
+                    onChange={(event) => {
+                      semanticIntentRequestIdRef.current += 1;
+                      if (speechRecognitionStatus === "interpreting") {
+                        setSpeechRecognitionStatus(speechSessionRef.current ? "waiting" : "idle");
+                      }
+                      setIntentCommandText(event.target.value);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !event.shiftKey) {
+                        event.preventDefault();
+                        if (
+                          intentCommandText.trim() &&
+                          speechRecognitionStatus !== "interpreting"
+                        ) {
+                          runIntentCommand(intentCommandText);
+                        }
+                      }
+                    }}
+                    placeholder="Type only when you want to…"
+                    aria-describedby="canvas-command-feedback"
+                  />
+                  <button
+                    className="primary"
+                    data-testid="intent-primary-action"
+                    type="submit"
+                    aria-label="Send typed command"
+                    disabled={!intentCommandText.trim() || speechRecognitionStatus === "interpreting"}
+                  >
+                    {speechRecognitionStatus === "interpreting" ? "…" : "↑"}
+                  </button>
+                </form>
+                <footer className="canvas-copilot-hint">
+                  <span><strong>Undo:</strong> show one open palm and swipe left</span>
+                  <span>Shift+Enter for a new line</span>
+                </footer>
+              </aside>
+            ) : (
+              <button
+                type="button"
+                className="canvas-copilot-toggle"
+                data-testid="canvas-copilot-toggle"
+                aria-label="Open Airo copilot"
+                onClick={() => setCopilotVisibility(true)}
+              >
+                <span aria-hidden="true">✦</span>
+                <span>Airo</span>
+                {speechRecognitionStatus === "hearing" ||
+                speechRecognitionStatus === "interpreting" ? (
+                  <i aria-hidden="true" />
+                ) : null}
+              </button>
+            )
+          ) : null}
+          {standaloneEditor && inputMode === "gesture" && !broadcastSafe ? (
+            <div className="canvas-zoom-controls" aria-label="Canvas zoom controls">
+              <button
+                type="button"
+                aria-label="Zoom out"
+                onClick={() => {
+                  const canvas = canvasRef.current;
+                  if (!canvas) return;
+                  applyViewport(
+                    zoomViewport(
+                      boardViewportRef.current,
+                      0.8,
+                      { x: canvas.clientWidth / 2, y: canvas.clientHeight / 2 },
+                      currentViewportLimits(),
+                    ),
+                  );
+                }}
+              >
+                −
+              </button>
+              <button
+                type="button"
+                className="canvas-zoom-value"
+                aria-label="Reset canvas zoom"
+                onClick={() => applyViewport({ ...IDENTITY_VIEWPORT })}
+              >
+                {Math.round(viewportScale * 100)}%
+              </button>
+              <button
+                type="button"
+                aria-label="Zoom in"
+                onClick={() => {
+                  const canvas = canvasRef.current;
+                  if (!canvas) return;
+                  applyViewport(
+                    zoomViewport(
+                      boardViewportRef.current,
+                      1.25,
+                      { x: canvas.clientWidth / 2, y: canvas.clientHeight / 2 },
+                      currentViewportLimits(),
+                    ),
+                  );
+                }}
+              >
+                +
+              </button>
+            </div>
+          ) : null}
           {boardTheme === "lightboard" &&
           surface === "standalone" &&
           !desktopOverlay &&
@@ -6340,15 +7230,16 @@ export function AirboardPrototype({
                     id="desktop-scrim-opacity"
                     data-testid="desktop-scrim-opacity"
                     type="range"
-                    min={0}
+                    min={MIN_CAMERA_PRESENTATION_SCRIM}
                     max={1}
                     step={0.05}
                     value={scrimOpacity}
                     onChange={(event) => {
-                      const next = Number(event.target.value);
+                      const next = cameraCanvasScrim(Number(event.target.value));
+                      scrimOpacityRef.current = next;
                       setScrimOpacity(next);
                       try {
-                        window.localStorage.setItem("airboard.scrim.v1", String(next));
+                        window.localStorage.setItem("airboard.scrim.camera.v1", String(next));
                       } catch {
                         // Preference persistence is best-effort.
                       }
@@ -6495,7 +7386,6 @@ export function AirboardPrototype({
           ) : null}
           {cameraCaptureAvailable &&
           onboardingVisible &&
-          !presenting &&
           !desktopOverlay &&
           inputMode === "gesture" ? (
             <div className="onboarding-overlay" role="dialog" aria-label="How to use Airboard">
@@ -6511,16 +7401,21 @@ export function AirboardPrototype({
                     “rename to Payments”, “delete”, “connect to the database.”
                   </li>
                   <li>
-                    <strong>Open hand points, closed hand grabs</strong>; reopen to drop.
-                    Drag shapes from the catalogs on the left.
+                    <strong>Close your hand over an object to move it</strong>; reopen to drop.
+                    To resize, keep three fingers open and precision-pinch a corner with your
+                    thumb and index finger.
                   </li>
                   <li>
                     <strong>Two open palms</strong> move the canvas; <strong>two closed
                     hands</strong> spread apart or together to zoom.
                   </li>
                   <li>
-                    Everything applies instantly — <strong>every change shows an Undo
-                    toast</strong>, and “Airo, …” always works as a fallback.
+                    <strong>One open palm swiped left</strong> undoes the last change.
+                    Release the palm before swiping again.
+                  </li>
+                  <li>
+                    Everything applies instantly. Use the toolbar, Cmd/Ctrl+Z, or an
+                    open-palm swipe to undo; the Airo panel shows each board action.
                   </li>
                 </ul>
                 <button
@@ -6538,28 +7433,6 @@ export function AirboardPrototype({
                   Got it — let me try
                 </button>
               </div>
-            </div>
-          ) : null}
-          {actionToast && !broadcastSafe ? (
-            <div className="action-toast" role="status" data-testid="action-toast">
-              <span>{actionToast.message}</span>
-              <button
-                type="button"
-                onClick={() => {
-                  undoLastAction();
-                  setActionToast(null);
-                }}
-              >
-                Undo
-              </button>
-              <button
-                type="button"
-                className="action-toast-dismiss"
-                aria-label="Dismiss"
-                onClick={() => setActionToast(null)}
-              >
-                ×
-              </button>
             </div>
           ) : null}
           <canvas
@@ -6604,18 +7477,6 @@ export function AirboardPrototype({
             }}
             onWheel={handleWheel}
           />
-          {surface === "standalone" &&
-          boardTheme === "lightboard" &&
-          cameraUnderlayEnabled &&
-          screenUnderlayStatus !== "active" &&
-          personOcclusionEnabled ? (
-            <canvas
-              ref={personForegroundCanvasRef}
-              className="lightboard-person-occlusion"
-              data-testid="person-occlusion-layer"
-              aria-hidden="true"
-            />
-          ) : null}
           {debugVisible && !broadcastSafe && gestureResult?.rawCursorPoint ? (
             <span
               className="debug-point raw"
@@ -6712,8 +7573,27 @@ export function AirboardPrototype({
           ) : null}
         </section>
 
-        <aside className="sidebar">
-          {inputMode === "gesture" ? (
+        {!standaloneEditor || settingsOpen ? (
+        <aside
+          id={standaloneEditor ? "canvas-settings" : undefined}
+          className={`sidebar${standaloneEditor ? " canvas-inspector open" : ""}`}
+        >
+          {standaloneEditor ? (
+            <div className="canvas-inspector-heading">
+              <div>
+                <span>Board</span>
+                <h2>Settings</h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close board settings"
+                onClick={() => setSettingsOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+          ) : null}
+          {inputMode === "gesture" && !standaloneEditor ? (
             <section className="section">
               <h2>Command</h2>
               <form
@@ -6767,7 +7647,7 @@ export function AirboardPrototype({
               ) : null}
             </section>
           ) : null}
-          <section className="section">
+          <section className="section sidebar-diagnostics">
             <h2>Status</h2>
             <div className="status-grid">
               {cameraCaptureAvailable ? (
@@ -6849,7 +7729,7 @@ export function AirboardPrototype({
             ) : null}
           </section>
 
-          <section className="section">
+          <section className="section sidebar-diagnostics">
             <h2>Board</h2>
             <div className="status-grid">
               <span>Visible strokes</span>
@@ -6861,6 +7741,68 @@ export function AirboardPrototype({
             </div>
           </section>
 
+          {standaloneEditor ? (
+            <section className="section media-permission-section">
+              <div className="section-heading-inline">
+                <div>
+                  <h2>Camera & microphone</h2>
+                  <p>Granted once for this site, then reused on every Airboard.</p>
+                </div>
+              </div>
+              <div className="media-permission-row">
+                <span className="media-permission-icon" aria-hidden="true">◉</span>
+                <div>
+                  <strong>Microphone</strong>
+                  <small>Airo voice commands</small>
+                </div>
+                <span className={`permission-state ${microphonePermission}`}>
+                  {mediaPermissionLabel(microphonePermission)}
+                </span>
+                <button
+                  type="button"
+                  disabled={!speechSupported}
+                  onClick={toggleVoiceInput}
+                >
+                  {speechArmed ? "Turn off" : microphonePermission === "granted" ? "Use" : "Allow"}
+                </button>
+              </div>
+              <div className="media-permission-row">
+                <span className="media-permission-icon" aria-hidden="true">◎</span>
+                <div>
+                  <strong>Camera</strong>
+                  <small>Hands and presenter view</small>
+                </div>
+                <span className={`permission-state ${cameraPermission}`}>
+                  {mediaPermissionLabel(cameraPermission)}
+                </span>
+                <button
+                  type="button"
+                  disabled={cameraStatus === "starting" || cameraStatus === "tracker_loading"}
+                  onClick={toggleCameraInput}
+                >
+                  {cameraStatus === "starting" || cameraStatus === "tracker_loading"
+                    ? "Starting…"
+                    : cameraStatus === "active"
+                      ? "Turn off"
+                      : cameraPermission === "granted"
+                        ? "Use"
+                        : "Allow"}
+                </button>
+              </div>
+              <p className="permission-note">
+                Choose <strong>Allow while visiting the site</strong> in the browser prompt.
+                Airboard will then resume an input you previously enabled without asking again.
+                Screen/window sharing must still be chosen for each capture session.
+              </p>
+              {microphonePermission === "denied" || cameraPermission === "denied" ? (
+                <p className="permission-warning">
+                  A blocked permission can only be changed from the site controls beside the
+                  browser address.
+                </p>
+              ) : null}
+            </section>
+          ) : null}
+
           <section className="section">
             <h2>Appearance</h2>
             <label className="check-row" htmlFor="lightboard-theme">
@@ -6868,8 +7810,12 @@ export function AirboardPrototype({
                 id="lightboard-theme"
                 type="checkbox"
                 checked={boardTheme === "lightboard"}
+                disabled={cameraCanvasLocked}
                 onChange={(event) => {
                   const nextTheme = event.target.checked ? "lightboard" : "classic";
+                  if (nextTheme === "classic" && cameraCanvasLocked) {
+                    return;
+                  }
                   if (nextTheme === "classic" && screenUnderlayStatus === "active") {
                     stopScreenUnderlay("Screen background stopped because Lightboard was turned off.");
                   }
@@ -6881,7 +7827,10 @@ export function AirboardPrototype({
                   }
                 }}
               />
-              <span>Lightboard (neon) theme</span>
+              <span>
+                Lightboard (neon) theme
+                {cameraCanvasLocked ? " · required while camera overlay is on" : ""}
+              </span>
             </label>
             {surface === "meet-main-stage" && cameraOverlay ? (
               <>
@@ -6894,14 +7843,7 @@ export function AirboardPrototype({
                       const enabled = event.target.checked;
                       setCameraOverlayEnabled(enabled);
                       if (enabled) {
-                        if (boardTheme !== "lightboard") {
-                          setBoardTheme("lightboard");
-                          try {
-                            window.localStorage.setItem("airboard.theme.v1", "lightboard");
-                          } catch {
-                            // Preference persistence is best-effort.
-                          }
-                        }
+                        enforceCameraCanvas();
                         cameraOverlay.start();
                       } else {
                         cameraOverlay.stop();
@@ -6972,6 +7914,7 @@ export function AirboardPrototype({
                       id="camera-underlay"
                       type="checkbox"
                       checked={cameraUnderlayEnabled}
+                      disabled={cameraStatus === "active"}
                       onChange={(event) => {
                         setCameraUnderlayEnabled(event.target.checked);
                         try {
@@ -6984,48 +7927,8 @@ export function AirboardPrototype({
                         }
                       }}
                     />
-                    <span>Camera behind board when no screen is selected</span>
+                    <span>Camera behind the dark canvas when no screen is selected</span>
                   </label>
-                ) : null}
-                {cameraCaptureAvailable &&
-                (surface === "standalone" || surface === "meet-main-stage") ? (
-                  <>
-                    <label className="check-row" htmlFor="person-occlusion">
-                      <input
-                        id="person-occlusion"
-                        data-testid="person-occlusion-toggle"
-                        type="checkbox"
-                        checked={personOcclusionEnabled}
-                        onChange={(event) => {
-                          setPersonOcclusionEnabled(event.target.checked);
-                          try {
-                            window.localStorage.setItem(
-                              "airboard.person-occlusion.v1",
-                              event.target.checked ? "on" : "off",
-                            );
-                          } catch {
-                            // Preference persistence is best-effort.
-                          }
-                        }}
-                      />
-                      <span>Keep the presenter in front of diagram ink</span>
-                    </label>
-                    {personOcclusionEnabled ? (
-                      <p className="hint" data-testid="person-occlusion-status">
-                        {personOcclusionStatus === "active"
-                          ? "Person depth is active — diagram ink passes behind the presenter."
-                          : personOcclusionStatus === "loading"
-                            ? "Loading the on-device person depth model…"
-                            : personOcclusionStatus === "ready"
-                              ? "Person depth is ready; waiting for the next camera frame."
-                              : personOcclusionStatus === "error"
-                                ? "Person depth could not start. The diagram remains fully in front."
-                                : cameraStatus === "active"
-                                  ? "Turn on the camera background or camera overlay to activate person depth."
-                                  : "Enable hands to activate on-device person depth with the camera."}
-                      </p>
-                    ) : null}
-                  </>
                 ) : null}
                 {surface === "standalone" ? (
                   <label className="check-row" htmlFor="local-contrast-plates">
@@ -7055,15 +7958,25 @@ export function AirboardPrototype({
                     <input
                       id="scrim-opacity"
                       type="range"
-                      min={0}
+                      min={screenUnderlayStatus === "active" ? 0 : MIN_CAMERA_PRESENTATION_SCRIM}
                       max={1}
                       step={0.05}
                       value={scrimOpacity}
                       onChange={(event) => {
-                        const next = Number(event.target.value);
+                        const requested = Number(event.target.value);
+                        const next =
+                          screenUnderlayStatus === "active"
+                            ? screenFriendlyScrim(requested)
+                            : cameraCanvasScrim(requested);
+                        scrimOpacityRef.current = next;
                         setScrimOpacity(next);
                         try {
-                          window.localStorage.setItem("airboard.scrim.v1", String(next));
+                          window.localStorage.setItem(
+                            screenUnderlayStatus === "active"
+                              ? "airboard.scrim.screen.v1"
+                              : "airboard.scrim.camera.v1",
+                            String(next),
+                          );
                         } catch {
                           // Preference persistence is best-effort.
                         }
@@ -7128,6 +8041,9 @@ export function AirboardPrototype({
                       cancelPendingIntent("Switched input mode; the command preview was cancelled.");
                     }
                     hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
+                    hybridResizeGestureControllerRef.current?.reset({
+                      requirePinchRelease: true,
+                    });
                     if (activeStrokeIdRef.current) {
                       commitStroke(activeStrokeIdRef.current, { discard: true });
                       activeStrokeIdRef.current = null;
@@ -7249,8 +8165,8 @@ export function AirboardPrototype({
                     <>
                     <p className="hint">
                       {voiceCaptureAvailable
-                        ? "Start Airo once. Then raise a flat palm and speak (no wake word), hold an element still to voice-edit it, or say “Airo, …” hands-free. Open hand points, closed hand grabs; reopen to drop. Shift-click remains the deterministic multi-select fallback."
-                        : "Click Enable hands to gesture with the meeting camera through the Airboard extension. Open hand points, closed hand grabs; reopen to drop. Voice is not available on this surface yet — pair gestures with typed commands. Shift-click remains the deterministic multi-select fallback."}
+                        ? "Start Airo once. Then raise a flat palm and speak (no wake word), hold an element still to voice-edit it, or say “Airo, …” hands-free. Close your hand over an object to move it; precision-pinch a corner handle to resize. Shift-click remains the deterministic multi-select fallback."
+                        : "Click Enable hands to gesture with the meeting camera through the Airboard extension. Close your hand over an object to move it; precision-pinch a corner handle to resize. Voice is not available on this surface yet — pair gestures with typed commands. Shift-click remains the deterministic multi-select fallback."}
                     </p>
                     <details className="advanced-settings">
                       <summary>Advanced settings</summary>
@@ -7426,8 +8342,8 @@ export function AirboardPrototype({
             ) : inputMode === "gesture" ? (
               <p className="hint">
                 {voiceCaptureAvailable
-                  ? "Start Airo once, then talk to the board without a wake word: raise a flat, open palm (push-to-talk) and speak, or grab an element and hold it still to edit it by voice — “rename to Payments”, “delete”, “connect to the database”. Commands apply instantly; every change shows an Undo toast. Camera off? Select an object and hold V for the same scoped mic, or say “Airo, …”. Drag shapes from the catalogs on the left. Shift-click multi-selects; Cmd/Ctrl+Z undoes."
-                  : "Enable hands, then point with an open hand and grab with a closed hand; reopen to drop. Commands apply instantly; every change shows an Undo toast. Voice is not available on this surface yet — type commands in the Command field. Drag shapes from the catalogs on the left. Shift-click multi-selects; Cmd/Ctrl+Z undoes."}
+                  ? "Start Airo once, then talk to the board without a wake word: raise a flat, open palm (push-to-talk) and speak, or grab an element and hold it still to edit it by voice — “rename to Payments”, “delete”, “connect to the database”. Commands apply instantly; use the toolbar, Cmd/Ctrl+Z, or an open-palm swipe left to undo. Camera off? Select an object and hold V for the same scoped mic, or say “Airo, …”. Drag shapes from the catalogs on the left. Shift-click multi-selects."
+                  : "Enable hands, then point with an open hand and grab with a closed hand; reopen to drop. Commands apply instantly; use the toolbar, Cmd/Ctrl+Z, or an open-palm swipe left to undo. Voice is not available on this surface yet — type commands in the Command field. Drag shapes from the catalogs on the left. Shift-click multi-selects."}
               </p>
             ) : (
               <p className="hint">Mouse or trackpad draws. Hold Shift or Alt while dragging to erase.</p>
@@ -7437,6 +8353,7 @@ export function AirboardPrototype({
             ) : null}
           </section>
         </aside>
+        ) : null}
       </div>
     </main>
   );
@@ -7625,6 +8542,26 @@ function truncateSpeechTranscript(transcript: string, maxLength = 64): string {
   return `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
 }
 
+/**
+ * Speech recognizers commonly render “add a database, uh, later that is
+ * connected to service” as one sentence. Convert that safe, explicit pattern
+ * into the same atomic create+connect plan the semantic planner would produce,
+ * so it never falls back to a manual Send click when the semantic provider is
+ * unavailable.
+ */
+function expandSpokenCreateAndConnect(text: string): [string, string] | null {
+  const match =
+    /^(?:add|create|insert|place|make)\s+(?:(?:a|an|the)\s+)?(process|service|database|queue|user|api|decision|note|component|circle|rectangle|document)\b[\s,]*(?:(?:uh|um|er|erm|like|then|later|layer)[\s,]*)*(?:that\s+)?(?:is\s+)?connected\s+to\s+(?:the\s+)?(.+?)\s*[.!?]?$/i.exec(
+      text.trim(),
+    );
+  const nodeType = match?.[1]?.trim();
+  const target = match?.[2]?.trim().replace(/[.!?]+$/, "");
+  if (!nodeType || !target) {
+    return null;
+  }
+  return [`add a ${nodeType} here`, `connect this to ${target}`];
+}
+
 function speechRecognitionLabel(status: SpeechRecognitionStatus): string {
   switch (status) {
     case "wake-detected":
@@ -7778,9 +8715,11 @@ function getHybridHandSignal(
   mapping: CanvasMapping,
 ): {
   point: { x: number; y: number };
+  resizePoint: { x: number; y: number } | null;
   trackingConfidence: number;
   grabStrength: number;
   grabConfidence: number;
+  resizePinchStrength: number;
 } | null {
   const hand =
     hands.find((candidate) => candidate.handedness === preferredHand && candidate.landmarks.length >= 21) ??
@@ -7800,6 +8739,8 @@ function getHybridHandSignal(
   }
 
   const grab = estimateGrabStrength(hand.landmarks);
+  const thumbTip = hand.landmarks[4];
+  const indexTip = hand.landmarks[8];
   const fitted = mapLandmarkToFittedCanvas(
     {
       x: (indexMcp.x + middleMcp.x + ringMcp.x + pinkyMcp.x) / 4,
@@ -7807,6 +8748,16 @@ function getHybridHandSignal(
     },
     mapping,
   );
+  const fittedResizePoint =
+    thumbTip && indexTip
+      ? mapLandmarkToFittedCanvas(
+          {
+            x: (thumbTip.x + indexTip.x) / 2,
+            y: (thumbTip.y + indexTip.y) / 2,
+          },
+          mapping,
+        )
+      : null;
   return {
     point: {
       // The hybrid controller owns selfie mirroring and its compact control
@@ -7814,12 +8765,19 @@ function getHybridHandSignal(
       x: fitted.x / mapping.canvasWidth,
       y: fitted.y / mapping.canvasHeight,
     },
+    resizePoint: fittedResizePoint
+      ? {
+          x: fittedResizePoint.x / mapping.canvasWidth,
+          y: fittedResizePoint.y / mapping.canvasHeight,
+        }
+      : null,
     trackingConfidence: hand.handednessScore,
     // Report the real strength; the controller decides how to treat a
     // low-confidence frame (hold an active grab vs. allow release when idle),
     // because only it knows whether a grab is in progress.
     grabStrength: grab.strength,
     grabConfidence: grab.confidence,
+    resizePinchStrength: estimatePrecisionResizePinch(hand.landmarks, grab),
   };
 }
 
@@ -7877,107 +8835,6 @@ function getSelectableAnnotationIds(state: BoardState): string[] {
             : 1,
     )
     .map((stroke) => stroke.id);
-}
-
-const HANDLE_TARGET_PREFIX = "handle:";
-
-function parseHandleTargetId(
-  targetId: string,
-): { strokeId: string; handle: AnnotationResizeHandle } | null {
-  if (!targetId.startsWith(HANDLE_TARGET_PREFIX)) {
-    return null;
-  }
-  const separator = targetId.lastIndexOf(":");
-  if (separator <= HANDLE_TARGET_PREFIX.length - 1) {
-    return null;
-  }
-  return {
-    strokeId: targetId.slice(HANDLE_TARGET_PREFIX.length, separator),
-    handle: targetId.slice(separator + 1) as AnnotationResizeHandle,
-  };
-}
-
-function buildGestureTargets(
-  state: BoardState,
-  selectedStrokeId: string | null,
-): GestureTarget[] {
-  const targets: GestureTarget[] = [];
-
-  // Resize handles of the (single) selected object outrank every other
-  // target, mirroring the pointer path where handles win inside the shape.
-  const selected = selectedStrokeId ? state.strokes[selectedStrokeId] : undefined;
-  const selectedAnnotation =
-    selected?.status === "committed" ? selected.annotation : undefined;
-  if (selected && selectedAnnotation) {
-    const handleAnchors: { handle: AnnotationResizeHandle; x: number; y: number }[] = [];
-    if (selectedAnnotation.bounds) {
-      const { x, y, width, height } = selectedAnnotation.bounds;
-      handleAnchors.push(
-        { handle: "nw", x, y },
-        { handle: "ne", x: x + width, y },
-        { handle: "sw", x, y: y + height },
-        { handle: "se", x: x + width, y: y + height },
-      );
-    } else if (selectedAnnotation.start && selectedAnnotation.end) {
-      handleAnchors.push(
-        { handle: "start", x: selectedAnnotation.start.x, y: selectedAnnotation.start.y },
-        { handle: "end", x: selectedAnnotation.end.x, y: selectedAnnotation.end.y },
-      );
-    }
-    for (const anchor of handleAnchors) {
-      targets.push({
-        id: `${HANDLE_TARGET_PREFIX}${selected.id}:${anchor.handle}`,
-        bounds: { x: anchor.x - 10, y: anchor.y - 10, width: 20, height: 20 },
-        priority: 3,
-        capturePaddingPx: 8,
-        releasePaddingPx: 14,
-      });
-    }
-  }
-  for (const stroke of Object.values(state.strokes)) {
-    const annotation = stroke.annotation;
-    if (stroke.status !== "committed" || !annotation) {
-      continue;
-    }
-
-    if (annotation.bounds) {
-      targets.push({
-        id: stroke.id,
-        bounds: annotation.bounds,
-        priority: annotation.type === "flow_node" || annotation.type === "sticky_note" ? 2 : 1,
-        capturePaddingPx: 12,
-        releasePaddingPx: 18,
-      });
-      continue;
-    }
-
-    if (annotation.start && annotation.end) {
-      // A connector is grabbable along its ENTIRE routed elbow, not just the
-      // straight-line midpoint (which often sits in empty space or under a
-      // node). One inflated target per route segment; all share the stroke id
-      // so acquisition is seamless across corners. Priority stays below nodes
-      // so a line hugging a shape never steals the shape's grab.
-      const route = getConnectorRoutePoints(annotation);
-      const inflate = 10;
-      for (let index = 1; index < route.length; index += 1) {
-        const from = route[index - 1]!;
-        const to = route[index]!;
-        targets.push({
-          id: stroke.id,
-          bounds: {
-            x: Math.min(from.x, to.x) - inflate,
-            y: Math.min(from.y, to.y) - inflate,
-            width: Math.abs(to.x - from.x) + inflate * 2,
-            height: Math.abs(to.y - from.y) + inflate * 2,
-          },
-          priority: annotation.type === "connector" ? 0.9 : 0.8,
-          capturePaddingPx: 10,
-          releasePaddingPx: 16,
-        });
-      }
-    }
-  }
-  return targets;
 }
 
 function formatRecordingClock(totalSeconds: number): string {

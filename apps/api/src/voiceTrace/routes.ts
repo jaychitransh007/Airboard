@@ -4,7 +4,7 @@ import { VoiceTraceBuffer } from "./buffer";
 import { clientKey, createRateLimiter } from "../security";
 import { computeVoiceMetrics } from "./metrics";
 import { parseVoiceTraceAppend, parseVoiceTurnId } from "./protocol";
-import { redactDiagnosticData } from "./redaction";
+import { redactDiagnosticData, redactVoiceTraceContent } from "./redaction";
 import type { AuthService } from "../auth";
 import { configuredApiTokenAllowed } from "../security";
 
@@ -44,7 +44,11 @@ export function registerVoiceTraceRoutes(
       const oldest = ownersByTurn.keys().next().value as string | undefined;
       if (oldest) ownersByTurn.delete(oldest);
     }
-    const event = buffer.append(parsed.value);
+    const sanitizedData = redactVoiceTraceContent(parsed.value.data);
+    const event = buffer.append({
+      ...parsed.value,
+      ...(sanitizedData ? { data: sanitizedData } : {}),
+    });
     if (context && auth?.client) {
       const { error } = await auth.client.from("voice_trace_events").insert({
         organization_id: context.organizationId,

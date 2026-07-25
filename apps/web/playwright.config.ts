@@ -11,6 +11,15 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   use: {
     baseURL: "http://127.0.0.1:3100",
+    storageState: {
+      cookies: [],
+      origins: [
+        {
+          origin: "http://127.0.0.1:3100",
+          localStorage: [{ name: "airboard.cookie-choice.v1", value: "necessary" }],
+        },
+      ],
+    },
   },
   webServer: [
     {
@@ -27,6 +36,10 @@ export default defineConfig({
         PORT: "4600",
         HOST: "127.0.0.1",
         AIRBOARD_ALLOWED_ORIGINS: "http://127.0.0.1:3100,http://localhost:3100",
+        // A parallel browser suite legitimately creates more sessions than
+        // the customer-facing abuse limit. Keep the runtime limit intact and
+        // raise it only inside this isolated loopback test process.
+        AIRBOARD_RATE_LIMIT_SESSION_START_PER_MINUTE: "10000",
       },
     },
     {

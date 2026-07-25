@@ -15,8 +15,8 @@ main-stage canvas, screen share, or second audience surface is required.
    processing confirmation. Raw media is processed live and is not stored by
    the extension.
 4. On a meeting-code URL, the content script mounts a private 1280×720 engine.
-   Overlay, neon theme, gesture-camera, Airo microphone, and person occlusion
-   default to enabled, subject to user and organization policy.
+   Overlay, neon theme, gesture-camera, and Airo microphone default to enabled,
+   subject to user and organization policy.
 5. The main-world compositor upgrades an already-running Meet sender in place,
    so first setup does not require the user to restart their camera.
 6. The popup and Airboard account show independent checks for installation,
@@ -34,9 +34,8 @@ again.
 - Content scripts run only on `https://meet.google.com/*`.
 - Frames and PCM chunks move only between Meet, the extension-owned relay, and
   the allowlisted Airboard renderer. The extension stores no raw media.
-- The renderer performs on-device hand tracking and person segmentation. Airo
-  sends microphone audio to the configured transcription provider only while
-  Airo is enabled.
+- The renderer performs on-device hand tracking. Airo sends microphone audio
+  to the configured transcription provider only while Airo is enabled.
 - Chrome's camera and microphone indicators remain visible. Leaving the
   meeting, disabling an input, or disabling Airboard releases its capture.
 - The website can read sanitized readiness state through
