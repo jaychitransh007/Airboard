@@ -60,6 +60,10 @@ import {
 } from "./boardViewport";
 import { CanvasNavigationTracker } from "./canvasNavigationTracker";
 import {
+  chooseDockGestureTarget,
+  DockGestureActivationTracker,
+} from "./dockGestureActivation";
+import {
   recordingFileName,
   startLightboardRecording,
   type LightboardRecorderHandle,
@@ -91,6 +95,7 @@ import { PalmGateTracker } from "./palmGateTracker";
 import {
   UndoGestureTracker,
   type UndoGestureFrame,
+  type UndoGestureEvent,
 } from "./undoGestureTracker";
 import {
   SnapGestureTracker,
@@ -230,7 +235,14 @@ type HandControlDiagnostics = {
   requiresPinchRelease: boolean;
 };
 
-type ObjectGestureState = "hover" | "grab" | "placing" | "no target" | "erase";
+type ObjectGestureState =
+  | "hover"
+  | "grab"
+  | "placing"
+  | "resize ready"
+  | "resizing"
+  | "no target"
+  | "erase";
 
 type SpeechRecognitionStatus =
   | "idle"
@@ -614,6 +626,12 @@ export function AirboardPrototype({
   const hybridResizeGestureControllerRef = useRef<HybridGestureController | null>(null);
   const hybridGestureCanvasSizeRef = useRef({ width: 0, height: 0, minTrackingConfidence: 0 });
   const hybridPinchClosedRef = useRef(false);
+  // One dock action per physical hand-close. This lets a user close just
+  // before reaching a tool without repeatedly activating adjacent controls.
+  const dockGestureActivationTrackerRef = useRef<DockGestureActivationTracker | null>(null);
+  if (dockGestureActivationTrackerRef.current === null) {
+    dockGestureActivationTrackerRef.current = new DockGestureActivationTracker();
+  }
   const speechSessionRef = useRef<ActiveSpeechSession | null>(null);
   const selectedSpeechModelRef = useRef("");
   const selectedSemanticIntentModelRef = useRef("");
@@ -658,9 +676,6 @@ export function AirboardPrototype({
     holdToEditTrackerRef.current = new HoldToEditTracker();
   }
   const scopedKeyActiveRef = useRef(false);
-  // Gesture lasso: close the hand on EMPTY canvas (Select tool) and drag a
-  // selection rectangle. Board-space origin while active.
-  const lassoOriginRef = useRef<{ x: number; y: number } | null>(null);
   const boardRef = useRef<BoardState>(
     initialBoardState ?? createInitialBoardState(persistentBoardId ?? BOARD_SESSION_ID),
   );
@@ -2437,47 +2452,64 @@ export function AirboardPrototype({
   }, [selectedAnnotationId]);
 
   /**
-   * Screen-space hit test of the air cursor against the catalog dock. A pinch
-   * edge over a dock button activates it (open category / arm tool); mere
-   * hovering highlights. Returns true when the dock consumed the pinch so the
-   * caller must not also start a board grab.
+   * Screen-space hit test of the air cursor against the catalog dock. The
+   * first dock target reached during one closing/closed-hand cycle activates,
+   * even if the hand closed just before entering the button. A padded,
+   * nearest-center target makes camera selection practical without allowing a
+   * held hand to trigger several adjacent tools.
    */
   const handleDockGesture = useCallback(
-    (screenPoint: { x: number; y: number }, pinchJustClosed: boolean): boolean => {
+    (
+      screenPoint: { x: number; y: number },
+      closeIntentActive: boolean,
+    ): "hover" | "activated" | null => {
       const dock = dockRef.current;
       const canvasRect = canvasRef.current?.getBoundingClientRect();
       if (!dock || !canvasRect) {
-        return false;
+        return null;
       }
-      let hovered: { id: string; element: HTMLButtonElement } | null = null;
+      const x = screenPoint.x + canvasRect.left;
+      const y = screenPoint.y + canvasRect.top;
+      const hitPadding = 10;
+      const candidates: {
+        id: string;
+        element: HTMLButtonElement;
+        bounds: { left: number; top: number; width: number; height: number };
+        disabled: boolean;
+      }[] = [];
       for (const element of dock.querySelectorAll<HTMLButtonElement>("[data-dock-id]")) {
         const rect = element.getBoundingClientRect();
-        const x = screenPoint.x + canvasRect.left;
-        const y = screenPoint.y + canvasRect.top;
-        if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
-          hovered = { id: element.dataset.dockId ?? "", element };
-          break;
-        }
+        candidates.push({
+          id: element.dataset.dockId ?? "",
+          element,
+          disabled: element.disabled,
+          bounds: {
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+          },
+        });
       }
+      const hoveredId = chooseDockGestureTarget({ x, y }, candidates, hitPadding);
+      const hovered = candidates.find((candidate) => candidate.id === hoveredId) ?? null;
       setDockGestureHover((current) => (current === (hovered?.id ?? null) ? current : hovered?.id ?? null));
       if (!hovered) {
-        return false;
+        return null;
       }
-      if (pinchJustClosed) {
+      const activatedId = dockGestureActivationTrackerRef.current!.activate(
+        hovered.id,
+        closeIntentActive,
+      );
+      if (activatedId) {
         // Reuse the click behavior exactly — one code path for mouse and hand.
         hovered.element.click();
+        return "activated";
       }
-      return true;
+      return "hover";
     },
     [],
   );
-
-  const cancelLasso = useCallback(() => {
-    if (lassoOriginRef.current) {
-      lassoOriginRef.current = null;
-      setGhostAnnotation(null);
-    }
-  }, []);
 
   const setDiagramVisibility = useCallback(
     (visible: boolean, _source: "snap" | "keyboard" | "voice" | "menu" | "test") => {
@@ -2492,7 +2524,6 @@ export function AirboardPrototype({
         pointerStrokeIdRef.current = null;
         gesturePathRef.current = [];
         touchpadPointsRef.current = [];
-        cancelLasso();
         cancelObjectInteraction();
         setSelectedAnnotationId(null);
         setSelectedAnnotationIds([]);
@@ -2534,7 +2565,6 @@ export function AirboardPrototype({
     },
     [
       cameraOverlay,
-      cancelLasso,
       cancelObjectInteraction,
       commitStroke,
       headlessMeetOverlay,
@@ -2561,88 +2591,6 @@ export function AirboardPrototype({
       return result;
     },
     [setDiagramVisibility, voiceRouter],
-  );
-
-  const finalizeLasso = useCallback(
-    (point: { x: number; y: number }) => {
-      const origin = lassoOriginRef.current;
-      lassoOriginRef.current = null;
-      setGhostAnnotation(null);
-      if (!origin) {
-        return;
-      }
-      const rect = {
-        x: Math.min(origin.x, point.x),
-        y: Math.min(origin.y, point.y),
-        width: Math.abs(point.x - origin.x),
-        height: Math.abs(point.y - origin.y),
-      };
-      if (rect.width < 12 && rect.height < 12) {
-        // A stray pinch, not a marquee.
-        return;
-      }
-      const ids = Object.values(boardRef.current.strokes)
-        .filter((stroke) => {
-          const annotation = stroke.annotation;
-          if (stroke.status !== "committed" || !annotation) {
-            return false;
-          }
-          const bounds =
-            annotation.bounds ??
-            (annotation.start && annotation.end
-              ? {
-                  x: Math.min(annotation.start.x, annotation.end.x),
-                  y: Math.min(annotation.start.y, annotation.end.y),
-                  width: Math.abs(annotation.end.x - annotation.start.x),
-                  height: Math.abs(annotation.end.y - annotation.start.y),
-                }
-              : null);
-          if (!bounds) {
-            return false;
-          }
-          return (
-            bounds.x < rect.x + rect.width &&
-            bounds.x + bounds.width > rect.x &&
-            bounds.y < rect.y + rect.height &&
-            bounds.y + bounds.height > rect.y
-          );
-        })
-        .map((stroke) => stroke.id);
-      setSelectedAnnotationIds(ids);
-      setSelectedAnnotationId(ids[ids.length - 1] ?? null);
-      setCommandFeedback(
-        ids.length === 0
-          ? "Nothing inside the selection area."
-          : `Selected ${ids.length} object${ids.length === 1 ? "" : "s"}.`,
-      );
-    },
-    [],
-  );
-
-  const updateLassoGhost = useCallback(
-    (point: { x: number; y: number }) => {
-      const origin = lassoOriginRef.current;
-      if (!origin) {
-        return;
-      }
-      const annotation: StrokeAnnotation = {
-        type: "rectangle",
-        source: "gesture",
-        bounds: {
-          x: Math.min(origin.x, point.x),
-          y: Math.min(origin.y, point.y),
-          width: Math.max(1, Math.abs(point.x - origin.x)),
-          height: Math.max(1, Math.abs(point.y - origin.y)),
-        },
-      };
-      setGhostAnnotation({
-        annotation,
-        points: buildAnnotationPoints(annotation, performance.now()),
-        color: "#0f766e",
-        thickness: 1,
-      });
-    },
-    [],
   );
 
   const handleGesture = useCallback(
@@ -2672,23 +2620,34 @@ export function AirboardPrototype({
           const point = screenPoint ? toBoardPoint(screenPoint) : null;
           const action = hybridOutput.action;
           const pinchClosed = hybridOutput.pinchState === "closed";
+          const closeIntentActive =
+            hybridOutput.pinchState === "closing" || pinchClosed;
           const pinchJustClosed = pinchClosed && !hybridPinchClosedRef.current;
           hybridPinchClosedRef.current = pinchClosed;
+          if (hybridOutput.pinchState === "open") {
+            dockGestureActivationTrackerRef.current!.release();
+          }
 
           // The catalog dock lives in screen space and outranks board
-          // interactions while the cursor is over it: pinching a dock button
-          // opens/picks instead of grabbing whatever object sits beneath.
-          if (screenPoint && handleDockGesture(screenPoint, pinchJustClosed)) {
-            hybridGestureControllerRef.current?.reset({ requirePinchRelease: pinchJustClosed });
+          // interactions while the cursor is over it. A close can begin just
+          // outside the button and still activate the first dock target reached.
+          const dockOutcome = screenPoint
+            ? handleDockGesture(screenPoint, closeIntentActive)
+            : null;
+          if (dockOutcome) {
+            const activated = dockOutcome === "activated";
+            hybridGestureControllerRef.current?.reset({ requirePinchRelease: activated });
             hybridResizeGestureControllerRef.current?.reset({
-              requirePinchRelease: pinchJustClosed,
+              requirePinchRelease: activated,
             });
+            if (activated) {
+              hybridPinchClosedRef.current = true;
+            }
             setObjectGestureState("hover");
             return;
           }
 
           if (action?.type === "grab_cancelled") {
-            cancelLasso();
             const interaction = objectInteractionRef.current;
             if (interaction?.mode === "moving" || interaction?.mode === "resizing") {
               updateAnnotationObject(interaction.strokeId, interaction.initialAnnotation);
@@ -2701,7 +2660,6 @@ export function AirboardPrototype({
 
           if (hybridOutput.trackingState !== "tracked" && !action) {
             if (hybridOutput.trackingState === "lost") {
-              cancelLasso();
               if (cameraPlacementActiveRef.current) {
                 cancelObjectInteraction();
                 cameraPlacementActiveRef.current = false;
@@ -2782,7 +2740,7 @@ export function AirboardPrototype({
             if (handleTarget) {
               // Precision pinch owns resize for the entire interaction. The
               // closed-hand movement controller cannot acquire handle targets.
-              setObjectGestureState("grab");
+              setObjectGestureState("resizing");
               beginObjectInteraction(point, {
                 inputSource: "air_gesture",
                 forcedStrokeId: handleTarget.strokeId,
@@ -2790,6 +2748,17 @@ export function AirboardPrototype({
               });
               setCommandFeedback(
                 "Resize locked — keep thumb and index pinched, then release to finish.",
+              );
+              return;
+            }
+            if (activeObjectTool === "eraser") {
+              beginObjectInteraction(point, {
+                inputSource: "air_gesture",
+                forcedStrokeId: action.targetId,
+              });
+              setObjectGestureState("erase");
+              setCommandFeedback(
+                "Erase locked — sweep the closed hand across targets, then reopen to finish.",
               );
               return;
             }
@@ -2806,57 +2775,37 @@ export function AirboardPrototype({
 
           if (action?.type === "drag_moved") {
             cameraGrabActiveRef.current = true;
-            setObjectGestureState("grab");
+            setObjectGestureState(pointerErasingRef.current ? "erase" : "grab");
             moveObjectInteraction(point, { inputSource: "air_gesture" });
             return;
           }
 
           if (action?.type === "grab_ended") {
             const resized = Boolean(parseGestureHandleTargetId(action.targetId));
+            const erased = pointerErasingRef.current;
             endObjectInteraction(point);
             cameraGrabActiveRef.current = false;
             setObjectGestureState("hover");
             setCommandFeedback(
-              resized
+              erased
+                ? "Erase complete. Select another tool before closing over an object."
+                : resized
                 ? "Resize complete. Close your hand over the object body to move it."
                 : "Move complete. Precision-pinch a corner handle only when you want to resize.",
             );
             return;
           }
 
-          // Lasso: a closed hand over empty canvas with the Select tool drags
-          // a selection marquee. Separable by definition — every other pinch
-          // meaning requires a target, a dock button, or an armed tool.
-          if (lassoOriginRef.current) {
-            if (pinchClosed && point) {
-              updateLassoGhost(point);
-              setObjectGestureState("grab");
-            } else if (point) {
-              finalizeLasso(point);
-              setObjectGestureState("hover");
-            } else {
-              cancelLasso();
-            }
-            return;
-          }
-          if (
-            pinchJustClosed &&
-            point &&
-            !hybridOutput.focusedTargetId &&
-            activeObjectTool === "select" &&
-            !cameraPlacementArmedToolRef.current &&
-            !cameraPlacementActiveRef.current &&
-            !objectInteractionRef.current
-          ) {
-            lassoOriginRef.current = point;
-            updateLassoGhost(point);
-            setObjectGestureState("grab");
-            return;
-          }
-
-          setHoverStrokeId(hybridOutput.focusedTargetId);
+          const focusedHandleTarget = hybridOutput.focusedTargetId
+            ? parseGestureHandleTargetId(hybridOutput.focusedTargetId)
+            : null;
+          setHoverStrokeId(
+            focusedHandleTarget?.strokeId ?? hybridOutput.focusedTargetId,
+          );
           setObjectGestureState(
-            hybridOutput.pinchState === "closed" && !hybridOutput.focusedTargetId
+            focusedHandleTarget
+              ? "resize ready"
+              : hybridOutput.pinchState === "closed" && !hybridOutput.focusedTargetId
               ? "no target"
               : "hover",
           );
@@ -2864,7 +2813,6 @@ export function AirboardPrototype({
         }
 
         if (!result) {
-          cancelLasso();
           const lastPoint = lastGesturePointerRef.current;
           if (cameraGrabActiveRef.current && lastPoint) {
             endObjectInteraction(lastPoint);
@@ -3015,11 +2963,8 @@ export function AirboardPrototype({
       cancelObjectInteraction,
       commitStroke,
       endObjectInteraction,
-      cancelLasso,
       eraseAt,
-      finalizeLasso,
       handleDockGesture,
-      updateLassoGhost,
       inputMode,
       inputPaused,
       makeFrictionPoint,
@@ -3145,9 +3090,16 @@ export function AirboardPrototype({
   }, [applyLocalEvent, render, updateStats]);
 
   const processUndoGestureFrame = useCallback(
-    (frame: UndoGestureFrame): boolean => {
-      if (undoGestureTrackerRef.current!.update(frame) !== "undo") {
-        return false;
+    (frame: UndoGestureFrame): UndoGestureEvent => {
+      const result = undoGestureTrackerRef.current!.update(frame);
+      if (result === "tracking") {
+        // Directional palm motion has declared undo intent. Drop any stationary
+        // palm candidate so the same motion cannot also open push-to-talk.
+        palmGateTrackerRef.current!.reset();
+        return "tracking";
+      }
+      if (result !== "undo") {
+        return null;
       }
 
       const wasInterpreting = speechRecognitionStatusRef.current === "interpreting";
@@ -3170,7 +3122,7 @@ export function AirboardPrototype({
           detail: "Open-palm swipe left cancelled the in-progress Airo request.",
           tone: "success",
         });
-        return true;
+        return "undo";
       }
 
       const hadUndo = undoStackRef.current.length > 0;
@@ -3186,7 +3138,7 @@ export function AirboardPrototype({
         detail: "Recognized one open palm swiping left.",
         tone: hadUndo ? "success" : "warning",
       });
-      return true;
+      return "undo";
     },
     [appendCopilotActivity, undoLastAction, voiceRouter],
   );
@@ -4397,7 +4349,7 @@ export function AirboardPrototype({
       },
       openPttGate: () => openVoiceGate({ mode: "ptt" }),
       emitUndoGestureFrame: (frame: UndoGestureFrame) =>
-        processUndoGestureFrame(frame),
+        processUndoGestureFrame(frame) === "undo",
       emitSnapGestureFrame: (frame: SnapGestureFrame) =>
         processSnapGestureFrame(frame) === "snap",
       setDiagramVisible: (visible: boolean) =>
@@ -5349,9 +5301,22 @@ export function AirboardPrototype({
       }
       landmarkTraceRef.current = null;
       setLandmarkRecordingActive(false);
+      const framesWithHands = recording.frames.filter(
+        (frame) => frame.hands.length > 0,
+      ).length;
+      if (framesWithHands === 0) {
+        setCommandFeedback(
+          "No hand landmarks were detected during the 5-second recording, so no empty trace was downloaded. Keep one full hand inside the camera frame and try again.",
+        );
+        return;
+      }
       const trace = {
         schemaVersion: "1.0",
         recordedAt: new Date().toISOString(),
+        captureSummary: {
+          totalFrames: recording.frames.length,
+          framesWithHands,
+        },
         frames: recording.frames,
       };
       const blob = new Blob([JSON.stringify(trace)], { type: "application/json" });
@@ -5388,20 +5353,19 @@ export function AirboardPrototype({
           cameraPlacementActiveRef.current ||
           activeStrokeIdRef.current !== null ||
           pointerStrokeIdRef.current !== null ||
-          pointerErasingRef.current ||
-          lassoOriginRef.current !== null,
+          pointerErasingRef.current,
       });
     },
     [inputPaused, processSnapGestureFrame],
   );
 
   /**
-   * One open palm moving left is undo. This runs before push-to-talk because
-   * motion is the disambiguator: a moving palm can undo, while the voice gate
-   * only engages after the palm remains still.
+   * One open palm moving left is undo. Directional travel reserves the pose
+   * before push-to-talk can engage; once the voice gate is open, undo stays
+   * suppressed until the user releases that gate.
    */
   const updateUndoGesture = useCallback(
-    (hands: readonly DetectedHand[], timestampMs: number): boolean => {
+    (hands: readonly DetectedHand[], timestampMs: number): UndoGestureEvent => {
       let bestScore = 0;
       let bestPoint: { x: number; y: number } | null = null;
       let trackedHands = 0;
@@ -5417,6 +5381,7 @@ export function AirboardPrototype({
           bestPoint = wrist ? { x: wrist.x, y: wrist.y } : null;
         }
       }
+      const voiceSnapshot = voiceRouter.snapshot;
       return processUndoGestureFrame({
         score: bestScore,
         point: bestPoint,
@@ -5424,12 +5389,17 @@ export function AirboardPrototype({
         suppressed:
           trackedHands !== 1 ||
           inputPaused ||
+          Boolean(voiceSnapshot?.open) ||
+          canvasNavTrackerRef.current?.reserving === true ||
           objectInteractionRef.current !== null ||
+          cameraGrabActiveRef.current ||
+          cameraPlacementActiveRef.current ||
           activeStrokeIdRef.current !== null ||
-          pointerStrokeIdRef.current !== null,
+          pointerStrokeIdRef.current !== null ||
+          pointerErasingRef.current,
       });
     },
-    [inputPaused, processUndoGestureFrame],
+    [inputPaused, processUndoGestureFrame, voiceRouter],
   );
 
   /**
@@ -5467,7 +5437,17 @@ export function AirboardPrototype({
         point: bestPoint,
         timestampMs,
         gateOpen: snapshot?.mode === "ptt" && snapshot.open,
-        suppressed: (snapshot?.mode === "scoped" && snapshot.open) || trackedHands >= 2,
+        suppressed:
+          inputPaused ||
+          (snapshot?.mode === "scoped" && snapshot.open) ||
+          trackedHands >= 2 ||
+          canvasNavTrackerRef.current?.reserving === true ||
+          objectInteractionRef.current !== null ||
+          cameraGrabActiveRef.current ||
+          cameraPlacementActiveRef.current ||
+          activeStrokeIdRef.current !== null ||
+          pointerStrokeIdRef.current !== null ||
+          pointerErasingRef.current,
       });
       if (event === "engage") {
         openVoiceGate({ mode: "ptt" });
@@ -5475,7 +5455,7 @@ export function AirboardPrototype({
         closeVoiceGate("ptt");
       }
     },
-    [closeVoiceGate, openVoiceGate, voiceRouter],
+    [closeVoiceGate, inputPaused, openVoiceGate, voiceRouter],
   );
 
   /**
@@ -5608,15 +5588,16 @@ export function AirboardPrototype({
               dragGain: 0.68,
               dragDeadZonePx: 0.5,
               // Resizing requires a precise corner/end-point acquisition. It
-              // must not inherit the broad closed-hand object grab radius.
-              areaCursorRadiusPx: 12,
-              stickyReleaseRadiusPx: 28,
+              // must not inherit the broad closed-hand object grab radius, but
+              // a webcam still needs more tolerance than a mouse-sized handle.
+              areaCursorRadiusPx: 24,
+              stickyReleaseRadiusPx: 42,
               trackingLossTimeoutMs: 260,
-              pinch: {
-                engageThreshold: 0.72,
-                releaseThreshold: 0.4,
-                engageDebounceMs: 110,
-                releaseDebounceMs: 90,
+            pinch: {
+                engageThreshold: 0.5,
+                releaseThreshold: 0.32,
+                engageDebounceMs: 70,
+                releaseDebounceMs: 80,
               },
             });
             hybridGestureCanvasSizeRef.current = {
@@ -5647,17 +5628,21 @@ export function AirboardPrototype({
             hands: collectNavHands(hands, cameraMapping),
             timestampMs,
           });
-          if (navTracker.engaged) {
-            setCanvasNavMode((mode) => (mode === navTracker.mode ? mode : navTracker.mode));
-            const viewport = boardViewportRef.current;
-            if (navUpdate.mode === "pan") {
-              applyViewport(
-                panViewport(viewport, navUpdate.dx, navUpdate.dy, currentViewportLimits()),
-              );
-            } else if (navUpdate.mode === "zoom") {
-              applyViewport(
-                zoomViewport(viewport, navUpdate.factor, navUpdate.anchor, currentViewportLimits()),
-              );
+          if (navTracker.reserving) {
+            if (navTracker.engaged) {
+              setCanvasNavMode((mode) => (mode === navTracker.mode ? mode : navTracker.mode));
+              const viewport = boardViewportRef.current;
+              if (navUpdate.mode === "pan") {
+                applyViewport(
+                  panViewport(viewport, navUpdate.dx, navUpdate.dy, currentViewportLimits()),
+                );
+              } else if (navUpdate.mode === "zoom") {
+                applyViewport(
+                  zoomViewport(viewport, navUpdate.factor, navUpdate.anchor, currentViewportLimits()),
+                );
+              }
+            } else {
+              setCanvasNavMode((mode) => (mode === null ? mode : null));
             }
             hybridGestureControllerRef.current.reset({ requirePinchRelease: true });
             hybridResizeGestureControllerRef.current?.reset({ requirePinchRelease: true });
@@ -5673,13 +5658,13 @@ export function AirboardPrototype({
 
           // A pending snap owns its short contact→release window. Do not let
           // the same curled-hand frames fall through and start an object grab,
-          // resize, lasso, or voice gate before the snap can complete.
+          // resize, placement, erasing, or voice gate before the snap completes.
           if (updateSnapGesture(hands, timestampMs) !== null) {
             handleGesture(null, undefined);
             animationFrame = requestAnimationFrame(loop);
             return;
           }
-          if (updateUndoGesture(hands, timestampMs)) {
+          if (updateUndoGesture(hands, timestampMs) !== null) {
             handleGesture(null, undefined);
             animationFrame = requestAnimationFrame(loop);
             return;
@@ -5725,8 +5710,15 @@ export function AirboardPrototype({
           });
           const resizeTargetId =
             resizeOutput.action?.targetId ?? resizeOutput.grabbedTargetId;
+          const resizeFocusTargetId = resizeOutput.focusedTargetId;
+          const resizeIntentReady =
+            Boolean(
+              resizeFocusTargetId &&
+                parseGestureHandleTargetId(resizeFocusTargetId),
+            ) && (signal?.resizePinchStrength ?? 0) >= 0.12;
           const resizeActive = Boolean(
-            resizeTargetId && parseGestureHandleTargetId(resizeTargetId),
+            (resizeTargetId && parseGestureHandleTargetId(resizeTargetId)) ||
+              resizeIntentReady,
           );
           hybridOutput = resizeActive ? resizeOutput : moveOutput;
           // The winning engage edge locks the interaction class. Resetting the
@@ -7384,6 +7376,27 @@ export function AirboardPrototype({
                   : `Holding “${voiceGate.label}” — press Start Airo once to enable voice edits`}
             </div>
           ) : null}
+          {inputMode === "gesture" &&
+          cameraStatus === "active" &&
+          objectGestureState !== "hover" &&
+          objectGestureState !== "no target" &&
+          !broadcastSafe ? (
+            <div
+              className={`object-gesture-pill ${voiceGate ? "with-voice" : ""}`}
+              role="status"
+              aria-live="polite"
+            >
+              {objectGestureState === "resize ready"
+                ? "Resize ready — keep the thumb–index point on the highlighted handle"
+                : objectGestureState === "resizing"
+                  ? "Resize locked — move the pinch, then separate"
+                  : objectGestureState === "placing"
+                    ? "Placement locked — move, then reopen"
+                    : objectGestureState === "erase"
+                      ? "Erase locked — sweep, then reopen"
+                      : "Move locked — move, then reopen"}
+            </div>
+          ) : null}
           {cameraCaptureAvailable &&
           onboardingVisible &&
           !desktopOverlay &&
@@ -7402,8 +7415,8 @@ export function AirboardPrototype({
                   </li>
                   <li>
                     <strong>Close your hand over an object to move it</strong>; reopen to drop.
-                    To resize, keep three fingers open and precision-pinch a corner with your
-                    thumb and index finger.
+                    To resize, select one object and touch thumb to index directly on a corner
+                    handle; keep the index extended while the other fingers rest naturally.
                   </li>
                   <li>
                     <strong>Two open palms</strong> move the canvas; <strong>two closed
@@ -8165,9 +8178,103 @@ export function AirboardPrototype({
                     <>
                     <p className="hint">
                       {voiceCaptureAvailable
-                        ? "Start Airo once. Then raise a flat palm and speak (no wake word), hold an element still to voice-edit it, or say “Airo, …” hands-free. Close your hand over an object to move it; precision-pinch a corner handle to resize. Shift-click remains the deterministic multi-select fallback."
-                        : "Click Enable hands to gesture with the meeting camera through the Airboard extension. Close your hand over an object to move it; precision-pinch a corner handle to resize. Voice is not available on this surface yet — pair gestures with typed commands. Shift-click remains the deterministic multi-select fallback."}
+                        ? "Start Airo once. Hold one flat palm still to speak; swipe it left promptly to undo. Use a relaxed hand to aim, a closed hand to move, and a precision thumb-index pinch only on a resize handle."
+                        : "Click Enable hands to use the meeting camera. Use a relaxed hand to aim, a closed hand to move, and a precision thumb-index pinch only on a resize handle. Voice is not available on this surface yet."}
                     </p>
+                    <details className="advanced-settings gesture-guide">
+                      <summary>Gesture guide</summary>
+                      <dl>
+                        <div>
+                          <dt>Aim</dt>
+                          <dd>Move one relaxed hand. Do not present a rigid flat palm.</dd>
+                        </div>
+                        <div>
+                          <dt>Choose or select</dt>
+                          <dd>
+                            Aim near a dock control or object and start closing one hand. The first
+                            highlighted target activates; reopen before choosing another.
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Move</dt>
+                          <dd>
+                            Keep Select active. Close over the object body, wait for “Move locked,”
+                            move it, then reopen.
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Place</dt>
+                          <dd>
+                            Choose a shape first. Move onto the canvas, close one hand, wait for
+                            “Holding,” position the preview, then reopen.
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Resize</dt>
+                          <dd>
+                            Select exactly one object. Touch thumb to index directly on a handle,
+                            keep the index extended toward that handle, and let the other fingers
+                            rest naturally. Wait for “Resize locked,” move, then separate thumb
+                            and index.
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Erase</dt>
+                          <dd>
+                            Choose Eraser first. Close over an object, wait for the erase state,
+                            sweep across targets, then reopen.
+                          </dd>
+                        </div>
+                        {voiceCaptureAvailable ? (
+                          <>
+                            <div>
+                              <dt>Speak to Airo</dt>
+                              <dd>
+                                Start Airo once, then hold one flat open palm still for about
+                                0.3 seconds. Lower or relax it when finished.
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>Voice-edit one object</dt>
+                              <dd>
+                                Close one hand over the object and hold it still for about
+                                0.6 seconds, then say the change.
+                              </dd>
+                            </div>
+                          </>
+                        ) : null}
+                        <div>
+                          <dt>Undo</dt>
+                          <dd>
+                            Show one flat palm and immediately swipe left. Do not hold first—a
+                            held palm is reserved for voice.
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Hide or show diagram</dt>
+                          <dd>
+                            With one hand, touch thumb to middle finger while keeping the index
+                            separated. Then flick the middle finger away quickly—the touch alone
+                            does nothing. Fully relax before snapping again.
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Pan</dt>
+                          <dd>Hold two open hands briefly, then move them together.</dd>
+                        </div>
+                        <div>
+                          <dt>Zoom</dt>
+                          <dd>
+                            Hold two closed hands briefly, then spread them apart or bring them
+                            together.
+                          </dd>
+                        </div>
+                      </dl>
+                      <p>
+                        Shift-click is the deterministic multi-select fallback. Shift+H toggles
+                        diagram visibility, and Cmd/Ctrl+Z always undoes.
+                      </p>
+                    </details>
                     <details className="advanced-settings">
                       <summary>Advanced settings</summary>
                     <div className="control-row">
@@ -8342,8 +8449,8 @@ export function AirboardPrototype({
             ) : inputMode === "gesture" ? (
               <p className="hint">
                 {voiceCaptureAvailable
-                  ? "Start Airo once, then talk to the board without a wake word: raise a flat, open palm (push-to-talk) and speak, or grab an element and hold it still to edit it by voice — “rename to Payments”, “delete”, “connect to the database”. Commands apply instantly; use the toolbar, Cmd/Ctrl+Z, or an open-palm swipe left to undo. Camera off? Select an object and hold V for the same scoped mic, or say “Airo, …”. Drag shapes from the catalogs on the left. Shift-click multi-selects."
-                  : "Enable hands, then point with an open hand and grab with a closed hand; reopen to drop. Commands apply instantly; use the toolbar, Cmd/Ctrl+Z, or an open-palm swipe left to undo. Voice is not available on this surface yet — type commands in the Command field. Drag shapes from the catalogs on the left. Shift-click multi-selects."}
+                  ? "Use the Gesture guide above for exact poses. A still flat palm speaks; a prompt flat-palm swipe left undoes. A relaxed hand aims, a closed hand moves, thumb-index pinches resize handles, and thumb-middle snaps hide or restore the diagram."
+                  : "Use the Gesture guide above for exact poses. A relaxed hand aims, a closed hand moves, thumb-index pinches resize handles, a flat-palm swipe left undoes, and thumb-middle snaps hide or restore the diagram."}
               </p>
             ) : (
               <p className="hint">Mouse or trackpad draws. Hold Shift or Alt while dragging to erase.</p>
@@ -8617,6 +8724,9 @@ function getHandControlCoach(input: {
     return "Placement preview grabbed. Move your closed hand, then open it to create the object.";
   }
   if (input.diagnostics.grabbedTargetId) {
+    if (parseGestureHandleTargetId(input.diagnostics.grabbedTargetId)) {
+      return "Resize locked. Move the thumb-index pinch, then separate the fingers to finish.";
+    }
     return "Object grabbed. Move your closed hand; open it fully to drop.";
   }
   if (input.diagnostics.requiresPinchRelease) {
@@ -8626,6 +8736,9 @@ function getHandControlCoach(input: {
     return "Your hand is closed, but no committed object is targeted. Reopen, hover a highlighted object, then close again.";
   }
   if (input.diagnostics.focusedTargetId) {
+    if (parseGestureHandleTargetId(input.diagnostics.focusedTargetId)) {
+      return "Resize ready. Keep thumb and index together on this handle until it locks.";
+    }
     return "Object targeted. Close all four fingers into a fist and hold briefly to grab.";
   }
   if (input.diagnostics.grabConfidence < 0.55) {

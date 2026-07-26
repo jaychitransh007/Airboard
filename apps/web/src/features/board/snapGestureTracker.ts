@@ -22,6 +22,8 @@ export type SnapGestureTrackerConfig = {
   maxReleaseMs: number;
   minTravelRatio: number;
   contactMotionTravelRatio: number;
+  /** Minimum fingertip-gap increase required for the occlusion-tolerant path. */
+  minReleaseDeltaRatio: number;
   minVelocityRatioPerSecond: number;
   precisionPinchRatio: number;
   trackingGapMs: number;
@@ -36,7 +38,8 @@ export const defaultSnapGestureTrackerConfig: SnapGestureTrackerConfig = {
   releaseRatio: 0.62,
   maxReleaseMs: 450,
   minTravelRatio: 0.12,
-  contactMotionTravelRatio: 0.2,
+  contactMotionTravelRatio: 0.22,
+  minReleaseDeltaRatio: 0.08,
   minVelocityRatioPerSecond: 0.45,
   precisionPinchRatio: 0.3,
   trackingGapMs: 180,
@@ -48,6 +51,7 @@ type Candidate = {
   contactFrames: number;
   armedAt: number | null;
   middleAtContact: SnapLandmark;
+  thumbMiddleAtContact: number;
   lastSeenAt: number;
   peakTravelRatio: number;
 };
@@ -106,6 +110,7 @@ export class SnapGestureTracker {
         contactFrames: 1,
         armedAt: null,
         middleAtContact: pose.middleRelativeToPalm,
+        thumbMiddleAtContact: pose.thumbMiddleRatio,
         lastSeenAt: frame.timestampMs,
         peakTravelRatio: 0,
       };
@@ -125,6 +130,10 @@ export class SnapGestureTracker {
       }
       candidate.contactFrames += 1;
       candidate.middleAtContact = pose.middleRelativeToPalm;
+      candidate.thumbMiddleAtContact = Math.min(
+        candidate.thumbMiddleAtContact,
+        pose.thumbMiddleRatio,
+      );
       if (
         candidate.contactFrames >= this.config.contactFrames &&
         candidate.armedAt === null
@@ -140,11 +149,14 @@ export class SnapGestureTracker {
     const velocity =
       elapsedMs > 0 ? (candidate.peakTravelRatio * 1_000) / elapsedMs : 0;
     const released = pose.thumbMiddleRatio >= this.config.releaseRatio;
-    // MediaPipe frequently keeps the occluded thumb and middle fingertips
-    // virtually touching throughout a real snap. The middle fingertip still
-    // travels sharply relative to the palm, which is the reliable visual
-    // signal. Accept that motion without requiring a synthetic wide-gap frame.
-    const releasedByContactMotion =
+    // A snap must include release, not merely contact. MediaPipe can understate
+    // the final gap when fingertips occlude each other, so the fallback accepts
+    // a partial gap increase paired with a sharp middle-finger flick. Pure
+    // contact motion is never enough: bringing the fingers together must not
+    // toggle the diagram.
+    const releasedByPartialGapMotion =
+      pose.thumbMiddleRatio - candidate.thumbMiddleAtContact >=
+        this.config.minReleaseDeltaRatio &&
       candidate.peakTravelRatio >= this.config.contactMotionTravelRatio;
     if (elapsedMs > this.config.maxReleaseMs) {
       this.candidate = null;
@@ -155,7 +167,7 @@ export class SnapGestureTracker {
     // band instead of treating the first non-contact frame as a failed snap.
     if (
       (!released || candidate.peakTravelRatio < this.config.minTravelRatio) &&
-      !releasedByContactMotion
+      !releasedByPartialGapMotion
     ) {
       return "tracking";
     }

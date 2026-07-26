@@ -783,6 +783,28 @@ button.screen-underlay-active {
   animation: none;
 }
 
+.object-gesture-pill {
+  position: absolute;
+  z-index: 8;
+  bottom: 26px;
+  left: 50%;
+  max-width: min(560px, calc(100% - 48px));
+  padding: 8px 14px;
+  border: 1px solid rgba(139, 124, 246, 0.5);
+  border-radius: 999px;
+  background: rgba(38, 27, 58, 0.92);
+  color: #f4f0ff;
+  font-size: 12px;
+  font-weight: 650;
+  box-shadow: 0 10px 28px rgba(31, 20, 48, 0.22);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.object-gesture-pill.with-voice {
+  bottom: 72px;
+}
+
 @keyframes voice-gate-pulse {
   0%,
   100% {
@@ -1087,6 +1109,7 @@ button.screen-underlay-active {
 .airboard-shell.broadcast-safe .recording-badge,
 .airboard-shell.broadcast-safe .desktop-overlay-badge,
 .airboard-shell.broadcast-safe .voice-gate-pill,
+.airboard-shell.broadcast-safe .object-gesture-pill,
 .airboard-shell.broadcast-safe .onboarding-overlay,
 .airboard-shell.broadcast-safe .debug-point,
 .airboard-shell.broadcast-safe .debug-spring,
@@ -1683,6 +1706,34 @@ button.screen-underlay-active {
   font-size: 12px;
   font-weight: 650;
   cursor: pointer;
+}
+
+.gesture-guide dl {
+  display: grid;
+  gap: 0;
+  margin: 2px 0 0;
+}
+
+.gesture-guide dl > div {
+  display: grid;
+  grid-template-columns: minmax(82px, 0.7fr) minmax(0, 1.8fr);
+  gap: 10px;
+  padding: 9px 2px;
+  border-top: 1px solid var(--panel-border);
+}
+
+.gesture-guide dt {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.gesture-guide dd,
+.gesture-guide p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 /* Air-cursor hover over dock buttons (gesture targeting). */
@@ -3605,6 +3656,10 @@ button.screen-underlay-active {
 
 .canvas-workspace .voice-gate-pill {
   bottom: 70px;
+}
+
+.canvas-workspace .object-gesture-pill.with-voice {
+  bottom: 116px;
 }
 
 @media (max-width: 980px) {

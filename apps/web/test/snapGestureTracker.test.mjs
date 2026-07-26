@@ -116,14 +116,27 @@ test("real-camera transition frames and a naturally curled snap pose remain arme
   );
 });
 
-test("real snap triggers when MediaPipe keeps occluded fingertips in contact", () => {
+test("contact and middle-finger motion alone do not trigger before release", () => {
   const tracker = new SnapGestureTracker();
   assert.equal(tracker.update(frame([hand({ contact: true })], 0)), "tracking");
   assert.equal(tracker.update(frame([hand({ contact: true })], 40)), "tracking");
   assert.equal(
     tracker.update(frame([hand({ contact: true, middleX: 0.57 })], 110)),
+    "tracking",
+  );
+  assert.equal(
+    tracker.update(frame([hand({ contact: false, middleX: 0.6 })], 150)),
     "snap",
   );
+});
+
+test("bringing thumb and middle together without a release never snaps", () => {
+  const tracker = new SnapGestureTracker();
+  assert.equal(tracker.update(frame([hand({ contact: true })], 0)), "tracking");
+  assert.equal(tracker.update(frame([hand({ contact: true })], 40)), "tracking");
+  assert.equal(tracker.update(frame([hand({ contact: true })], 120)), "tracking");
+  assert.equal(tracker.update(frame([hand({ contact: true })], 260)), "tracking");
+  assert.equal(tracker.update(frame([hand({ contact: true })], 500)), null);
 });
 
 test("armed snap survives a brief motion-blur tracking gap", () => {

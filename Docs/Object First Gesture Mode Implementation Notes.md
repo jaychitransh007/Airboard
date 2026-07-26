@@ -1,5 +1,9 @@
 # Object-First Gesture Mode Implementation Notes
 
+> **Current interaction reference:** See
+> [Gesture Interaction Audit](./Gesture%20Interaction%20Audit.md) for exact
+> poses, arbitration rules, missing gestures, and audience-specific gaps.
+
 ## Summary
 
 Gesture Mode now behaves as an object-first annotation surface instead of a drawing classifier. Users choose a clean object from the left dock, drag the ghost into place, and then select, move, resize, relabel, reconnect, or erase it.

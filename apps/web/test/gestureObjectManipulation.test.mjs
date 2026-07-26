@@ -58,6 +58,15 @@ test("move and resize controllers receive disjoint target sets", () => {
   assert.deepEqual(moveTargets.map((target) => target.id), ["node"]);
   assert.equal(resizeTargets.length, 4);
   assert.ok(resizeTargets.every((target) => target.id.startsWith("handle:node:")));
+  assert.ok(
+    resizeTargets.every(
+      (target) =>
+        target.bounds.width === 28 &&
+        target.bounds.height === 28 &&
+        target.capturePaddingPx === 8,
+    ),
+    "camera resize handles expose a forgiving acquisition area",
+  );
   assert.deepEqual(
     parseGestureHandleTargetId("handle:node:nw"),
     { strokeId: "node", handle: "nw" },
@@ -131,5 +140,34 @@ test("precision resize rejects a closed fist even when thumb and index are close
     }),
     0,
     "a closed hand can only move, never resize",
+  );
+});
+
+test("precision resize accepts a natural pinch with resting support fingers", () => {
+  const landmarks = Array.from({ length: 21 }, () => null);
+  landmarks[4] = { x: 0.5, y: 0.5, z: 0 };
+  landmarks[8] = { x: 0.515, y: 0.5, z: 0 };
+  const baseGrab = {
+    strength: 0.15,
+    confidence: 1,
+    handScale: 0.2,
+    observedFingers: 4,
+  };
+
+  assert.ok(
+    estimatePrecisionResizePinch(landmarks, {
+      ...baseGrab,
+      fingerScores: { index: 0.3, middle: 0.82, ring: 0.86, pinky: 0.8 },
+    }) > 0.5,
+    "support fingers may rest naturally while thumb and extended index pinch",
+  );
+  assert.equal(
+    estimatePrecisionResizePinch(landmarks, {
+      ...baseGrab,
+      strength: 0.84,
+      fingerScores: { index: 0.88, middle: 0.9, ring: 0.92, pinky: 0.9 },
+    }),
+    0,
+    "a fist-like pose cannot resize even when thumb and index appear close",
   );
 });

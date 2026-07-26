@@ -4,8 +4,46 @@ import test from "node:test";
 import { PalmGateTracker } from "../src/features/board/palmGateTracker.ts";
 import { HoldToEditTracker } from "../src/features/board/holdToEditTracker.ts";
 import { UndoGestureTracker } from "../src/features/board/undoGestureTracker.ts";
+import {
+  chooseDockGestureTarget,
+  DockGestureActivationTracker,
+} from "../src/features/board/dockGestureActivation.ts";
 
 const P = { x: 0.5, y: 0.4 };
+
+test("dock choose accepts a close that began before entering and fires once", () => {
+  const tracker = new DockGestureActivationTracker();
+  assert.equal(tracker.activate(null, true), null, "closed before reaching a tool");
+  assert.equal(tracker.activate("flow", true), "flow", "first reached tool activates");
+  assert.equal(tracker.activate("system", true), null, "same close cannot activate a neighbor");
+  tracker.release();
+  assert.equal(tracker.activate("system", true), "system", "reopening arms another choice");
+});
+
+test("dock choose uses padded hit areas and resolves overlap by nearest center", () => {
+  const targets = [
+    {
+      id: "flow",
+      bounds: { left: 0, top: 0, width: 40, height: 40 },
+    },
+    {
+      id: "system",
+      bounds: { left: 45, top: 0, width: 40, height: 40 },
+    },
+  ];
+  assert.equal(
+    chooseDockGestureTarget({ x: 43, y: 20 }, targets, 10),
+    "system",
+  );
+  assert.equal(
+    chooseDockGestureTarget(
+      { x: 20, y: 20 },
+      [{ ...targets[0], disabled: true }],
+      10,
+    ),
+    null,
+  );
+});
 
 test("palm gate engages only after the pose holds still for the debounce", () => {
   const tracker = new PalmGateTracker();
@@ -119,7 +157,11 @@ test("a single presented palm swiped left emits one undo", () => {
     suppressed: false,
   });
   assert.equal(tracker.update(frame(0.2, 0)), null);
-  assert.equal(tracker.update(frame(0.3, 80)), null);
+  assert.equal(
+    tracker.update(frame(0.3, 80)),
+    "tracking",
+    "directional motion reserves the palm before push-to-talk can engage",
+  );
   assert.equal(
     tracker.update(frame(0.42, 180)),
     "undo",
@@ -162,4 +204,17 @@ test("undo swipe rejects vertical motion, suppression, and repeat firing", () =>
   tracker.update({ score: 0.1, point: null, timestampMs: 900, suppressed: false });
   tracker.update(frame(0.2, 1_800));
   assert.equal(tracker.update(frame(0.45, 2_000)), "undo", "release and cooldown re-arm");
+});
+
+test("undo intent ignores still-palm jitter so push-to-talk can own the pose", () => {
+  const tracker = new UndoGestureTracker();
+  const frame = (x, y, timestampMs) => ({
+    score: 0.9,
+    point: { x, y },
+    timestampMs,
+    suppressed: false,
+  });
+  assert.equal(tracker.update(frame(0.5, 0.45, 0)), null);
+  assert.equal(tracker.update(frame(0.48, 0.46, 120)), null);
+  assert.equal(tracker.update(frame(0.51, 0.44, 300)), null);
 });

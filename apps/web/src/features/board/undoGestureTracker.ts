@@ -10,6 +10,10 @@
 export type UndoGestureTrackerConfig = {
   engageScore: number;
   releaseScore: number;
+  /** Leftward travel that reserves the palm for undo instead of push-to-talk. */
+  intentDistance: number;
+  /** Horizontal travel must dominate vertical drift by at least this ratio. */
+  minHorizontalDominance: number;
   minDistance: number;
   maxVerticalDrift: number;
   minDurationMs: number;
@@ -22,6 +26,8 @@ export type UndoGestureTrackerConfig = {
 export const defaultUndoGestureTrackerConfig: UndoGestureTrackerConfig = {
   engageScore: 0.68,
   releaseScore: 0.42,
+  intentDistance: 0.055,
+  minHorizontalDominance: 1.35,
   minDistance: 0.18,
   maxVerticalDrift: 0.12,
   minDurationMs: 90,
@@ -38,7 +44,7 @@ export type UndoGestureFrame = {
   suppressed: boolean;
 };
 
-export type UndoGestureEvent = "undo" | null;
+export type UndoGestureEvent = "tracking" | "undo" | null;
 
 type Sample = {
   x: number;
@@ -101,16 +107,34 @@ export class UndoGestureTracker {
       return null;
     }
     const duration = timestampMs - start.timestampMs;
-    if (duration < this.config.minDurationMs) {
-      return null;
-    }
     const horizontalDistance = sample.x - start.x;
     const verticalDistance = Math.abs(sample.y - start.y);
+    const horizontalDominant =
+      Math.abs(horizontalDistance) >=
+      Math.max(verticalDistance * this.config.minHorizontalDominance, 0.001);
+    const hasUndoIntent =
+      horizontalDistance <= -this.config.intentDistance &&
+      horizontalDominant &&
+      verticalDistance <= this.config.maxVerticalDrift;
+
+    // A clear wrong-way or vertical sweep starts a fresh candidate. This keeps
+    // ordinary presenter motion from leaving a stale origin that later turns a
+    // small correction into an undo.
     if (
-      horizontalDistance > -this.config.minDistance ||
+      horizontalDistance >= this.config.intentDistance ||
       verticalDistance > this.config.maxVerticalDrift
     ) {
+      this.samples = [sample];
       return null;
+    }
+    if (duration < this.config.minDurationMs) {
+      return hasUndoIntent ? "tracking" : null;
+    }
+    if (
+      horizontalDistance > -this.config.minDistance ||
+      !horizontalDominant
+    ) {
+      return hasUndoIntent ? "tracking" : null;
     }
 
     this.samples = [];

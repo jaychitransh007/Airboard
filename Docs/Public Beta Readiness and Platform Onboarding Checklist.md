@@ -196,8 +196,8 @@ Goal: an administrator can install Airboard safely, and a participant can become
   - Acceptance: Before camera/microphone use, participants see what is processed, where it is processed/stored, retention, controls, and a non-media fallback.
 - [ ] **[NOT STARTED] ONB-007 — Add input-mode selection and permission diagnostics.**
   - Acceptance: Gesture, voice, pointer/touchpad, and typed input are offered according to policy and client capability; denied permissions produce clear recovery steps.
-- [ ] **[NOT STARTED] ONB-008 — Add calibration and a guided practice action.**
-  - Acceptance: The user calibrates applicable input, creates and undoes a sample object, sees confidence/feedback, and can retry or choose another input mode.
+- [ ] **[NOT STARTED] ONB-008 — Add guided gesture practice with live feedback.**
+  - Acceptance: The user practices choose, move, place, resize, erase, undo, snap, pan, and zoom; sees pose/contact/release quality and conflict explanations; completes a sample object journey; and can retry or choose another input mode.
 - [ ] **[NOT STARTED] ONB-009 — Guarantee a keyboard/pointer fallback on every supported surface.**
   - Acceptance: Core create, select, move, edit, undo, and delete actions remain usable without camera or microphone.
 - [ ] **[NOT STARTED] ONB-010 — Add role-aware first-run guidance and accessible help.**
@@ -208,6 +208,8 @@ Goal: an administrator can install Airboard safely, and a participant can become
   - Acceptance: Admin can remove provider access and Airboard data according to policy, with confirmation, audit history, and no orphaned credentials.
 - [ ] **[NOT STARTED] ONB-013 — Measure onboarding funnel and failure reasons.**
   - Acceptance: Analytics cover install start/success, consent failure, test-meeting pass, meeting launch, permission decision, calibration pass, first successful object, fallback choice, and abandonment without capturing sensitive content.
+- [ ] **[NOT STARTED] ONB-014 — Add personal gesture calibration.**
+  - Acceptance: A user can calibrate dominant hand, comfortable range, camera framing, close-hand strength, precision thumb-index resize, and thumb-middle snap timing; preferences remain private and can be reset without storing raw landmarks.
 
 ## Phase 4 — Google Meet public-beta integration
 

@@ -52,10 +52,10 @@ async function emitSnap(page: Page, startAt: number): Promise<void> {
       timestampMs: timestampMs + 40,
       suppressed: false,
     });
-    // A real snap can keep the two occluded fingertips virtually touching in
-    // MediaPipe while the middle finger visibly flicks relative to the palm.
+    // Contact arms the gesture; a later visible gap plus fast middle-finger
+    // travel completes it. Contact alone must never toggle visibility.
     api.emitSnapGestureFrame({
-      hands: [makeHand(true, 0.57)],
+      hands: [makeHand(false, 0.57)],
       timestampMs: timestampMs + 110,
       suppressed: false,
     });
@@ -114,4 +114,27 @@ test("snap, keyboard, menu, and voice share one local visibility action", async 
   await command.fill("bring the diagram back");
   await page.getByTestId("intent-primary-action").click();
   await expect(page.locator("main.airboard-shell")).not.toHaveClass(/diagram-hidden/);
+});
+
+test("gesture guide teaches the exact conflict-safe poses", async ({ page }) => {
+  await page.goto("/?testStandalone=1");
+  await page.getByRole("button", { name: "Open board settings" }).click();
+  await page.getByText("Gesture guide", { exact: true }).click();
+
+  await expect(page.getByText("Do not present a rigid flat palm.")).toBeVisible();
+  await expect(
+    page.getByText(/touch thumb to index directly on a handle/i),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/let the other fingers rest naturally/i),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/flick the middle finger away quickly—the touch alone does nothing/i),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/held palm is reserved for voice/i),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Hold two closed hands briefly/i),
+  ).toBeVisible();
 });

@@ -82,6 +82,12 @@ test("two open palms moving together pan after the engage debounce", () => {
 test("two closed hands spreading zoom around their midpoint", () => {
   const tracker = new CanvasNavigationTracker();
   tracker.update({ hands: [closed(400, 300), closed(500, 300)], timestampMs: 0 });
+  assert.equal(
+    tracker.reserving,
+    true,
+    "the first two-hand frame reserves input before zoom finishes debouncing",
+  );
+  assert.equal(tracker.engaged, false);
   tracker.update({ hands: [closed(400, 300), closed(500, 300)], timestampMs: 160 });
   const update = tracker.update({
     hands: [closed(350, 300), closed(550, 300)],
@@ -107,6 +113,7 @@ test("SEPARATION: one hand — or mixed poses — never navigates", () => {
     );
   }
   assert.equal(tracker.engaged, false);
+  assert.equal(tracker.reserving, false);
 });
 
 test("SEPARATION: pan never morphs into zoom — pose switch releases first", () => {

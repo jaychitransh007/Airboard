@@ -54,10 +54,13 @@ export function buildGestureManipulationTargets(
 
     return anchors.map((anchor) => ({
       id: `${GESTURE_HANDLE_TARGET_PREFIX}${selected.id}:${anchor.handle}`,
-      bounds: { x: anchor.x - 8, y: anchor.y - 8, width: 16, height: 16 },
+      // Camera precision is lower than pointer precision. A 28px target plus
+      // the area cursor keeps the visible handle easy to acquire without
+      // exposing the object body to resize.
+      bounds: { x: anchor.x - 14, y: anchor.y - 14, width: 28, height: 28 },
       priority: 3,
-      capturePaddingPx: 4,
-      releasePaddingPx: 8,
+      capturePaddingPx: 8,
+      releasePaddingPx: 16,
     }));
   }
 
@@ -121,8 +124,9 @@ export function parseGestureHandleTargetId(
 
 /**
  * A resize is a precision pinch, not a fist. Thumb and index must meet while
- * the middle, ring, and pinky remain open. A closed hand therefore produces a
- * zero resize signal even though thumb and index are physically close.
+ * the index remains extended toward a selected handle. The remaining fingers
+ * may rest naturally; requiring an artificial three-finger pose made ordinary
+ * camera pinches unusable.
  */
 export function estimatePrecisionResizePinch(
   landmarks: readonly (HandLandmark | null | undefined)[],
@@ -142,29 +146,17 @@ export function estimatePrecisionResizePinch(
     return 0;
   }
 
-  const supportingFingerScores = [
-    grab.fingerScores.middle,
-    grab.fingerScores.ring,
-    grab.fingerScores.pinky,
-  ];
-  if (supportingFingerScores.some((score) => score === undefined || !Number.isFinite(score))) {
-    return 0;
-  }
-  const maximumSupportingCurl = Math.max(
-    ...(supportingFingerScores as number[]),
-  );
-  // Full strength below 0.18 curl, tapering to zero at 0.52. This rejects a
-  // fist while allowing natural, slightly relaxed support fingers.
-  const openFingerGate = clamp01((0.52 - maximumSupportingCurl) / 0.34);
-  if (openFingerGate === 0) {
+  const indexCurl = grab.fingerScores.index;
+  if (
+    indexCurl === undefined ||
+    !Number.isFinite(indexCurl) ||
+    indexCurl > 0.72 ||
+    grab.strength >= 0.8
+  ) {
     return 0;
   }
 
   const normalizedDistance =
     Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y) / grab.handScale;
-  return pinchStrengthFromDistance(normalizedDistance) * openFingerGate;
-}
-
-function clamp01(value: number): number {
-  return Math.min(1, Math.max(0, Number.isFinite(value) ? value : 0));
+  return pinchStrengthFromDistance(normalizedDistance, 0.24, 1.05);
 }
