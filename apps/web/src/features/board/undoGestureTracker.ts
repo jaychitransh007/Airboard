@@ -1,9 +1,10 @@
 /**
  * Conflict-safe undo gesture recognizer.
  *
- * A single MediaPipe Open_Palm swiped left triggers one undo. Voice uses the
- * separate Victory label, so this tracker owns only directional palm motion.
- * It latches after firing and requires a palm release before it can fire again.
+ * A single landmark-defined open palm swiped left triggers one Undo. Voice
+ * uses the mutually exclusive Victory pose, so this tracker owns only
+ * directional palm motion. It latches after firing and requires a palm release
+ * before it can fire again.
  */
 
 export type UndoGestureTrackerConfig = {
@@ -17,7 +18,7 @@ export type UndoGestureTrackerConfig = {
   maxVerticalDrift: number;
   minDurationMs: number;
   maxDurationMs: number;
-  /** Brief missing-label tolerance while the same single hand remains tracked. */
+  /** Brief pose-score dropout tolerance while the same hand remains tracked. */
   dropoutGraceMs: number;
   releaseMs: number;
   cooldownMs: number;

@@ -42,7 +42,7 @@ test("movement restarts the stable-hold clock", () => {
   );
 });
 
-test("confidence hysteresis tolerates a weak frame but never activates on one", () => {
+test("pose-score hysteresis tolerates a weak frame but never activates on one", () => {
   const tracker = new VictoryVoiceGestureTracker();
 
   tracker.update(frame(0));
@@ -51,7 +51,7 @@ test("confidence hysteresis tolerates a weak frame but never activates on one", 
   assert.equal(
     tracker.update(frame(400, { score: 0.6 })),
     null,
-    "confidence must recover before activation",
+    "pose score must recover before activation",
   );
   assert.equal(tracker.update(frame(430)), "activate");
 
@@ -64,7 +64,7 @@ test("confidence hysteresis tolerates a weak frame but never activates on one", 
   assert.equal(dropped.update(frame(900)), "activate");
 });
 
-test("one motion-blurred classifier dropout does not erase a valid hold", () => {
+test("one motion-blurred pose-score dropout does not erase a valid hold", () => {
   const tracker = new VictoryVoiceGestureTracker();
 
   tracker.update(frame(0));

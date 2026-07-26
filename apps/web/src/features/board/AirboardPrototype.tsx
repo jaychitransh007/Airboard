@@ -59,6 +59,7 @@ import {
   type ViewportLimits,
 } from "./boardViewport";
 import { CanvasNavigationTracker } from "./canvasNavigationTracker";
+import { arbitrateGestureFrame } from "./gestureFrameArbitration";
 import {
   chooseDockGestureTarget,
   DockGestureActivationTracker,
@@ -90,8 +91,13 @@ import {
 } from "../meet/meetMediaBridge";
 import { CatalogGlyph } from "./catalogGlyphs";
 import { boardDeletionSnapshot, validateBoardTitle } from "./boardLifecycle";
-import { selectSingleCannedGesture } from "./cannedGestureSelection";
 import { HoldToEditTracker } from "./holdToEditTracker";
+import { selectLandmarkManipulationSignal } from "./landmarkManipulationInput";
+import {
+  collectLandmarkNavigationHands,
+  shouldReserveLandmarkNavigation,
+} from "./landmarkNavigationInput";
+import { selectSingleLandmarkPose } from "./landmarkPoseSelection";
 import {
   UndoGestureTracker,
   type UndoGestureFrame,
@@ -141,12 +147,11 @@ import {
 import {
   defaultGestureConfig,
   defaultVirtualSurfaceFrictionConfig,
-  estimateGrabStrength,
+  estimatePalmPresentation,
+  estimateVictoryPresentation,
   frictionPresets,
   GesturePipeline,
   HybridGestureController,
-  mapLandmarkToCanvas,
-  mapLandmarkToFittedCanvas,
   MediaPipeHandTracker,
   type CanvasMapping,
   type DetectedHand,
@@ -4803,6 +4808,8 @@ export function AirboardPrototype({
     }
     trackerRef.current?.close();
     trackerRef.current = null;
+    canvasNavTrackerRef.current?.reset();
+    setCanvasNavMode(null);
     snapGestureTrackerRef.current?.reset();
     undoGestureTrackerRef.current?.reset();
     if (victoryVoiceGestureTrackerRef.current?.engaged) {
@@ -4905,7 +4912,6 @@ export function AirboardPrototype({
       setCameraStatus("tracker_loading");
       const tracker = await MediaPipeHandTracker.create({
         wasmBaseUrl: "/vendor/mediapipe/wasm",
-        modelAssetPath: "/vendor/mediapipe/models/gesture_recognizer.task",
       });
       if (releaseIfUnmounted(stream, tracker)) {
         meetBridgeSessionRef.current?.stop();
@@ -5346,12 +5352,16 @@ export function AirboardPrototype({
   );
 
   /**
-   * MediaPipe Open_Palm moving left is undo. A stationary open palm has no
-   * command meaning; only directional motion reserves the hand stream.
+   * Airboard's landmark-defined open palm moving left is Undo. A stationary
+   * open palm has no command meaning; only directional motion reserves the
+   * hand stream.
    */
   const updateUndoGesture = useCallback(
     (hands: readonly DetectedHand[], timestampMs: number): UndoGestureEvent => {
-      const openPalm = selectSingleCannedGesture(hands, "Open_Palm");
+      const openPalm = selectSingleLandmarkPose(
+        hands,
+        estimatePalmPresentation,
+      );
       const voiceSnapshot = voiceRouter.snapshot;
       return processUndoGestureFrame({
         score: openPalm.score,
@@ -5374,13 +5384,16 @@ export function AirboardPrototype({
   );
 
   /**
-   * MediaPipe Victory held still briefly opens the command mic gate. Dropping
-   * the V pose closes it after a short release debounce, with one activation
-   * per neutral-hand reset.
+   * Airboard's landmark-defined Victory pose held still briefly opens the
+   * command mic gate. Dropping the V pose closes it after a short release
+   * debounce, with one activation per neutral-hand reset.
    */
   const updateVictoryVoiceGesture = useCallback(
     (hands: readonly DetectedHand[], timestampMs: number) => {
-      const victory = selectSingleCannedGesture(hands, "Victory");
+      const victory = selectSingleLandmarkPose(
+        hands,
+        estimateVictoryPresentation,
+      );
       const snapshot = voiceRouter.snapshot;
       return processVictoryVoiceGestureFrame({
         score: victory.score,
@@ -5540,7 +5553,11 @@ export function AirboardPrototype({
             };
           }
 
-          const signal = getHybridHandSignal(hands, result?.hand, cameraMapping);
+          const signal = selectLandmarkManipulationSignal(
+            hands,
+            result?.hand,
+            cameraMapping,
+          );
           captureLandmarkFrame(hands, timestampMs);
 
           // Visibility remains available while the diagram is hidden, but all
@@ -5553,96 +5570,143 @@ export function AirboardPrototype({
             return;
           }
 
-          // Two-hand canvas navigation outranks every single-hand gesture:
-          // while engaged, the object controller and voice gate are suppressed
-          // so pan/zoom can never grab an object or open the mic.
           const navTracker = canvasNavTrackerRef.current!;
-          const navUpdate = navTracker.update({
-            hands: collectNavHands(hands, cameraMapping),
-            timestampMs,
-          });
-          if (navTracker.reserving) {
-            if (navTracker.engaged) {
-              setCanvasNavMode((mode) => (mode === navTracker.mode ? mode : navTracker.mode));
-              const viewport = boardViewportRef.current;
-              if (navUpdate.mode === "pan") {
-                applyViewport(
-                  panViewport(viewport, navUpdate.dx, navUpdate.dy, currentViewportLimits()),
+          const frameOwner = arbitrateGestureFrame({
+            // Two-hand navigation outranks every one-hand gesture. Its
+            // reservation window prevents pan/zoom from grabbing an object or
+            // opening the command microphone.
+            navigation: {
+              update: () => {
+                const navigationHands = collectLandmarkNavigationHands(
+                  hands,
+                  cameraMapping,
                 );
-              } else if (navUpdate.mode === "zoom") {
-                applyViewport(
-                  zoomViewport(viewport, navUpdate.factor, navUpdate.anchor, currentViewportLimits()),
-                );
-              }
-            } else {
-              setCanvasNavMode((mode) => (mode === null ? mode : null));
-            }
-            hybridGestureControllerRef.current.reset({ requirePinchRelease: true });
-            hybridPinchClosedRef.current = false;
-            if (victoryVoiceGestureTrackerRef.current!.engaged) {
-              closeVoiceGate("ptt");
-            }
-            victoryVoiceGestureTrackerRef.current!.reset();
-            undoGestureTrackerRef.current!.reset();
-            updateSnapGesture(hands, timestampMs);
-            handleGesture(null, undefined);
-            animationFrame = requestAnimationFrame(loop);
-            return;
-          }
-          setCanvasNavMode((mode) => (mode === null ? mode : null));
-
-          // A pending snap owns its short contact→release window. Do not let
-          // the same curled-hand frames fall through and start an object grab,
-          // resize, placement, erasing, or voice gate before the snap completes.
-          if (updateSnapGesture(hands, timestampMs) !== null) {
-            handleGesture(null, undefined);
-            animationFrame = requestAnimationFrame(loop);
-            return;
-          }
-          if (updateUndoGesture(hands, timestampMs) !== null) {
-            handleGesture(null, undefined);
-            animationFrame = requestAnimationFrame(loop);
-            return;
-          }
-          const voiceGestureEvent = updateVictoryVoiceGesture(hands, timestampMs);
-          if (
-            voiceGestureEvent !== null ||
-            victoryVoiceGestureTrackerRef.current!.reserving
-          ) {
-            handleGesture(null, undefined);
-            animationFrame = requestAnimationFrame(loop);
-            return;
-          }
-          const viewportForTargets = boardViewportRef.current;
-          const screenTargets = buildGestureMoveTargets(boardRef.current).map((target) => ({
-              ...target,
-              bounds: {
-                x: target.bounds.x * viewportForTargets.scale + viewportForTargets.x,
-                y: target.bounds.y * viewportForTargets.scale + viewportForTargets.y,
-                width: target.bounds.width * viewportForTargets.scale,
-                height: target.bounds.height * viewportForTargets.scale,
+                const navUpdate = navTracker.update({
+                  hands: navigationHands,
+                  timestampMs,
+                });
+                if (
+                  !shouldReserveLandmarkNavigation(
+                    hands.length,
+                    navTracker.reserving,
+                  )
+                ) {
+                  setCanvasNavMode((mode) => (mode === null ? mode : null));
+                  return false;
+                }
+                if (navTracker.engaged) {
+                  setCanvasNavMode((mode) =>
+                    mode === navTracker.mode ? mode : navTracker.mode,
+                  );
+                  const viewport = boardViewportRef.current;
+                  if (navUpdate.mode === "pan") {
+                    applyViewport(
+                      panViewport(
+                        viewport,
+                        navUpdate.dx,
+                        navUpdate.dy,
+                        currentViewportLimits(),
+                      ),
+                    );
+                  } else if (navUpdate.mode === "zoom") {
+                    applyViewport(
+                      zoomViewport(
+                        viewport,
+                        navUpdate.factor,
+                        navUpdate.anchor,
+                        currentViewportLimits(),
+                      ),
+                    );
+                  }
+                } else {
+                  setCanvasNavMode((mode) => (mode === null ? mode : null));
+                }
+                return true;
               },
-            }));
-          hybridOutput = hybridGestureControllerRef.current.update({
-            handPoint: signal?.point ?? null,
-            trackingConfidence: signal?.trackingConfidence ?? 0,
-            pinchStrength: signal?.grabStrength ?? 0,
-            grabConfidence: signal?.grabConfidence ?? 0,
-            timestampMs,
-            // Camera targeting exposes committed object bodies only. There are
-            // no synthetic resize handles or empty-canvas selection targets.
-            targets: screenTargets,
+            },
+            // A pending snap owns its complete contact→release window. Curled
+            // contact frames therefore cannot fall through into manipulation.
+            snap: {
+              update: () => updateSnapGesture(hands, timestampMs) !== null,
+              onPreempted: () => {
+                snapGestureTrackerRef.current!.reset();
+              },
+            },
+            undo: {
+              update: () => updateUndoGesture(hands, timestampMs) !== null,
+              onPreempted: () => {
+                undoGestureTrackerRef.current!.reset();
+              },
+            },
+            voice: {
+              update: () => {
+                const event = updateVictoryVoiceGesture(hands, timestampMs);
+                return (
+                  event !== null ||
+                  victoryVoiceGestureTrackerRef.current!.reserving
+                );
+              },
+              onPreempted: () => {
+                if (victoryVoiceGestureTrackerRef.current!.engaged) {
+                  closeVoiceGate("ptt");
+                }
+                victoryVoiceGestureTrackerRef.current!.reset();
+              },
+            },
+            manipulation: {
+              onPreempted: () => {
+                hybridGestureControllerRef.current!.reset({
+                  requirePinchRelease: true,
+                });
+                hybridPinchClosedRef.current = false;
+              },
+              run: () => {
+                const viewportForTargets = boardViewportRef.current;
+                const screenTargets = buildGestureMoveTargets(
+                  boardRef.current,
+                ).map((target) => ({
+                  ...target,
+                  bounds: {
+                    x:
+                      target.bounds.x * viewportForTargets.scale +
+                      viewportForTargets.x,
+                    y:
+                      target.bounds.y * viewportForTargets.scale +
+                      viewportForTargets.y,
+                    width:
+                      target.bounds.width * viewportForTargets.scale,
+                    height:
+                      target.bounds.height * viewportForTargets.scale,
+                  },
+                }));
+                hybridOutput = hybridGestureControllerRef.current!.update({
+                  handPoint: signal?.point ?? null,
+                  trackingConfidence: signal?.trackingConfidence ?? 0,
+                  pinchStrength: signal?.grabStrength ?? 0,
+                  grabConfidence: signal?.grabConfidence ?? 0,
+                  timestampMs,
+                  // Camera targeting exposes committed object bodies only.
+                  // There are no resize handles or empty-canvas targets.
+                  targets: screenTargets,
+                });
+                setHandControlDiagnostics({
+                  trackingConfidence: signal?.trackingConfidence ?? 0,
+                  grabStrength: signal?.grabStrength ?? 0,
+                  grabConfidence: signal?.grabConfidence ?? 0,
+                  focusedTargetId: hybridOutput.focusedTargetId,
+                  grabbedTargetId: hybridOutput.grabbedTargetId,
+                  placementActive: cameraPlacementActiveRef.current,
+                  controllerState: hybridOutput.state,
+                  requiresPinchRelease: hybridOutput.requiresPinchRelease,
+                });
+              },
+            },
           });
-          setHandControlDiagnostics({
-            trackingConfidence: signal?.trackingConfidence ?? 0,
-            grabStrength: signal?.grabStrength ?? 0,
-            grabConfidence: signal?.grabConfidence ?? 0,
-            focusedTargetId: hybridOutput.focusedTargetId,
-            grabbedTargetId: hybridOutput.grabbedTargetId,
-            placementActive: cameraPlacementActiveRef.current,
-            controllerState: hybridOutput.state,
-            requiresPinchRelease: hybridOutput.requiresPinchRelease,
-          });
+          if (frameOwner !== "manipulation") {
+            handleGesture(null, undefined);
+            animationFrame = requestAnimationFrame(loop);
+            return;
+          }
         }
         handleGesture(result, hybridOutput);
       }
@@ -8705,63 +8769,6 @@ function getAnnotationHandleAtPoint(
   return null;
 }
 
-function getHybridHandSignal(
-  hands: readonly DetectedHand[],
-  preferredHand: GestureResult["hand"],
-  mapping: CanvasMapping,
-): {
-  point: { x: number; y: number };
-  trackingConfidence: number;
-  grabStrength: number;
-  grabConfidence: number;
-} | null {
-  const hand =
-    hands.find((candidate) => candidate.handedness === preferredHand && candidate.landmarks.length >= 21) ??
-    [...hands]
-      .filter((candidate) => candidate.landmarks.length >= 21)
-      .sort((left, right) => right.handednessScore - left.handednessScore)[0];
-  if (!hand) {
-    return null;
-  }
-
-  const indexMcp = hand.landmarks[5];
-  const middleMcp = hand.landmarks[9];
-  const ringMcp = hand.landmarks[13];
-  const pinkyMcp = hand.landmarks[17];
-  if (!indexMcp || !middleMcp || !ringMcp || !pinkyMcp) {
-    return null;
-  }
-
-  const grab = estimateGrabStrength(hand.landmarks);
-  const fitted = mapLandmarkToFittedCanvas(
-    {
-      x: (indexMcp.x + middleMcp.x + ringMcp.x + pinkyMcp.x) / 4,
-      y: (indexMcp.y + middleMcp.y + ringMcp.y + pinkyMcp.y) / 4,
-    },
-    mapping,
-  );
-  return {
-    point: {
-      // The hybrid controller owns selfie mirroring and its compact control
-      // zone. Feed it crop-correct normalized visible-camera coordinates.
-      x: fitted.x / mapping.canvasWidth,
-      y: fitted.y / mapping.canvasHeight,
-    },
-    trackingConfidence: hand.handednessScore,
-    // Report the real strength; the controller decides how to treat a
-    // low-confidence frame (hold an active grab vs. allow release when idle),
-    // because only it knows whether a grab is in progress.
-    grabStrength: grab.strength,
-    grabConfidence: grab.confidence,
-  };
-}
-
-// Committed diagram objects in a stable order, for keyboard Tab cycling.
-/**
- * Maps up to two tracked hands into navigation inputs: mirrored full-frame
- * canvas coordinates (matching the on-screen sense of motion) plus the grab
- * signal that separates pan (open) from zoom (closed).
- */
 function dockButtonClass(selected: boolean, gestureHover: boolean): string | undefined {
   const classes = [selected ? "selected" : null, gestureHover ? "gesture-hover" : null].filter(
     Boolean,
@@ -8769,34 +8776,7 @@ function dockButtonClass(selected: boolean, gestureHover: boolean): string | und
   return classes.length > 0 ? classes.join(" ") : undefined;
 }
 
-function collectNavHands(
-  hands: readonly DetectedHand[],
-  mapping: CanvasMapping,
-): { point: { x: number; y: number }; grabStrength: number }[] {
-  const tracked = hands.filter((hand) => hand.landmarks.length >= 21);
-  if (tracked.length !== 2) {
-    return [];
-  }
-  return tracked.map((hand) => {
-    const indexMcp = hand.landmarks[5]!;
-    const middleMcp = hand.landmarks[9]!;
-    const ringMcp = hand.landmarks[13]!;
-    const pinkyMcp = hand.landmarks[17]!;
-    const point = mapLandmarkToCanvas(
-      {
-        x: (indexMcp.x + middleMcp.x + ringMcp.x + pinkyMcp.x) / 4,
-        y: (indexMcp.y + middleMcp.y + ringMcp.y + pinkyMcp.y) / 4,
-      },
-      { ...mapping, mirrorInput: true, sensitivity: 1 },
-      0,
-    );
-    return {
-      point: { x: point.x, y: point.y },
-      grabStrength: estimateGrabStrength(hand.landmarks).strength,
-    };
-  });
-}
-
+// Committed diagram objects in a stable order, for keyboard Tab cycling.
 function getSelectableAnnotationIds(state: BoardState): string[] {
   return Object.values(state.strokes)
     .filter((stroke) => stroke.status === "committed" && stroke.annotation)

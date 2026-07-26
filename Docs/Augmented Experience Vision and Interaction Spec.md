@@ -52,10 +52,10 @@ fading ghost, never a board mutation.
 
 ### 2.3 Command channel: gesture-gated voice
 
-- **Push-to-talk pose:** hold MediaPipe's built-in `Victory` / V sign still for
-  about 0.4 seconds. While held, a mic ring renders at the cursor; speech is
-  captured; release (or trailing silence) finalizes the utterance. No wake word
-  is needed after the one-time Start Airo microphone action.
+- **Push-to-talk pose:** hold Airboard's landmark-defined Victory / V sign
+  still for about 0.4 seconds. While held, a mic ring renders at the cursor;
+  speech is captured; release (or trailing silence) finalizes the utterance.
+  No wake word is needed after the one-time Start Airo microphone action.
 - **Hold-to-edit (scoped commands):** grabbing an element and holding it still ~600ms
   puts it in a *scoped* state — mic ring attaches to the element, and utterances are
   parsed against a small edit grammar applied to that element: rename, retype ("make it
@@ -84,8 +84,8 @@ fading ghost, never a board mutation.
 
 ## 3. Gesture Vocabulary (v2)
 
-Deliberately small; every pose must be reliably separable in the current MediaPipe
-classifier before it ships.
+Deliberately small; every pose must be reliably separable in Airboard's
+HandLandmarker-backed pose and motion harness before it ships.
 
 | Gesture | Hands | Context | Action | Status |
 |---|---|---|---|---|
@@ -102,20 +102,29 @@ classifier before it ships.
 | Point at A … point at B while speaking | 1 | With deixis | Resolves "this/that/here" | P1 |
 | Grab a ghost suggestion | 1 | On ghost | Accept suggestion | P1 |
 
-Separation model (2026-07-14, as built): **hand count is the first-level switch** —
+Canonical recognition architecture (2026-07-26, as built):
+`HandLandmarker.detectForVideo()` is the only camera inference path. It emits
+21 landmarks per hand. Airboard computes pose evidence from those landmarks,
+feeds it to temporal state machines for hold/swipe/contact-release behavior,
+and arbitrates one owner per frame. The MediaPipe `GestureRecognizer` and its
+canned labels are not runtime inputs.
+
+Separation model (2026-07-26, as built): **hand count is the first-level switch** —
 two-hand navigation outranks and suppresses every single-hand gesture (object
 controller reset, voice/undo gates suppressed); within two-hand, pose separates pan (open)
 from zoom (closed) and a session never morphs between them (release-then-re-engage
 with debounce and flicker-rebase). Within one-hand, location separates the dock
 (screen-space hit test, wins over board objects) from the canvas, and pose separates
-point / grab / built-in command pose; push-to-talk additionally requires `Victory`
-while Undo requires `Open_Palm` plus leftward motion. Mouse parity: ctrl/⌘+wheel
+point / grab / Airboard-defined command pose; push-to-talk requires Victory
+geometry plus a stable hold while Undo requires open-palm geometry plus
+leftward motion. Runtime ownership is Navigation → Snap → Undo → Victory/Voice
+→ Move/Place/Erase. Mouse parity: ctrl/⌘+wheel
 zooms at the cursor, plain wheel pans; the viewport
 resets when switching input modes.
 
 Explicitly **not** gestures (false-positive risk too high): delete and clear. These
 stay voice ("delete this", "clear the board") and keyboard. Undo is the shipped
-`Open_Palm` swipe-left motion gesture.
+landmark-defined open-palm swipe-left motion gesture.
 
 ## 4. Shape Catalog (replaces the button stack)
 

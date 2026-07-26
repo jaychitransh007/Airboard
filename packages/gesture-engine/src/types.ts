@@ -24,29 +24,11 @@ export type HandLandmark = {
   z?: number;
 };
 
-export type MediaPipeCannedGestureName =
-  | "None"
-  | "Closed_Fist"
-  | "Open_Palm"
-  | "Pointing_Up"
-  | "Thumb_Down"
-  | "Thumb_Up"
-  | "Victory"
-  | "ILoveYou"
-  | "Unknown";
-
-export type MediaPipeCannedGesture = {
-  name: MediaPipeCannedGestureName;
-  score: number;
-};
-
 export type DetectedHand = {
   handedness: Handedness;
   handednessScore: number;
   landmarks: HandLandmark[];
   worldLandmarks?: HandLandmark[];
-  /** MediaPipe's top canned static-gesture classification for this hand. */
-  cannedGesture?: MediaPipeCannedGesture;
 };
 
 export type CursorPoint = {

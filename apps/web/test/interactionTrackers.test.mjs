@@ -121,7 +121,7 @@ test("a single presented palm swiped left emits one undo", () => {
   );
 });
 
-test("one motion-blurred Open_Palm label dropout preserves the swipe origin", () => {
+test("one motion-blurred open-palm score dropout preserves the swipe origin", () => {
   const tracker = new UndoGestureTracker();
   const frame = (x, timestampMs, score = 0.9, point = { x, y: 0.45 }) => ({
     score,
@@ -137,7 +137,7 @@ test("one motion-blurred Open_Palm label dropout preserves the swipe origin", ()
   assert.equal(tracker.update(frame(0.43, 190)), "undo");
 });
 
-test("Open_Palm confidence hysteresis preserves motion but requires recovery to fire", () => {
+test("open-palm score hysteresis preserves motion but requires recovery to fire", () => {
   const tracker = new UndoGestureTracker();
   const frame = (x, timestampMs, score) => ({
     score,

@@ -104,9 +104,9 @@ export class VoiceCommandRouter {
    * Claims the in-progress speech turn for the current gesture gate.
    *
    * Speech providers often emit the final transcript several seconds after
-   * the user has lowered their palm. Capturing the gate on the first interim
-   * result keeps that same utterance automatic without extending the general
-   * post-gesture grace window for unrelated room speech.
+   * the user has lowered their Victory pose. Capturing the gate on the first
+   * interim result keeps that same utterance automatic without extending the
+   * general post-gesture grace window for unrelated room speech.
    */
   noteSpeechActivity(): void {
     this.expire();

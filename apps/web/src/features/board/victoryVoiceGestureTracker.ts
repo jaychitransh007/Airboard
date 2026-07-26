@@ -1,22 +1,22 @@
 /**
- * One-shot voice activation from MediaPipe's built-in Victory pose.
+ * One-shot voice activation from Airboard's landmark-defined Victory pose.
  *
- * The caller supplies the best Victory classification score and anchor only
+ * The caller supplies the Victory geometry score and palm anchor only
  * when exactly one hand is present. This tracker owns the temporal contract:
  * the pose must remain stable for a short hold, fires once, and cannot re-arm
  * until the pose has been released and the cooldown has elapsed.
  */
 
 export type VictoryVoiceGestureTrackerConfig = {
-  /** Victory confidence at or above which a new hold may begin. */
+  /** Victory landmark score at or above which a new hold may begin. */
   engageScore: number;
-  /** Below this confidence, an active pose begins its release countdown. */
+  /** Below this pose score, an active pose begins its release countdown. */
   releaseScore: number;
   /** Duration of a stable Victory pose before voice activation. */
   holdMs: number;
   /** Sustained pose loss required before another activation can be armed. */
   releaseMs: number;
-  /** Brief missing-label tolerance while the same single hand remains tracked. */
+  /** Brief pose-score dropout tolerance while the same hand remains tracked. */
   dropoutGraceMs: number;
   /** Normalized camera-space drift allowed during the hold. */
   stillnessRadius: number;
@@ -35,7 +35,7 @@ export const defaultVictoryVoiceGestureTrackerConfig: VictoryVoiceGestureTracker
 };
 
 export type VictoryVoiceGestureFrame = {
-  /** MediaPipe Victory classification confidence in the range 0..1. */
+  /** Airboard Victory landmark score in the range 0..1. */
   score: number;
   /**
    * Anchor for the one detected hand, or null unless exactly one hand is
@@ -149,7 +149,7 @@ export class VictoryVoiceGestureTracker {
       return null;
     }
 
-    // Confidence in the hysteresis band preserves an existing hold but cannot
+    // A score in the hysteresis band preserves an existing hold but cannot
     // complete it. This absorbs a weak frame without activating on a weak pose.
     if (score < this.config.engageScore) {
       return null;

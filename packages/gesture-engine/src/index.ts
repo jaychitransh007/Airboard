@@ -6,6 +6,7 @@ export * from "./mapper.ts";
 export * from "./mediapipe.ts";
 export * from "./oneEuroFilter.ts";
 export * from "./palmPresentation.ts";
+export * from "./victoryPresentation.ts";
 export * from "./pinchHysteresis.ts";
 export * from "./physicalMarker.ts";
 export * from "./pipeline.ts";

@@ -16,9 +16,9 @@ export type PalmPresentationLandmarks = readonly (
 
 export type PalmPresentationEstimate = {
   /**
-   * Normalized 0..1 signal for a "presented palm": an open, flat hand held
-   * upright toward the camera. 0 for fists, pinches, and foreshortened
-   * pointing poses.
+   * Normalized 0..1 signal for a "presented palm": an open, flat hand facing
+   * the camera at any in-plane rotation. 0 for fists, pinches, edge-on hands,
+   * and foreshortened pointing poses.
    */
   score: number;
   /** Finger extension evidence (0 = curled fist, 1 = fully open hand). */
@@ -30,7 +30,7 @@ export type PalmPresentationEstimate = {
    * too mirroring-dependent to disambiguate reliably.
    */
   flatnessScore: number;
-  /** Fingertips-above-wrist evidence, so a resting or pointing hand scores low. */
+  /** Fingertips-above-wrist diagnostic; not required by the runtime pose. */
   uprightScore: number;
   /** Landmark coverage quality, independent of the pose itself. */
   confidence: number;
@@ -58,13 +58,14 @@ const ZERO_ESTIMATE: PalmPresentationEstimate = {
 };
 
 /**
- * Estimates a deliberately presented open hand for trace diagnostics.
+ * Estimates a deliberately presented open hand from the canonical landmark
+ * stream. Runtime Undo routing and offline trace diagnostics use this same
+ * definition so production behavior can be replayed without a classifier.
  *
- * The pose must be simultaneously open (fingers extended), flat to the camera
- * (projected palm area near its physical maximum), and upright (fingertips
- * above the wrist). Runtime action routing uses MediaPipe's built-in
- * Open_Palm label; this geometric estimate remains useful in offline landmark
- * traces and calibration reports.
+ * The pose must be simultaneously open (fingers extended) and flat to the
+ * camera (projected palm area near its physical maximum). In-plane rotation is
+ * deliberately allowed: the leftward swipe supplies intent, so users should
+ * not also have to keep their fingertips vertically above the wrist.
  */
 export function estimatePalmPresentation(
   landmarks: PalmPresentationLandmarks,
@@ -96,7 +97,7 @@ export function estimatePalmPresentation(
   // hand proportions; the ramp reaches 1 at 0.34 to tolerate narrow palms.
   const flatnessScore = clamp(projectedArea / (handScale * handScale * 0.34));
 
-  let opennessSum = 0;
+  const fingerOpennessScores: number[] = [];
   let uprightSum = 0;
   let observedFingers = 0;
   for (const [mcpIndex, pipIndex, tipIndex] of FINGERS) {
@@ -117,32 +118,48 @@ export function estimatePalmPresentation(
     const straightness =
       pathLength > 1e-6 ? clamp(planarDistance(mcp, tip) / pathLength) : 0;
     const reach = clamp((planarDistance(mcp, tip) / knuckleSpan - 0.45) / 0.4);
-    opennessSum += clamp(straightness * 0.45 + reach * 0.55);
+    fingerOpennessScores.push(clamp(straightness * 0.45 + reach * 0.55));
 
     // Upright: fingertip meaningfully above the wrist in image space
     // (image y grows downward).
     uprightSum += clamp((wrist.y - tip.y) / handScale / 0.85);
   }
 
-  if (observedFingers < 3 || !(knuckleSpan > 1e-4)) {
+  // Undo deliberately requires a complete four-finger observation. Missing
+  // landmarks must fail closed rather than letting the remaining fingers
+  // inflate an otherwise ambiguous pose score.
+  if (observedFingers < FINGERS.length || !(knuckleSpan > 1e-4)) {
     return { ...ZERO_ESTIMATE, flatnessScore };
   }
 
-  const opennessScore = clamp(opennessSum / observedFingers);
+  // The two weakest fingers are authoritative. Averaging all four would allow
+  // a Victory or pointing transition to masquerade as an open palm because
+  // two strongly extended fingers could hide two folded fingers.
+  const weakestFingerScores = [...fingerOpennessScores]
+    .sort((left, right) => left - right)
+    .slice(0, 2);
+  const weakestIndividualScore = weakestFingerScores[0] ?? 0;
+  const opennessScore = clamp(
+    weakestFingerScores.reduce((sum, value) => sum + value, 0) /
+      weakestFingerScores.length,
+  );
   const uprightScore = clamp(uprightSum / observedFingers);
   const confidence = clamp(observedFingers / FINGERS.length);
 
-  // Every component must individually hold — a flat fist, a foreshortened
-  // pointing hand, or an open sideways hand is not the pose. Below its floor
-  // the score collapses to zero so the downstream debounce never accumulates
-  // weak evidence. Openness carries the strictest floor because it is the
-  // foreshortening discriminator.
-  if (opennessScore < 0.5 || flatnessScore < 0.35 || uprightScore < 0.35) {
+  // Both required components must individually hold — a flat fist,
+  // foreshortened pointing hand, or edge-on open hand is not the pose. Below
+  // either floor the score collapses to zero so motion tracking never
+  // accumulates weak evidence.
+  if (
+    weakestIndividualScore < 0.35 ||
+    opennessScore < 0.5 ||
+    flatnessScore < 0.35
+  ) {
     return { score: 0, opennessScore, flatnessScore, uprightScore, confidence };
   }
 
   const score = clamp(
-    opennessScore * 0.45 + flatnessScore * 0.27 + uprightScore * 0.28,
+    opennessScore * 0.58 + flatnessScore * 0.32 + confidence * 0.1,
   );
   return { score, opennessScore, flatnessScore, uprightScore, confidence };
 }
