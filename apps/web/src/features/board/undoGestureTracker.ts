@@ -1,16 +1,15 @@
 /**
  * Conflict-safe undo gesture recognizer.
  *
- * A single, presented open palm swiped left triggers one undo. The existing
- * push-to-talk gesture deliberately requires the same palm to hold still, so
- * motion makes these two intents mutually exclusive. The tracker latches after
- * firing and requires a palm release before it can fire again.
+ * A single MediaPipe Open_Palm swiped left triggers one undo. Voice uses the
+ * separate Victory label, so this tracker owns only directional palm motion.
+ * It latches after firing and requires a palm release before it can fire again.
  */
 
 export type UndoGestureTrackerConfig = {
   engageScore: number;
   releaseScore: number;
-  /** Leftward travel that reserves the palm for undo instead of push-to-talk. */
+  /** Leftward travel that reserves the palm stream for Undo. */
   intentDistance: number;
   /** Horizontal travel must dominate vertical drift by at least this ratio. */
   minHorizontalDominance: number;
@@ -18,6 +17,8 @@ export type UndoGestureTrackerConfig = {
   maxVerticalDrift: number;
   minDurationMs: number;
   maxDurationMs: number;
+  /** Brief missing-label tolerance while the same single hand remains tracked. */
+  dropoutGraceMs: number;
   releaseMs: number;
   cooldownMs: number;
   mirrorX: boolean;
@@ -32,6 +33,7 @@ export const defaultUndoGestureTrackerConfig: UndoGestureTrackerConfig = {
   maxVerticalDrift: 0.12,
   minDurationMs: 90,
   maxDurationMs: 650,
+  dropoutGraceMs: 120,
   releaseMs: 180,
   cooldownMs: 1_200,
   mirrorX: true,
@@ -57,6 +59,7 @@ export class UndoGestureTracker {
   private samples: Sample[] = [];
   private latched = false;
   private releaseSince: number | null = null;
+  private lastPoseSeenAt: number | null = null;
   private cooldownUntil = 0;
 
   constructor(config: Partial<UndoGestureTrackerConfig> = {}) {
@@ -66,15 +69,32 @@ export class UndoGestureTracker {
   update(frame: UndoGestureFrame): UndoGestureEvent {
     const { score, point, timestampMs, suppressed } = frame;
 
-    if (suppressed || !point || score < this.config.releaseScore) {
+    const posePresent = point !== null && score >= this.config.releaseScore;
+    if (posePresent) {
+      this.lastPoseSeenAt = timestampMs;
+    }
+    const withinDropoutGrace =
+      !suppressed &&
+      !posePresent &&
+      this.lastPoseSeenAt !== null &&
+      timestampMs - this.lastPoseSeenAt <= this.config.dropoutGraceMs;
+    if (withinDropoutGrace) {
+      return null;
+    }
+
+    if (suppressed || !posePresent) {
       this.samples = [];
+      const lastPoseSeenAt = this.lastPoseSeenAt;
+      this.lastPoseSeenAt = null;
       if (!this.latched) {
         this.releaseSince = null;
         return null;
       }
       if (this.releaseSince === null) {
-        this.releaseSince = timestampMs;
-        return null;
+        this.releaseSince =
+          suppressed || lastPoseSeenAt === null
+            ? timestampMs
+            : lastPoseSeenAt + this.config.dropoutGraceMs;
       }
       if (timestampMs - this.releaseSince >= this.config.releaseMs) {
         this.latched = false;
@@ -87,8 +107,7 @@ export class UndoGestureTracker {
     if (this.latched || timestampMs < this.cooldownUntil) {
       return null;
     }
-    if (score < this.config.engageScore) {
-      this.samples = [];
+    if (score < this.config.engageScore && this.samples.length === 0) {
       return null;
     }
 
@@ -136,6 +155,9 @@ export class UndoGestureTracker {
     ) {
       return hasUndoIntent ? "tracking" : null;
     }
+    if (score < this.config.engageScore) {
+      return "tracking";
+    }
 
     this.samples = [];
     this.latched = true;
@@ -147,6 +169,7 @@ export class UndoGestureTracker {
     this.samples = [];
     this.latched = false;
     this.releaseSince = null;
+    this.lastPoseSeenAt = null;
     this.cooldownUntil = 0;
   }
 }

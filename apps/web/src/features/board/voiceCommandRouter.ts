@@ -12,7 +12,7 @@ import {
  * and through which channel?". Three channels exist, in priority order:
  *
  *   1. gated-scoped — a hold-to-edit gate is scoping an element,
- *   2. gated-ptt    — a push-to-talk palm gate is open,
+ *   2. gated-ptt    — the Victory-hold push-to-talk gate is open,
  *   3. wake         — the "Airo …" wake-word router.
  *
  * Everything that used to make this fragile is centralized here: gate grace

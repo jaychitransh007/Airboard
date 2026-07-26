@@ -58,13 +58,13 @@ const ZERO_ESTIMATE: PalmPresentationEstimate = {
 };
 
 /**
- * Detects a deliberately presented open hand — the push-to-talk pose.
+ * Estimates a deliberately presented open hand for trace diagnostics.
  *
  * The pose must be simultaneously open (fingers extended), flat to the camera
  * (projected palm area near its physical maximum), and upright (fingertips
- * above the wrist). Casual pointing fails the flatness or upright test, a grab
- * fails the openness test, and a hand resting at the bottom of the frame fails
- * the upright test, so the pose is rare outside an intentional gesture.
+ * above the wrist). Runtime action routing uses MediaPipe's built-in
+ * Open_Palm label; this geometric estimate remains useful in offline landmark
+ * traces and calibration reports.
  */
 export function estimatePalmPresentation(
   landmarks: PalmPresentationLandmarks,

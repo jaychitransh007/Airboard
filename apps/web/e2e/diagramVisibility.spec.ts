@@ -121,7 +121,9 @@ test("gesture guide teaches the exact conflict-safe poses", async ({ page }) => 
   await page.getByRole("button", { name: "Open board settings" }).click();
   await page.getByText("Gesture guide", { exact: true }).click();
 
-  await expect(page.getByText("Do not present a rigid flat palm.")).toBeVisible();
+  await expect(
+    page.getByText("Move one relaxed hand without holding a command pose."),
+  ).toBeVisible();
   await expect(
     page.getByText(/Camera gestures select one object only and never draw a lasso/i),
   ).toBeVisible();
@@ -133,8 +135,12 @@ test("gesture guide teaches the exact conflict-safe poses", async ({ page }) => 
     page.getByText(/flick the middle finger away quickly—the touch alone does nothing/i),
   ).toBeVisible();
   await expect(
-    page.getByText(/held palm is reserved for voice/i),
+    page.getByText(/hold one V sign still for about 0\.4 seconds/i),
   ).toBeVisible();
+  await expect(
+    page.getByText(/flat palm and swipe left in one clear horizontal motion/i),
+  ).toBeVisible();
+  await expect(page.getByText(/held palm is reserved for voice/i)).toHaveCount(0);
   await expect(
     page.getByText(/Hold two closed hands briefly/i),
   ).toBeVisible();

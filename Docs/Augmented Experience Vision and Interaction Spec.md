@@ -52,10 +52,10 @@ fading ghost, never a board mutation.
 
 ### 2.3 Command channel: gesture-gated voice
 
-- **Push-to-talk pose:** palm held toward the camera (or pinch-hold — pick one after
-  prototyping; palm-to-camera is more distinguishable from grab/point in the current
-  classifier). While held, a mic ring renders at the cursor; speech is captured; release
-  (or trailing silence) finalizes the utterance. No wake word needed.
+- **Push-to-talk pose:** hold MediaPipe's built-in `Victory` / V sign still for
+  about 0.4 seconds. While held, a mic ring renders at the cursor; speech is
+  captured; release (or trailing silence) finalizes the utterance. No wake word
+  is needed after the one-time Start Airo microphone action.
 - **Hold-to-edit (scoped commands):** grabbing an element and holding it still ~600ms
   puts it in a *scoped* state — mic ring attaches to the element, and utterances are
   parsed against a small edit grammar applied to that element: rename, retype ("make it
@@ -92,7 +92,8 @@ classifier before it ships.
 | Open palm point | 1 | Canvas | Cursor / hover highlight | shipped |
 | Close hand (grab) on element | 1 | Canvas | Grab → move; reopen = drop | shipped |
 | Grab + hold still ~600ms | 1 | On element | **Scope element** → scoped voice edit | shipped |
-| Flat palm, held still | 1 (only tracked hand) | Anywhere | **Push-to-talk** (command mic) | shipped |
+| Victory / V sign, held still ~400ms | 1 (only tracked hand) | Anywhere | **Push-to-talk** (command mic) | shipped |
+| Open palm, swipe left | 1 (only tracked hand) | Anywhere | **Undo** one action or cancel an interpreting command | shipped |
 | Point + pinch on dock | 1 | Catalog dock | Open category / arm shape tool | shipped |
 | Two open palms, move together | 2 | Anywhere | **Pan** the canvas (bounded infinite plane) | shipped |
 | Two closed hands, spread/converge | 2 | Anywhere | **Zoom** (anchored at hand midpoint, 25–300%) | shipped |
@@ -103,16 +104,18 @@ classifier before it ships.
 
 Separation model (2026-07-14, as built): **hand count is the first-level switch** —
 two-hand navigation outranks and suppresses every single-hand gesture (object
-controller reset, palm gate suppressed); within two-hand, pose separates pan (open)
+controller reset, voice/undo gates suppressed); within two-hand, pose separates pan (open)
 from zoom (closed) and a session never morphs between them (release-then-re-engage
 with debounce and flicker-rebase). Within one-hand, location separates the dock
 (screen-space hit test, wins over board objects) from the canvas, and pose separates
-point / grab / flat-palm; push-to-talk additionally requires being the only tracked
-hand. Mouse parity: ctrl/⌘+wheel zooms at the cursor, plain wheel pans; the viewport
+point / grab / built-in command pose; push-to-talk additionally requires `Victory`
+while Undo requires `Open_Palm` plus leftward motion. Mouse parity: ctrl/⌘+wheel
+zooms at the cursor, plain wheel pans; the viewport
 resets when switching input modes.
 
-Explicitly **not** gestures (false-positive risk too high): undo, delete, clear. These
-stay voice ("undo", "delete this") and keyboard.
+Explicitly **not** gestures (false-positive risk too high): delete and clear. These
+stay voice ("delete this", "clear the board") and keyboard. Undo is the shipped
+`Open_Palm` swipe-left motion gesture.
 
 ## 4. Shape Catalog (replaces the button stack)
 
@@ -174,7 +177,7 @@ stay voice ("undo", "delete this") and keyboard.
 ## 7. User Stories
 
 **Epic A — Command without ceremony**
-- As a presenter, I hold my palm up and say "add a payment service next to the API" and
+- As a presenter, I hold a V sign and say "add a payment service next to the API" and
   it appears — no wake word, no button, no confirmation.
 - As a presenter, I grab the ePay node, hold it, say "rename to Ledger API", and it's
   renamed the moment I finish speaking.
@@ -205,7 +208,7 @@ stay voice ("undo", "delete this") and keyboard.
 ## 8. Scope and Phasing
 
 **P0 — the augmented core (shipped 2026-07-12)**
-1. Gesture-gated push-to-talk (palm-to-camera) replacing per-line wake word; "Airo"
+1. Gesture-gated push-to-talk (`Victory` held for ~400ms) replacing per-line wake word; "Airo"
    kept as fallback. — `packages/gesture-engine` (new pose + state), `realtimeSpeech.ts`
    (mic gating), `AirboardPrototype.tsx` (mic ring UI).
 2. Hold-to-edit scoped commands on grab-hold / selection. — gesture-engine hold

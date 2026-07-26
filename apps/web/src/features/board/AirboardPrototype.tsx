@@ -90,8 +90,8 @@ import {
 } from "../meet/meetMediaBridge";
 import { CatalogGlyph } from "./catalogGlyphs";
 import { boardDeletionSnapshot, validateBoardTitle } from "./boardLifecycle";
+import { selectSingleCannedGesture } from "./cannedGestureSelection";
 import { HoldToEditTracker } from "./holdToEditTracker";
-import { PalmGateTracker } from "./palmGateTracker";
 import {
   UndoGestureTracker,
   type UndoGestureFrame,
@@ -103,6 +103,11 @@ import {
   type SnapGestureFrame,
   type SnapGestureTrackerResult,
 } from "./snapGestureTracker";
+import {
+  VictoryVoiceGestureTracker,
+  type VictoryVoiceGestureEvent,
+  type VictoryVoiceGestureFrame,
+} from "./victoryVoiceGestureTracker";
 import {
   VoiceCommandRouter,
   type VoiceGateMode,
@@ -137,7 +142,6 @@ import {
   defaultGestureConfig,
   defaultVirtualSurfaceFrictionConfig,
   estimateGrabStrength,
-  estimatePalmPresentation,
   frictionPresets,
   GesturePipeline,
   HybridGestureController,
@@ -436,7 +440,7 @@ const CATALOG_DRAG_MIME = "application/x-airboard-tool";
 // A "gate" is an explicit, user-held addressing channel: while a gate is open
 // (or within its short grace window after closing), finalized speech routes
 // straight to the command pipeline without the "Airo" wake word. All gate
-// timing/routing rules live in VoiceCommandRouter + PalmGateTracker +
+// timing/routing rules live in VoiceCommandRouter + VictoryVoiceGestureTracker +
 // HoldToEditTracker (unit-tested, React-free); the component only wires them.
 type VoiceGateUi =
   | { mode: "ptt" }
@@ -652,9 +656,9 @@ export function AirboardPrototype({
     voiceRouterRef.current = new VoiceCommandRouter();
   }
   const voiceRouter = voiceRouterRef.current;
-  const palmGateTrackerRef = useRef<PalmGateTracker | null>(null);
-  if (palmGateTrackerRef.current === null) {
-    palmGateTrackerRef.current = new PalmGateTracker();
+  const victoryVoiceGestureTrackerRef = useRef<VictoryVoiceGestureTracker | null>(null);
+  if (victoryVoiceGestureTrackerRef.current === null) {
+    victoryVoiceGestureTrackerRef.current = new VictoryVoiceGestureTracker();
   }
   const undoGestureTrackerRef = useRef<UndoGestureTracker | null>(null);
   if (undoGestureTrackerRef.current === null) {
@@ -818,7 +822,7 @@ export function AirboardPrototype({
       id: 1,
       source: "Airo",
       title: "Ready",
-      detail: "Raise one open palm and speak, say “Airo…”, or type below.",
+      detail: "Hold a V sign for voice, say “Airo…”, or type below.",
       tone: "neutral",
     },
   ]);
@@ -2535,7 +2539,7 @@ export function AirboardPrototype({
         setPendingIntent(null);
         voiceRouter.reset();
         setVoiceGate(null);
-        palmGateTrackerRef.current!.reset();
+        victoryVoiceGestureTrackerRef.current!.reset();
         undoGestureTrackerRef.current!.reset();
         hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
         hybridPinchClosedRef.current = false;
@@ -2571,9 +2575,8 @@ export function AirboardPrototype({
       const voiceSnapshot = voiceRouter.snapshot;
       const result = snapGestureTrackerRef.current!.update({
         ...frame,
-        // A palm push-to-talk gate may misclassify the beginning of a snap.
-        // Snap visibility outranks that global gate; only a scoped object
-        // voice edit remains exclusive.
+        // Visibility remains available while the global voice pose is idle;
+        // only a scoped object voice edit is exclusive.
         suppressed:
           frame.suppressed ||
           Boolean(voiceSnapshot?.mode === "scoped" && voiceSnapshot.open),
@@ -3057,9 +3060,9 @@ export function AirboardPrototype({
     (frame: UndoGestureFrame): UndoGestureEvent => {
       const result = undoGestureTrackerRef.current!.update(frame);
       if (result === "tracking") {
-        // Directional palm motion has declared undo intent. Drop any stationary
-        // palm candidate so the same motion cannot also open push-to-talk.
-        palmGateTrackerRef.current!.reset();
+        // Open-palm motion has declared undo intent. Cancel any incomplete
+        // Victory hold before the frame stream is reserved for the swipe.
+        victoryVoiceGestureTrackerRef.current!.reset();
         return "tracking";
       }
       if (result !== "undo") {
@@ -3072,7 +3075,7 @@ export function AirboardPrototype({
       voiceCorrectionPendingRef.current = null;
       voiceRouter.reset();
       setVoiceGate(null);
-      palmGateTrackerRef.current!.reset();
+      victoryVoiceGestureTrackerRef.current!.reset();
       hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
       setLastGestureIntent({ intent: "undo", confidence: 1 });
 
@@ -4195,7 +4198,7 @@ export function AirboardPrototype({
   const syncVoiceGateUi = useCallback(() => {
     const snapshot = voiceRouter.snapshot;
     if (!snapshot || (snapshot.mode === "ptt" && !snapshot.open)) {
-      // Push-to-talk reads as released the moment the palm drops; the scoped
+      // Push-to-talk reads as released when the V sign drops; the scoped
       // pill stays visible through its grace window ("grab, let go, speak").
       setVoiceGate(null);
       return;
@@ -4219,8 +4222,8 @@ export function AirboardPrototype({
       if (gate.mode === "ptt") {
         setCommandFeedback(
           micArmed
-            ? "Push-to-talk: speak a board command, then relax your hand."
-            : "Palm detected. Press Start Airo once to enable push-to-talk.",
+            ? "V sign recognized — speak a board command, then relax your hand."
+            : "V sign recognized. Press Start Airo once to enable voice commands.",
         );
         return;
       }
@@ -4243,6 +4246,19 @@ export function AirboardPrototype({
       syncVoiceGateUi();
     },
     [syncVoiceGateUi, voiceRouter],
+  );
+
+  const processVictoryVoiceGestureFrame = useCallback(
+    (frame: VictoryVoiceGestureFrame): VictoryVoiceGestureEvent => {
+      const event = victoryVoiceGestureTrackerRef.current!.update(frame);
+      if (event === "activate") {
+        openVoiceGate({ mode: "ptt" });
+      } else if (event === "release") {
+        closeVoiceGate("ptt");
+      }
+      return event;
+    },
+    [closeVoiceGate, openVoiceGate],
   );
 
   const dispatchVoiceDecision = useCallback(
@@ -4310,6 +4326,8 @@ export function AirboardPrototype({
         return routeFinalTranscript(transcript, { engine: "realtime" });
       },
       openPttGate: () => openVoiceGate({ mode: "ptt" }),
+      emitVictoryVoiceGestureFrame: (frame: VictoryVoiceGestureFrame) =>
+        processVictoryVoiceGestureFrame(frame),
       emitUndoGestureFrame: (frame: UndoGestureFrame) =>
         processUndoGestureFrame(frame) === "undo",
       emitSnapGestureFrame: (frame: SnapGestureFrame) =>
@@ -4352,6 +4370,7 @@ export function AirboardPrototype({
   }, [
     currentViewportLimits,
     openVoiceGate,
+    processVictoryVoiceGestureFrame,
     processSnapGestureFrame,
     processUndoGestureFrame,
     render,
@@ -4432,7 +4451,7 @@ export function AirboardPrototype({
       if (!classification.wakeDetected) {
         setSpeechRecognitionStatus("wake-missing");
         setCommandFeedback(
-          `Mic heard “${truncateSpeechTranscript(transcript)}”, but it wasn't addressed to the board. Raise an open palm while speaking, or say “Airo, add a user.”`,
+          `Mic heard “${truncateSpeechTranscript(transcript)}”, but it wasn't addressed to the board. Hold a V sign for voice, or say “Airo, add a user.”`,
         );
       } else if (classification.commands.length === 0) {
         setSpeechRecognitionStatus("wake-detected");
@@ -4785,9 +4804,14 @@ export function AirboardPrototype({
     trackerRef.current?.close();
     trackerRef.current = null;
     snapGestureTrackerRef.current?.reset();
+    undoGestureTrackerRef.current?.reset();
+    if (victoryVoiceGestureTrackerRef.current?.engaged) {
+      closeVoiceGate("ptt");
+    }
+    victoryVoiceGestureTrackerRef.current?.reset();
     setCameraStatus("idle");
     setCameraError(null);
-  }, []);
+  }, [closeVoiceGate]);
 
   const startCamera = useCallback(async () => {
     if (!cameraCaptureAvailable) {
@@ -4881,7 +4905,7 @@ export function AirboardPrototype({
       setCameraStatus("tracker_loading");
       const tracker = await MediaPipeHandTracker.create({
         wasmBaseUrl: "/vendor/mediapipe/wasm",
-        modelAssetPath: "/vendor/mediapipe/models/hand_landmarker.task",
+        modelAssetPath: "/vendor/mediapipe/models/gesture_recognizer.task",
       });
       if (releaseIfUnmounted(stream, tracker)) {
         meetBridgeSessionRef.current?.stop();
@@ -5322,34 +5346,19 @@ export function AirboardPrototype({
   );
 
   /**
-   * One open palm moving left is undo. Directional travel reserves the pose
-   * before push-to-talk can engage; once the voice gate is open, undo stays
-   * suppressed until the user releases that gate.
+   * MediaPipe Open_Palm moving left is undo. A stationary open palm has no
+   * command meaning; only directional motion reserves the hand stream.
    */
   const updateUndoGesture = useCallback(
     (hands: readonly DetectedHand[], timestampMs: number): UndoGestureEvent => {
-      let bestScore = 0;
-      let bestPoint: { x: number; y: number } | null = null;
-      let trackedHands = 0;
-      for (const hand of hands) {
-        if (hand.landmarks.length < 21) {
-          continue;
-        }
-        trackedHands += 1;
-        const estimate = estimatePalmPresentation(hand.landmarks);
-        if (estimate.score > bestScore) {
-          bestScore = estimate.score;
-          const wrist = hand.landmarks[0];
-          bestPoint = wrist ? { x: wrist.x, y: wrist.y } : null;
-        }
-      }
+      const openPalm = selectSingleCannedGesture(hands, "Open_Palm");
       const voiceSnapshot = voiceRouter.snapshot;
       return processUndoGestureFrame({
-        score: bestScore,
-        point: bestPoint,
+        score: openPalm.score,
+        point: openPalm.point,
         timestampMs,
         suppressed:
-          trackedHands !== 1 ||
+          openPalm.trackedHands !== 1 ||
           inputPaused ||
           Boolean(voiceSnapshot?.open) ||
           canvasNavTrackerRef.current?.reserving === true ||
@@ -5365,44 +5374,22 @@ export function AirboardPrototype({
   );
 
   /**
-   * Palm push-to-talk: an open, flat, upright hand held still briefly opens
-   * the command mic gate; dropping the pose (with hysteresis) closes it. The
-   * pose estimator gates hard on openness, so grabs and pointing never arm it,
-   * and the stillness requirement keeps ordinary hover movement from opening
-   * the mic mid-gesture.
+   * MediaPipe Victory held still briefly opens the command mic gate. Dropping
+   * the V pose closes it after a short release debounce, with one activation
+   * per neutral-hand reset.
    */
-  const updatePalmPushToTalk = useCallback(
+  const updateVictoryVoiceGesture = useCallback(
     (hands: readonly DetectedHand[], timestampMs: number) => {
-      let bestScore = 0;
-      let bestPoint: { x: number; y: number } | null = null;
-      for (const hand of hands) {
-        if (hand.landmarks.length < 21) {
-          continue;
-        }
-        const estimate = estimatePalmPresentation(hand.landmarks);
-        if (estimate.score > bestScore) {
-          bestScore = estimate.score;
-          const wrist = hand.landmarks[0];
-          bestPoint = wrist ? { x: wrist.x, y: wrist.y } : null;
-        }
-      }
-
-      // Push-to-talk requires the palm to be the ONLY tracked hand: with two
-      // hands visible the user is navigating (or about to).
-      const trackedHands = hands.reduce(
-        (count, hand) => (hand.landmarks.length >= 21 ? count + 1 : count),
-        0,
-      );
+      const victory = selectSingleCannedGesture(hands, "Victory");
       const snapshot = voiceRouter.snapshot;
-      const event = palmGateTrackerRef.current!.update({
-        score: bestScore,
-        point: bestPoint,
+      return processVictoryVoiceGestureFrame({
+        score: victory.score,
+        point: victory.point,
         timestampMs,
-        gateOpen: snapshot?.mode === "ptt" && snapshot.open,
         suppressed:
           inputPaused ||
           (snapshot?.mode === "scoped" && snapshot.open) ||
-          trackedHands >= 2 ||
+          victory.trackedHands !== 1 ||
           canvasNavTrackerRef.current?.reserving === true ||
           objectInteractionRef.current !== null ||
           cameraGrabActiveRef.current ||
@@ -5411,14 +5398,20 @@ export function AirboardPrototype({
           pointerStrokeIdRef.current !== null ||
           pointerErasingRef.current,
       });
-      if (event === "engage") {
-        openVoiceGate({ mode: "ptt" });
-      } else if (event === "release") {
-        closeVoiceGate("ptt");
-      }
     },
-    [closeVoiceGate, inputPaused, openVoiceGate, voiceRouter],
+    [inputPaused, processVictoryVoiceGestureFrame, voiceRouter],
   );
+
+  useEffect(() => {
+    if (inputMode === "gesture" && !inputPaused) {
+      return;
+    }
+    if (victoryVoiceGestureTrackerRef.current!.engaged) {
+      closeVoiceGate("ptt");
+    }
+    victoryVoiceGestureTrackerRef.current!.reset();
+    undoGestureTrackerRef.current!.reset();
+  }, [closeVoiceGate, inputMode, inputPaused]);
 
   /**
    * Hold-to-edit and gate housekeeping. Grabbing an element (hand or pointer)
@@ -5586,7 +5579,10 @@ export function AirboardPrototype({
             }
             hybridGestureControllerRef.current.reset({ requirePinchRelease: true });
             hybridPinchClosedRef.current = false;
-            palmGateTrackerRef.current!.reset();
+            if (victoryVoiceGestureTrackerRef.current!.engaged) {
+              closeVoiceGate("ptt");
+            }
+            victoryVoiceGestureTrackerRef.current!.reset();
             undoGestureTrackerRef.current!.reset();
             updateSnapGesture(hands, timestampMs);
             handleGesture(null, undefined);
@@ -5608,7 +5604,15 @@ export function AirboardPrototype({
             animationFrame = requestAnimationFrame(loop);
             return;
           }
-          updatePalmPushToTalk(hands, timestampMs);
+          const voiceGestureEvent = updateVictoryVoiceGesture(hands, timestampMs);
+          if (
+            voiceGestureEvent !== null ||
+            victoryVoiceGestureTrackerRef.current!.reserving
+          ) {
+            handleGesture(null, undefined);
+            animationFrame = requestAnimationFrame(loop);
+            return;
+          }
           const viewportForTargets = boardViewportRef.current;
           const screenTargets = buildGestureMoveTargets(boardRef.current).map((target) => ({
               ...target,
@@ -5662,9 +5666,10 @@ export function AirboardPrototype({
     captureLandmarkFrame,
     currentViewportLimits,
     sensitivity,
+    closeVoiceGate,
     updateSnapGesture,
     updateUndoGesture,
-    updatePalmPushToTalk,
+    updateVictoryVoiceGesture,
   ]);
 
   useEffect(() => {
@@ -6897,7 +6902,7 @@ export function AirboardPrototype({
                       ? `“${truncateSpeechTranscript(speechHeardText, 180)}”`
                       : speechArmed
                         ? "Listening for your next command…"
-                        : "Start Airo, then raise one open palm and speak."}
+                        : "Start Airo, then hold a V sign for 0.4 seconds and speak."}
                   </p>
                   <small className={`copilot-status ${speechRecognitionStatus}`}>
                     {speechRecognitionLabel(speechRecognitionStatus)}
@@ -7269,7 +7274,7 @@ export function AirboardPrototype({
               {voiceGate.mode === "ptt"
                 ? speechArmed
                   ? "Listening — speak a board command"
-                  : "Palm detected — press Start Airo once to enable push-to-talk"
+                  : "V sign detected — press Start Airo once to enable voice commands"
                 : speechArmed
                   ? `Editing “${voiceGate.label}” — “rename to …”, “delete”, “connect to …”`
                   : `Holding “${voiceGate.label}” — press Start Airo once to enable voice edits`}
@@ -7301,7 +7306,7 @@ export function AirboardPrototype({
                 <h2>Talk to the board, not to software</h2>
                 <ul>
                   <li>
-                    <strong>Raise a flat palm</strong> and speak — no wake word.
+                    <strong>Hold a V sign for 0.4 seconds</strong> and speak — no wake word.
                     “Add a payment service next to the API.”
                   </li>
                   <li>
@@ -8069,7 +8074,7 @@ export function AirboardPrototype({
                     <>
                     <p className="hint">
                       {voiceCaptureAvailable
-                        ? "Start Airo once. Hold one flat palm still to speak; swipe it left promptly to undo. Use a relaxed hand to aim and a closed hand to move."
+                        ? "Start Airo once. Hold a V sign still for 0.4 seconds to speak; show one open palm and swipe left to undo. Use a relaxed hand to aim and a closed hand to move."
                         : "Click Enable hands to use the meeting camera. Use a relaxed hand to aim and a closed hand to move. Voice is not available on this surface yet."}
                     </p>
                     <details className="advanced-settings gesture-guide">
@@ -8077,7 +8082,7 @@ export function AirboardPrototype({
                       <dl>
                         <div>
                           <dt>Aim</dt>
-                          <dd>Move one relaxed hand. Do not present a rigid flat palm.</dd>
+                          <dd>Move one relaxed hand without holding a command pose.</dd>
                         </div>
                         <div>
                           <dt>Choose or select</dt>
@@ -8113,8 +8118,8 @@ export function AirboardPrototype({
                             <div>
                               <dt>Speak to Airo</dt>
                               <dd>
-                                Start Airo once, then hold one flat open palm still for about
-                                0.3 seconds. Lower or relax it when finished.
+                                Start Airo once, then hold one V sign still for about
+                                0.4 seconds. Lower or relax it when finished.
                               </dd>
                             </div>
                             <div>
@@ -8129,8 +8134,8 @@ export function AirboardPrototype({
                         <div>
                           <dt>Undo</dt>
                           <dd>
-                            Show one flat palm and immediately swipe left. Do not hold first—a
-                            held palm is reserved for voice.
+                            Show one flat palm and swipe left in one clear horizontal motion.
+                            Release before another undo.
                           </dd>
                         </div>
                         <div>
@@ -8333,7 +8338,7 @@ export function AirboardPrototype({
             ) : inputMode === "gesture" ? (
               <p className="hint">
                 {voiceCaptureAvailable
-                  ? "Use the Gesture guide above for exact poses. A still flat palm speaks; a prompt flat-palm swipe left undoes. A relaxed hand aims, a closed hand moves, and thumb-middle snaps hide or restore the diagram."
+                  ? "Use the Gesture guide above for exact poses. A held V sign activates voice; an open-palm swipe left undoes. A relaxed hand aims, a closed hand moves, and thumb-middle snaps hide or restore the diagram."
                   : "Use the Gesture guide above for exact poses. A relaxed hand aims, a closed hand moves, a flat-palm swipe left undoes, and thumb-middle snaps hide or restore the diagram."}
               </p>
             ) : (

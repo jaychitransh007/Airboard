@@ -17,9 +17,9 @@ name the active context and provide pointer, keyboard, menu, or voice fallbacks.
 | Move object | Keep Select active; close one hand over the object body, wait for “Move locked,” move, then reopen | Moves only the latched object | Intent Canvas |
 | Place object | Choose a catalog item, move onto the canvas, close one hand, wait for “Holding,” position the preview, then reopen | Commits the selected object type | Intent Canvas |
 | Erase | Choose Eraser first, close one hand over an object, wait for the erase state, sweep across targets, then reopen | Deletes touched objects as one recoverable undo action | Intent Canvas |
-| Global push-to-talk | Start Airo once; hold one flat, upright open palm still for about 0.3 seconds; speak; lower or relax the hand | Opens and closes the global voice gate | Voice-capable hands surface |
+| Global push-to-talk | Start Airo once; hold one MediaPipe `Victory` / V sign still for about 0.4 seconds; speak; lower or relax the hand | Opens and closes the global voice gate | Voice-capable hands surface |
 | Scoped voice edit | Close one hand over an object and hold it nearly still for about 0.6 seconds; speak the change | Addresses the voice command to that object | Voice-capable hands surface |
-| Undo | Show one flat palm and immediately swipe left; do not hold first | Undoes one action or cancels an interpreting command | Hands-enabled surface |
+| Undo | Show one MediaPipe `Open_Palm` and swipe left in one clear horizontal motion; release before another undo | Undoes one action or cancels an interpreting command | Hands-enabled surface |
 | Hide / restore diagram | With one hand, touch thumb to middle finger while keeping thumb-index separated, then perform a fast middle-finger flick that increases the fingertip gap; return to neutral | Toggles diagram only after release motion, not on contact alone | Standalone canvas and meeting overlay |
 | Pan canvas | Hold two open hands for about 0.15 seconds, then move them together | Pans the viewport | Intent Canvas |
 | Zoom canvas | Hold two closed hands for about 0.15 seconds, then spread or converge them | Zooms around the hand midpoint | Intent Canvas |
@@ -44,19 +44,20 @@ commitments.
 
 | Gestures | Why they are close | Current separation | Remaining risk |
 | --- | --- | --- | --- |
-| Push-to-talk vs undo | Both use one flat open palm | Stillness owns voice; prompt directional left travel reserves undo; undo is suppressed after the voice gate opens | A user who holds briefly and then sweeps may intend either action; the UI must teach “hold to speak, move immediately to undo.” |
-| Aim vs push-to-talk | Both can look like an open hand | Aim is a relaxed moving hand; voice requires a flat, upright palm held still for 0.3 seconds | Users naturally present an open palm while explaining. |
+| Push-to-talk vs undo | Both are one-hand command gestures | Voice requires the built-in `Victory` label and a 0.4-second stable hold; Undo requires `Open_Palm` plus a left swipe | Low: the MediaPipe static labels are distinct before motion tracking begins. |
+| Aim vs push-to-talk | A casual hand can briefly resemble a command pose | Voice requires a high-confidence `Victory` label held still for 0.4 seconds; ordinary hover has no voice meaning | A user may naturally make a V sign while presenting; hold, cooldown, and one-shot latching reduce accidental activation. |
 | Move vs place vs erase | All use a closed hand and drag | Select + object body means move; an armed catalog tool means place; Eraser means erase. The chosen mode locks until release. | If the active tool or lock feedback is not visible, the same pose appears unpredictable. |
 | Move vs scoped voice edit | Both begin by closing over an object | Movement beyond tolerance locks out voice; a nearly still 0.6-second hold scopes speech | Fine positioning with a pause can feel like voice activation. |
 | One-hand move vs two-hand zoom | Both use closed hands | Two-hand navigation now reserves the stream on its first valid frame, before its engage debounce, so a zoom cannot pre-grab an object | Tracking loss that drops one hand can end navigation; the release debounce prevents an immediate mode switch. |
-| Two-open-hand pan vs open-palm voice/undo | All use open hands | Two tracked hands suppress every single-hand palm action | One hand temporarily leaving frame ends the reservation after the navigation release debounce. |
+| Two-open-hand pan vs open-palm undo | Both use open hands | Two tracked hands suppress every single-hand Undo action | One hand temporarily leaving frame ends the reservation after the navigation release debounce. |
 | Eraser vs move | Both close over an object | Erasing requires Eraser to be the active tool; Select cannot erase | Mode visibility is essential in a live session. |
 
 ## Fixes applied in this audit
 
 - Two-hand navigation reserves input from its first valid candidate frame, not
   only after the 150 ms engage debounce.
-- Directional undo intent reserves the open palm before push-to-talk can engage.
+- Voice and Undo now use distinct MediaPipe built-in poses: `Victory` and
+  `Open_Palm`, respectively.
 - Undo is suppressed while any voice gate is open.
 - Push-to-talk is suppressed during navigation, movement, placement, erasing,
   paused input, and other active interactions.

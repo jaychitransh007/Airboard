@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { PalmGateTracker } from "../src/features/board/palmGateTracker.ts";
 import { HoldToEditTracker } from "../src/features/board/holdToEditTracker.ts";
 import { UndoGestureTracker } from "../src/features/board/undoGestureTracker.ts";
 import {
@@ -42,53 +41,6 @@ test("dock choose uses padded hit areas and resolves overlap by nearest center",
       10,
     ),
     null,
-  );
-});
-
-test("palm gate engages only after the pose holds still for the debounce", () => {
-  const tracker = new PalmGateTracker();
-  const base = { score: 0.8, point: P, gateOpen: false, suppressed: false };
-  assert.equal(tracker.update({ ...base, timestampMs: 0 }), null, "first frame arms");
-  assert.equal(tracker.update({ ...base, timestampMs: 100 }), null, "too early");
-  assert.equal(tracker.update({ ...base, timestampMs: 300 }), "engage");
-});
-
-test("palm gate never engages while moving — drift re-arms the debounce", () => {
-  const tracker = new PalmGateTracker();
-  const base = { score: 0.8, gateOpen: false, suppressed: false };
-  tracker.update({ ...base, point: { x: 0.2, y: 0.4 }, timestampMs: 0 });
-  tracker.update({ ...base, point: { x: 0.4, y: 0.4 }, timestampMs: 150 }); // drift > radius
-  assert.equal(
-    tracker.update({ ...base, point: { x: 0.4, y: 0.4 }, timestampMs: 300 }),
-    null,
-    "clock restarted at the drift",
-  );
-  assert.equal(tracker.update({ ...base, point: { x: 0.4, y: 0.4 }, timestampMs: 440 }), "engage");
-});
-
-test("palm gate release requires sustained sub-threshold score (hysteresis)", () => {
-  const tracker = new PalmGateTracker();
-  const open = { point: P, gateOpen: true, suppressed: false };
-  // In the hysteresis band: no release.
-  assert.equal(tracker.update({ ...open, score: 0.5, timestampMs: 0 }), null);
-  // Below release score, but not yet sustained.
-  assert.equal(tracker.update({ ...open, score: 0.2, timestampMs: 10 }), null);
-  assert.equal(tracker.update({ ...open, score: 0.2, timestampMs: 100 }), null);
-  // A strong pose frame cancels the countdown.
-  assert.equal(tracker.update({ ...open, score: 0.7, point: P, timestampMs: 150 }), null);
-  assert.equal(tracker.update({ ...open, score: 0.1, timestampMs: 200 }), null);
-  assert.equal(tracker.update({ ...open, score: 0.1, timestampMs: 460 }), "release");
-});
-
-test("palm gate is suppressed while another gate outranks it", () => {
-  const tracker = new PalmGateTracker();
-  const base = { score: 0.9, point: P, gateOpen: false, suppressed: true };
-  tracker.update({ ...base, timestampMs: 0 });
-  assert.equal(tracker.update({ ...base, timestampMs: 500 }), null, "suppressed");
-  assert.equal(
-    tracker.update({ ...base, suppressed: false, timestampMs: 600 }),
-    "engage",
-    "engages immediately once unsuppressed (candidate never dropped)",
   );
 });
 
@@ -160,13 +112,44 @@ test("a single presented palm swiped left emits one undo", () => {
   assert.equal(
     tracker.update(frame(0.3, 80)),
     "tracking",
-    "directional motion reserves the palm before push-to-talk can engage",
+    "directional open-palm motion reserves Undo",
   );
   assert.equal(
     tracker.update(frame(0.42, 180)),
     "undo",
     "raw camera motion right is a visible swipe left after mirroring",
   );
+});
+
+test("one motion-blurred Open_Palm label dropout preserves the swipe origin", () => {
+  const tracker = new UndoGestureTracker();
+  const frame = (x, timestampMs, score = 0.9, point = { x, y: 0.45 }) => ({
+    score,
+    point,
+    timestampMs,
+    suppressed: false,
+  });
+
+  assert.equal(tracker.update(frame(0.2, 0)), null);
+  assert.equal(tracker.update(frame(0.25, 60)), null);
+  assert.equal(tracker.update(frame(0.25, 93, 0, null)), null);
+  assert.equal(tracker.update(frame(0.32, 126)), "tracking");
+  assert.equal(tracker.update(frame(0.43, 190)), "undo");
+});
+
+test("Open_Palm confidence hysteresis preserves motion but requires recovery to fire", () => {
+  const tracker = new UndoGestureTracker();
+  const frame = (x, timestampMs, score) => ({
+    score,
+    point: { x, y: 0.45 },
+    timestampMs,
+    suppressed: false,
+  });
+
+  assert.equal(tracker.update(frame(0.2, 0, 0.9)), null);
+  assert.equal(tracker.update(frame(0.3, 80, 0.55)), "tracking");
+  assert.equal(tracker.update(frame(0.42, 180, 0.55)), "tracking");
+  assert.equal(tracker.update(frame(0.44, 210, 0.9)), "undo");
 });
 
 test("undo swipe rejects vertical motion, suppression, and repeat firing", () => {
@@ -206,7 +189,7 @@ test("undo swipe rejects vertical motion, suppression, and repeat firing", () =>
   assert.equal(tracker.update(frame(0.45, 2_000)), "undo", "release and cooldown re-arm");
 });
 
-test("undo intent ignores still-palm jitter so push-to-talk can own the pose", () => {
+test("still open-palm jitter never triggers Undo", () => {
   const tracker = new UndoGestureTracker();
   const frame = (x, y, timestampMs) => ({
     score: 0.9,
