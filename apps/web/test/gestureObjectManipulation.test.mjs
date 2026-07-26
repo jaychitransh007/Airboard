@@ -5,9 +5,8 @@ import { createInitialBoardState } from "@airboard/core";
 import { HybridGestureController } from "@airboard/gesture-engine";
 
 import {
-  buildGestureManipulationTargets,
-  estimatePrecisionResizePinch,
-  parseGestureHandleTargetId,
+  buildGestureMoveTargets,
+  resolveResizeHandleForInput,
 } from "../src/features/board/gestureObjectManipulation.ts";
 
 function selectedNodeBoard() {
@@ -32,15 +31,15 @@ function selectedNodeBoard() {
   return board;
 }
 
-function controller(areaCursorRadiusPx) {
+function controller() {
   return new HybridGestureController({
     canvasWidth: 1000,
     canvasHeight: 500,
     controlZone: { x: 0, y: 0, width: 1, height: 1 },
     mirrorX: false,
     hoverSmoothingTimeMs: 0,
-    areaCursorRadiusPx,
-    stickyReleaseRadiusPx: areaCursorRadiusPx * 2,
+    areaCursorRadiusPx: 40,
+    stickyReleaseRadiusPx: 80,
     pinch: {
       engageThreshold: 0.7,
       releaseThreshold: 0.4,
@@ -50,124 +49,53 @@ function controller(areaCursorRadiusPx) {
   });
 }
 
-test("move and resize controllers receive disjoint target sets", () => {
-  const board = selectedNodeBoard();
-  const moveTargets = buildGestureManipulationTargets(board, "node", "move");
-  const resizeTargets = buildGestureManipulationTargets(board, "node", "resize");
+test("camera targeting exposes object bodies without resize handles", () => {
+  const targets = buildGestureMoveTargets(selectedNodeBoard());
 
-  assert.deepEqual(moveTargets.map((target) => target.id), ["node"]);
-  assert.equal(resizeTargets.length, 4);
-  assert.ok(resizeTargets.every((target) => target.id.startsWith("handle:node:")));
-  assert.ok(
-    resizeTargets.every(
-      (target) =>
-        target.bounds.width === 28 &&
-        target.bounds.height === 28 &&
-        target.capturePaddingPx === 8,
-    ),
-    "camera resize handles expose a forgiving acquisition area",
-  );
-  assert.deepEqual(
-    parseGestureHandleTargetId("handle:node:nw"),
-    { strokeId: "node", handle: "nw" },
-  );
-  assert.equal(parseGestureHandleTargetId("node"), null);
+  assert.deepEqual(targets.map((target) => target.id), ["node"]);
+  assert.ok(targets.every((target) => !target.id.startsWith("handle:")));
 });
 
-test("a fist moves from a corner while a precision pinch resizes that corner", () => {
-  const board = selectedNodeBoard();
-  const moveTargets = buildGestureManipulationTargets(board, "node", "move");
-  const resizeTargets = buildGestureManipulationTargets(board, "node", "resize");
+test("camera input cannot resolve a resize handle even when one is selected", () => {
+  assert.equal(resolveResizeHandleForInput("air_gesture", "nw", "se"), null);
+  assert.equal(resolveResizeHandleForInput("pointer", undefined, "se"), "se");
+  assert.equal(resolveResizeHandleForInput("pointer", "nw", "se"), "nw");
+});
+
+test("closing a hand on empty canvas cannot begin a lasso or mutate the board", () => {
+  const gesture = controller();
   const input = {
-    handPoint: { x: 0.45, y: 0.42 },
+    handPoint: { x: 0.2, y: 0.2 },
     trackingConfidence: 1,
     grabConfidence: 1,
+    pinchStrength: 0.95,
+    targets: [],
+  };
+
+  const closed = gesture.update({ ...input, timestampMs: 0 });
+  const dragged = gesture.update({
+    ...input,
+    handPoint: { x: 0.8, y: 0.8 },
+    timestampMs: 100,
+  });
+
+  assert.equal(closed.action, null);
+  assert.equal(closed.grabbedTargetId, null);
+  assert.equal(dragged.action, null);
+  assert.equal(dragged.grabbedTargetId, null);
+});
+
+test("closing a hand over an object can still move that object", () => {
+  const targets = buildGestureMoveTargets(selectedNodeBoard());
+  const output = controller().update({
+    handPoint: { x: 0.5, y: 0.5 },
+    trackingConfidence: 1,
+    grabConfidence: 1,
+    pinchStrength: 0.95,
     timestampMs: 0,
-  };
-
-  const fistMove = controller(40).update({
-    ...input,
-    pinchStrength: 0.95,
-    targets: moveTargets,
+    targets,
   });
-  const fistResize = controller(12).update({
-    ...input,
-    pinchStrength: 0,
-    targets: resizeTargets,
-  });
-  assert.equal(fistMove.action?.type, "grab_started");
-  assert.equal(fistMove.action?.targetId, "node");
-  assert.equal(fistResize.action, null);
 
-  const pinchMove = controller(40).update({
-    ...input,
-    pinchStrength: 0.1,
-    targets: moveTargets,
-  });
-  const pinchResize = controller(12).update({
-    ...input,
-    pinchStrength: 0.95,
-    targets: resizeTargets,
-  });
-  assert.equal(pinchMove.action, null);
-  assert.equal(pinchResize.action?.type, "grab_started");
-  assert.equal(pinchResize.action?.targetId, "handle:node:nw");
-});
-
-test("precision resize rejects a closed fist even when thumb and index are close", () => {
-  const landmarks = Array.from({ length: 21 }, () => null);
-  landmarks[4] = { x: 0.5, y: 0.5, z: 0 };
-  landmarks[8] = { x: 0.51, y: 0.5, z: 0 };
-  const baseGrab = {
-    strength: 0,
-    confidence: 1,
-    handScale: 0.2,
-    observedFingers: 4,
-  };
-
-  assert.ok(
-    estimatePrecisionResizePinch(landmarks, {
-      ...baseGrab,
-      fingerScores: { index: 0.4, middle: 0.08, ring: 0.1, pinky: 0.12 },
-    }) > 0.9,
-    "thumb/index pinch with three open support fingers is a resize",
-  );
-  assert.equal(
-    estimatePrecisionResizePinch(landmarks, {
-      ...baseGrab,
-      strength: 0.95,
-      fingerScores: { index: 0.9, middle: 0.85, ring: 0.9, pinky: 0.88 },
-    }),
-    0,
-    "a closed hand can only move, never resize",
-  );
-});
-
-test("precision resize accepts a natural pinch with resting support fingers", () => {
-  const landmarks = Array.from({ length: 21 }, () => null);
-  landmarks[4] = { x: 0.5, y: 0.5, z: 0 };
-  landmarks[8] = { x: 0.515, y: 0.5, z: 0 };
-  const baseGrab = {
-    strength: 0.15,
-    confidence: 1,
-    handScale: 0.2,
-    observedFingers: 4,
-  };
-
-  assert.ok(
-    estimatePrecisionResizePinch(landmarks, {
-      ...baseGrab,
-      fingerScores: { index: 0.3, middle: 0.82, ring: 0.86, pinky: 0.8 },
-    }) > 0.5,
-    "support fingers may rest naturally while thumb and extended index pinch",
-  );
-  assert.equal(
-    estimatePrecisionResizePinch(landmarks, {
-      ...baseGrab,
-      strength: 0.84,
-      fingerScores: { index: 0.88, middle: 0.9, ring: 0.92, pinky: 0.9 },
-    }),
-    0,
-    "a fist-like pose cannot resize even when thumb and index appear close",
-  );
+  assert.equal(output.action?.type, "grab_started");
+  assert.equal(output.action?.targetId, "node");
 });

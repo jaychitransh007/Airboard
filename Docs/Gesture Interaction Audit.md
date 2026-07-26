@@ -16,7 +16,6 @@ name the active context and provide pointer, keyboard, menu, or voice fallbacks.
 | Choose tool or select | Aim at a dock control or object, start closing one hand, then reopen without dragging | The first dock target reached during that close activates, or the object remains selected | Intent Canvas |
 | Move object | Keep Select active; close one hand over the object body, wait for “Move locked,” move, then reopen | Moves only the latched object | Intent Canvas |
 | Place object | Choose a catalog item, move onto the canvas, close one hand, wait for “Holding,” position the preview, then reopen | Commits the selected object type | Intent Canvas |
-| Resize | Select exactly one object; touch thumb to index on a visible handle with the index extended toward it; other fingers may rest naturally; wait for “Resize locked,” move, then release | Resizes only the selected handle | Intent Canvas |
 | Erase | Choose Eraser first, close one hand over an object, wait for the erase state, sweep across targets, then reopen | Deletes touched objects as one recoverable undo action | Intent Canvas |
 | Global push-to-talk | Start Airo once; hold one flat, upright open palm still for about 0.3 seconds; speak; lower or relax the hand | Opens and closes the global voice gate | Voice-capable hands surface |
 | Scoped voice edit | Close one hand over an object and hold it nearly still for about 0.6 seconds; speak the change | Addresses the voice command to that object | Voice-capable hands surface |
@@ -49,7 +48,6 @@ commitments.
 | Aim vs push-to-talk | Both can look like an open hand | Aim is a relaxed moving hand; voice requires a flat, upright palm held still for 0.3 seconds | Users naturally present an open palm while explaining. |
 | Move vs place vs erase | All use a closed hand and drag | Select + object body means move; an armed catalog tool means place; Eraser means erase. The chosen mode locks until release. | If the active tool or lock feedback is not visible, the same pose appears unpredictable. |
 | Move vs scoped voice edit | Both begin by closing over an object | Movement beyond tolerance locks out voice; a nearly still 0.6-second hold scopes speech | Fine positioning with a pause can feel like voice activation. |
-| Resize vs hide/show snap | Both involve thumb contact | Resize requires thumb-index contact with an extended index on a selected handle; snap requires thumb-middle contact, thumb-index separation, a measurable release-gap increase, rapid travel, cooldown, and neutral reset | Occluded fingertips can be mislabeled by a webcam; live feedback remains necessary. |
 | One-hand move vs two-hand zoom | Both use closed hands | Two-hand navigation now reserves the stream on its first valid frame, before its engage debounce, so a zoom cannot pre-grab an object | Tracking loss that drops one hand can end navigation; the release debounce prevents an immediate mode switch. |
 | Two-open-hand pan vs open-palm voice/undo | All use open hands | Two tracked hands suppress every single-hand palm action | One hand temporarily leaving frame ends the reservation after the navigation release debounce. |
 | Eraser vs move | Both close over an object | Erasing requires Eraser to be the active tool; Select cannot erase | Mode visibility is essential in a live session. |
@@ -67,9 +65,9 @@ commitments.
 - Dock targeting uses padded nearest-target acquisition and accepts a close
   started just before the cursor reaches the tool, with one activation per
   close/reopen cycle.
-- Resize uses larger camera targets, a shorter debounce, the visible
-  thumb-index midpoint cursor near handles, and accepts naturally resting
-  support fingers while rejecting an index-curled fist.
+- Camera resize was removed entirely. Camera targeting now exposes committed
+  object bodies only—never resize handles or empty-canvas selection regions.
+  Pointer handles and typed or voice resize commands remain available.
 - Snap now requires release-gap growth after thumb-middle contact; contact
   alone cannot toggle diagram visibility.
 - The canvas settings include an exact gesture guide instead of the ambiguous

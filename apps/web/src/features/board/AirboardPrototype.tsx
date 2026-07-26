@@ -188,11 +188,7 @@ import {
   type GestureAnnotationResult,
   type ObjectDockTool,
 } from "./gestureAnnotationMode";
-import {
-  buildGestureManipulationTargets,
-  estimatePrecisionResizePinch,
-  parseGestureHandleTargetId,
-} from "./gestureObjectManipulation";
+import { buildGestureMoveTargets, resolveResizeHandleForInput } from "./gestureObjectManipulation";
 import {
   parseIntentCanvasCommand,
   type IntentCanvasOperation,
@@ -239,8 +235,6 @@ type ObjectGestureState =
   | "hover"
   | "grab"
   | "placing"
-  | "resize ready"
-  | "resizing"
   | "no target"
   | "erase";
 
@@ -623,7 +617,6 @@ export function AirboardPrototype({
   const standaloneVoiceResumeAttemptedRef = useRef(false);
   const pipelineRef = useRef(new GesturePipeline());
   const hybridGestureControllerRef = useRef<HybridGestureController | null>(null);
-  const hybridResizeGestureControllerRef = useRef<HybridGestureController | null>(null);
   const hybridGestureCanvasSizeRef = useRef({ width: 0, height: 0, minTrackingConfidence: 0 });
   const hybridPinchClosedRef = useRef(false);
   // One dock action per physical hand-close. This lets a user close just
@@ -2227,11 +2220,13 @@ export function AirboardPrototype({
       const selectedStroke = interactionSelectionId
         ? boardRef.current.strokes[interactionSelectionId]
         : undefined;
-      const handle =
-        options.forcedHandle ??
-        (selectedStroke?.annotation
+      const handle = resolveResizeHandleForInput(
+        inputSource,
+        options.forcedHandle,
+        selectedStroke?.annotation
           ? getAnnotationHandleAtPoint(selectedStroke.annotation, point)
-          : null);
+          : null,
+      );
       if (selectedStroke?.annotation && handle) {
         objectInteractionInitialStateRef.current = boardRef.current;
         objectInteractionRef.current = {
@@ -2543,7 +2538,6 @@ export function AirboardPrototype({
         palmGateTrackerRef.current!.reset();
         undoGestureTrackerRef.current!.reset();
         hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
-        hybridResizeGestureControllerRef.current?.reset({ requirePinchRelease: true });
         hybridPinchClosedRef.current = false;
       }
 
@@ -2599,7 +2593,6 @@ export function AirboardPrototype({
 
       if (inputPaused) {
         hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
-        hybridResizeGestureControllerRef.current?.reset({ requirePinchRelease: true });
         hybridPinchClosedRef.current = false;
         const lastPoint = lastGesturePointerRef.current;
         if (cameraPlacementActiveRef.current) {
@@ -2637,9 +2630,6 @@ export function AirboardPrototype({
           if (dockOutcome) {
             const activated = dockOutcome === "activated";
             hybridGestureControllerRef.current?.reset({ requirePinchRelease: activated });
-            hybridResizeGestureControllerRef.current?.reset({
-              requirePinchRelease: activated,
-            });
             if (activated) {
               hybridPinchClosedRef.current = true;
             }
@@ -2691,7 +2681,6 @@ export function AirboardPrototype({
             // no confirmation gate. Undo remains the safety net.
             applyPendingIntentRef.current?.();
             hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
-            hybridResizeGestureControllerRef.current?.reset({ requirePinchRelease: true });
             hybridPinchClosedRef.current = true;
             setObjectGestureState("hover");
             return;
@@ -2736,21 +2725,6 @@ export function AirboardPrototype({
 
           if (action?.type === "grab_started") {
             cameraGrabActiveRef.current = true;
-            const handleTarget = parseGestureHandleTargetId(action.targetId);
-            if (handleTarget) {
-              // Precision pinch owns resize for the entire interaction. The
-              // closed-hand movement controller cannot acquire handle targets.
-              setObjectGestureState("resizing");
-              beginObjectInteraction(point, {
-                inputSource: "air_gesture",
-                forcedStrokeId: handleTarget.strokeId,
-                forcedHandle: handleTarget.handle,
-              });
-              setCommandFeedback(
-                "Resize locked — keep thumb and index pinched, then release to finish.",
-              );
-              return;
-            }
             if (activeObjectTool === "eraser") {
               beginObjectInteraction(point, {
                 inputSource: "air_gesture",
@@ -2781,7 +2755,6 @@ export function AirboardPrototype({
           }
 
           if (action?.type === "grab_ended") {
-            const resized = Boolean(parseGestureHandleTargetId(action.targetId));
             const erased = pointerErasingRef.current;
             endObjectInteraction(point);
             cameraGrabActiveRef.current = false;
@@ -2789,23 +2762,14 @@ export function AirboardPrototype({
             setCommandFeedback(
               erased
                 ? "Erase complete. Select another tool before closing over an object."
-                : resized
-                ? "Resize complete. Close your hand over the object body to move it."
-                : "Move complete. Precision-pinch a corner handle only when you want to resize.",
+                : "Move complete. Camera gestures never resize objects.",
             );
             return;
           }
 
-          const focusedHandleTarget = hybridOutput.focusedTargetId
-            ? parseGestureHandleTargetId(hybridOutput.focusedTargetId)
-            : null;
-          setHoverStrokeId(
-            focusedHandleTarget?.strokeId ?? hybridOutput.focusedTargetId,
-          );
+          setHoverStrokeId(hybridOutput.focusedTargetId);
           setObjectGestureState(
-            focusedHandleTarget
-              ? "resize ready"
-              : hybridOutput.pinchState === "closed" && !hybridOutput.focusedTargetId
+            hybridOutput.pinchState === "closed" && !hybridOutput.focusedTargetId
               ? "no target"
               : "hover",
           );
@@ -3110,7 +3074,6 @@ export function AirboardPrototype({
       setVoiceGate(null);
       palmGateTrackerRef.current!.reset();
       hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
-      hybridResizeGestureControllerRef.current?.reset({ requirePinchRelease: true });
       setLastGestureIntent({ intent: "undo", confidence: 1 });
 
       if (wasInterpreting) {
@@ -3568,7 +3531,6 @@ export function AirboardPrototype({
         cameraPlacementActiveRef.current = false;
         cameraGrabActiveRef.current = false;
         hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
-        hybridResizeGestureControllerRef.current?.reset({ requirePinchRelease: true });
         hybridPinchClosedRef.current = true;
       }
       const linkedCreate = expandSpokenCreateAndConnect(text);
@@ -5556,7 +5518,6 @@ export function AirboardPrototype({
           const controllerSize = hybridGestureCanvasSizeRef.current;
           if (
             !hybridGestureControllerRef.current ||
-            !hybridResizeGestureControllerRef.current ||
             controllerSize.width !== roundedWidth ||
             controllerSize.height !== roundedHeight ||
             controllerSize.minTrackingConfidence !== confidenceThreshold
@@ -5577,27 +5538,6 @@ export function AirboardPrototype({
                 releaseThreshold: 0.38,
                 engageDebounceMs: 75,
                 releaseDebounceMs: 90,
-              },
-            });
-            hybridResizeGestureControllerRef.current = new HybridGestureController({
-              canvasWidth: roundedWidth,
-              canvasHeight: roundedHeight,
-              mirrorX: true,
-              minTrackingConfidence: confidenceThreshold,
-              hoverSmoothingTimeMs: 30,
-              dragGain: 0.68,
-              dragDeadZonePx: 0.5,
-              // Resizing requires a precise corner/end-point acquisition. It
-              // must not inherit the broad closed-hand object grab radius, but
-              // a webcam still needs more tolerance than a mouse-sized handle.
-              areaCursorRadiusPx: 24,
-              stickyReleaseRadiusPx: 42,
-              trackingLossTimeoutMs: 260,
-            pinch: {
-                engageThreshold: 0.5,
-                releaseThreshold: 0.32,
-                engageDebounceMs: 70,
-                releaseDebounceMs: 80,
               },
             });
             hybridGestureCanvasSizeRef.current = {
@@ -5645,7 +5585,6 @@ export function AirboardPrototype({
               setCanvasNavMode((mode) => (mode === null ? mode : null));
             }
             hybridGestureControllerRef.current.reset({ requirePinchRelease: true });
-            hybridResizeGestureControllerRef.current?.reset({ requirePinchRelease: true });
             hybridPinchClosedRef.current = false;
             palmGateTrackerRef.current!.reset();
             undoGestureTrackerRef.current!.reset();
@@ -5671,16 +5610,7 @@ export function AirboardPrototype({
           }
           updatePalmPushToTalk(hands, timestampMs);
           const viewportForTargets = boardViewportRef.current;
-          const selectedGestureStrokeId =
-            selectedAnnotationIdsRef.current.length === 1
-              ? (selectedAnnotationIdsRef.current[0] ?? null)
-              : null;
-          const screenTargets = (kind: "move" | "resize") =>
-            buildGestureManipulationTargets(
-              boardRef.current,
-              selectedGestureStrokeId,
-              kind,
-            ).map((target) => ({
+          const screenTargets = buildGestureMoveTargets(boardRef.current).map((target) => ({
               ...target,
               bounds: {
                 x: target.bounds.x * viewportForTargets.scale + viewportForTargets.x,
@@ -5689,46 +5619,16 @@ export function AirboardPrototype({
                 height: target.bounds.height * viewportForTargets.scale,
               },
             }));
-          const moveOutput = hybridGestureControllerRef.current.update({
+          hybridOutput = hybridGestureControllerRef.current.update({
             handPoint: signal?.point ?? null,
             trackingConfidence: signal?.trackingConfidence ?? 0,
             pinchStrength: signal?.grabStrength ?? 0,
             grabConfidence: signal?.grabConfidence ?? 0,
             timestampMs,
-            // Movement sees whole objects only; handles are not addressable by
-            // this closed-hand controller.
-            targets: screenTargets("move"),
+            // Camera targeting exposes committed object bodies only. There are
+            // no synthetic resize handles or empty-canvas selection targets.
+            targets: screenTargets,
           });
-          const resizeOutput = hybridResizeGestureControllerRef.current.update({
-            handPoint: signal?.resizePoint ?? null,
-            trackingConfidence: signal?.trackingConfidence ?? 0,
-            pinchStrength: signal?.resizePinchStrength ?? 0,
-            grabConfidence: signal?.grabConfidence ?? 0,
-            timestampMs,
-            // Precision pinch sees selected-object handles only.
-            targets: screenTargets("resize"),
-          });
-          const resizeTargetId =
-            resizeOutput.action?.targetId ?? resizeOutput.grabbedTargetId;
-          const resizeFocusTargetId = resizeOutput.focusedTargetId;
-          const resizeIntentReady =
-            Boolean(
-              resizeFocusTargetId &&
-                parseGestureHandleTargetId(resizeFocusTargetId),
-            ) && (signal?.resizePinchStrength ?? 0) >= 0.12;
-          const resizeActive = Boolean(
-            (resizeTargetId && parseGestureHandleTargetId(resizeTargetId)) ||
-              resizeIntentReady,
-          );
-          hybridOutput = resizeActive ? resizeOutput : moveOutput;
-          // The winning engage edge locks the interaction class. Resetting the
-          // other controller prevents a pose transition during the same hold
-          // from turning a move into a resize (or the reverse).
-          if (resizeOutput.action?.type === "grab_started") {
-            hybridGestureControllerRef.current.reset({ requirePinchRelease: true });
-          } else if (moveOutput.action?.type === "grab_started") {
-            hybridResizeGestureControllerRef.current.reset({ requirePinchRelease: true });
-          }
           setHandControlDiagnostics({
             trackingConfidence: signal?.trackingConfidence ?? 0,
             grabStrength: signal?.grabStrength ?? 0,
@@ -6307,7 +6207,6 @@ export function AirboardPrototype({
       if (objectInteractionRef.current || cameraGrabActiveRef.current) {
         cancelObjectInteraction();
         hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
-        hybridResizeGestureControllerRef.current?.reset({ requirePinchRelease: true });
         hybridPinchClosedRef.current = true;
       }
       objectInteractionRef.current = null;
@@ -7386,15 +7285,11 @@ export function AirboardPrototype({
               role="status"
               aria-live="polite"
             >
-              {objectGestureState === "resize ready"
-                ? "Resize ready — keep the thumb–index point on the highlighted handle"
-                : objectGestureState === "resizing"
-                  ? "Resize locked — move the pinch, then separate"
-                  : objectGestureState === "placing"
-                    ? "Placement locked — move, then reopen"
-                    : objectGestureState === "erase"
-                      ? "Erase locked — sweep, then reopen"
-                      : "Move locked — move, then reopen"}
+              {objectGestureState === "placing"
+                ? "Placement locked — move, then reopen"
+                : objectGestureState === "erase"
+                  ? "Erase locked — sweep, then reopen"
+                  : "Move locked — move, then reopen"}
             </div>
           ) : null}
           {cameraCaptureAvailable &&
@@ -7415,8 +7310,7 @@ export function AirboardPrototype({
                   </li>
                   <li>
                     <strong>Close your hand over an object to move it</strong>; reopen to drop.
-                    To resize, select one object and touch thumb to index directly on a corner
-                    handle; keep the index extended while the other fingers rest naturally.
+                    Camera gestures do not resize objects.
                   </li>
                   <li>
                     <strong>Two open palms</strong> move the canvas; <strong>two closed
@@ -8054,9 +7948,6 @@ export function AirboardPrototype({
                       cancelPendingIntent("Switched input mode; the command preview was cancelled.");
                     }
                     hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
-                    hybridResizeGestureControllerRef.current?.reset({
-                      requirePinchRelease: true,
-                    });
                     if (activeStrokeIdRef.current) {
                       commitStroke(activeStrokeIdRef.current, { discard: true });
                       activeStrokeIdRef.current = null;
@@ -8178,8 +8069,8 @@ export function AirboardPrototype({
                     <>
                     <p className="hint">
                       {voiceCaptureAvailable
-                        ? "Start Airo once. Hold one flat palm still to speak; swipe it left promptly to undo. Use a relaxed hand to aim, a closed hand to move, and a precision thumb-index pinch only on a resize handle."
-                        : "Click Enable hands to use the meeting camera. Use a relaxed hand to aim, a closed hand to move, and a precision thumb-index pinch only on a resize handle. Voice is not available on this surface yet."}
+                        ? "Start Airo once. Hold one flat palm still to speak; swipe it left promptly to undo. Use a relaxed hand to aim and a closed hand to move."
+                        : "Click Enable hands to use the meeting camera. Use a relaxed hand to aim and a closed hand to move. Voice is not available on this surface yet."}
                     </p>
                     <details className="advanced-settings gesture-guide">
                       <summary>Gesture guide</summary>
@@ -8192,7 +8083,8 @@ export function AirboardPrototype({
                           <dt>Choose or select</dt>
                           <dd>
                             Aim near a dock control or object and start closing one hand. The first
-                            highlighted target activates; reopen before choosing another.
+                            highlighted target activates; reopen before choosing another. Camera
+                            gestures select one object only and never draw a lasso.
                           </dd>
                         </div>
                         <div>
@@ -8207,15 +8099,6 @@ export function AirboardPrototype({
                           <dd>
                             Choose a shape first. Move onto the canvas, close one hand, wait for
                             “Holding,” position the preview, then reopen.
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>Resize</dt>
-                          <dd>
-                            Select exactly one object. Touch thumb to index directly on a handle,
-                            keep the index extended toward that handle, and let the other fingers
-                            rest naturally. Wait for “Resize locked,” move, then separate thumb
-                            and index.
                           </dd>
                         </div>
                         <div>
@@ -8271,8 +8154,9 @@ export function AirboardPrototype({
                         </div>
                       </dl>
                       <p>
-                        Shift-click is the deterministic multi-select fallback. Shift+H toggles
-                        diagram visibility, and Cmd/Ctrl+Z always undoes.
+                        Camera gestures do not resize objects or select an area. Use pointer
+                        handles or a typed or voice resize command. Shift+H toggles diagram
+                        visibility, and Cmd/Ctrl+Z always undoes.
                       </p>
                     </details>
                     <details className="advanced-settings">
@@ -8449,8 +8333,8 @@ export function AirboardPrototype({
             ) : inputMode === "gesture" ? (
               <p className="hint">
                 {voiceCaptureAvailable
-                  ? "Use the Gesture guide above for exact poses. A still flat palm speaks; a prompt flat-palm swipe left undoes. A relaxed hand aims, a closed hand moves, thumb-index pinches resize handles, and thumb-middle snaps hide or restore the diagram."
-                  : "Use the Gesture guide above for exact poses. A relaxed hand aims, a closed hand moves, thumb-index pinches resize handles, a flat-palm swipe left undoes, and thumb-middle snaps hide or restore the diagram."}
+                  ? "Use the Gesture guide above for exact poses. A still flat palm speaks; a prompt flat-palm swipe left undoes. A relaxed hand aims, a closed hand moves, and thumb-middle snaps hide or restore the diagram."
+                  : "Use the Gesture guide above for exact poses. A relaxed hand aims, a closed hand moves, a flat-palm swipe left undoes, and thumb-middle snaps hide or restore the diagram."}
               </p>
             ) : (
               <p className="hint">Mouse or trackpad draws. Hold Shift or Alt while dragging to erase.</p>
@@ -8724,9 +8608,6 @@ function getHandControlCoach(input: {
     return "Placement preview grabbed. Move your closed hand, then open it to create the object.";
   }
   if (input.diagnostics.grabbedTargetId) {
-    if (parseGestureHandleTargetId(input.diagnostics.grabbedTargetId)) {
-      return "Resize locked. Move the thumb-index pinch, then separate the fingers to finish.";
-    }
     return "Object grabbed. Move your closed hand; open it fully to drop.";
   }
   if (input.diagnostics.requiresPinchRelease) {
@@ -8736,9 +8617,6 @@ function getHandControlCoach(input: {
     return "Your hand is closed, but no committed object is targeted. Reopen, hover a highlighted object, then close again.";
   }
   if (input.diagnostics.focusedTargetId) {
-    if (parseGestureHandleTargetId(input.diagnostics.focusedTargetId)) {
-      return "Resize ready. Keep thumb and index together on this handle until it locks.";
-    }
     return "Object targeted. Close all four fingers into a fist and hold briefly to grab.";
   }
   if (input.diagnostics.grabConfidence < 0.55) {
@@ -8828,11 +8706,9 @@ function getHybridHandSignal(
   mapping: CanvasMapping,
 ): {
   point: { x: number; y: number };
-  resizePoint: { x: number; y: number } | null;
   trackingConfidence: number;
   grabStrength: number;
   grabConfidence: number;
-  resizePinchStrength: number;
 } | null {
   const hand =
     hands.find((candidate) => candidate.handedness === preferredHand && candidate.landmarks.length >= 21) ??
@@ -8852,8 +8728,6 @@ function getHybridHandSignal(
   }
 
   const grab = estimateGrabStrength(hand.landmarks);
-  const thumbTip = hand.landmarks[4];
-  const indexTip = hand.landmarks[8];
   const fitted = mapLandmarkToFittedCanvas(
     {
       x: (indexMcp.x + middleMcp.x + ringMcp.x + pinkyMcp.x) / 4,
@@ -8861,16 +8735,6 @@ function getHybridHandSignal(
     },
     mapping,
   );
-  const fittedResizePoint =
-    thumbTip && indexTip
-      ? mapLandmarkToFittedCanvas(
-          {
-            x: (thumbTip.x + indexTip.x) / 2,
-            y: (thumbTip.y + indexTip.y) / 2,
-          },
-          mapping,
-        )
-      : null;
   return {
     point: {
       // The hybrid controller owns selfie mirroring and its compact control
@@ -8878,19 +8742,12 @@ function getHybridHandSignal(
       x: fitted.x / mapping.canvasWidth,
       y: fitted.y / mapping.canvasHeight,
     },
-    resizePoint: fittedResizePoint
-      ? {
-          x: fittedResizePoint.x / mapping.canvasWidth,
-          y: fittedResizePoint.y / mapping.canvasHeight,
-        }
-      : null,
     trackingConfidence: hand.handednessScore,
     // Report the real strength; the controller decides how to treat a
     // low-confidence frame (hold an active grab vs. allow release when idle),
     // because only it knows whether a grab is in progress.
     grabStrength: grab.strength,
     grabConfidence: grab.confidence,
-    resizePinchStrength: estimatePrecisionResizePinch(hand.landmarks, grab),
   };
 }
 

@@ -97,7 +97,7 @@ classifier before it ships.
 | Two open palms, move together | 2 | Anywhere | **Pan** the canvas (bounded infinite plane) | shipped |
 | Two closed hands, spread/converge | 2 | Anywhere | **Zoom** (anchored at hand midpoint, 25–300%) | shipped |
 | Close hand on EMPTY canvas + drag | 1 | Select tool | No action; gesture lasso removed until group actions have a complete product purpose | removed |
-| Grab a corner handle of the selection | 1 | Selected object | **Resize** (same as pointer handles) | shipped |
+| Grab a corner handle of the selection | 1 | Selected object | No camera action; use pointer handles or typed/voice resize | removed |
 | Point at A … point at B while speaking | 1 | With deixis | Resolves "this/that/here" | P1 |
 | Grab a ghost suggestion | 1 | On ghost | Accept suggestion | P1 |
 

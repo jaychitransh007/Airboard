@@ -6,7 +6,7 @@
 
 ## Summary
 
-Gesture Mode now behaves as an object-first annotation surface instead of a drawing classifier. Users choose a clean object from the left dock, drag the ghost into place, and then select, move, resize, relabel, reconnect, or erase it.
+Gesture Mode now behaves as an object-first annotation surface instead of a drawing classifier. Users choose a clean object from the left dock, drag the ghost into place, and then select, move, relabel, reconnect, or erase it. Resize remains available through pointer handles and typed or voice commands.
 
 Camera gestures are now used as pointer/select/move/erase input. Mid-air shape inference is no longer the primary workflow.
 
@@ -31,6 +31,8 @@ Camera gestures are now used as pointer/select/move/erase input. Mid-air shape i
   - Object grab is intentionally separate from the old freehand writing classifier.
   - Multi-finger fist strength above the object-control threshold starts `grab`; opening the hand ends it.
   - A committed object must be highlighted before a normal grab starts; the focused target then stays latched during movement.
+  - Camera resize is intentionally unsupported. Thumb-index input cannot mutate object dimensions.
+  - Closing or dragging over empty canvas space is a no-op; gesture lasso selection is not supported.
   - The sidebar `Object control` row shows `hover`, `placing`, `grab`, `no target`, or `erase`, and only reports a grab when a real object or placement interaction is active.
 - Rendering:
   - Selected objects show outlines and handles.
@@ -57,6 +59,7 @@ Camera gestures are now used as pointer/select/move/erase input. Mid-air shape i
    - Choose `Flow`, close the hand, move it, and open it. Watch `Object control` change to `placing`, then confirm `Visible strokes` increases only after opening.
    - Switch to `Select`, use an open hand to highlight the committed object, close all four fingers, move, and reopen. Watch `Object control` change from `hover` to `grab` only after a target is acquired.
    - Close over empty board space and confirm the state says `no target` rather than `grab`.
+   - Pinch thumb and index near every visible pointer handle and confirm object dimensions do not change.
 
 ## Validation
 

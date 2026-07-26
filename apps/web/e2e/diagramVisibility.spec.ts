@@ -123,11 +123,12 @@ test("gesture guide teaches the exact conflict-safe poses", async ({ page }) => 
 
   await expect(page.getByText("Do not present a rigid flat palm.")).toBeVisible();
   await expect(
-    page.getByText(/touch thumb to index directly on a handle/i),
+    page.getByText(/Camera gestures select one object only and never draw a lasso/i),
   ).toBeVisible();
   await expect(
-    page.getByText(/let the other fingers rest naturally/i),
+    page.getByText(/Camera gestures do not resize objects or select an area/i),
   ).toBeVisible();
+  await expect(page.locator(".gesture-guide dt", { hasText: "Resize" })).toHaveCount(0);
   await expect(
     page.getByText(/flick the middle finger away quickly—the touch alone does nothing/i),
   ).toBeVisible();
