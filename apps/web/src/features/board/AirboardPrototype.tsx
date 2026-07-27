@@ -398,8 +398,8 @@ const OBJECT_DOCK: readonly { label: string; tool: ObjectDockTool }[] = [
   { label: "Select", tool: "select" },
   ...[...AIRBOARD_SEMANTIC_NODE_CAPABILITIES]
     .sort((left, right) => left.palette.order - right.palette.order)
-    .map(({ palette, nodeType }) => ({
-      label: palette.title,
+    .map(({ title, nodeType }) => ({
+      label: title,
       tool: SEMANTIC_NODE_DOCK_TOOLS[nodeType],
     })),
   { label: "Arrow", tool: "arrow" },
@@ -413,11 +413,13 @@ const OBJECT_DOCK: readonly { label: string; tool: ObjectDockTool }[] = [
 const OBJECT_CATALOG: readonly {
   id: string;
   label: string;
+  iconTool: ObjectDockTool;
   tools: readonly { label: string; tool: ObjectDockTool }[];
 }[] = [
   {
     id: "flow",
     label: "Flow",
+    iconTool: "connector",
     tools: catalogTools([
       "flow",
       "decision",
@@ -428,8 +430,18 @@ const OBJECT_CATALOG: readonly {
       "connector",
     ]),
   },
-  { id: "system", label: "System", tools: catalogTools(["user", "service", "api", "database", "queue"]) },
-  { id: "annotate", label: "Annotate", tools: catalogTools(["note", "circle", "box", "highlight"]) },
+  {
+    id: "system",
+    label: "System",
+    iconTool: "service",
+    tools: catalogTools(["user", "service", "api", "database", "queue"]),
+  },
+  {
+    id: "annotate",
+    label: "Annotate",
+    iconTool: "note",
+    tools: catalogTools(["note", "circle", "box", "highlight"]),
+  },
 ];
 
 function catalogTools(tools: readonly ObjectDockTool[]): { label: string; tool: ObjectDockTool }[] {
@@ -7243,42 +7255,54 @@ export function AirboardPrototype({
             <div ref={dockRef} className="object-dock catalog-dock" role="toolbar" aria-label="Shape catalog">
               <button
                 data-dock-id="select"
-                className={dockButtonClass(activeObjectTool === "select", dockGestureHover === "select")}
+                className={`catalog-dock-button ${
+                  dockButtonClass(activeObjectTool === "select", dockGestureHover === "select") ?? ""
+                }`}
                 type="button"
                 aria-pressed={activeObjectTool === "select"}
+                aria-label="Select"
+                data-tooltip="Select"
+                title="Select"
                 onClick={() => {
                   setOpenCatalogId(null);
                   activateObjectTool("select");
                 }}
               >
-                Select
+                <CatalogGlyph tool="select" />
+                <span className="sr-only">Select</span>
               </button>
+              <span className="catalog-dock-divider" aria-hidden="true" />
               {OBJECT_CATALOG.map((category) => {
                 const isOpen = openCatalogId === category.id;
                 const holdsActiveTool = category.tools.some(
                   (item) => item.tool === activeObjectTool,
                 );
+                const categoryIconTool = holdsActiveTool ? activeObjectTool : category.iconTool;
                 return (
-                  <div key={category.id} className="catalog-category">
+                  <div key={category.id} className="catalog-category" data-catalog-id={category.id}>
                     <button
                       data-dock-id={`category:${category.id}`}
-                      className={dockButtonClass(
-                        isOpen || holdsActiveTool,
-                        dockGestureHover === `category:${category.id}`,
-                      )}
+                      className={`catalog-dock-button catalog-category-trigger ${
+                        dockButtonClass(
+                          isOpen || holdsActiveTool,
+                          dockGestureHover === `category:${category.id}`,
+                        ) ?? ""
+                      }`}
                       type="button"
                       aria-expanded={isOpen}
                       aria-haspopup="menu"
+                      aria-label={category.label}
+                      data-tooltip={`${category.label} elements`}
+                      title={`${category.label} elements`}
                       onClick={() =>
                         setOpenCatalogId((current) =>
                           current === category.id ? null : category.id,
                         )
                       }
                     >
-                      {category.label}
-                      <span aria-hidden="true" className="catalog-caret">
-                        ▸
-                      </span>
+                      <CatalogGlyph tool={categoryIconTool} />
+                      <span className="sr-only">{category.label} elements</span>
+                      <span aria-hidden="true" className="catalog-menu-indicator">+</span>
                     </button>
                     {isOpen ? (
                       <div className="catalog-flyout" role="menu" aria-label={`${category.label} shapes`}>
@@ -7294,6 +7318,8 @@ export function AirboardPrototype({
                               ) ?? ""
                             }`}
                             type="button"
+                            aria-label={item.label}
+                            data-tooltip={item.label}
                             title={`${item.label} — click or pinch to arm placement, or drag onto the board`}
                             draggable
                             onDragStart={(event) => {
@@ -7306,7 +7332,7 @@ export function AirboardPrototype({
                             }}
                           >
                             <CatalogGlyph tool={item.tool} />
-                            <span className="catalog-tile-label">{item.label}</span>
+                            <span className="sr-only">{item.label}</span>
                           </button>
                         ))}
                       </div>
@@ -7314,17 +7340,24 @@ export function AirboardPrototype({
                   </div>
                 );
               })}
+              <span className="catalog-dock-divider" aria-hidden="true" />
               <button
                 data-dock-id="eraser"
-                className={dockButtonClass(activeObjectTool === "eraser", dockGestureHover === "eraser")}
+                className={`catalog-dock-button ${
+                  dockButtonClass(activeObjectTool === "eraser", dockGestureHover === "eraser") ?? ""
+                }`}
                 type="button"
                 aria-pressed={activeObjectTool === "eraser"}
+                aria-label="Eraser"
+                data-tooltip="Eraser"
+                title="Eraser"
                 onClick={() => {
                   setOpenCatalogId(null);
                   activateObjectTool("eraser");
                 }}
               >
-                Eraser
+                <CatalogGlyph tool="eraser" />
+                <span className="sr-only">Eraser</span>
               </button>
             </div>
           ) : null}
