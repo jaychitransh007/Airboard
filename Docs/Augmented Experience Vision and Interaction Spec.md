@@ -52,7 +52,7 @@ fading ghost, never a board mutation.
 
 ### 2.3 Command channel: gesture-gated voice
 
-- **Push-to-talk pose:** hold Airboard's landmark-defined Victory / V sign
+- **Push-to-talk pose:** hold Airboard's landmark-defined open palm
   still for about 0.4 seconds. While held, a mic ring renders at the cursor;
   speech is captured; release (or trailing silence) finalizes the utterance.
   No wake word is needed after the one-time Start Airo microphone action.
@@ -92,7 +92,7 @@ HandLandmarker-backed pose and motion harness before it ships.
 | Open palm point | 1 | Canvas | Cursor / hover highlight | shipped |
 | Close hand (grab) on element | 1 | Canvas | Grab → move; reopen = drop | shipped |
 | Grab + hold still ~600ms | 1 | On element | **Scope element** → scoped voice edit | shipped |
-| Victory / V sign, held still ~400ms | 1 (only tracked hand) | Anywhere | **Push-to-talk** (command mic) | shipped |
+| Open palm, held still ~400ms | 1 (only tracked hand) | Anywhere | **Push-to-talk** (command mic) | shipped |
 | Open palm, swipe left | 1 (only tracked hand) | Anywhere | **Undo** one action or cancel an interpreting command | shipped |
 | Point + pinch on dock | 1 | Catalog dock | Open category / arm shape tool | shipped |
 | Two open palms, move together | 2 | Anywhere | **Pan** the canvas (bounded infinite plane) | shipped |
@@ -115,10 +115,11 @@ controller reset, voice/undo gates suppressed); within two-hand, pose separates 
 from zoom (closed) and a session never morphs between them (release-then-re-engage
 with debounce and flicker-rebase). Within one-hand, location separates the dock
 (screen-space hit test, wins over board objects) from the canvas, and pose separates
-point / grab / Airboard-defined command pose; push-to-talk requires Victory
-geometry plus a stable hold while Undo requires open-palm geometry plus
-leftward motion. Runtime ownership is Navigation → Snap → Undo → Victory/Voice
-→ Move/Place/Erase. Mouse parity: ctrl/⌘+wheel
+point / grab / Airboard-defined command pose; push-to-talk and Undo now share
+the open-palm pose and are separated by motion — a still palm opens the mic
+while a leftward swipe undoes. Runtime ownership is Navigation → Snap → Undo →
+Voice → Move/Place/Erase, so Undo's higher priority cancels an armed voice hold
+the instant a swipe declares intent. Mouse parity: ctrl/⌘+wheel
 zooms at the cursor, plain wheel pans; the viewport
 resets when switching input modes.
 
@@ -186,7 +187,7 @@ landmark-defined open-palm swipe-left motion gesture.
 ## 7. User Stories
 
 **Epic A — Command without ceremony**
-- As a presenter, I hold a V sign and say "add a payment service next to the API" and
+- As a presenter, I hold an open palm and say "add a payment service next to the API" and
   it appears — no wake word, no button, no confirmation.
 - As a presenter, I grab the ePay node, hold it, say "rename to Ledger API", and it's
   renamed the moment I finish speaking.
@@ -217,7 +218,7 @@ landmark-defined open-palm swipe-left motion gesture.
 ## 8. Scope and Phasing
 
 **P0 — the augmented core (shipped 2026-07-12)**
-1. Gesture-gated push-to-talk (`Victory` held for ~400ms) replacing per-line wake word; "Airo"
+1. Gesture-gated push-to-talk (open palm held still for ~400ms) replacing per-line wake word; "Airo"
    kept as fallback. — `packages/gesture-engine` (new pose + state), `realtimeSpeech.ts`
    (mic gating), `AirboardPrototype.tsx` (mic ring UI).
 2. Hold-to-edit scoped commands on grab-hold / selection. — gesture-engine hold

@@ -17,7 +17,7 @@ name the active context and provide pointer, keyboard, menu, or voice fallbacks.
 | Move object | Keep Select active; close one hand over the object body, wait for “Move locked,” move, then reopen | Moves only the latched object | Intent Canvas |
 | Place object | Choose a catalog item, move onto the canvas, close one hand, wait for “Holding,” position the preview, then reopen | Commits the selected object type | Intent Canvas |
 | Erase | Choose Eraser first, close one hand over an object, wait for the erase state, sweep across targets, then reopen | Deletes touched objects as one recoverable undo action | Intent Canvas |
-| Global push-to-talk | Start Airo once; hold one Airboard-defined Victory / V sign still for about 0.4 seconds; speak; lower or relax the hand | Opens and closes the global voice gate | Voice-capable hands surface |
+| Global push-to-talk | Start Airo once; hold one Airboard-defined open palm still for about 0.4 seconds; speak; lower or relax the hand | Opens and closes the global voice gate | Voice-capable hands surface |
 | Scoped voice edit | Close one hand over an object and hold it nearly still for about 0.6 seconds; speak the change | Addresses the voice command to that object | Voice-capable hands surface |
 | Undo | Show one Airboard-defined open palm and swipe left in one clear horizontal motion; release before another undo | Undoes one action or cancels an interpreting command | Hands-enabled surface |
 | Hide / restore diagram | With one hand, touch thumb to middle finger while keeping thumb-index separated, then perform a fast middle-finger flick that increases the fingertip gap; return to neutral | Toggles diagram only after release motion, not on contact alone | Standalone canvas and meeting overlay |
@@ -44,8 +44,8 @@ commitments.
 
 | Gestures | Why they are close | Current separation | Remaining risk |
 | --- | --- | --- | --- |
-| Push-to-talk vs undo | Both are one-hand command gestures | Voice requires Airboard's two-raised/two-folded-finger Victory geometry plus a stable 0.4-second hold; Undo requires all four fingers open plus a left swipe | Low: the landmark definitions are mutually exclusive before their temporal trackers begin. |
-| Aim vs push-to-talk | A casual hand can briefly resemble a command pose | Voice requires a high-scoring Victory geometry held still for 0.4 seconds; ordinary hover has no voice meaning | A user may naturally make a V sign while presenting; hold, cooldown, and one-shot latching reduce accidental activation. |
+| Push-to-talk vs undo | Both are one-hand open-palm gestures | Both use the same open palm; motion is the discriminator — voice requires a stable 0.4-second still hold, Undo requires a leftward swipe. Undo holds higher priority and cancels an armed voice hold the moment leftward intent appears | Medium: separation is motion-based, not pose-based, so a slow or paused swipe could momentarily arm voice; the 0.4-second still-hold, stillness radius, cooldown, and one-shot latching bound the effect. |
+| Aim vs push-to-talk | A casual hand can briefly resemble a command pose | Voice requires a high-scoring open-palm geometry (flat, fingers extended) held still for 0.4 seconds; a relaxed aiming hand is not a presented flat palm and has no voice meaning | A user may rest an open palm in view while presenting; the 0.4-second still-hold, cooldown, and one-shot latching reduce accidental activation. |
 | Move vs place vs erase | All use a closed hand and drag | Select + object body means move; an armed catalog tool means place; Eraser means erase. The chosen mode locks until release. | If the active tool or lock feedback is not visible, the same pose appears unpredictable. |
 | Move vs scoped voice edit | Both begin by closing over an object | Movement beyond tolerance locks out voice; a nearly still 0.6-second hold scopes speech | Fine positioning with a pause can feel like voice activation. |
 | One-hand move vs two-hand zoom | Both use closed hands | Two-hand navigation now reserves the stream on its first valid frame, before its engage debounce, so a zoom cannot pre-grab an object | Tracking loss that drops one hand can end navigation; the release debounce prevents an immediate mode switch. |
@@ -59,11 +59,11 @@ commitments.
 - `HandLandmarker.detectForVideo()` is the sole camera perception backend for
   every gesture. Airboard derives pose scores and motion from the same 21
   landmarks; the MediaPipe canned gesture classifier is not in the runtime.
-- Voice and Undo use mutually exclusive Airboard landmark definitions:
-  Victory (index and middle raised; ring and pinky folded) and open palm (all
-  four fingers extended and palm presented), respectively.
+- Voice and Undo share one Airboard landmark definition — the open palm (all
+  four fingers extended and palm presented) — and are separated by motion: a
+  still hold opens the voice gate, a leftward swipe undoes.
 - Runtime ownership is locked in this order: two-hand navigation, Snap, Undo,
-  Victory/Voice, then Move/Place/Erase. A higher-priority candidate suppresses
+  Voice, then Move/Place/Erase. A higher-priority candidate suppresses
   every action below it.
 - Undo is suppressed while any voice gate is open.
 - Push-to-talk is suppressed during navigation, movement, placement, erasing,

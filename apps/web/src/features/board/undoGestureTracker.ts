@@ -2,9 +2,10 @@
  * Conflict-safe undo gesture recognizer.
  *
  * A single landmark-defined open palm swiped left triggers one Undo. Voice
- * uses the mutually exclusive Victory pose, so this tracker owns only
- * directional palm motion. It latches after firing and requires a palm release
- * before it can fire again.
+ * uses the same open palm held still, so motion is the discriminator: this
+ * tracker owns only directional (leftward) palm travel, while a stationary
+ * palm belongs to the voice gate. It latches after firing and requires a palm
+ * release before it can fire again.
  */
 
 export type UndoGestureTrackerConfig = {

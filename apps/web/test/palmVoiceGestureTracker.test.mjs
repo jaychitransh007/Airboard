@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { VictoryVoiceGestureTracker } from "../src/features/board/victoryVoiceGestureTracker.ts";
+import { PalmVoiceGestureTracker } from "../src/features/board/palmVoiceGestureTracker.ts";
 
 const POINT = { x: 0.48, y: 0.4 };
 
@@ -13,8 +13,8 @@ const frame = (timestampMs, overrides = {}) => ({
   ...overrides,
 });
 
-test("a stable Victory pose activates one voice turn after 400 ms", () => {
-  const tracker = new VictoryVoiceGestureTracker();
+test("a stable open palm activates one voice turn after 400 ms", () => {
+  const tracker = new PalmVoiceGestureTracker();
 
   assert.equal(tracker.update(frame(0)), null);
   assert.equal(tracker.reserving, true);
@@ -23,12 +23,12 @@ test("a stable Victory pose activates one voice turn after 400 ms", () => {
   assert.equal(tracker.update(frame(400)), "activate");
   assert.equal(tracker.engaged, true);
 
-  assert.equal(tracker.update(frame(700)), null, "a held V cannot fire twice");
+  assert.equal(tracker.update(frame(700)), null, "a held palm cannot fire twice");
   assert.equal(tracker.update(frame(1_500)), null, "latching outlives cooldown");
 });
 
 test("movement restarts the stable-hold clock", () => {
-  const tracker = new VictoryVoiceGestureTracker();
+  const tracker = new PalmVoiceGestureTracker();
 
   tracker.update(frame(0));
   assert.equal(
@@ -43,7 +43,7 @@ test("movement restarts the stable-hold clock", () => {
 });
 
 test("pose-score hysteresis tolerates a weak frame but never activates on one", () => {
-  const tracker = new VictoryVoiceGestureTracker();
+  const tracker = new PalmVoiceGestureTracker();
 
   tracker.update(frame(0));
   assert.equal(tracker.update(frame(250, { score: 0.6 })), null);
@@ -55,7 +55,7 @@ test("pose-score hysteresis tolerates a weak frame but never activates on one", 
   );
   assert.equal(tracker.update(frame(430)), "activate");
 
-  const dropped = new VictoryVoiceGestureTracker();
+  const dropped = new PalmVoiceGestureTracker();
   dropped.update(frame(0));
   dropped.update(frame(250, { score: 0.3 }));
   assert.equal(dropped.reserving, false, "falling below release cancels the hold");
@@ -65,7 +65,7 @@ test("pose-score hysteresis tolerates a weak frame but never activates on one", 
 });
 
 test("one motion-blurred pose-score dropout does not erase a valid hold", () => {
-  const tracker = new VictoryVoiceGestureTracker();
+  const tracker = new PalmVoiceGestureTracker();
 
   tracker.update(frame(0));
   tracker.update(frame(180));
@@ -78,8 +78,8 @@ test("one motion-blurred pose-score dropout does not erase a valid hold", () => 
   assert.equal(tracker.update(frame(400)), "activate");
 });
 
-test("suppression and an ambiguous hand count cannot arm Victory", () => {
-  const tracker = new VictoryVoiceGestureTracker();
+test("suppression and an ambiguous hand count cannot arm the palm voice hold", () => {
+  const tracker = new PalmVoiceGestureTracker();
 
   tracker.update(frame(0, { suppressed: true }));
   assert.equal(tracker.update(frame(500, { suppressed: true })), null);
@@ -94,7 +94,7 @@ test("suppression and an ambiguous hand count cannot arm Victory", () => {
 });
 
 test("suppression releases an already-active voice gate", () => {
-  const tracker = new VictoryVoiceGestureTracker();
+  const tracker = new PalmVoiceGestureTracker();
 
   tracker.update(frame(0));
   assert.equal(tracker.update(frame(400)), "activate");
@@ -107,7 +107,7 @@ test("suppression releases an already-active voice gate", () => {
 });
 
 test("sustained release and cooldown are both required before re-arming", () => {
-  const tracker = new VictoryVoiceGestureTracker();
+  const tracker = new PalmVoiceGestureTracker();
 
   tracker.update(frame(0));
   assert.equal(tracker.update(frame(400)), "activate");
@@ -134,7 +134,7 @@ test("sustained release and cooldown are both required before re-arming", () => 
 });
 
 test("reset clears a partial or latched activation immediately", () => {
-  const tracker = new VictoryVoiceGestureTracker();
+  const tracker = new PalmVoiceGestureTracker();
 
   tracker.update(frame(0));
   assert.equal(tracker.reserving, true);

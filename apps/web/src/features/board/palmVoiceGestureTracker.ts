@@ -1,18 +1,19 @@
 /**
- * One-shot voice activation from Airboard's landmark-defined Victory pose.
+ * One-shot voice activation from Airboard's landmark-defined open-palm pose.
  *
- * The caller supplies the Victory geometry score and palm anchor only
+ * The caller supplies the open-palm geometry score and palm anchor only
  * when exactly one hand is present. This tracker owns the temporal contract:
  * the pose must remain stable for a short hold, fires once, and cannot re-arm
- * until the pose has been released and the cooldown has elapsed.
+ * until the pose has been released and the cooldown has elapsed. A still palm
+ * means "talk"; the same palm swept left is Undo, owned by its own tracker.
  */
 
-export type VictoryVoiceGestureTrackerConfig = {
-  /** Victory landmark score at or above which a new hold may begin. */
+export type PalmVoiceGestureTrackerConfig = {
+  /** Open-palm landmark score at or above which a new hold may begin. */
   engageScore: number;
   /** Below this pose score, an active pose begins its release countdown. */
   releaseScore: number;
-  /** Duration of a stable Victory pose before voice activation. */
+  /** Duration of a stable open-palm pose before voice activation. */
   holdMs: number;
   /** Sustained pose loss required before another activation can be armed. */
   releaseMs: number;
@@ -24,9 +25,12 @@ export type VictoryVoiceGestureTrackerConfig = {
   cooldownMs: number;
 };
 
-export const defaultVictoryVoiceGestureTrackerConfig: VictoryVoiceGestureTrackerConfig = {
-  engageScore: 0.72,
-  releaseScore: 0.45,
+export const defaultPalmVoiceGestureTrackerConfig: PalmVoiceGestureTrackerConfig = {
+  // Matches the open-palm Undo tracker's detection thresholds so a clearly
+  // presented palm reliably opens the mic; the 400 ms still-hold + stillness
+  // radius (not a higher score bar) is what keeps casual palms from arming.
+  engageScore: 0.68,
+  releaseScore: 0.42,
   holdMs: 400,
   releaseMs: 220,
   dropoutGraceMs: 120,
@@ -34,8 +38,8 @@ export const defaultVictoryVoiceGestureTrackerConfig: VictoryVoiceGestureTracker
   cooldownMs: 900,
 };
 
-export type VictoryVoiceGestureFrame = {
-  /** Airboard Victory landmark score in the range 0..1. */
+export type PalmVoiceGestureFrame = {
+  /** Airboard open-palm landmark score in the range 0..1. */
   score: number;
   /**
    * Anchor for the one detected hand, or null unless exactly one hand is
@@ -47,10 +51,10 @@ export type VictoryVoiceGestureFrame = {
   suppressed: boolean;
 };
 
-export type VictoryVoiceGestureEvent = "activate" | "release" | null;
+export type PalmVoiceGestureEvent = "activate" | "release" | null;
 
-export class VictoryVoiceGestureTracker {
-  private readonly config: VictoryVoiceGestureTrackerConfig;
+export class PalmVoiceGestureTracker {
+  private readonly config: PalmVoiceGestureTrackerConfig;
   private candidateSince: number | null = null;
   private anchor: { x: number; y: number } | null = null;
   private latched = false;
@@ -58,15 +62,15 @@ export class VictoryVoiceGestureTracker {
   private lastPoseSeenAt: number | null = null;
   private cooldownUntil = 0;
 
-  constructor(config: Partial<VictoryVoiceGestureTrackerConfig> = {}) {
+  constructor(config: Partial<PalmVoiceGestureTrackerConfig> = {}) {
     this.config = {
-      ...defaultVictoryVoiceGestureTrackerConfig,
+      ...defaultPalmVoiceGestureTrackerConfig,
       ...config,
     };
   }
 
   /**
-   * True from the first qualifying Victory frame until the hold is cancelled
+   * True from the first qualifying open-palm frame until the hold is cancelled
    * or the fired pose is released. Other one-hand gestures should yield while
    * this tracker reserves the stream.
    */
@@ -79,7 +83,7 @@ export class VictoryVoiceGestureTracker {
     return this.latched;
   }
 
-  update(frame: VictoryVoiceGestureFrame): VictoryVoiceGestureEvent {
+  update(frame: PalmVoiceGestureFrame): PalmVoiceGestureEvent {
     const { score, point, timestampMs, suppressed } = frame;
     const posePresent = point !== null && score >= this.config.releaseScore;
     if (posePresent) {

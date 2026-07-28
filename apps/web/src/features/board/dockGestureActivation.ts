@@ -9,6 +9,22 @@ export type DockGestureTarget = {
   };
 };
 
+const CATALOG_CATEGORY_TARGET_PREFIX = "category:";
+export type DockGesturePinchPhase = "open" | "closing" | "closed" | "opening";
+
+/**
+ * Maps a hovered catalog-category trigger to the catalog it should open.
+ * Tool tiles and top-level controls deliberately return null: hovering them
+ * may highlight the target, but must never select or activate anything.
+ */
+export function catalogIdForDockGestureHover(targetId: string | null): string | null {
+  if (!isCatalogCategoryTarget(targetId)) {
+    return null;
+  }
+  const catalogId = targetId.slice(CATALOG_CATEGORY_TARGET_PREFIX.length);
+  return catalogId || null;
+}
+
 /**
  * Chooses one forgiving dock target in screen space. Overlapping padded areas
  * resolve to the closest visual center so a camera cursor cannot activate an
@@ -42,25 +58,58 @@ export function chooseDockGestureTarget(
 }
 
 /**
- * Permits one dock activation per physical close/reopen cycle. Crucially, the
- * close may begin before the hand reaches the target.
+ * Permits one dock activation per complete physical close/reopen cycle. A
+ * concrete target must remain stable from the controller's `closing` phase
+ * through its confirmed `closed` phase. `opening -> closed` jitter therefore
+ * cannot manufacture another pickup, and only a true `open` phase rearms the
+ * tracker. Catalog categories remain hover-only.
  */
 export class DockGestureActivationTracker {
   private consumed = false;
+  private candidateId: string | null = null;
 
-  activate(targetId: string | null, closeIntentActive: boolean): string | null {
-    if (!targetId || !closeIntentActive || this.consumed) {
+  update(targetId: string | null, pinchPhase: DockGesturePinchPhase): string | null {
+    if (pinchPhase === "open") {
+      this.release();
       return null;
     }
+
+    if (pinchPhase === "opening") {
+      this.candidateId = null;
+      return null;
+    }
+
+    const activatableTarget =
+      targetId && !isCatalogCategoryTarget(targetId) ? targetId : null;
+    if (pinchPhase === "closing") {
+      this.candidateId = this.consumed ? null : activatableTarget;
+      return null;
+    }
+
+    if (
+      this.consumed ||
+      !activatableTarget ||
+      this.candidateId !== activatableTarget
+    ) {
+      return null;
+    }
+
     this.consumed = true;
-    return targetId;
+    this.candidateId = null;
+    return activatableTarget;
   }
 
   release(): void {
     this.consumed = false;
+    this.candidateId = null;
   }
 
   reset(): void {
     this.consumed = false;
+    this.candidateId = null;
   }
+}
+
+function isCatalogCategoryTarget(targetId: string | null): targetId is string {
+  return targetId?.startsWith(CATALOG_CATEGORY_TARGET_PREFIX) ?? false;
 }

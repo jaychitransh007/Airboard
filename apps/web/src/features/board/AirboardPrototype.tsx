@@ -30,7 +30,6 @@ import {
   AIRBOARD_TRANSCRIPTION_KEYTERMS,
   classifyBrowserWakeTranscript,
   createBrowserWakeSpeechSession,
-  isAirboardVoiceConfirmation,
   supportsBrowserSpeech,
   type BrowserWakeSpeechSession,
 } from "./browserSpeech";
@@ -61,8 +60,10 @@ import {
 import { CanvasNavigationTracker } from "./canvasNavigationTracker";
 import { arbitrateGestureFrame } from "./gestureFrameArbitration";
 import {
+  catalogIdForDockGestureHover,
   chooseDockGestureTarget,
   DockGestureActivationTracker,
+  type DockGesturePinchPhase,
 } from "./dockGestureActivation";
 import {
   recordingFileName,
@@ -110,10 +111,10 @@ import {
   type SnapGestureTrackerResult,
 } from "./snapGestureTracker";
 import {
-  VictoryVoiceGestureTracker,
-  type VictoryVoiceGestureEvent,
-  type VictoryVoiceGestureFrame,
-} from "./victoryVoiceGestureTracker";
+  PalmVoiceGestureTracker,
+  type PalmVoiceGestureEvent,
+  type PalmVoiceGestureFrame,
+} from "./palmVoiceGestureTracker";
 import {
   VoiceCommandRouter,
   type VoiceGateMode,
@@ -134,7 +135,6 @@ import {
   shouldUseSemanticIntentFallback,
   type SemanticIntentConfig,
   type SemanticIntentContext,
-  type SemanticIntentPendingClarification,
   type SemanticIntentParserIssue,
 } from "./semanticIntent";
 import {
@@ -148,7 +148,6 @@ import {
   defaultGestureConfig,
   defaultVirtualSurfaceFrictionConfig,
   estimatePalmPresentation,
-  estimateVictoryPresentation,
   frictionPresets,
   GesturePipeline,
   HybridGestureController,
@@ -255,7 +254,6 @@ type SpeechRecognitionStatus =
   | "wake-missing"
   | "interpreting"
   | "command-recognized"
-  | "confirmation-needed"
   | "command-rejected"
   | "error";
 
@@ -274,7 +272,6 @@ type IntentPreparationOutcome = {
   preparedText: string;
   source: "deterministic" | "semantic";
   stepCount: number;
-  clarificationPending?: boolean;
 };
 
 type VoiceCommandTraceContext = {
@@ -330,11 +327,6 @@ type PendingIntent = {
   voiceTurnId?: string;
 };
 
-type PendingSemanticClarificationState = SemanticIntentPendingClarification & {
-  boardState: BoardState;
-  expiresAt: number;
-};
-
 type SemanticExecutionSnapshot = {
   boardState: BoardState;
   selectionIds: string[];
@@ -348,13 +340,25 @@ type SemanticExecutionSnapshot = {
   viewOrigin: { x: number; y: number };
 };
 
-const SEMANTIC_CLARIFICATION_TTL_MS = 2 * 60 * 1_000;
 
 type ObjectInteraction =
   | {
       mode: "placing";
       tool: ObjectDockTool;
       start: AnnotationPoint;
+    }
+  | {
+      mode: "catalog_carrying";
+      tool: ObjectDockTool;
+      point: AnnotationPoint;
+      pickupScreenPoint: { x: number; y: number };
+      catalogBounds: {
+        left: number;
+        top: number;
+        right: number;
+        bottom: number;
+      };
+      enteredCanvas: boolean;
     }
   | {
       mode: "moving";
@@ -452,12 +456,40 @@ function catalogTools(tools: readonly ObjectDockTool[]): { label: string; tool: 
 }
 
 const CATALOG_DRAG_MIME = "application/x-airboard-tool";
+const CATALOG_DROP_EXIT_PX = 12;
+const CATALOG_DROP_MIN_TRAVEL_PX = 24;
+
+type DockGestureOutcome =
+  | {
+      type: "hover";
+      targetId: string;
+    }
+  | {
+      type: "activated";
+      targetId: string;
+      catalogBounds: {
+        left: number;
+        top: number;
+        right: number;
+        bottom: number;
+      };
+    };
+
+function placementToolFromDockTarget(targetId: string): ObjectDockTool | null {
+  if (!targetId.startsWith("tool:")) {
+    return null;
+  }
+  const tool = targetId.slice("tool:".length) as ObjectDockTool;
+  return OBJECT_DOCK.some((entry) => entry.tool === tool) && isPlacementTool(tool)
+    ? tool
+    : null;
+}
 
 // ---- Voice gates -----------------------------------------------------------
 // A "gate" is an explicit, user-held addressing channel: while a gate is open
 // (or within its short grace window after closing), finalized speech routes
 // straight to the command pipeline without the "Airo" wake word. All gate
-// timing/routing rules live in VoiceCommandRouter + VictoryVoiceGestureTracker +
+// timing/routing rules live in VoiceCommandRouter + PalmVoiceGestureTracker +
 // HoldToEditTracker (unit-tested, React-free); the component only wires them.
 type VoiceGateUi =
   | { mode: "ptt" }
@@ -658,7 +690,6 @@ export function AirboardPrototype({
   const wakeCommandQueueRef = useRef<Promise<void>>(Promise.resolve());
   const semanticIntentConfigRef = useRef<SemanticIntentConfig | null>(null);
   const semanticIntentRequestIdRef = useRef(0);
-  const pendingSemanticClarificationRef = useRef<PendingSemanticClarificationState | null>(null);
   const selectedAnnotationIdsRef = useRef<string[]>([]);
   const voiceCorrectionPendingRef = useRef<{
     heard: string;
@@ -673,9 +704,9 @@ export function AirboardPrototype({
     voiceRouterRef.current = new VoiceCommandRouter();
   }
   const voiceRouter = voiceRouterRef.current;
-  const victoryVoiceGestureTrackerRef = useRef<VictoryVoiceGestureTracker | null>(null);
-  if (victoryVoiceGestureTrackerRef.current === null) {
-    victoryVoiceGestureTrackerRef.current = new VictoryVoiceGestureTracker();
+  const palmVoiceGestureTrackerRef = useRef<PalmVoiceGestureTracker | null>(null);
+  if (palmVoiceGestureTrackerRef.current === null) {
+    palmVoiceGestureTrackerRef.current = new PalmVoiceGestureTracker();
   }
   const undoGestureTrackerRef = useRef<UndoGestureTracker | null>(null);
   if (undoGestureTrackerRef.current === null) {
@@ -831,6 +862,8 @@ export function AirboardPrototype({
   const [viewportScale, setViewportScale] = useState(1);
   const [canvasNavMode, setCanvasNavMode] = useState<"pan" | "zoom" | null>(null);
   const [dockGestureHover, setDockGestureHover] = useState<string | null>(null);
+  const dockGestureHoverRef = useRef<string | null>(null);
+  const catalogCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dockRef = useRef<HTMLDivElement | null>(null);
   const [copilotOpen, setCopilotOpen] = useState(true);
   const copilotActivitySequenceRef = useRef(1);
@@ -839,11 +872,12 @@ export function AirboardPrototype({
       id: 1,
       source: "Airo",
       title: "Ready",
-      detail: "Hold a V sign for voice, say “Airo…”, or type below.",
+      detail: "Hold an open palm for voice, say “Airo…”, or type below.",
       tone: "neutral",
     },
   ]);
   const [openCatalogId, setOpenCatalogId] = useState<string | null>(null);
+  const openCatalogIdRef = useRef<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [titleEditing, setTitleEditing] = useState(false);
@@ -915,6 +949,9 @@ export function AirboardPrototype({
   useEffect(() => {
     selectedAnnotationIdsRef.current = selectedAnnotationIds;
   }, [selectedAnnotationIds]);
+  useEffect(() => {
+    openCatalogIdRef.current = openCatalogId;
+  }, [openCatalogId]);
   useEffect(() => {
     try {
       window.localStorage.removeItem("airboard.project-glossary.v1");
@@ -2205,6 +2242,15 @@ export function AirboardPrototype({
         forcedStrokeId?: string;
         forcedHandle?: AnnotationResizeHandle;
         placementTool?: ObjectDockTool;
+        catalogCarry?: {
+          pickupScreenPoint: { x: number; y: number };
+          catalogBounds: {
+            left: number;
+            top: number;
+            right: number;
+            bottom: number;
+          };
+        };
       } = {},
     ) => {
       lastGesturePointerRef.current = point;
@@ -2213,11 +2259,20 @@ export function AirboardPrototype({
 
       const placementTool = options.placementTool ?? activeObjectTool;
       if (isPlacementTool(placementTool)) {
-        objectInteractionRef.current = {
-          mode: "placing",
-          tool: placementTool,
-          start: point,
-        };
+        objectInteractionRef.current = options.catalogCarry
+          ? {
+              mode: "catalog_carrying",
+              tool: placementTool,
+              point,
+              pickupScreenPoint: options.catalogCarry.pickupScreenPoint,
+              catalogBounds: options.catalogCarry.catalogBounds,
+              enteredCanvas: false,
+            }
+          : {
+              mode: "placing",
+              tool: placementTool,
+              start: point,
+            };
         updatePlacementGhost(placementTool, point, point);
         selectAnnotationObject(null);
         setObjectGestureState("grab");
@@ -2325,6 +2380,12 @@ export function AirboardPrototype({
       }
 
       const interaction = objectInteractionRef.current;
+      if (interaction?.mode === "catalog_carrying") {
+        interaction.point = point;
+        updatePlacementGhost(interaction.tool, point, point);
+        return;
+      }
+
       if (interaction?.mode === "placing") {
         updatePlacementGhost(interaction.tool, interaction.start, point);
         return;
@@ -2398,6 +2459,8 @@ export function AirboardPrototype({
       const interaction = objectInteractionRef.current;
       if (interaction?.mode === "placing") {
         commitPlacementObject(interaction.tool, interaction.start, point);
+      } else if (interaction?.mode === "catalog_carrying") {
+        commitPlacementObject(interaction.tool, point);
       } else if (interaction?.mode === "moving" || interaction?.mode === "resizing") {
         const initialState = objectInteractionInitialStateRef.current;
         const undoEvents = initialState
@@ -2467,18 +2530,47 @@ export function AirboardPrototype({
     setLabelDraft(annotation?.label ?? "");
   }, [selectedAnnotationId]);
 
+  const cancelCatalogClose = useCallback(() => {
+    if (catalogCloseTimerRef.current !== null) {
+      clearTimeout(catalogCloseTimerRef.current);
+      catalogCloseTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleCatalogClose = useCallback(() => {
+    if (catalogCloseTimerRef.current !== null) {
+      return;
+    }
+    catalogCloseTimerRef.current = setTimeout(() => {
+      catalogCloseTimerRef.current = null;
+      openCatalogIdRef.current = null;
+      dockGestureHoverRef.current = null;
+      setOpenCatalogId(null);
+      setDockGestureHover(null);
+    }, 320);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (catalogCloseTimerRef.current !== null) {
+        clearTimeout(catalogCloseTimerRef.current);
+      }
+    },
+    [],
+  );
+
   /**
-   * Screen-space hit test of the air cursor against the catalog dock. The
-   * first dock target reached during one closing/closed-hand cycle activates,
-   * even if the hand closed just before entering the button. A padded,
-   * nearest-center target makes camera selection practical without allowing a
-   * held hand to trigger several adjacent tools.
+   * Screen-space hit test of the air cursor against the catalog dock.
+   * Category triggers are hover-only and open immediately. A concrete control
+   * activates only on a confirmed close edge while the cursor is already over
+   * it. The padded nearest-center target keeps the small icon rail forgiving
+   * without turning a held hand into a sweep-to-select gesture.
    */
   const handleDockGesture = useCallback(
     (
       screenPoint: { x: number; y: number },
-      closeIntentActive: boolean,
-    ): "hover" | "activated" | null => {
+      pinchPhase: DockGesturePinchPhase,
+    ): DockGestureOutcome | null => {
       const dock = dockRef.current;
       const canvasRect = canvasRef.current?.getBoundingClientRect();
       if (!dock || !canvasRect) {
@@ -2486,7 +2578,7 @@ export function AirboardPrototype({
       }
       const x = screenPoint.x + canvasRect.left;
       const y = screenPoint.y + canvasRect.top;
-      const hitPadding = 10;
+      const hitPadding = 12;
       const candidates: {
         id: string;
         element: HTMLButtonElement;
@@ -2508,23 +2600,68 @@ export function AirboardPrototype({
         });
       }
       const hoveredId = chooseDockGestureTarget({ x, y }, candidates, hitPadding);
+      const preciseTargetId = chooseDockGestureTarget({ x, y }, candidates, 0);
       const hovered = candidates.find((candidate) => candidate.id === hoveredId) ?? null;
+      dockGestureHoverRef.current = hovered?.id ?? null;
       setDockGestureHover((current) => (current === (hovered?.id ?? null) ? current : hovered?.id ?? null));
       if (!hovered) {
+        scheduleCatalogClose();
+        dockGestureActivationTrackerRef.current!.update(null, pinchPhase);
         return null;
       }
-      const activatedId = dockGestureActivationTrackerRef.current!.activate(
-        hovered.id,
-        closeIntentActive,
+      cancelCatalogClose();
+      const hoveredCatalogId = catalogIdForDockGestureHover(hovered.id);
+      if (hoveredCatalogId) {
+        const preciseCatalogId = catalogIdForDockGestureHover(preciseTargetId);
+        const currentCatalogId = openCatalogIdRef.current;
+        // First entry opens immediately. Once a category is open, overlapping
+        // padded hit areas cannot switch it until the cursor is truly inside
+        // the next trigger's visible bounds.
+        if (
+          !currentCatalogId ||
+          currentCatalogId === hoveredCatalogId ||
+          preciseCatalogId === hoveredCatalogId
+        ) {
+          openCatalogIdRef.current = hoveredCatalogId;
+          setOpenCatalogId((current) =>
+            current === hoveredCatalogId ? current : hoveredCatalogId,
+          );
+        }
+      }
+      const activatedId = dockGestureActivationTrackerRef.current!.update(
+        preciseTargetId,
+        pinchPhase,
       );
       if (activatedId) {
+        const activated =
+          candidates.find((candidate) => candidate.id === activatedId) ?? null;
+        if (!activated) {
+          return { type: "hover", targetId: hovered.id };
+        }
         // Reuse the click behavior exactly — one code path for mouse and hand.
-        hovered.element.click();
-        return "activated";
+        activated.element.click();
+        const left = Math.min(...candidates.map((candidate) => candidate.bounds.left));
+        const top = Math.min(...candidates.map((candidate) => candidate.bounds.top));
+        const right = Math.max(
+          ...candidates.map((candidate) => candidate.bounds.left + candidate.bounds.width),
+        );
+        const bottom = Math.max(
+          ...candidates.map((candidate) => candidate.bounds.top + candidate.bounds.height),
+        );
+        return {
+          type: "activated",
+          targetId: activatedId,
+          catalogBounds: {
+            left: left - canvasRect.left,
+            top: top - canvasRect.top,
+            right: right - canvasRect.left,
+            bottom: bottom - canvasRect.top,
+          },
+        };
       }
-      return "hover";
+      return { type: "hover", targetId: hovered.id };
     },
-    [],
+    [cancelCatalogClose, scheduleCatalogClose],
   );
 
   const setDiagramVisibility = useCallback(
@@ -2550,13 +2687,12 @@ export function AirboardPrototype({
         setEditingAnnotationId(null);
         setOpenCatalogId(null);
         semanticIntentRequestIdRef.current += 1;
-        pendingSemanticClarificationRef.current = null;
         pendingIntentRef.current = null;
         applyPendingIntentRef.current = null;
         setPendingIntent(null);
         voiceRouter.reset();
         setVoiceGate(null);
-        victoryVoiceGestureTrackerRef.current!.reset();
+        palmVoiceGestureTrackerRef.current!.reset();
         undoGestureTrackerRef.current!.reset();
         hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
         hybridPinchClosedRef.current = false;
@@ -2633,24 +2769,62 @@ export function AirboardPrototype({
           const point = screenPoint ? toBoardPoint(screenPoint) : null;
           const action = hybridOutput.action;
           const pinchClosed = hybridOutput.pinchState === "closed";
-          const closeIntentActive =
-            hybridOutput.pinchState === "closing" || pinchClosed;
           const pinchJustClosed = pinchClosed && !hybridPinchClosedRef.current;
           hybridPinchClosedRef.current = pinchClosed;
-          if (hybridOutput.pinchState === "open") {
-            dockGestureActivationTrackerRef.current!.release();
-          }
 
-          // The catalog dock lives in screen space and outranks board
-          // interactions while the cursor is over it. A close can begin just
-          // outside the button and still activate the first dock target reached.
-          const dockOutcome = screenPoint
-            ? handleDockGesture(screenPoint, closeIntentActive)
+          // The catalog owns the stream only while no board/carry interaction
+          // is active. Hover reveals a category; a confirmed close edge on a
+          // concrete shape starts one uninterrupted carry.
+          if (
+            !screenPoint &&
+            !cameraPlacementActiveRef.current &&
+            !cameraGrabActiveRef.current
+          ) {
+            scheduleCatalogClose();
+          }
+          const dockOutcome =
+            screenPoint &&
+            !cameraPlacementActiveRef.current &&
+            !cameraGrabActiveRef.current &&
+            !pointerErasingRef.current
+              ? handleDockGesture(screenPoint, hybridOutput.pinchState)
             : null;
           if (dockOutcome) {
-            const activated = dockOutcome === "activated";
-            hybridGestureControllerRef.current?.reset({ requirePinchRelease: activated });
-            if (activated) {
+            const placementTool =
+              dockOutcome.type === "activated"
+                ? placementToolFromDockTarget(dockOutcome.targetId)
+                : null;
+            if (
+              placementTool &&
+              point &&
+              screenPoint &&
+              dockOutcome.type === "activated"
+            ) {
+              cameraPlacementArmedToolRef.current = null;
+              cameraPlacementActiveRef.current = true;
+              cameraGrabActiveRef.current = true;
+              hybridPinchClosedRef.current = true;
+              cancelCatalogClose();
+              openCatalogIdRef.current = null;
+              dockGestureHoverRef.current = null;
+              setOpenCatalogId(null);
+              setDockGestureHover(null);
+              beginObjectInteraction(point, {
+                inputSource: "air_gesture",
+                placementTool,
+                catalogCarry: {
+                  pickupScreenPoint: screenPoint,
+                  catalogBounds: dockOutcome.catalogBounds,
+                },
+              });
+              setCommandFeedback(
+                `Holding ${objectToolLabel(placementTool)}. Drag it onto the diagram, then open your hand to place.`,
+              );
+              setObjectGestureState("placing");
+              return;
+            }
+            if (dockOutcome.type === "activated") {
+              hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
               hybridPinchClosedRef.current = true;
             }
             setObjectGestureState("hover");
@@ -2707,16 +2881,58 @@ export function AirboardPrototype({
           }
 
           if (cameraPlacementActiveRef.current) {
+            const catalogCarry =
+              objectInteractionRef.current?.mode === "catalog_carrying"
+                ? objectInteractionRef.current
+                : null;
+            let catalogDropPointValid = catalogCarry === null;
+            if (catalogCarry && screenPoint) {
+              const outsideCatalog =
+                screenPoint.x < catalogCarry.catalogBounds.left - CATALOG_DROP_EXIT_PX ||
+                screenPoint.x > catalogCarry.catalogBounds.right + CATALOG_DROP_EXIT_PX ||
+                screenPoint.y < catalogCarry.catalogBounds.top - CATALOG_DROP_EXIT_PX ||
+                screenPoint.y > catalogCarry.catalogBounds.bottom + CATALOG_DROP_EXIT_PX;
+              const canvasRect = canvasRef.current?.getBoundingClientRect();
+              catalogDropPointValid =
+                outsideCatalog &&
+                Boolean(
+                  canvasRect &&
+                    screenPoint.x >= CATALOG_DROP_EXIT_PX &&
+                    screenPoint.x <= canvasRect.width - CATALOG_DROP_EXIT_PX &&
+                    screenPoint.y >= CATALOG_DROP_EXIT_PX &&
+                    screenPoint.y <= canvasRect.height - CATALOG_DROP_EXIT_PX,
+                );
+              const traveled =
+                Math.hypot(
+                  screenPoint.x - catalogCarry.pickupScreenPoint.x,
+                  screenPoint.y - catalogCarry.pickupScreenPoint.y,
+                ) >= CATALOG_DROP_MIN_TRAVEL_PX;
+              if (outsideCatalog && traveled) {
+                catalogCarry.enteredCanvas = true;
+              }
+            }
             if (hybridOutput.pinchState === "open") {
               const placementTool = objectInteractionRef.current?.mode === "placing"
                 ? objectInteractionRef.current.tool
+                : objectInteractionRef.current?.mode === "catalog_carrying"
+                  ? objectInteractionRef.current.tool
                 : activeObjectTool;
-              endObjectInteraction(point);
+              if (
+                catalogCarry &&
+                (!catalogCarry.enteredCanvas || !catalogDropPointValid)
+              ) {
+                cancelObjectInteraction();
+                setCommandFeedback(
+                  `${objectToolLabel(placementTool)} returned to the catalog. Drag it onto the diagram before releasing.`,
+                );
+              } else {
+                endObjectInteraction(point);
+                setCommandFeedback(
+                  `${objectToolLabel(placementTool)} placed. Close your hand over it to move it again.`,
+                );
+              }
               cameraPlacementActiveRef.current = false;
               cameraGrabActiveRef.current = false;
-              setCommandFeedback(
-                `${objectToolLabel(placementTool)} placed. Close your hand over it to move it again.`,
-              );
               setObjectGestureState("hover");
             } else {
               moveObjectInteraction(point, { inputSource: "air_gesture" });
@@ -2798,6 +3014,14 @@ export function AirboardPrototype({
 
         if (!result) {
           const lastPoint = lastGesturePointerRef.current;
+          if (objectInteractionRef.current?.mode === "catalog_carrying") {
+            cancelObjectInteraction();
+            cameraPlacementActiveRef.current = false;
+            cameraGrabActiveRef.current = false;
+            setCommandFeedback("Catalog placement cancelled.");
+            setObjectGestureState("hover");
+            return;
+          }
           if (cameraGrabActiveRef.current && lastPoint) {
             endObjectInteraction(lastPoint);
             cameraGrabActiveRef.current = false;
@@ -2944,6 +3168,7 @@ export function AirboardPrototype({
       appendStrokePoint,
       beginObjectInteraction,
       activeObjectTool,
+      cancelCatalogClose,
       cancelObjectInteraction,
       commitStroke,
       endObjectInteraction,
@@ -2956,6 +3181,7 @@ export function AirboardPrototype({
       moveObjectInteraction,
       moveCursor,
       moveCursorPoint,
+      scheduleCatalogClose,
       startStroke,
       toBoardPoint,
       updateAnnotationObject,
@@ -3078,8 +3304,8 @@ export function AirboardPrototype({
       const result = undoGestureTrackerRef.current!.update(frame);
       if (result === "tracking") {
         // Open-palm motion has declared undo intent. Cancel any incomplete
-        // Victory hold before the frame stream is reserved for the swipe.
-        victoryVoiceGestureTrackerRef.current!.reset();
+        // Open-palm voice hold before the frame stream is reserved for the swipe.
+        palmVoiceGestureTrackerRef.current!.reset();
         return "tracking";
       }
       if (result !== "undo") {
@@ -3088,11 +3314,10 @@ export function AirboardPrototype({
 
       const wasInterpreting = speechRecognitionStatusRef.current === "interpreting";
       semanticIntentRequestIdRef.current += 1;
-      pendingSemanticClarificationRef.current = null;
       voiceCorrectionPendingRef.current = null;
       voiceRouter.reset();
       setVoiceGate(null);
-      victoryVoiceGestureTrackerRef.current!.reset();
+      palmVoiceGestureTrackerRef.current!.reset();
       hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
       setLastGestureIntent({ intent: "undo", confidence: 1 });
 
@@ -3639,7 +3864,6 @@ export function AirboardPrototype({
       }
       const desiredGraphCorrection = parseDesiredGraphCorrection(instruction);
       if (desiredGraphCorrection) {
-        pendingSemanticClarificationRef.current = null;
         setIntentCommandText(instruction);
         if (voiceTurnId) {
           reportVoiceTrace(voiceTurnId, "parser_outcome", {
@@ -3662,7 +3886,6 @@ export function AirboardPrototype({
       }
       const directResult = prepareIntentCommand(instruction, voiceTurnId);
       if (directResult !== "rejected") {
-        pendingSemanticClarificationRef.current = null;
         return {
           result: directResult,
           preparedText: instruction,
@@ -3713,28 +3936,6 @@ export function AirboardPrototype({
         canvasHeight: (requestCanvasRect?.height ?? 600) / boardViewportRef.current.scale,
         viewOrigin: toBoardPoint({ x: 0, y: 0 }),
       };
-      const pendingClarificationState = pendingSemanticClarificationRef.current;
-      const pendingClarificationForRequest =
-        pendingClarificationState &&
-        !boardContentChanged(pendingClarificationState.boardState, requestBoardState) &&
-        pendingClarificationState.expiresAt > Date.now()
-          ? {
-              previousTranscript: pendingClarificationState.previousTranscript,
-              question: pendingClarificationState.question,
-              missingSlots: [...pendingClarificationState.missingSlots],
-            }
-          : null;
-      // A pending clarification is dropped when the board changed or the
-      // two-minute window lapsed. Surface that so a late "yes/left/user one"
-      // answer is not silently reinterpreted as a brand-new command.
-      let droppedClarificationNote = "";
-      if (pendingClarificationState && !pendingClarificationForRequest) {
-        pendingSemanticClarificationRef.current = null;
-        droppedClarificationNote =
-          pendingClarificationState.expiresAt <= Date.now()
-            ? "Your earlier question expired, so I'm treating this as a new command. "
-            : "The board changed, so I dropped my earlier question and am treating this as a new command. ";
-      }
 
       const requestId = semanticIntentRequestIdRef.current + 1;
       semanticIntentRequestIdRef.current = requestId;
@@ -3742,7 +3943,7 @@ export function AirboardPrototype({
         selectedSemanticIntentModelRef.current || semanticConfig.defaultModel;
       setSpeechRecognitionStatus("interpreting");
       setCommandFeedback(
-        `${droppedClarificationNote}Understanding “${truncateSpeechTranscript(instruction)}” with ${semanticConfig.provider ?? "AI"} / ${semanticModel ?? "semantic model"}…`,
+        `Understanding “${truncateSpeechTranscript(instruction)}” with ${semanticConfig.provider ?? "AI"} / ${semanticModel ?? "semantic model"}…`,
       );
       if (voiceTurnId) {
         reportVoiceTrace(voiceTurnId, "semantic_request", {
@@ -3766,9 +3967,6 @@ export function AirboardPrototype({
             requestSelectionIds,
             Boolean(requestPointer),
           ),
-          ...(pendingClarificationForRequest
-            ? { pendingClarification: pendingClarificationForRequest }
-            : {}),
           ...(semanticModel ? { model: semanticModel } : {}),
         });
         if (semanticIntentRequestIdRef.current !== requestId) {
@@ -3788,7 +3986,6 @@ export function AirboardPrototype({
           currentSelectionIds.length !== requestSelectionIds.length ||
           currentSelectionIds.some((strokeId, index) => strokeId !== requestSelectionIds[index]);
         if (boardChangedDuringPlanning || selectionChangedDuringPlanning) {
-          pendingSemanticClarificationRef.current = null;
           setSpeechRecognitionStatus("command-rejected");
           setCommandFeedback("The board changed while Airo was planning. Please repeat the command for the current board.");
           if (voiceTurnId) {
@@ -3808,6 +4005,11 @@ export function AirboardPrototype({
         }
         const plan = resolution.plan;
         if (plan.status !== "resolved") {
+          // Airo never asks the user to confirm a voice command. If the model
+          // still declines to produce actions (unsupported, or a stray
+          // clarification the prompt forbids), that turn simply has nothing to
+          // apply: report a plain rejection the user can repeat. There is no
+          // pending-confirmation state and no click anywhere in this path.
           if (voiceTurnId) {
             reportVoiceTrace(voiceTurnId, "semantic_result", {
               status: plan.status,
@@ -3821,61 +4023,20 @@ export function AirboardPrototype({
               usage: resolution.metadata.usage,
             });
           }
-          if (plan.status === "clarification" && plan.clarificationQuestion) {
-            pendingSemanticClarificationRef.current = {
-              previousTranscript: instruction,
-              question: plan.clarificationQuestion,
-              missingSlots: [...plan.missingSlots],
-              boardState: requestBoardState,
-              expiresAt: Date.now() + SEMANTIC_CLARIFICATION_TTL_MS,
-            };
-            if (voiceTurnId) {
-              reportVoiceTrace(voiceTurnId, "clarification", {
-                question: plan.clarificationQuestion,
-                issueCode: plan.issueCode,
-                missingSlots: plan.missingSlots,
-              });
-            }
-            setSpeechRecognitionStatus("confirmation-needed");
-            setCommandFeedback(plan.clarificationQuestion);
-          } else {
-            pendingSemanticClarificationRef.current = null;
-            setSpeechRecognitionStatus("command-rejected");
-            setCommandFeedback(semanticIntentIssueMessage(plan.issueCode));
-          }
-          return {
-            result: "rejected",
-            preparedText: instruction,
-            source: "semantic",
-            stepCount: 0,
-            clarificationPending: plan.status === "clarification",
-          };
-        }
-
-        if (
-          pendingClarificationForRequest &&
-          plan.actions.some((action) => action.type === "cancel" || action.type === "undo")
-        ) {
-          setSpeechRecognitionStatus("confirmation-needed");
+          setSpeechRecognitionStatus("command-rejected");
           setCommandFeedback(
-            `I treated “${truncateSpeechTranscript(instruction)}” as the clarification answer. ${pendingClarificationForRequest.question}`,
+            plan.status === "clarification" && plan.clarificationQuestion
+              ? plan.clarificationQuestion
+              : semanticIntentIssueMessage(plan.issueCode),
           );
-          if (voiceTurnId) {
-            reportVoiceTrace(voiceTurnId, "semantic_failure", {
-              code: "CLARIFICATION_ANSWER_MISROUTED",
-              actionTypes: plan.actions.map((action) => action.type),
-            });
-          }
           return {
             result: "rejected",
             preparedText: instruction,
             source: "semantic",
             stepCount: 0,
-            clarificationPending: true,
           };
         }
 
-        pendingSemanticClarificationRef.current = null;
         if (voiceTurnId) {
           reportVoiceTrace(voiceTurnId, "semantic_result", {
             status: plan.status,
@@ -3968,10 +4129,8 @@ export function AirboardPrototype({
           if (outcome.result === "rejected") {
             appendCopilotActivity({
               source: "Airo",
-              title: outcome.clarificationPending ? "Needs clarification" : "Could not apply",
-              detail: outcome.clarificationPending
-                ? "Answer the current question to continue."
-                : "The board was not changed. Edit the command and try again.",
+              title: "Could not apply",
+              detail: "The board was not changed. Edit the command and try again.",
               tone: "warning",
             });
           }
@@ -4125,27 +4284,6 @@ export function AirboardPrototype({
           detail: traceContext?.transcript?.trim() || instruction,
           tone: "neutral",
         });
-        if (
-          pendingIntentRef.current &&
-          isAirboardVoiceConfirmation(instruction)
-        ) {
-          if (voiceTurnId) {
-            reportVoiceTrace(voiceTurnId, "parser_outcome", {
-              status: "parsed",
-              operationKind: "confirm",
-            });
-          }
-          voiceCorrectionPendingRef.current = null;
-          setIntentCommandText("");
-          setSpeechRecognitionStatus("command-recognized");
-          applyPendingIntentRef.current?.();
-          if (voiceTurnId) {
-            reportVoiceTrace(voiceTurnId, "turn_completed", { outcome: "confirmation_routed" });
-          }
-          await nextAnimationFrame();
-          return;
-        }
-
         voiceCorrectionPendingRef.current = null;
         setIntentCommandText(instruction);
         setSpeechRecognitionStatus("interpreting");
@@ -4166,20 +4304,14 @@ export function AirboardPrototype({
             stepCount: 0,
           };
         // Commands commit instantly inside the preparer — there is no pending
-        // plan to confirm and no mishear "did you mean?" prompt. A rejected
-        // command just reports the rejection; the user simply repeats it.
+        // plan to confirm and no "did you mean?" prompt. Airo applies its best
+        // interpretation automatically; a turn that produced nothing to apply
+        // reports a plain rejection and the user simply repeats it. Undo is the
+        // safety net for a wrong best-guess.
         setSpeechRecognitionStatus(
-          outcome.clarificationPending
-            ? "confirmation-needed"
-            : outcome.result === "rejected"
-            ? "command-rejected"
-            : "command-recognized",
+          outcome.result === "rejected" ? "command-rejected" : "command-recognized",
         );
-        if (outcome.clarificationPending && voiceTurnId) {
-          reportVoiceTrace(voiceTurnId, "turn_completed", {
-            outcome: "awaiting_clarification",
-          });
-        } else if (outcome.result === "rejected" && voiceTurnId) {
+        if (outcome.result === "rejected" && voiceTurnId) {
           reportVoiceTrace(voiceTurnId, "action_failed", {
             phase: "interpretation",
             outcome: "rejected",
@@ -4189,11 +4321,8 @@ export function AirboardPrototype({
         if (outcome.result === "rejected") {
           appendCopilotActivity({
             source: "Airo",
-            title: outcome.clarificationPending ? "Needs clarification" : "Could not apply",
-            detail:
-              outcome.clarificationPending
-                ? "Answer the question shown above by voice, or edit the transcript and send it."
-                : "Edit the transcript below or repeat the command.",
+            title: "Could not apply",
+            detail: "Edit the transcript below or repeat the command.",
             tone: "warning",
           });
         }
@@ -4215,7 +4344,7 @@ export function AirboardPrototype({
   const syncVoiceGateUi = useCallback(() => {
     const snapshot = voiceRouter.snapshot;
     if (!snapshot || (snapshot.mode === "ptt" && !snapshot.open)) {
-      // Push-to-talk reads as released when the V sign drops; the scoped
+      // Push-to-talk reads as released when the open palm drops; the scoped
       // pill stays visible through its grace window ("grab, let go, speak").
       setVoiceGate(null);
       return;
@@ -4239,8 +4368,8 @@ export function AirboardPrototype({
       if (gate.mode === "ptt") {
         setCommandFeedback(
           micArmed
-            ? "V sign recognized — speak a board command, then relax your hand."
-            : "V sign recognized. Press Start Airo once to enable voice commands.",
+            ? "Open palm recognized — speak a board command, then relax your hand."
+            : "Open palm recognized. Press Start Airo once to enable voice commands.",
         );
         return;
       }
@@ -4265,9 +4394,9 @@ export function AirboardPrototype({
     [syncVoiceGateUi, voiceRouter],
   );
 
-  const processVictoryVoiceGestureFrame = useCallback(
-    (frame: VictoryVoiceGestureFrame): VictoryVoiceGestureEvent => {
-      const event = victoryVoiceGestureTrackerRef.current!.update(frame);
+  const processPalmVoiceGestureFrame = useCallback(
+    (frame: PalmVoiceGestureFrame): PalmVoiceGestureEvent => {
+      const event = palmVoiceGestureTrackerRef.current!.update(frame);
       if (event === "activate") {
         openVoiceGate({ mode: "ptt" });
       } else if (event === "release") {
@@ -4343,12 +4472,14 @@ export function AirboardPrototype({
         return routeFinalTranscript(transcript, { engine: "realtime" });
       },
       openPttGate: () => openVoiceGate({ mode: "ptt" }),
-      emitVictoryVoiceGestureFrame: (frame: VictoryVoiceGestureFrame) =>
-        processVictoryVoiceGestureFrame(frame),
+      emitPalmVoiceGestureFrame: (frame: PalmVoiceGestureFrame) =>
+        processPalmVoiceGestureFrame(frame),
       emitUndoGestureFrame: (frame: UndoGestureFrame) =>
         processUndoGestureFrame(frame) === "undo",
       emitSnapGestureFrame: (frame: SnapGestureFrame) =>
         processSnapGestureFrame(frame) === "snap",
+      emitHybridGestureOutput: (output: HybridGestureControllerOutput) =>
+        handleGesture(null, output),
       setDiagramVisible: (visible: boolean) =>
         setDiagramVisibility(visible, "test"),
       getDiagramVisible: () => diagramVisibleRef.current,
@@ -4357,6 +4488,28 @@ export function AirboardPrototype({
         setVoiceGate(null);
       },
       getViewport: () => ({ ...boardViewportRef.current }),
+      getCatalogGestureState: () => {
+        const interaction = objectInteractionRef.current;
+        const ghostBounds = ghostAnnotation?.annotation.bounds;
+        return {
+          openCatalogId,
+          activeTool: activeObjectTool,
+          interactionMode: interaction?.mode ?? null,
+          carriedTool:
+            interaction?.mode === "catalog_carrying" ? interaction.tool : null,
+          enteredCanvas:
+            interaction?.mode === "catalog_carrying"
+              ? interaction.enteredCanvas
+              : false,
+          placementActive: cameraPlacementActiveRef.current,
+          ghostCenter: ghostBounds
+            ? {
+                x: ghostBounds.x + ghostBounds.width / 2,
+                y: ghostBounds.y + ghostBounds.height / 2,
+              }
+            : null,
+        };
+      },
       setViewport: (viewport: BoardViewport) => {
         boardViewportRef.current = clampViewport(viewport, currentViewportLimits());
         setViewportScale(Math.round(boardViewportRef.current.scale * 100) / 100);
@@ -4385,9 +4538,13 @@ export function AirboardPrototype({
       delete target.__airboardTestHooks;
     };
   }, [
+    activeObjectTool,
     currentViewportLimits,
+    ghostAnnotation,
+    handleGesture,
     openVoiceGate,
-    processVictoryVoiceGestureFrame,
+    openCatalogId,
+    processPalmVoiceGestureFrame,
     processSnapGestureFrame,
     processUndoGestureFrame,
     render,
@@ -4468,7 +4625,7 @@ export function AirboardPrototype({
       if (!classification.wakeDetected) {
         setSpeechRecognitionStatus("wake-missing");
         setCommandFeedback(
-          `Mic heard “${truncateSpeechTranscript(transcript)}”, but it wasn't addressed to the board. Hold a V sign for voice, or say “Airo, add a user.”`,
+          `Mic heard “${truncateSpeechTranscript(transcript)}”, but it wasn't addressed to the board. Hold an open palm for voice, or say “Airo, add a user.”`,
         );
       } else if (classification.commands.length === 0) {
         setSpeechRecognitionStatus("wake-detected");
@@ -4824,10 +4981,10 @@ export function AirboardPrototype({
     setCanvasNavMode(null);
     snapGestureTrackerRef.current?.reset();
     undoGestureTrackerRef.current?.reset();
-    if (victoryVoiceGestureTrackerRef.current?.engaged) {
+    if (palmVoiceGestureTrackerRef.current?.engaged) {
       closeVoiceGate("ptt");
     }
-    victoryVoiceGestureTrackerRef.current?.reset();
+    palmVoiceGestureTrackerRef.current?.reset();
     setCameraStatus("idle");
     setCameraError(null);
   }, [closeVoiceGate]);
@@ -5034,7 +5191,6 @@ export function AirboardPrototype({
 
   const clearBoard = useCallback(() => {
     semanticIntentRequestIdRef.current += 1;
-    pendingSemanticClarificationRef.current = null;
     voiceCorrectionPendingRef.current = null;
     setSpeechRecognitionStatus(speechSessionRef.current ? "waiting" : "idle");
     commitStroke(activeStrokeIdRef.current);
@@ -5396,25 +5552,26 @@ export function AirboardPrototype({
   );
 
   /**
-   * Airboard's landmark-defined Victory pose held still briefly opens the
-   * command mic gate. Dropping the V pose closes it after a short release
-   * debounce, with one activation per neutral-hand reset.
+   * Airboard's landmark-defined open palm held still briefly opens the command
+   * mic gate. Dropping the palm closes it after a short release debounce, with
+   * one activation per neutral-hand reset. Undo owns the same open palm swept
+   * left, so a still palm means "talk" and a leftward sweep means "undo".
    */
-  const updateVictoryVoiceGesture = useCallback(
+  const updatePalmVoiceGesture = useCallback(
     (hands: readonly DetectedHand[], timestampMs: number) => {
-      const victory = selectSingleLandmarkPose(
+      const palm = selectSingleLandmarkPose(
         hands,
-        estimateVictoryPresentation,
+        estimatePalmPresentation,
       );
       const snapshot = voiceRouter.snapshot;
-      return processVictoryVoiceGestureFrame({
-        score: victory.score,
-        point: victory.point,
+      return processPalmVoiceGestureFrame({
+        score: palm.score,
+        point: palm.point,
         timestampMs,
         suppressed:
           inputPaused ||
           (snapshot?.mode === "scoped" && snapshot.open) ||
-          victory.trackedHands !== 1 ||
+          palm.trackedHands !== 1 ||
           canvasNavTrackerRef.current?.reserving === true ||
           objectInteractionRef.current !== null ||
           cameraGrabActiveRef.current ||
@@ -5424,17 +5581,17 @@ export function AirboardPrototype({
           pointerErasingRef.current,
       });
     },
-    [inputPaused, processVictoryVoiceGestureFrame, voiceRouter],
+    [inputPaused, processPalmVoiceGestureFrame, voiceRouter],
   );
 
   useEffect(() => {
     if (inputMode === "gesture" && !inputPaused) {
       return;
     }
-    if (victoryVoiceGestureTrackerRef.current!.engaged) {
+    if (palmVoiceGestureTrackerRef.current!.engaged) {
       closeVoiceGate("ptt");
     }
-    victoryVoiceGestureTrackerRef.current!.reset();
+    palmVoiceGestureTrackerRef.current!.reset();
     undoGestureTrackerRef.current!.reset();
   }, [closeVoiceGate, inputMode, inputPaused]);
 
@@ -5652,17 +5809,17 @@ export function AirboardPrototype({
             },
             voice: {
               update: () => {
-                const event = updateVictoryVoiceGesture(hands, timestampMs);
+                const event = updatePalmVoiceGesture(hands, timestampMs);
                 return (
                   event !== null ||
-                  victoryVoiceGestureTrackerRef.current!.reserving
+                  palmVoiceGestureTrackerRef.current!.reserving
                 );
               },
               onPreempted: () => {
-                if (victoryVoiceGestureTrackerRef.current!.engaged) {
+                if (palmVoiceGestureTrackerRef.current!.engaged) {
                   closeVoiceGate("ptt");
                 }
-                victoryVoiceGestureTrackerRef.current!.reset();
+                palmVoiceGestureTrackerRef.current!.reset();
               },
             },
             manipulation: {
@@ -5674,23 +5831,26 @@ export function AirboardPrototype({
               },
               run: () => {
                 const viewportForTargets = boardViewportRef.current;
-                const screenTargets = buildGestureMoveTargets(
-                  boardRef.current,
-                ).map((target) => ({
-                  ...target,
-                  bounds: {
-                    x:
-                      target.bounds.x * viewportForTargets.scale +
-                      viewportForTargets.x,
-                    y:
-                      target.bounds.y * viewportForTargets.scale +
-                      viewportForTargets.y,
-                    width:
-                      target.bounds.width * viewportForTargets.scale,
-                    height:
-                      target.bounds.height * viewportForTargets.scale,
-                  },
-                }));
+                const catalogOwnsPointer =
+                  dockGestureHoverRef.current !== null ||
+                  objectInteractionRef.current?.mode === "catalog_carrying";
+                const screenTargets = catalogOwnsPointer
+                  ? []
+                  : buildGestureMoveTargets(boardRef.current).map((target) => ({
+                      ...target,
+                      bounds: {
+                        x:
+                          target.bounds.x * viewportForTargets.scale +
+                          viewportForTargets.x,
+                        y:
+                          target.bounds.y * viewportForTargets.scale +
+                          viewportForTargets.y,
+                        width:
+                          target.bounds.width * viewportForTargets.scale,
+                        height:
+                          target.bounds.height * viewportForTargets.scale,
+                      },
+                    }));
                 hybridOutput = hybridGestureControllerRef.current!.update({
                   handPoint: signal?.point ?? null,
                   trackingConfidence: signal?.trackingConfidence ?? 0,
@@ -5745,7 +5905,7 @@ export function AirboardPrototype({
     closeVoiceGate,
     updateSnapGesture,
     updateUndoGesture,
-    updateVictoryVoiceGesture,
+    updatePalmVoiceGesture,
   ]);
 
   useEffect(() => {
@@ -6978,7 +7138,7 @@ export function AirboardPrototype({
                       ? `“${truncateSpeechTranscript(speechHeardText, 180)}”`
                       : speechArmed
                         ? "Listening for your next command…"
-                        : "Start Airo, then hold a V sign for 0.4 seconds and speak."}
+                        : "Start Airo, then hold an open palm for 0.4 seconds and speak."}
                   </p>
                   <small className={`copilot-status ${speechRecognitionStatus}`}>
                     {speechRecognitionLabel(speechRecognitionStatus)}
@@ -7371,7 +7531,7 @@ export function AirboardPrototype({
               {voiceGate.mode === "ptt"
                 ? speechArmed
                   ? "Listening — speak a board command"
-                  : "V sign detected — press Start Airo once to enable voice commands"
+                  : "Open palm detected — press Start Airo once to enable voice commands"
                 : speechArmed
                   ? `Editing “${voiceGate.label}” — “rename to …”, “delete”, “connect to …”`
                   : `Holding “${voiceGate.label}” — press Start Airo once to enable voice edits`}
@@ -7403,7 +7563,7 @@ export function AirboardPrototype({
                 <h2>Talk to the board, not to software</h2>
                 <ul>
                   <li>
-                    <strong>Hold a V sign for 0.4 seconds</strong> and speak — no wake word.
+                    <strong>Hold an open palm still for 0.4 seconds</strong> and speak — no wake word.
                     “Add a payment service next to the API.”
                   </li>
                   <li>
@@ -8171,7 +8331,7 @@ export function AirboardPrototype({
                     <>
                     <p className="hint">
                       {voiceCaptureAvailable
-                        ? "Start Airo once. Hold a V sign still for 0.4 seconds to speak; show one open palm and swipe left to undo. Use a relaxed hand to aim and a closed hand to move."
+                        ? "Start Airo once. Hold an open palm still for 0.4 seconds to speak; sweep that same open palm left to undo. Use a relaxed hand to aim and a closed hand to move."
                         : "Click Enable hands to use the meeting camera. Use a relaxed hand to aim and a closed hand to move. Voice is not available on this surface yet."}
                     </p>
                     <details className="advanced-settings gesture-guide">
@@ -8215,8 +8375,9 @@ export function AirboardPrototype({
                             <div>
                               <dt>Speak to Airo</dt>
                               <dd>
-                                Start Airo once, then hold one V sign still for about
-                                0.4 seconds. Lower or relax it when finished.
+                                Start Airo once, then hold one open palm still (no
+                                sideways motion) for about 0.4 seconds. Lower or relax it
+                                when finished.
                               </dd>
                             </div>
                             <div>
@@ -8231,8 +8392,8 @@ export function AirboardPrototype({
                         <div>
                           <dt>Undo</dt>
                           <dd>
-                            Show one flat palm and swipe left in one clear horizontal motion.
-                            Release before another undo.
+                            Show one open palm and sweep it left in one clear horizontal
+                            motion (no pause). Release before another undo.
                           </dd>
                         </div>
                         <div>
@@ -8435,7 +8596,7 @@ export function AirboardPrototype({
             ) : inputMode === "gesture" ? (
               <p className="hint">
                 {voiceCaptureAvailable
-                  ? "Use the Gesture guide above for exact poses. A held V sign activates voice; an open-palm swipe left undoes. A relaxed hand aims, a closed hand moves, and thumb-middle snaps hide or restore the diagram."
+                  ? "Use the Gesture guide above for exact poses. A held open palm activates voice; sweeping that same open palm left undoes. A relaxed hand aims, a closed hand moves, and thumb-middle snaps hide or restore the diagram."
                   : "Use the Gesture guide above for exact poses. A relaxed hand aims, a closed hand moves, a flat-palm swipe left undoes, and thumb-middle snaps hide or restore the diagram."}
               </p>
             ) : (
@@ -8663,8 +8824,6 @@ function speechRecognitionLabel(status: SpeechRecognitionStatus): string {
       return "wake word not detected";
     case "command-recognized":
       return "command recognized";
-    case "confirmation-needed":
-      return "confirm suggested command";
     case "interpreting":
       return "understanding command";
     case "command-rejected":

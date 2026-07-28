@@ -12,7 +12,7 @@ import {
  * and through which channel?". Three channels exist, in priority order:
  *
  *   1. gated-scoped — a hold-to-edit gate is scoping an element,
- *   2. gated-ptt    — the Victory-hold push-to-talk gate is open,
+ *   2. gated-ptt    — the open-palm-hold push-to-talk gate is open,
  *   3. wake         — the "Airo …" wake-word router.
  *
  * Everything that used to make this fragile is centralized here: gate grace
@@ -104,7 +104,7 @@ export class VoiceCommandRouter {
    * Claims the in-progress speech turn for the current gesture gate.
    *
    * Speech providers often emit the final transcript several seconds after
-   * the user has lowered their Victory pose. Capturing the gate on the first
+   * the user has lowered their open palm. Capturing the gate on the first
    * interim result keeps that same utterance automatic without extending the
    * general post-gesture grace window for unrelated room speech.
    */

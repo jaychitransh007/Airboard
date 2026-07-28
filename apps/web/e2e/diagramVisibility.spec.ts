@@ -135,10 +135,10 @@ test("gesture guide teaches the exact conflict-safe poses", async ({ page }) => 
     page.getByText(/flick the middle finger away quickly—the touch alone does nothing/i),
   ).toBeVisible();
   await expect(
-    page.getByText(/hold one V sign still for about 0\.4 seconds/i),
+    page.getByText(/hold one open palm still/i),
   ).toBeVisible();
   await expect(
-    page.getByText(/flat palm and swipe left in one clear horizontal motion/i),
+    page.getByText(/sweep it left in one clear horizontal motion/i),
   ).toBeVisible();
   await expect(page.getByText(/held palm is reserved for voice/i)).toHaveCount(0);
   await expect(

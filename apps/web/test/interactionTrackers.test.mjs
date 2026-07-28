@@ -4,19 +4,70 @@ import test from "node:test";
 import { HoldToEditTracker } from "../src/features/board/holdToEditTracker.ts";
 import { UndoGestureTracker } from "../src/features/board/undoGestureTracker.ts";
 import {
+  catalogIdForDockGestureHover,
   chooseDockGestureTarget,
   DockGestureActivationTracker,
 } from "../src/features/board/dockGestureActivation.ts";
 
 const P = { x: 0.5, y: 0.4 };
 
-test("dock choose accepts a close that began before entering and fires once", () => {
+test("catalog category hover maps to open without treating tools as categories", () => {
+  assert.equal(catalogIdForDockGestureHover("category:flow"), "flow");
+  assert.equal(catalogIdForDockGestureHover("category:system"), "system");
+  assert.equal(catalogIdForDockGestureHover("category:"), null);
+  assert.equal(catalogIdForDockGestureHover("tool:decision"), null);
+  assert.equal(catalogIdForDockGestureHover("select"), null);
+  assert.equal(catalogIdForDockGestureHover(null), null);
+});
+
+test("a category close edge never activates or consumes the tool latch", () => {
   const tracker = new DockGestureActivationTracker();
-  assert.equal(tracker.activate(null, true), null, "closed before reaching a tool");
-  assert.equal(tracker.activate("flow", true), "flow", "first reached tool activates");
-  assert.equal(tracker.activate("system", true), null, "same close cannot activate a neighbor");
-  tracker.release();
-  assert.equal(tracker.activate("system", true), "system", "reopening arms another choice");
+  assert.equal(tracker.update("category:flow", "closing"), null);
+  assert.equal(tracker.update("category:flow", "closed"), null);
+  assert.equal(
+    tracker.update("tool:decision", "closed"),
+    null,
+    "moving a held close from category to tool cannot pick it up",
+  );
+  tracker.update("tool:decision", "open");
+  tracker.update("tool:decision", "closing");
+  assert.equal(tracker.update("tool:decision", "closed"), "tool:decision");
+});
+
+test("a tool must stay targeted from closing through closed and activates once", () => {
+  const tracker = new DockGestureActivationTracker();
+  assert.equal(tracker.update("tool:decision", "open"), null, "hover cannot select");
+  assert.equal(tracker.update("tool:decision", "closing"), null);
+  assert.equal(tracker.update("tool:process", "closed"), null, "target changed mid-close");
+  tracker.update("tool:decision", "open");
+  tracker.update("tool:decision", "closing");
+  assert.equal(tracker.update("tool:decision", "closed"), "tool:decision");
+  assert.equal(
+    tracker.update("tool:process", "closed"),
+    null,
+    "same close cannot activate a neighboring tool",
+  );
+});
+
+test("opening-to-closed jitter does not fabricate a second activation edge", () => {
+  const tracker = new DockGestureActivationTracker();
+  tracker.update("tool:decision", "open");
+  tracker.update("tool:decision", "closing");
+  assert.equal(tracker.update("tool:decision", "closed"), "tool:decision");
+  assert.equal(tracker.update("tool:process", "opening"), null);
+  assert.equal(tracker.update("tool:process", "closed"), null);
+  tracker.update("tool:process", "open");
+  tracker.update("tool:process", "closing");
+  assert.equal(tracker.update("tool:process", "closed"), "tool:process");
+});
+
+test("top-level dock controls retain the stable close activation contract", () => {
+  const tracker = new DockGestureActivationTracker();
+  tracker.update("select", "closing");
+  assert.equal(tracker.update("select", "closed"), "select");
+  tracker.update("eraser", "open");
+  tracker.update("eraser", "closing");
+  assert.equal(tracker.update("eraser", "closed"), "eraser");
 });
 
 test("dock choose uses padded hit areas and resolves overlap by nearest center", () => {

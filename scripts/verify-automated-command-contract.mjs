@@ -7,7 +7,7 @@ const [
   styles,
   router,
   undoTracker,
-  victoryTracker,
+  palmVoiceTracker,
   mediaPipeTracker,
   palmPose,
   victoryPose,
@@ -17,7 +17,7 @@ const [
   readFile(new URL("apps/web/app/globals.css", root), "utf8"),
   readFile(new URL("apps/web/src/features/board/voiceCommandRouter.ts", root), "utf8"),
   readFile(new URL("apps/web/src/features/board/undoGestureTracker.ts", root), "utf8"),
-  readFile(new URL("apps/web/src/features/board/victoryVoiceGestureTracker.ts", root), "utf8"),
+  readFile(new URL("apps/web/src/features/board/palmVoiceGestureTracker.ts", root), "utf8"),
   readFile(new URL("packages/gesture-engine/src/mediapipe.ts", root), "utf8"),
   readFile(new URL("packages/gesture-engine/src/palmPresentation.ts", root), "utf8"),
   readFile(new URL("packages/gesture-engine/src/victoryPresentation.ts", root), "utf8"),
@@ -69,8 +69,7 @@ const required = [
     "raw-landmark Move/Place/Erase routing",
   ],
   [board, "selectSingleLandmarkPose(", "canonical landmark pose selection"],
-  [board, "estimatePalmPresentation", "landmark-defined Open Palm routing"],
-  [board, "estimateVictoryPresentation", "landmark-defined Victory routing"],
+  [board, "estimatePalmPresentation", "landmark-defined Open Palm routing (undo + voice)"],
   [
     board,
     "canvasNavTrackerRef.current?.reset();",
@@ -80,7 +79,7 @@ const required = [
   [router, "noteSpeechActivity(): void", "voice router speech claim"],
   [router, "utteranceGate", "late final-transcript ownership"],
   [undoTracker, 'return "undo"', "undo gesture recognizer"],
-  [victoryTracker, 'return "activate"', "Victory hold recognizer"],
+  [palmVoiceTracker, 'return "activate"', "open-palm hold voice recognizer"],
   [mediaPipeTracker, "HandLandmarker.createFromOptions", "canonical HandLandmarker"],
   [mediaPipeTracker, "detectForVideo", "HandLandmarker video inference"],
   [palmPose, "estimatePalmPresentation", "Open Palm landmark definition"],
@@ -108,9 +107,6 @@ if (missing.length > 0) {
 
 if (board.includes('className="canvas-command-bar"')) {
   throw new Error("The deprecated bottom command bar was reintroduced.");
-}
-if (board.includes("PalmGateTracker")) {
-  throw new Error("The deprecated open-palm voice gate was reintroduced.");
 }
 for (const [forbidden, label] of [
   ["GestureRecognizer", "GestureRecognizer runtime"],

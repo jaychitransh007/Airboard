@@ -16,7 +16,7 @@ type Hooks = {
     timestampMs: number;
     suppressed: boolean;
   }): boolean;
-  emitVictoryVoiceGestureFrame(frame: {
+  emitPalmVoiceGestureFrame(frame: {
     score: number;
     point: { x: number; y: number } | null;
     timestampMs: number;
@@ -148,13 +148,13 @@ test("one open-palm swipe left undoes exactly one automatic voice action", async
   await expect.poll(async () => (await summary(page)).objectCount).toBe(0);
 });
 
-test("Victory must hold for 400 ms, activates voice once, and releases cleanly", async ({
+test("an open palm must hold for 400 ms, activates voice once, and releases cleanly", async ({
   page,
 }) => {
   await page.goto("/?testStandalone=1");
   await hooks(page);
 
-  const victory = (
+  const palm = (
     timestampMs: number,
     score = 0.94,
     point: { x: number; y: number } | null = { x: 0.48, y: 0.42 },
@@ -162,7 +162,7 @@ test("Victory must hold for 400 ms, activates voice once, and releases cleanly",
     page.evaluate(
       ({ timestampMs, score, point }) =>
         (window as never as { __airboardTestHooks: Hooks })
-          .__airboardTestHooks.emitVictoryVoiceGestureFrame({
+          .__airboardTestHooks.emitPalmVoiceGestureFrame({
             score,
             point,
             timestampMs,
@@ -171,20 +171,20 @@ test("Victory must hold for 400 ms, activates voice once, and releases cleanly",
       { timestampMs, score, point },
     );
 
-  expect(await victory(0)).toBeNull();
-  expect(await victory(200)).toBeNull();
-  expect(await victory(233, 0, null)).toBeNull();
-  expect(await victory(266)).toBeNull();
-  expect(await victory(399)).toBeNull();
+  expect(await palm(0)).toBeNull();
+  expect(await palm(200)).toBeNull();
+  expect(await palm(233, 0, null)).toBeNull();
+  expect(await palm(266)).toBeNull();
+  expect(await palm(399)).toBeNull();
   await expect(page.getByTestId("voice-gate-pill")).toHaveCount(0);
 
-  expect(await victory(400)).toBe("activate");
-  await expect(page.getByTestId("voice-gate-pill")).toContainText("V sign detected");
-  expect(await victory(700)).toBeNull();
+  expect(await palm(400)).toBe("activate");
+  await expect(page.getByTestId("voice-gate-pill")).toContainText("Open palm detected");
+  expect(await palm(700)).toBeNull();
 
-  expect(await victory(800, 0, null)).toBeNull();
-  expect(await victory(1_020, 0, null)).toBeNull();
-  expect(await victory(1_040, 0, null)).toBe("release");
+  expect(await palm(800, 0, null)).toBeNull();
+  expect(await palm(1_020, 0, null)).toBeNull();
+  expect(await palm(1_040, 0, null)).toBe("release");
   await expect(page.getByTestId("voice-gate-pill")).toHaveCount(0);
 });
 

@@ -8,7 +8,7 @@ import {
 
 import { selectSingleLandmarkPose } from "../src/features/board/landmarkPoseSelection.ts";
 import { UndoGestureTracker } from "../src/features/board/undoGestureTracker.ts";
-import { VictoryVoiceGestureTracker } from "../src/features/board/victoryVoiceGestureTracker.ts";
+import { PalmVoiceGestureTracker } from "../src/features/board/palmVoiceGestureTracker.ts";
 
 function landmarkArray(entries) {
   const landmarks = Array.from({ length: 21 }, () => ({
@@ -123,13 +123,13 @@ test("raw rotated open-palm landmarks followed by a visible left swipe emit one 
   assert.equal(update(0.3, 260), null, "the same held palm cannot fire twice");
 });
 
-test("raw rotated Victory landmarks held still activate and release Voice once", () => {
-  const tracker = new VictoryVoiceGestureTracker();
-  const base = rotate(victoryHand(), -Math.PI / 3);
+test("raw rotated open-palm landmarks held still activate and release Voice once", () => {
+  const tracker = new PalmVoiceGestureTracker();
+  const base = rotate(openPalm(), -Math.PI / 3);
   const update = (timestampMs, landmarks = base) => {
     const pose = selectSingleLandmarkPose(
       landmarks ? [detectedHand(landmarks)] : [],
-      estimateVictoryPresentation,
+      estimatePalmPresentation,
     );
     return tracker.update({
       score: pose.score,
@@ -143,7 +143,7 @@ test("raw rotated Victory landmarks held still activate and release Voice once",
   assert.equal(update(200), null);
   assert.equal(update(399), null);
   assert.equal(update(400), "activate");
-  assert.equal(update(700), null, "a held V cannot activate twice");
+  assert.equal(update(700), null, "a held palm cannot activate twice");
   assert.equal(update(800, null), null);
   assert.equal(update(1_150, null), "release");
 });
