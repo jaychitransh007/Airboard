@@ -3303,8 +3303,9 @@ export function AirboardPrototype({
     (frame: UndoGestureFrame): UndoGestureEvent => {
       const result = undoGestureTrackerRef.current!.update(frame);
       if (result === "tracking") {
-        // Open-palm motion has declared undo intent. Cancel any incomplete
-        // Open-palm voice hold before the frame stream is reserved for the swipe.
+        // Open-palm motion has declared possible Undo intent. Cancel any
+        // incomplete voice hold, but keep the pointer live until the complete
+        // directional swipe actually fires.
         palmVoiceGestureTrackerRef.current!.reset();
         return "tracking";
       }
@@ -5521,8 +5522,8 @@ export function AirboardPrototype({
 
   /**
    * Airboard's landmark-defined open palm moving left is Undo. A stationary
-   * open palm has no command meaning; only directional motion reserves the
-   * hand stream.
+   * open palm can still arm Voice and drive the cursor. Only a completed
+   * directional swipe owns the frame and preempts pointer manipulation.
    */
   const updateUndoGesture = useCallback(
     (hands: readonly DetectedHand[], timestampMs: number): UndoGestureEvent => {
@@ -5802,18 +5803,17 @@ export function AirboardPrototype({
               },
             },
             undo: {
-              update: () => updateUndoGesture(hands, timestampMs) !== null,
+              update: () => updateUndoGesture(hands, timestampMs) === "undo",
               onPreempted: () => {
                 undoGestureTrackerRef.current!.reset();
               },
             },
             voice: {
-              update: () => {
-                const event = updatePalmVoiceGesture(hands, timestampMs);
-                return (
-                  event !== null ||
-                  palmVoiceGestureTrackerRef.current!.reserving
-                );
+              // Voice observes the same open-palm frames that drive normal
+              // hover. A still hold can open the mic without freezing the air
+              // cursor; closing the hand remains the only grab/drag edge.
+              observe: () => {
+                updatePalmVoiceGesture(hands, timestampMs);
               },
               onPreempted: () => {
                 if (palmVoiceGestureTrackerRef.current!.engaged) {

@@ -6,7 +6,7 @@ import {
   arbitrateGestureFrame,
 } from "../src/features/board/gestureFrameArbitration.ts";
 
-const claimingOwners = ["navigation", "snap", "undo", "voice"];
+const claimingOwners = ["navigation", "snap", "undo"];
 
 function runScenario(winner) {
   const inspected = [];
@@ -30,7 +30,14 @@ function runScenario(winner) {
     navigation: stage("navigation"),
     snap: stage("snap"),
     undo: stage("undo"),
-    voice: stage("voice"),
+    voice: {
+      observe: () => {
+        inspected.push("voice");
+      },
+      onPreempted: () => {
+        preempted.push("voice");
+      },
+    },
     manipulation: {
       run: () => {
         executed.push("manipulation");
@@ -81,9 +88,35 @@ test("manipulation runs exactly once as the fallback when no global gesture clai
   const result = runScenario("manipulation");
 
   assert.equal(result.owner, "manipulation");
-  assert.deepEqual(result.inspected, claimingOwners);
+  assert.deepEqual(result.inspected, [...claimingOwners, "voice"]);
   assert.deepEqual(result.executed, ["manipulation"]);
   assert.deepEqual(result.preempted, []);
+});
+
+test("voice observes an open-palm frame without taking it away from the pointer", () => {
+  const observed = [];
+  const executed = [];
+  const neverClaims = () => false;
+
+  const owner = arbitrateGestureFrame({
+    navigation: { update: neverClaims },
+    snap: { update: neverClaims },
+    undo: { update: neverClaims },
+    voice: {
+      observe: () => {
+        observed.push("voice-hold");
+      },
+    },
+    manipulation: {
+      run: () => {
+        executed.push("pointer");
+      },
+    },
+  });
+
+  assert.equal(owner, "manipulation");
+  assert.deepEqual(observed, ["voice-hold"]);
+  assert.deepEqual(executed, ["pointer"]);
 });
 
 test("simultaneous claims still produce one owner: the highest-priority stage", () => {
@@ -105,7 +138,14 @@ test("simultaneous claims still produce one owner: the highest-priority stage", 
     navigation: claimingStage("navigation"),
     snap: claimingStage("snap"),
     undo: claimingStage("undo"),
-    voice: claimingStage("voice"),
+    voice: {
+      observe: () => {
+        inspected.push("voice");
+      },
+      onPreempted: () => {
+        preempted.push("voice");
+      },
+    },
     manipulation: {
       run: () => {
         executed.push("manipulation");

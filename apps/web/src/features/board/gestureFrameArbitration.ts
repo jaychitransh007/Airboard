@@ -1,11 +1,16 @@
 /**
  * The one authoritative ownership order for a camera gesture frame.
  *
- * Stage updates are evaluated only until one stage wins. Each update owns its
- * recognizer advancement and any effects caused by that recognizer, then
- * reports whether it reserved the frame. Lower-priority stages receive an
- * explicit preemption callback so their state can be reset without observing
- * the winning frame. Manipulation is the final fallback.
+ * Exclusive stage updates are evaluated only until one stage wins. Each update
+ * owns its recognizer advancement and any effects caused by that recognizer,
+ * then reports whether it reserved the frame. Lower-priority participants
+ * receive an explicit preemption callback so their state can be reset without
+ * observing the winning frame.
+ *
+ * Voice is deliberately a passive observer after the exclusive stages. Its
+ * open-palm hold must be able to advance while that same open palm drives the
+ * air cursor, so observing voice can never preempt manipulation. Manipulation
+ * remains the final fallback and runs after every voice observation.
  *
  * Keeping advancement and effects together matches the stateful trackers used
  * by the board: an Undo tracker can cross its threshold and apply Undo in the
@@ -19,12 +24,18 @@ export const GESTURE_FRAME_PRIORITY = [
   "manipulation",
 ] as const;
 
-export type GestureFrameOwner = (typeof GESTURE_FRAME_PRIORITY)[number];
+export type GestureFrameParticipant = (typeof GESTURE_FRAME_PRIORITY)[number];
+export type GestureFrameOwner = Exclude<GestureFrameParticipant, "voice">;
 
 type ClaimingGestureFrameOwner = Exclude<GestureFrameOwner, "manipulation">;
 
 export type GestureFrameStage = Readonly<{
   update: () => boolean;
+  onPreempted?: () => void;
+}>;
+
+export type GestureFrameObserverStage = Readonly<{
+  observe: () => void;
   onPreempted?: () => void;
 }>;
 
@@ -35,21 +46,29 @@ export type GestureFrameManipulationStage = Readonly<{
 
 export type GestureFrameArbitrationInput = Readonly<
   Record<ClaimingGestureFrameOwner, GestureFrameStage> & {
+    /**
+     * Passive open-palm voice observation. It may open or close the voice gate,
+     * but it never owns the pointer frame.
+     */
+    voice: GestureFrameObserverStage;
     /** Normal hover, selection, placement, erase, or object movement fallback. */
     manipulation: GestureFrameManipulationStage;
   }
 >;
 
-const CLAIMING_PRIORITY: readonly ClaimingGestureFrameOwner[] =
-  GESTURE_FRAME_PRIORITY.slice(0, -1) as ClaimingGestureFrameOwner[];
+const CLAIMING_PRIORITY: readonly ClaimingGestureFrameOwner[] = [
+  "navigation",
+  "snap",
+  "undo",
+];
 
 /**
  * Assign one and only one owner to the current gesture frame.
  *
  * The helper is stateless and deterministic for the supplied stages. A
- * higher-priority claim prevents every lower-priority claim and action from
- * running. If no global gesture claims the frame, manipulation always receives
- * it as the fallback.
+ * higher-priority exclusive claim prevents every lower-priority observation or
+ * action from running. If no exclusive gesture claims the frame, voice first
+ * observes the palm and manipulation always receives the same frame.
  */
 export function arbitrateGestureFrame(
   input: GestureFrameArbitrationInput,
@@ -65,6 +84,7 @@ export function arbitrateGestureFrame(
     return owner;
   }
 
+  input.voice.observe();
   input.manipulation.run();
   return "manipulation";
 }

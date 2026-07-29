@@ -66,7 +66,14 @@ export function selectLandmarkManipulationSignal(
       x: fitted.x / mapping.canvasWidth,
       y: fitted.y / mapping.canvasHeight,
     },
-    trackingConfidence: hand.handednessScore,
+    // HandLandmarker has already applied its detection, presence, and tracking
+    // thresholds before returning this complete, finite hand. Its category
+    // score only measures certainty that the hand is labelled left vs right;
+    // a front-facing open palm can have a low category score while its
+    // landmarks remain excellent. Treating that label certainty as tracking
+    // quality made Voice recognize the palm while the pointer stayed at the
+    // last mouse position.
+    trackingConfidence: 1,
     grabStrength: grab.strength,
     grabConfidence: grab.confidence,
   };
