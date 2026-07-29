@@ -8,8 +8,8 @@ import {
 } from "@airboard/gesture-engine";
 
 const PALM_ANCHOR_INDEXES = [5, 9, 13, 17] as const;
-const OPEN_PALM_POINTER_MIN_SCORE = 0.42;
-const CLOSED_HAND_POINTER_MIN_STRENGTH = 0.68;
+const OPEN_PALM_POINTER_MIN_SCORE = 0.38;
+const CLOSED_HAND_POINTER_MIN_STRENGTH = 0.56;
 
 export type LandmarkManipulationSignal = {
   point: { x: number; y: number };

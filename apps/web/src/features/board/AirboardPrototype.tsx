@@ -2547,7 +2547,7 @@ export function AirboardPrototype({
       dockGestureHoverRef.current = null;
       setOpenCatalogId(null);
       setDockGestureHover(null);
-    }, 320);
+    }, 520);
   }, []);
 
   useEffect(
@@ -2578,7 +2578,8 @@ export function AirboardPrototype({
       }
       const x = screenPoint.x + canvasRect.left;
       const y = screenPoint.y + canvasRect.top;
-      const hitPadding = 12;
+      const hitPadding = 18;
+      const activationPadding = 8;
       const candidates: {
         id: string;
         element: HTMLButtonElement;
@@ -2600,7 +2601,11 @@ export function AirboardPrototype({
         });
       }
       const hoveredId = chooseDockGestureTarget({ x, y }, candidates, hitPadding);
-      const preciseTargetId = chooseDockGestureTarget({ x, y }, candidates, 0);
+      const preciseTargetId = chooseDockGestureTarget(
+        { x, y },
+        candidates,
+        activationPadding,
+      );
       const hovered = candidates.find((candidate) => candidate.id === hoveredId) ?? null;
       dockGestureHoverRef.current = hovered?.id ?? null;
       setDockGestureHover((current) => (current === (hovered?.id ?? null) ? current : hovered?.id ?? null));
@@ -5703,17 +5708,20 @@ export function AirboardPrototype({
               canvasHeight: roundedHeight,
               mirrorX: true,
               minTrackingConfidence: confidenceThreshold,
-              hoverSmoothingTimeMs: 30,
-              dragGain: 0.68,
-              dragDeadZonePx: 0.5,
-              areaCursorRadiusPx: 40,
-              stickyReleaseRadiusPx: 64,
-              trackingLossTimeoutMs: 260,
+              hoverSmoothingTimeMs: 72,
+              hoverDeadZonePx: 2.25,
+              dragGain: 0.74,
+              dragSmoothingTimeMs: 58,
+              dragDeadZonePx: 1.25,
+              areaCursorRadiusPx: 54,
+              stickyReleaseRadiusPx: 88,
+              trackingLossTimeoutMs: 420,
+              grabReacquireGraceMs: 620,
               pinch: {
-                engageThreshold: 0.68,
-                releaseThreshold: 0.38,
-                engageDebounceMs: 75,
-                releaseDebounceMs: 90,
+                engageThreshold: 0.6,
+                releaseThreshold: 0.3,
+                engageDebounceMs: 55,
+                releaseDebounceMs: 80,
               },
             });
             hybridGestureCanvasSizeRef.current = {

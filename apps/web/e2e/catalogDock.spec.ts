@@ -137,8 +137,8 @@ test("the shape catalog is a bottom-centered icon dock with accessible controls"
     await expect(control).toBeVisible();
     await expect(control.locator("svg.catalog-glyph")).toBeVisible();
     const box = await control.boundingBox();
-    expect(box!.width).toBeGreaterThanOrEqual(44);
-    expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.width).toBeGreaterThanOrEqual(56);
+    expect(box!.height).toBeGreaterThanOrEqual(56);
   }
 
   const flowTrigger = dock.getByRole("button", { name: "Flow", exact: true });
@@ -194,8 +194,8 @@ test("the Flow icon strip stays fully reachable on a narrow canvas", async ({ pa
   expect(narrowMenuBox!.x + narrowMenuBox!.width).toBeLessThanOrEqual(375);
   for (const item of await menu.getByRole("menuitem").all()) {
     const itemBox = await item.boundingBox();
-    expect(itemBox!.width).toBeGreaterThanOrEqual(44);
-    expect(itemBox!.height).toBeGreaterThanOrEqual(44);
+    expect(itemBox!.width).toBeGreaterThanOrEqual(68);
+    expect(itemBox!.height).toBeGreaterThanOrEqual(68);
   }
 });
 
