@@ -1,6 +1,5 @@
 import { estimateGrabStrength } from "./grabStrength.ts";
 import { estimatePalmPresentation } from "./palmPresentation.ts";
-import { estimateVictoryPresentation } from "./victoryPresentation.ts";
 import type { HandLandmark } from "./types.ts";
 
 /**
@@ -34,8 +33,6 @@ export type ReplaySample = {
   t: number;
   /** Best palm-presentation score across hands in the frame. */
   palmScore: number;
-  /** Best Victory-presentation score across hands in the frame. */
-  victoryScore: number;
   /** Best grab strength across hands in the frame. */
   grabStrength: number;
 };
@@ -43,18 +40,13 @@ export type ReplaySample = {
 export function replayLandmarkTrace(trace: LandmarkTrace): ReplaySample[] {
   return trace.frames.map((frame) => {
     let palmScore = 0;
-    let victoryScore = 0;
     let grabStrength = 0;
     for (const hand of frame.hands) {
       const landmarks: HandLandmark[] = hand.landmarks.map(([x, y, z]) => ({ x, y, z }));
       palmScore = Math.max(palmScore, estimatePalmPresentation(landmarks).score);
-      victoryScore = Math.max(
-        victoryScore,
-        estimateVictoryPresentation(landmarks).score,
-      );
       grabStrength = Math.max(grabStrength, estimateGrabStrength(landmarks).strength);
     }
-    return { t: frame.t, palmScore, victoryScore, grabStrength };
+    return { t: frame.t, palmScore, grabStrength };
   });
 }
 

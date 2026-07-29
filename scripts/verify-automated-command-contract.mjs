@@ -10,7 +10,6 @@ const [
   palmVoiceTracker,
   mediaPipeTracker,
   palmPose,
-  victoryPose,
   gestureFrameArbitration,
 ] = await Promise.all([
   readFile(new URL("apps/web/src/features/board/AirboardPrototype.tsx", root), "utf8"),
@@ -20,7 +19,6 @@ const [
   readFile(new URL("apps/web/src/features/board/palmVoiceGestureTracker.ts", root), "utf8"),
   readFile(new URL("packages/gesture-engine/src/mediapipe.ts", root), "utf8"),
   readFile(new URL("packages/gesture-engine/src/palmPresentation.ts", root), "utf8"),
-  readFile(new URL("packages/gesture-engine/src/victoryPresentation.ts", root), "utf8"),
   readFile(
     new URL("apps/web/src/features/board/gestureFrameArbitration.ts", root),
     "utf8",
@@ -83,7 +81,6 @@ const required = [
   [mediaPipeTracker, "HandLandmarker.createFromOptions", "canonical HandLandmarker"],
   [mediaPipeTracker, "detectForVideo", "HandLandmarker video inference"],
   [palmPose, "estimatePalmPresentation", "Open Palm landmark definition"],
-  [victoryPose, "estimateVictoryPresentation", "Victory landmark definition"],
   [
     gestureFrameArbitration,
     "export function arbitrateGestureFrame",

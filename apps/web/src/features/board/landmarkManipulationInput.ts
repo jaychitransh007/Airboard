@@ -1,5 +1,6 @@
 import {
   estimateGrabStrength,
+  estimatePalmPresentation,
   mapLandmarkToFittedCanvas,
   type CanvasMapping,
   type DetectedHand,
@@ -7,6 +8,8 @@ import {
 } from "@airboard/gesture-engine";
 
 const PALM_ANCHOR_INDEXES = [5, 9, 13, 17] as const;
+const OPEN_PALM_POINTER_MIN_SCORE = 0.42;
+const CLOSED_HAND_POINTER_MIN_STRENGTH = 0.68;
 
 export type LandmarkManipulationSignal = {
   point: { x: number; y: number };
@@ -17,7 +20,8 @@ export type LandmarkManipulationSignal = {
 
 /**
  * Selects one HandLandmarker hand for Move/Place/Erase and derives its cursor
- * and grab evidence. No static gesture label participates in manipulation.
+ * and grab evidence. A presented open palm owns hover; a closed hand owns grab.
+ * Partial finger poses own neither and therefore cannot drive the pointer.
  */
 export function selectLandmarkManipulationSignal(
   hands: readonly DetectedHand[],
@@ -47,7 +51,14 @@ export function selectLandmarkManipulationSignal(
   const palmKnuckles = PALM_ANCHOR_INDEXES.map(
     (index) => hand.landmarks[index]!,
   );
+  const palm = estimatePalmPresentation(hand.landmarks);
   const grab = estimateGrabStrength(hand.landmarks);
+  if (
+    palm.score < OPEN_PALM_POINTER_MIN_SCORE &&
+    grab.strength < CLOSED_HAND_POINTER_MIN_STRENGTH
+  ) {
+    return null;
+  }
   const fitted = mapLandmarkToFittedCanvas(
     {
       x:

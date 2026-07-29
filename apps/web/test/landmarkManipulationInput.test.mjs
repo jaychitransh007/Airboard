@@ -71,6 +71,32 @@ function closedFistLandmarks() {
   ];
 }
 
+function partialTwoFingerLandmarks() {
+  return [
+    point(0.5, 0.84),
+    point(0.43, 0.77),
+    point(0.4, 0.72),
+    point(0.38, 0.67),
+    point(0.36, 0.62),
+    point(0.43, 0.64),
+    point(0.4, 0.51),
+    point(0.38, 0.4),
+    point(0.36, 0.29),
+    point(0.48, 0.62),
+    point(0.49, 0.48),
+    point(0.51, 0.36),
+    point(0.54, 0.25),
+    point(0.54, 0.64),
+    point(0.55, 0.58),
+    point(0.56, 0.64),
+    point(0.55, 0.7),
+    point(0.6, 0.67),
+    point(0.61, 0.61),
+    point(0.62, 0.67),
+    point(0.61, 0.73),
+  ];
+}
+
 function hand(landmarks = closedFistLandmarks(), handednessScore = 0.96) {
   return {
     handedness: "right",
@@ -154,6 +180,17 @@ test("uncertain handedness cannot freeze an otherwise valid hand pointer", () =>
 
   assert.equal(output.trackingState, "tracked");
   assert.ok(output.cursor, "the air cursor must replace the last mouse position");
+});
+
+test("a partial two-finger pose cannot drive the pointer", () => {
+  assert.equal(
+    selectLandmarkManipulationSignal(
+      [hand(partialTwoFingerLandmarks())],
+      "right",
+      MAPPING,
+    ),
+    null,
+  );
 });
 
 test("missing or non-finite palm anchors fail closed", () => {

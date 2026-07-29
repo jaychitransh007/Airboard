@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  estimatePalmPresentation,
-  estimateVictoryPresentation,
-} from "@airboard/gesture-engine";
+import { estimatePalmPresentation } from "@airboard/gesture-engine";
 
 import { selectSingleLandmarkPose } from "../src/features/board/landmarkPoseSelection.ts";
 import { UndoGestureTracker } from "../src/features/board/undoGestureTracker.ts";
@@ -42,32 +39,6 @@ function openPalm() {
     entries[tip] = { x, y: 0.36, z: 0 };
   }
   return landmarkArray(entries);
-}
-
-function victoryHand() {
-  return landmarkArray({
-    0: { x: 0.5, y: 0.84, z: 0 },
-    1: { x: 0.43, y: 0.77, z: 0 },
-    2: { x: 0.4, y: 0.72, z: 0 },
-    3: { x: 0.38, y: 0.67, z: 0 },
-    4: { x: 0.36, y: 0.62, z: 0 },
-    5: { x: 0.43, y: 0.64, z: 0 },
-    6: { x: 0.4, y: 0.51, z: 0 },
-    7: { x: 0.38, y: 0.4, z: 0 },
-    8: { x: 0.36, y: 0.29, z: 0 },
-    9: { x: 0.48, y: 0.62, z: 0 },
-    10: { x: 0.49, y: 0.48, z: 0 },
-    11: { x: 0.51, y: 0.36, z: 0 },
-    12: { x: 0.54, y: 0.25, z: 0 },
-    13: { x: 0.54, y: 0.64, z: 0 },
-    14: { x: 0.55, y: 0.58, z: 0 },
-    15: { x: 0.56, y: 0.64, z: 0 },
-    16: { x: 0.55, y: 0.7, z: 0 },
-    17: { x: 0.6, y: 0.67, z: 0 },
-    18: { x: 0.61, y: 0.61, z: 0 },
-    19: { x: 0.62, y: 0.67, z: 0 },
-    20: { x: 0.61, y: 0.73, z: 0 },
-  });
 }
 
 function detectedHand(landmarks) {
@@ -146,14 +117,4 @@ test("raw rotated open-palm landmarks held still activate and release Voice once
   assert.equal(update(700), null, "a held palm cannot activate twice");
   assert.equal(update(800, null), null);
   assert.equal(update(1_150, null), "release");
-});
-
-test("Open Palm and Victory landmark definitions are mutually exclusive", () => {
-  const palm = openPalm();
-  const victory = victoryHand();
-
-  assert.ok(estimatePalmPresentation(palm).score >= 0.68);
-  assert.equal(estimateVictoryPresentation(palm).score, 0);
-  assert.ok(estimateVictoryPresentation(victory).score >= 0.72);
-  assert.equal(estimatePalmPresentation(victory).score, 0);
 });

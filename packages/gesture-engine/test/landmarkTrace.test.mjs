@@ -14,10 +14,6 @@ test("replaying the reference trace detects each pose only in its segment", asyn
   const trace = parseLandmarkTrace(JSON.parse(await readFile(FIXTURE, "utf8")));
   const samples = replayLandmarkTrace(trace);
   assert.equal(samples.length, trace.frames.length);
-  assert.ok(
-    samples.every((sample) => Number.isFinite(sample.victoryScore)),
-    "every replay sample exposes the canonical Victory score",
-  );
 
   // Palm-presentation pose: exactly one contiguous segment covering the
   // held-open-palm phase (the rising phase also scores — stillness gating is
@@ -40,10 +36,6 @@ test("replaying the reference trace detects each pose only in its segment", asyn
   assert.ok(pointingSamples.length > 20);
   for (const sample of pointingSamples) {
     assert.ok(sample.palmScore < 0.62, `pointing frame at ${sample.t} scored palm ${sample.palmScore}`);
-    assert.ok(
-      sample.victoryScore < 0.72,
-      `pointing frame at ${sample.t} scored Victory ${sample.victoryScore}`,
-    );
     assert.ok(sample.grabStrength < 0.68, `pointing frame at ${sample.t} scored grab ${sample.grabStrength}`);
   }
 });

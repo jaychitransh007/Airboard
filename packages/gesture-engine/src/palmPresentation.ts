@@ -133,8 +133,8 @@ export function estimatePalmPresentation(
   }
 
   // The two weakest fingers are authoritative. Averaging all four would allow
-  // a Victory or pointing transition to masquerade as an open palm because
-  // two strongly extended fingers could hide two folded fingers.
+  // a partial or pointing transition to masquerade as an open palm because two
+  // strongly extended fingers could hide two folded fingers.
   const weakestFingerScores = [...fingerOpennessScores]
     .sort((left, right) => left - right)
     .slice(0, 2);
