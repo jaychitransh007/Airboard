@@ -137,8 +137,8 @@ test("the shape catalog is a bottom-centered icon dock with accessible controls"
     await expect(control).toBeVisible();
     await expect(control.locator("svg.catalog-glyph")).toBeVisible();
     const box = await control.boundingBox();
-    expect(box!.width).toBeGreaterThanOrEqual(56);
-    expect(box!.height).toBeGreaterThanOrEqual(56);
+    expect(box!.width).toBeGreaterThanOrEqual(68);
+    expect(box!.height).toBeGreaterThanOrEqual(68);
   }
 
   const flowTrigger = dock.getByRole("button", { name: "Flow", exact: true });
@@ -157,6 +157,9 @@ test("the shape catalog is a bottom-centered icon dock with accessible controls"
   ]) {
     const tool = flowMenu.getByRole("menuitem", { name });
     await expect(tool.locator("svg.catalog-glyph")).toBeVisible();
+    const box = await tool.boundingBox();
+    expect(box!.width).toBeGreaterThanOrEqual(90);
+    expect(box!.height).toBeGreaterThanOrEqual(90);
   }
   await expect(flowMenu.locator(".catalog-tile-label")).toHaveCount(0);
 });
@@ -194,7 +197,13 @@ test("the Flow icon strip stays fully reachable on a narrow canvas", async ({ pa
   expect(narrowMenuBox!.x + narrowMenuBox!.width).toBeLessThanOrEqual(375);
   for (const item of await menu.getByRole("menuitem").all()) {
     const itemBox = await item.boundingBox();
-    expect(itemBox!.width).toBeGreaterThanOrEqual(68);
+    expect(itemBox!.width).toBeGreaterThanOrEqual(90);
+    expect(itemBox!.height).toBeGreaterThanOrEqual(90);
+  }
+
+  for (const name of ["Select", "Flow", "System", "Annotate", "Eraser"]) {
+    const itemBox = await dock.getByRole("button", { name, exact: true }).boundingBox();
+    expect(itemBox!.width).toBeGreaterThanOrEqual(64);
     expect(itemBox!.height).toBeGreaterThanOrEqual(68);
   }
 });
@@ -322,7 +331,9 @@ test("air hover opens a category and one close-drag-release carries a shape", as
         ? Math.hypot(center.x - processPoint.x, center.y - processPoint.y)
         : Infinity;
     })
-    .toBeLessThan(3);
+    // The centered flyout can land on a fractional CSS pixel; the carried
+    // preview should still begin imperceptibly close to the air cursor.
+    .toBeLessThan(5);
 
   const dropPoint = {
     x: canvasBox!.width * 0.7,

@@ -669,14 +669,14 @@ button.screen-underlay-active {
   top: auto;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   width: max-content;
   max-width: calc(100% - 40px);
   max-height: none;
   overflow: visible;
-  padding: 9px;
+  padding: 12px;
   border: 1px solid rgba(48, 38, 61, 0.12);
-  border-radius: 20px;
+  border-radius: 24px;
   background: rgba(252, 251, 253, 0.96);
   box-shadow:
     0 18px 48px rgba(24, 16, 35, 0.2),
@@ -698,9 +698,9 @@ button.screen-underlay-active {
 
 .catalog-dock-divider {
   width: 1px;
-  height: 42px;
+  height: 50px;
   flex: none;
-  margin: 0 4px;
+  margin: 0 5px;
   background: rgba(48, 38, 61, 0.12);
 }
 
@@ -712,14 +712,14 @@ button.screen-underlay-active {
 .catalog-dock .catalog-dock-button {
   position: relative;
   display: grid;
-  width: 58px;
-  min-width: 58px;
-  height: 58px;
-  min-height: 58px;
+  width: 70px;
+  min-width: 70px;
+  height: 70px;
+  min-height: 70px;
   place-items: center;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: 15px;
+  border-radius: 18px;
   background: transparent;
   color: #4d4853;
   cursor: pointer;
@@ -751,23 +751,23 @@ button.screen-underlay-active {
 }
 
 .catalog-dock .catalog-glyph {
-  width: 34px;
-  height: 34px;
+  width: 42px;
+  height: 42px;
   overflow: visible;
 }
 
 .catalog-menu-indicator {
   position: absolute;
-  right: 6px;
-  bottom: 4px;
+  right: 7px;
+  bottom: 5px;
   display: grid;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   place-items: center;
   border: 1px solid currentColor;
   border-radius: 50%;
   background: inherit;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 750;
   line-height: 1;
   opacity: 0.72;
@@ -816,13 +816,13 @@ button.screen-underlay-active {
   top: auto;
   display: flex;
   width: max-content;
-  max-width: min(660px, calc(100vw - 32px));
+  max-width: min(780px, calc(100vw - 32px));
   flex-wrap: nowrap;
-  gap: 8px;
+  gap: 10px;
   overflow: visible;
-  padding: 10px;
+  padding: 12px;
   border: 1px solid rgba(48, 38, 61, 0.12);
-  border-radius: 18px;
+  border-radius: 22px;
   background: rgba(252, 251, 253, 0.98);
   box-shadow:
     0 16px 44px rgba(24, 16, 35, 0.2),
@@ -851,14 +851,14 @@ button.screen-underlay-active {
 .catalog-flyout button {
   position: relative;
   display: grid;
-  width: 72px;
-  min-width: 72px;
-  height: 72px;
-  min-height: 72px;
+  width: 92px;
+  min-width: 92px;
+  height: 92px;
+  min-height: 92px;
   place-items: center;
   padding: 0;
   border-color: transparent;
-  border-radius: 15px;
+  border-radius: 20px;
   background: transparent;
   color: #4d4853;
   text-align: center;
@@ -1745,7 +1745,7 @@ button.screen-underlay-active {
     top: auto;
     bottom: calc(100% + 12px);
     left: 50%;
-    width: min(420px, calc(100vw - 24px));
+    width: min(344px, calc(100vw - 24px));
     max-width: calc(100vw - 24px);
     flex-wrap: wrap;
     justify-content: center;
@@ -1781,7 +1781,7 @@ button.screen-underlay-active {
   .catalog-flyout {
     position: fixed;
     right: 12px;
-    bottom: 98px;
+    bottom: 124px;
     left: 12px;
     width: auto;
     max-width: none;
@@ -1895,10 +1895,10 @@ button.screen-underlay-active {
 .catalog-flyout .catalog-tile {
   display: grid;
   justify-items: center;
-  width: 72px;
-  min-width: 72px;
-  height: 72px;
-  min-height: 72px;
+  width: 92px;
+  min-width: 92px;
+  height: 92px;
+  min-height: 92px;
   gap: 0;
   padding: 0;
   text-align: center;
@@ -1906,8 +1906,8 @@ button.screen-underlay-active {
 }
 
 .catalog-flyout .catalog-tile .catalog-glyph {
-  width: 42px;
-  height: 42px;
+  width: 54px;
+  height: 54px;
 }
 
 .catalog-flyout .catalog-tile.selected,
@@ -3079,9 +3079,9 @@ button.screen-underlay-active {
   display: flex;
   width: max-content;
   max-width: calc(100% - 44px);
-  padding: 9px;
+  padding: 12px;
   border-color: rgba(48, 38, 61, 0.13);
-  border-radius: 20px;
+  border-radius: 24px;
   background: rgba(252, 251, 253, 0.96);
   box-shadow:
     0 20px 50px rgba(10, 7, 15, 0.32),
@@ -3093,10 +3093,10 @@ button.screen-underlay-active {
 }
 
 .canvas-workspace .object-dock button {
-  width: 58px;
-  min-width: 58px;
-  height: 58px;
-  min-height: 58px;
+  width: 70px;
+  min-width: 70px;
+  height: 70px;
+  min-height: 70px;
   padding: 0;
   border-color: transparent;
   background: transparent;
@@ -3124,10 +3124,10 @@ button.screen-underlay-active {
 }
 
 .canvas-workspace .object-dock .catalog-flyout .catalog-tile {
-  width: 72px;
-  min-width: 72px;
-  height: 72px;
-  min-height: 72px;
+  width: 92px;
+  min-width: 92px;
+  height: 92px;
+  min-height: 92px;
 }
 
 .canvas-workspace.copilot-open .object-dock.catalog-dock {
@@ -3917,9 +3917,26 @@ button.screen-underlay-active {
     bottom: 14px;
     left: 50%;
     display: flex;
-    width: max-content;
-    max-width: calc(100% - 20px);
+    width: calc(100% - 20px);
+    max-width: none;
+    gap: 0;
+    padding: 8px;
     transform: translateX(-50%);
+  }
+
+  .canvas-workspace .catalog-dock-divider {
+    display: none;
+  }
+
+  .canvas-workspace .object-dock.catalog-dock > .catalog-dock-button,
+  .canvas-workspace .object-dock.catalog-dock > .catalog-category {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .canvas-workspace .object-dock.catalog-dock > .catalog-category > .catalog-dock-button {
+    width: 100%;
+    min-width: 0;
   }
 
   .canvas-copilot {

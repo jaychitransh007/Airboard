@@ -2578,8 +2578,8 @@ export function AirboardPrototype({
       }
       const x = screenPoint.x + canvasRect.left;
       const y = screenPoint.y + canvasRect.top;
-      const hitPadding = 18;
-      const activationPadding = 8;
+      const hitPadding = 26;
+      const activationPadding = 14;
       const candidates: {
         id: string;
         element: HTMLButtonElement;
