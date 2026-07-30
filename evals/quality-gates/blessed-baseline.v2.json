@@ -1,0 +1,94 @@
+{
+  "schemaVersion": "airboard-blessed-baseline-artifact.v1",
+  "baselineVersion": "airboard-blessed-baseline.v2",
+  "configurationBinding": {
+    "configVersion": "release.v1",
+    "reportSchemaVersion": "airboard-quality-report.v1",
+    "releasePolicySha256": "c4013b7faf28e5bd17c575275e7a3e72c52b8b85d7922399887addd529fa6358"
+  },
+  "metricsSha256": "ffe21393e153ff0113625056684533a668f65b247c56844dd63845e313228ddc",
+  "provenance": {
+    "kind": "versioned_policy_reference",
+    "evidenceArtifact": "blessed-baseline.v2.json",
+    "assertsMediaAvailability": false,
+    "assertsEvaluationEvidence": false,
+    "note": "This comparison reference and evaluator do not independently attest restricted-media availability or report provenance."
+  },
+  "metrics": {
+    "contract": {
+      "passRate": 1
+    },
+    "safety": {
+      "passRate": 1
+    },
+    "atomicity": {
+      "passRate": 1
+    },
+    "undo": {
+      "passRate": 1
+    },
+    "semantic": {
+      "coreAccuracy": 0.97,
+      "overallAccuracy": 0.94,
+      "slices": {
+        "clarification": {
+          "accuracy": 0.92,
+          "critical": true
+        },
+        "compound_commands": {
+          "accuracy": 0.93,
+          "critical": false
+        },
+        "indian_english": {
+          "accuracy": 0.91,
+          "critical": true
+        },
+        "non_board_speech": {
+          "accuracy": 0.99,
+          "critical": true
+        }
+      }
+    },
+    "gesture": {
+      "precision": 0.97,
+      "recall": 0.94,
+      "duplicateRate": 0.003,
+      "criticalFalseTriggerCount": 0,
+      "acquireLatencyP95Ms": 450,
+      "releaseLatencyP95Ms": 250,
+      "frameProcessingP95Ms": 25,
+      "slices": {
+        "core_lighting": {
+          "score": 0.94,
+          "critical": false
+        },
+        "low_light": {
+          "score": 0.9,
+          "critical": true
+        },
+        "tracking_loss": {
+          "score": 0.96,
+          "critical": true
+        },
+        "two_hand": {
+          "score": 0.92,
+          "critical": true
+        }
+      }
+    },
+    "stt": {
+      "criticalTokenRecall": 0.985
+    },
+    "latency": {
+      "deterministicEndToActionP95Ms": 850,
+      "semanticEndToActionP95Ms": 2200
+    },
+    "ambient": {
+      "actionCount": 0,
+      "observedHours": 30
+    },
+    "cost": {
+      "costPerSuccessUsd": 0.05
+    }
+  }
+}

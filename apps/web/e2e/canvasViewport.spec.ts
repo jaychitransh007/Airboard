@@ -98,4 +98,7 @@ test("ctrl+wheel zooms; plain wheel pans; limits hold", async ({ page }) => {
   await evalHooks(page, (h) => h.setViewport({ x: 0, y: 0, scale: 999 }));
   const clamped = await evalHooks(page, (h) => h.getViewport());
   expect(clamped.scale).toBeLessThanOrEqual(3);
+  expect((await evalHooks(page, (h) => h.getBoardSummary())).objectCount).toBe(
+    0,
+  );
 });

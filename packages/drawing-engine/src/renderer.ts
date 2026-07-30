@@ -5,6 +5,7 @@ import type {
   Stroke,
   StrokeAnnotation,
   StrokePoint,
+  AirboardNodeVisualKind,
 } from "@airboard/core";
 import { nodeVisualKind } from "@airboard/core";
 import { getConnectorRoutePoints, getRouteMidpoint } from "./connectorGeometry.ts";
@@ -214,7 +215,7 @@ function renderBoardContent(
     );
   }
 
-  for (const stroke of Object.values(state.strokes)) {
+  for (const stroke of orderCommittedStrokesForRender(Object.values(state.strokes))) {
     if (stroke.status === "deleted" && !options.showDeleted) {
       continue;
     }
@@ -266,6 +267,30 @@ function renderBoardContent(
   if (options.view) {
     context.restore();
   }
+}
+
+/**
+ * Semantic connectors belong behind diagram nodes. Plans normally create all
+ * nodes before their connectors, so relying on object insertion order paints
+ * connector ink and labels over node bodies. A stable partition keeps the
+ * relative order within each layer while moving only committed connectors to
+ * the back.
+ */
+export function orderCommittedStrokesForRender(strokes: readonly Stroke[]): Stroke[] {
+  const connectors: Stroke[] = [];
+  const remainder: Stroke[] = [];
+  for (const stroke of strokes) {
+    const annotationType = stroke.annotation?.type;
+    if (
+      stroke.status === "committed" &&
+      (annotationType === "connector" || annotationType === "arrow")
+    ) {
+      connectors.push(stroke);
+    } else {
+      remainder.push(stroke);
+    }
+  }
+  return [...connectors, ...remainder];
 }
 
 const CONTRAST_PLATE_ANNOTATIONS = new Set<StrokeAnnotation["type"]>([
@@ -604,15 +629,56 @@ function drawNodeShape(context: CanvasRenderingContext2D, stroke: Stroke): void 
       break;
   }
 
+  const labelPlacement = nodeLabelPlacement(bounds, visualKind);
   drawAnnotationLabel(
     context,
     annotation.label,
-    bounds.x + bounds.width / 2,
-    visualKind === "actor"
-      ? bounds.y + bounds.height * 0.88
-      : bounds.y + bounds.height / 2,
-    visualKind === "actor" ? bounds.width - 6 : bounds.width - 20,
+    labelPlacement.centerX,
+    labelPlacement.centerY,
+    labelPlacement.maxWidth,
   );
+}
+
+export type NodeLabelPlacement = {
+  centerX: number;
+  centerY: number;
+  maxWidth: number;
+};
+
+/**
+ * Returns the label anchor for a semantic node visual.
+ *
+ * Queue nodes contain two stacked lanes separated at the overall vertical
+ * center. The generic center anchor therefore puts text directly on the lane
+ * divider. Use the undecorated lower lane instead; the upper lane retains its
+ * directional marker. All other visual anchors intentionally remain
+ * unchanged.
+ */
+export function nodeLabelPlacement(
+  bounds: AnnotationBounds,
+  visualKind: AirboardNodeVisualKind,
+): NodeLabelPlacement {
+  if (visualKind === "actor") {
+    return {
+      centerX: bounds.x + bounds.width / 2,
+      centerY: bounds.y + bounds.height * 0.88,
+      maxWidth: bounds.width - 6,
+    };
+  }
+  if (visualKind === "queue") {
+    const gap = Math.min(8, bounds.width * 0.06);
+    const laneHeight = (bounds.height - gap) / 2;
+    return {
+      centerX: bounds.x + gap + (bounds.width - gap) / 2,
+      centerY: bounds.y + bounds.height - laneHeight / 2,
+      maxWidth: bounds.width - gap - 20,
+    };
+  }
+  return {
+    centerX: bounds.x + bounds.width / 2,
+    centerY: bounds.y + bounds.height / 2,
+    maxWidth: bounds.width - 20,
+  };
 }
 
 function drawContainerShape(

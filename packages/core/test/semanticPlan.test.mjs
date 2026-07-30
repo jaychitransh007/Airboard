@@ -207,6 +207,64 @@ test("rejects malformed, oversized, control-character, and undocumented model ou
   );
 });
 
+test("rejects invalid variants for every reference kind", () => {
+  const invalidReferences = [
+    { kind: "current_selection", unexpected: true },
+    { kind: "pointer", unexpected: true },
+    {
+      kind: "visible_label",
+      label: "API",
+      occurrence: null,
+      unexpected: true,
+    },
+    {
+      kind: "type_ordinal",
+      nodeType: "service",
+      ordinal: 1,
+      unexpected: true,
+    },
+    { kind: "plan_handle", handle: "created", unexpected: true },
+  ];
+  const observedKinds = new Set();
+  for (const target of invalidReferences) {
+    observedKinds.add(target.kind);
+    assert.equal(
+      parseSemanticPlan(
+        resolved([{ type: "rename", target, label: "Renamed" }]),
+      ).ok,
+      false,
+      target.kind,
+    );
+  }
+  observedKinds.add("connection");
+  assert.equal(
+    parseSemanticPlan(
+      resolved([
+        {
+          type: "delete_connection",
+          connection: {
+            kind: "connection",
+            from: ref("API"),
+            to: ref("Database"),
+            label: null,
+            occurrence: null,
+            unexpected: true,
+          },
+        },
+      ]),
+    ).ok,
+    false,
+  );
+  assert.deepEqual([...observedKinds].sort(), [
+    "connection",
+    "current_selection",
+    "plan_handle",
+    "pointer",
+    "type_ordinal",
+    "visible_label",
+  ]);
+});
+
 test("enforces resolution and clarification consistency", () => {
   assert.equal(parseSemanticPlan(resolved([])).ok, false);
   assert.equal(

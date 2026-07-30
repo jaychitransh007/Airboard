@@ -112,7 +112,7 @@ If no supported semantic provider/key is configured, `GET /intent/config` report
 
 Every finalized command gets a `voiceTurnId` that links capture metadata, final STT text, wake classification, parser/grounding outcome, semantic input/output or failure, clarification, preview, final action, undo, and terminal outcome. Browser stages are appended with `POST /voice/trace`; a bounded local trace can be inspected with `GET /voice/trace/:voiceTurnId` using an allowed Origin header. Semantic server logs carry the same ID and provider request metadata.
 
-Raw microphone audio is never stored or accepted by the trace API. Trace payloads are size/depth bounded and reject audio blobs, credentials, tokens, secrets, and passwords. The current prototype keeps only a bounded in-memory diagnostic buffer; production deployment still needs authenticated trace access, configurable transcript retention, encryption, deletion/export, and access auditing.
+Raw microphone audio is never stored or accepted by the trace API. Trace payloads are size/depth bounded and reject audio blobs, credentials, tokens, secrets, and passwords. Authenticated deployments store sanitized, organization-scoped voice trace events and hard-delete them within 14 days; local API runs without Supabase retain only a bounded in-memory diagnostic buffer. Trace access, export, deletion, and auditing follow the authenticated commercial control-plane policies.
 
 ### Voice semantic evaluation
 

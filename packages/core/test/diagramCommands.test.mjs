@@ -120,6 +120,37 @@ test("reverses a connector in place as one undoable annotation update", () => {
   assert.deepEqual(undone.state.strokes.calls.annotation, before);
 });
 
+test("reciprocal connectors receive distinct deterministic route lanes", () => {
+  let state = createInitialBoardState("board-1");
+  state = createNode(state, "user", { x: 100, y: 100 }, "User").state;
+  state = createNode(state, "auth", { x: 400, y: 100 }, "Authentication").state;
+  state = applyDiagramCommand(
+    state,
+    {
+      type: "nodes.connect",
+      connectorId: "request",
+      fromId: "user",
+      toId: "auth",
+      label: "requests",
+    },
+    context(),
+  ).state;
+  state = applyDiagramCommand(
+    state,
+    {
+      type: "nodes.connect",
+      connectorId: "authenticates",
+      fromId: "auth",
+      toId: "user",
+      label: "authenticates",
+    },
+    context(),
+  ).state;
+
+  assert.equal(state.strokes.request.annotation.routeOffset, undefined);
+  assert.equal(state.strokes.authenticates.annotation.routeOffset, 72);
+});
+
 test("creates semantic circles as true ellipse annotations", () => {
   const result = applyDiagramCommand(
     createInitialBoardState("board-1"),

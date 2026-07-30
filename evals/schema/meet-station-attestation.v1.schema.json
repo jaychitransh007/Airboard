@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://airboard.dev/evals/schema/meet-station-attestation.v1.schema.json",
+  "title": "Airboard Meet station attestation",
+  "description": "Short-lived, privacy-safe evidence produced by a protected real-Meet test station. This file must remain outside the repository and CI artifacts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "attestationId",
+    "stationDeviceId",
+    "issuedBy",
+    "observedAt",
+    "expiresAt",
+    "meetingCodeHash",
+    "sender",
+    "receiver",
+    "privacy"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "airboard-meet-station-attestation.v1"
+    },
+    "attestationId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "stationDeviceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "issuedBy": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "observedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expiresAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "meetingCodeHash": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$"
+    },
+    "sender": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "compositorEngaged",
+        "senderAttached",
+        "encodedFramesDelta",
+        "outboundBytesDelta"
+      ],
+      "properties": {
+        "compositorEngaged": {
+          "const": true
+        },
+        "senderAttached": {
+          "const": true
+        },
+        "encodedFramesDelta": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "outboundBytesDelta": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "receiver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "expectedOverlayObserved",
+        "participantCount"
+      ],
+      "properties": {
+        "method": {
+          "enum": [
+            "second_participant",
+            "receiver_station_automation"
+          ]
+        },
+        "expectedOverlayObserved": {
+          "const": true
+        },
+        "participantCount": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rawMediaRetained",
+        "contentCaptured"
+      ],
+      "properties": {
+        "rawMediaRetained": {
+          "const": false
+        },
+        "contentCaptured": {
+          "const": false
+        }
+      }
+    }
+  }
+}

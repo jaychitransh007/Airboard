@@ -21,7 +21,8 @@ This document describes the implemented customer journey, its operating data, an
 - `/`, `/product`, `/pricing`, `/enterprise`, `/templates`, `/demo`, `/download`
 - `/integrations` and `/integrations/google-meet|zoom|teams|standalone`
 - `/use-cases/sales|engineering|teaching|consulting|workshops`
-- `/security`, `/docs`, `/support`, `/status`, `/changelog`
+- `/security`, `/help`, `/help/:category/:article`, `/support`, `/status`, `/changelog`
+- `/docs` is a legacy redirect to `/help`
 - `/privacy`, `/terms`, `/dpa`, `/subprocessors`, `/cookies`, `/accessibility`
 - `/contact-sales`, `/signup`, `/login`, `/auth/callback`, `/invite/:token`
 

@@ -1,0 +1,1716 @@
+{
+  "schemaVersion": "interaction-eval-corpus.v1",
+  "caseSchemaVersion": "interaction-eval-case.v1",
+  "capabilityRegistryVersion": "1.2",
+  "description": "Representative offline interaction contracts spanning board mutations, non-board state, exact-once delivery, safety invariants, and undo.",
+  "coverage": {
+    "minCasesPerCapability": 1,
+    "requiredCapabilities": [
+      "action:create",
+      "action:connect",
+      "action:move",
+      "action:rename",
+      "action:delete",
+      "action:select",
+      "node:service",
+      "node:database",
+      "contract:exact-once",
+      "contract:forbidden-mutations",
+      "contract:undo-round-trip",
+      "state:non-board",
+      "interaction:clarification"
+    ],
+    "requiredChannels": [
+      "typed",
+      "voice",
+      "gesture",
+      "pointer",
+      "touchpad",
+      "keyboard",
+      "stylus",
+      "catalog",
+      "remote"
+    ],
+    "requiredTags": [
+      "board-mutation",
+      "non-board-state",
+      "safety"
+    ]
+  },
+  "cases": [
+    {
+      "schemaVersion": "interaction-eval-case.v1",
+      "id": "voice-create-service",
+      "title": "Voice creates one service node",
+      "corpusVersion": "interaction-v1",
+      "modality": "voice",
+      "surface": "replay",
+      "riskLevel": "low",
+      "datasetAssetHash": "none",
+      "description": "A resolved voice command creates and commits exactly one semantic node and can be undone.",
+      "capabilities": [
+        "action:create",
+        "node:service",
+        "contract:exact-once",
+        "contract:undo-round-trip"
+      ],
+      "tags": [
+        "voice",
+        "board-mutation",
+        "happy-path"
+      ],
+      "initial": {
+        "boardState": {
+          "boardId": "board:primary",
+          "nodes": [],
+          "edges": [],
+          "strokes": []
+        },
+        "nonBoardState": {
+          "selection": [],
+          "mode": "idle"
+        },
+        "pointer": {
+          "x": 200,
+          "y": 200
+        }
+      },
+      "interaction": {
+        "channel": "voice",
+        "input": {
+          "transcript": "Airo, add a service named Checkout API"
+        }
+      },
+    "expected": {
+      "outcome": "applied",
+      "route": {
+        "channel": "voice",
+        "activation": "wake"
+      },
+      "processingPath": [
+        "voice",
+        "deterministic_parser",
+        "grounding",
+        "atomic_transaction"
+      ],
+      "requiredActions": [
+        {
+          "type": "node.create",
+          "nodeType": "service",
+          "label": "Checkout API"
+        }
+      ],
+      "feedbackCategory": "success",
+      "latencyBudget": {
+        "totalMs": 1000
+      },
+      "comparison": {
+          "board": "partial",
+          "geometryTolerance": 0.5
+        },
+        "finalBoardState": {
+          "nodes": [
+            {
+              "id": "node:checkout-api",
+              "status": "committed",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "service",
+                "label": "Checkout API",
+                "bounds": {
+                  "x": 144,
+                  "y": 180,
+                  "width": 152,
+                  "height": 80
+                }
+              }
+            }
+          ]
+        },
+        "exactOnce": [
+          {
+            "id": "checkout-committed-once",
+            "source": "events",
+            "match": {
+              "type": "stroke.committed",
+              "strokeId": "node:checkout-api"
+            },
+            "count": 1
+          }
+        ],
+        "undoRoundTrip": {
+          "board": true,
+          "requireUndoEvents": true
+        }
+      }
+    },
+    {
+      "schemaVersion": "interaction-eval-case.v1",
+      "id": "voice-connect-named-nodes",
+      "title": "Voice connects two named nodes",
+      "corpusVersion": "interaction-v1",
+      "modality": "voice",
+      "surface": "replay",
+      "riskLevel": "low",
+      "datasetAssetHash": "none",
+      "description": "A connector keeps logical endpoints stable and is emitted once.",
+      "capabilities": [
+        "action:connect",
+        "node:service",
+        "node:database",
+        "contract:exact-once",
+        "contract:undo-round-trip"
+      ],
+      "tags": [
+        "voice",
+        "board-mutation",
+        "connector"
+      ],
+      "initial": {
+        "boardState": {
+          "boardId": "board:primary",
+          "nodes": [
+            {
+              "id": "node:checkout-api",
+              "status": "committed",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "service",
+                "label": "Checkout API",
+                "bounds": {
+                  "x": 100,
+                  "y": 120,
+                  "width": 152,
+                  "height": 80
+                }
+              }
+            },
+            {
+              "id": "node:orders-db",
+              "status": "committed",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "database",
+                "label": "Orders DB",
+                "bounds": {
+                  "x": 420,
+                  "y": 112,
+                  "width": 144,
+                  "height": 96
+                }
+              }
+            }
+          ],
+          "edges": []
+        }
+      },
+      "interaction": {
+        "channel": "voice",
+        "input": {
+          "activation": "ptt",
+          "transcript": "Connect Checkout API to Orders DB as writes"
+        }
+      },
+    "expected": {
+      "outcome": "applied",
+      "route": {
+        "channel": "voice",
+        "activation": "ptt"
+      },
+      "processingPath": [
+        "voice",
+        "deterministic_parser",
+        "grounding",
+        "atomic_transaction"
+      ],
+      "requiredActions": [
+        {
+          "type": "nodes.connect",
+          "fromId": "node:checkout-api",
+          "toId": "node:orders-db",
+          "label": "writes"
+        }
+      ],
+      "feedbackCategory": "success",
+      "latencyBudget": {
+        "totalMs": 1000
+      },
+      "comparison": {
+          "board": "partial",
+          "geometryTolerance": {
+            "position": 1,
+            "size": 0.5
+          }
+        },
+        "finalBoardState": {
+          "edges": [
+            {
+              "id": "edge:node:checkout-api->node:orders-db:writes",
+              "status": "committed",
+              "annotation": {
+                "type": "connector",
+                "label": "writes",
+                "snappedStartStrokeId": "node:checkout-api",
+                "snappedEndStrokeId": "node:orders-db"
+              }
+            }
+          ]
+        },
+        "exactOnce": [
+          {
+            "id": "connector-committed-once",
+            "match": {
+              "type": "stroke.committed",
+              "strokeId": "edge:node:checkout-api->node:orders-db:writes"
+            }
+          }
+        ],
+        "undoRoundTrip": {
+          "board": true,
+          "requireUndoEvents": true
+        }
+      }
+    },
+    {
+      "schemaVersion": "interaction-eval-case.v1",
+      "id": "gesture-move-node-with-edge",
+      "title": "Gesture moves a node and bound edge",
+      "corpusVersion": "interaction-v1",
+      "modality": "gesture",
+      "surface": "replay",
+      "riskLevel": "medium",
+      "datasetAssetHash": "none",
+      "description": "Gesture geometry may drift within tolerance, but meeting state cannot change and undo restores both objects.",
+      "capabilities": [
+        "action:move",
+        "contract:forbidden-mutations",
+        "contract:undo-round-trip",
+        "state:non-board"
+      ],
+      "tags": [
+        "gesture",
+        "board-mutation",
+        "geometry",
+        "safety"
+      ],
+      "initial": {
+        "boardState": {
+          "boardId": "board:primary",
+          "nodes": [
+            {
+              "id": "node:checkout-api",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "service",
+                "label": "Checkout API",
+                "bounds": {
+                  "x": 100,
+                  "y": 120,
+                  "width": 152,
+                  "height": 80
+                }
+              }
+            },
+            {
+              "id": "node:orders-db",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "database",
+                "label": "Orders DB",
+                "bounds": {
+                  "x": 420,
+                  "y": 112,
+                  "width": 144,
+                  "height": 96
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "edge:checkout-orders",
+              "annotation": {
+                "type": "connector",
+                "snappedStartStrokeId": "node:checkout-api",
+                "snappedEndStrokeId": "node:orders-db"
+              }
+            }
+          ]
+        },
+        "nonBoardState": {
+          "selection": [
+            "node:checkout-api"
+          ],
+          "meeting": {
+            "provider": "google_meet",
+            "recording": false
+          }
+        }
+      },
+      "interaction": {
+        "channel": "gesture",
+        "input": {
+          "gesture": "grab-drag-release",
+          "objectId": "node:checkout-api",
+          "delta": {
+            "x": 60,
+            "y": 40
+          }
+        },
+        "commands": [
+          {
+            "type": "objects.move",
+            "objectIds": [
+              "node:checkout-api"
+            ],
+            "delta": {
+              "x": 60,
+              "y": 40
+            }
+          }
+        ]
+      },
+    "expected": {
+      "outcome": "applied",
+      "route": {
+        "channel": "gesture",
+        "gestureOwner": "manipulation"
+      },
+      "processingPath": [
+        "camera_fixture",
+        "landmark_fixture",
+        "gesture_owner_fixture",
+        "atomic_transaction"
+      ],
+      "requiredActions": [
+        {
+          "type": "objects.move",
+          "objectIds": [
+            "node:checkout-api"
+          ]
+        }
+      ],
+      "feedbackCategory": "success",
+      "latencyBudget": {
+        "totalMs": 100
+      },
+      "comparison": {
+          "board": "partial",
+          "nonBoard": "exact",
+          "geometryTolerance": 1.5
+        },
+        "finalBoardState": {
+          "nodes": [
+            {
+              "id": "node:checkout-api",
+              "annotation": {
+                "bounds": {
+                  "x": 160,
+                  "y": 160,
+                  "width": 152,
+                  "height": 80
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "edge:checkout-orders",
+              "annotation": {
+                "snappedStartStrokeId": "node:checkout-api",
+                "snappedEndStrokeId": "node:orders-db"
+              }
+            }
+          ]
+        },
+        "finalNonBoardState": {
+          "selection": [
+            "node:checkout-api"
+          ],
+          "meeting": {
+            "provider": "google_meet",
+            "recording": false
+          }
+        },
+        "forbiddenMutations": [
+          {
+            "id": "meeting-state-isolation",
+            "scope": "nonBoard",
+            "path": "meeting",
+            "description": "Moving a board object cannot mutate meeting controls."
+          }
+        ],
+        "undoRoundTrip": {
+          "board": true,
+          "nonBoard": true,
+          "requireUndoEvents": true
+        }
+      }
+    },
+    {
+      "schemaVersion": "interaction-eval-case.v1",
+      "id": "keyboard-rename-preserves-selection",
+      "title": "Keyboard rename preserves selection",
+      "corpusVersion": "interaction-v1",
+      "modality": "keyboard",
+      "surface": "replay",
+      "riskLevel": "medium",
+      "datasetAssetHash": "none",
+      "description": "Renaming changes one label and leaves selection and meeting state intact.",
+      "capabilities": [
+        "action:rename",
+        "contract:forbidden-mutations",
+        "state:non-board"
+      ],
+      "tags": [
+        "keyboard",
+        "board-mutation",
+        "non-board-state",
+        "safety"
+      ],
+      "initial": {
+        "boardState": {
+          "boardId": "board:primary",
+          "nodes": [
+            {
+              "id": "node:checkout-api",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "service",
+                "label": "Checkout API"
+              }
+            }
+          ],
+          "edges": []
+        },
+        "nonBoardState": {
+          "selection": [
+            "node:checkout-api"
+          ],
+          "meeting": {
+            "muted": false
+          }
+        }
+      },
+      "interaction": {
+        "channel": "keyboard",
+        "input": {
+          "shortcut": "Enter",
+          "text": "Payments API"
+        },
+        "commands": [
+          {
+            "type": "object.rename",
+            "objectId": "node:checkout-api",
+            "label": "Payments API"
+          }
+        ]
+      },
+    "expected": {
+      "outcome": "applied",
+      "route": {
+        "channel": "keyboard",
+        "activation": "direct"
+      },
+      "processingPath": [
+        "keyboard",
+        "fixture_command",
+        "atomic_transaction"
+      ],
+      "requiredActions": [
+        {
+          "type": "object.rename",
+          "objectId": "node:checkout-api",
+          "label": "Payments API"
+        }
+      ],
+      "feedbackCategory": "success",
+      "latencyBudget": {
+        "totalMs": 100
+      },
+      "comparison": {
+          "board": "partial",
+          "nonBoard": "exact"
+        },
+        "finalBoardState": {
+          "nodes": [
+            {
+              "id": "node:checkout-api",
+              "annotation": {
+                "label": "Payments API"
+              }
+            }
+          ]
+        },
+        "finalNonBoardState": {
+          "selection": [
+            "node:checkout-api"
+          ],
+          "meeting": {
+            "muted": false
+          }
+        },
+        "forbiddenMutations": [
+          {
+            "scope": "nonBoard",
+            "path": "meeting"
+          }
+        ]
+      }
+    },
+    {
+      "schemaVersion": "interaction-eval-case.v1",
+      "id": "touchpad-delete-cascades-once",
+      "title": "Touchpad delete cascades exactly once",
+      "corpusVersion": "interaction-v1",
+      "modality": "touchpad",
+      "surface": "replay",
+      "riskLevel": "destructive",
+      "datasetAssetHash": "none",
+      "description": "Deleting a selected node tombstones its attached edge in one event and undo restores both.",
+      "capabilities": [
+        "action:delete",
+        "contract:exact-once",
+        "contract:undo-round-trip"
+      ],
+      "tags": [
+        "touchpad",
+        "board-mutation",
+        "cascade"
+      ],
+      "initial": {
+        "boardState": {
+          "boardId": "board:primary",
+          "nodes": [
+            {
+              "id": "node:checkout-api",
+              "status": "committed",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "service",
+                "label": "Checkout API"
+              }
+            },
+            {
+              "id": "node:orders-db",
+              "status": "committed",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "database",
+                "label": "Orders DB"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "edge:checkout-orders",
+              "status": "committed",
+              "annotation": {
+                "type": "connector",
+                "snappedStartStrokeId": "node:checkout-api",
+                "snappedEndStrokeId": "node:orders-db"
+              }
+            }
+          ]
+        }
+      },
+      "interaction": {
+        "channel": "touchpad",
+        "input": {
+          "action": "delete-selection",
+          "selection": [
+            "node:checkout-api"
+          ]
+        },
+        "commands": [
+          {
+            "type": "objects.delete",
+            "objectIds": [
+              "node:checkout-api"
+            ],
+            "cascadeConnectors": true
+          }
+        ]
+      },
+    "expected": {
+      "outcome": "applied",
+      "route": {
+        "channel": "touchpad",
+        "activation": "direct"
+      },
+      "processingPath": [
+        "touchpad",
+        "fixture_command",
+        "atomic_transaction"
+      ],
+      "requiredActions": [
+        {
+          "type": "objects.delete",
+          "objectIds": [
+            "node:checkout-api"
+          ]
+        }
+      ],
+      "feedbackCategory": "success",
+      "latencyBudget": {
+        "totalMs": 100
+      },
+      "comparison": {
+          "board": "partial",
+          "includeDeleted": true
+        },
+        "finalBoardState": {
+          "nodes": [
+            {
+              "id": "node:checkout-api",
+              "status": "deleted"
+            }
+          ],
+          "edges": [
+            {
+              "id": "edge:checkout-orders",
+              "status": "deleted"
+            }
+          ]
+        },
+        "exactOnce": [
+          {
+            "id": "cascade-delete-event-once",
+            "match": {
+              "type": "stroke.deleted",
+              "strokeIds": [
+                "edge:checkout-orders",
+                "node:checkout-api"
+              ]
+            }
+          }
+        ],
+        "undoRoundTrip": {
+          "board": true,
+          "requireUndoEvents": true
+        }
+      }
+    },
+    {
+      "schemaVersion": "interaction-eval-case.v1",
+      "id": "gesture-select-is-non-board-only",
+      "title": "Gesture selection only changes non-board state",
+      "corpusVersion": "interaction-v1",
+      "modality": "gesture",
+      "surface": "replay",
+      "riskLevel": "none",
+      "datasetAssetHash": "none",
+      "description": "Selection is an exact-once side effect and must not mutate BoardState.",
+      "capabilities": [
+        "action:select",
+        "contract:exact-once",
+        "contract:forbidden-mutations",
+        "state:non-board"
+      ],
+      "tags": [
+        "gesture",
+        "non-board-state",
+        "safety"
+      ],
+      "initial": {
+        "boardState": {
+          "boardId": "board:primary",
+          "nodes": [
+            {
+              "id": "node:checkout-api",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "service",
+                "label": "Checkout API"
+              }
+            }
+          ],
+          "edges": []
+        },
+        "nonBoardState": {
+          "selection": [],
+          "mode": "idle"
+        }
+      },
+      "interaction": {
+        "channel": "gesture",
+        "input": {
+          "gesture": "point-hold",
+          "objectId": "node:checkout-api"
+        }
+      },
+    "expected": {
+      "outcome": "applied",
+      "route": {
+        "channel": "gesture",
+        "gestureOwner": "manipulation"
+      },
+      "processingPath": [
+        "camera_fixture",
+        "landmark_fixture",
+        "gesture_owner_fixture",
+        "selection"
+      ],
+      "feedbackCategory": "selection",
+      "latencyBudget": {
+        "totalMs": 100
+      },
+      "comparison": {
+          "board": "partial",
+          "nonBoard": "exact"
+        },
+        "finalBoardState": {
+          "boardId": "board:primary",
+          "nodes": [
+            {
+              "id": "node:checkout-api",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "service",
+                "label": "Checkout API"
+              }
+            }
+          ],
+          "edges": []
+        },
+        "finalNonBoardState": {
+          "selection": [
+            "node:checkout-api"
+          ],
+          "mode": "selected"
+        },
+        "forbiddenMutations": [
+          {
+            "id": "selection-does-not-write-board",
+            "scope": "board",
+            "path": "/"
+          }
+        ],
+        "exactOnce": [
+          {
+            "id": "selection-changed-once",
+            "source": "sideEffects",
+            "match": {
+              "type": "selection.changed",
+              "objectId": "node:checkout-api"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "schemaVersion": "interaction-eval-case.v1",
+      "id": "voice-ambiguous-connect-clarifies",
+      "title": "Ambiguous connect requests clarification",
+      "corpusVersion": "interaction-v1",
+      "modality": "voice",
+      "surface": "replay",
+      "riskLevel": "high",
+      "datasetAssetHash": "none",
+      "description": "An ambiguous target opens clarification state without board or meeting mutations.",
+      "capabilities": [
+        "action:connect",
+        "interaction:clarification",
+        "contract:forbidden-mutations",
+        "state:non-board"
+      ],
+      "tags": [
+        "voice",
+        "non-board-state",
+        "safety",
+        "clarification"
+      ],
+      "initial": {
+        "boardState": {
+          "boardId": "board:primary",
+          "nodes": [
+            {
+              "id": "node:api-one",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "service",
+                "label": "API"
+              }
+            },
+            {
+              "id": "node:api-two",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "service",
+                "label": "API"
+              }
+            },
+            {
+              "id": "node:orders-db",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "database",
+                "label": "Orders DB"
+              }
+            }
+          ],
+          "edges": []
+        },
+        "nonBoardState": {
+          "meeting": {
+            "muted": false
+          },
+          "pendingClarification": null
+        }
+      },
+      "interaction": {
+        "channel": "voice",
+        "input": {
+          "activation": "ptt",
+          "transcript": "Connect the API to Orders DB",
+          "semanticPlan": {
+            "version": "1.1",
+            "status": "clarification",
+            "issueCode": "ambiguous_reference",
+            "clarificationQuestion": "Which API should connect to Orders DB?",
+            "missingSlots": [
+              "source"
+            ],
+            "actions": []
+          }
+        }
+      },
+    "expected": {
+      "outcome": "clarification",
+      "route": {
+        "channel": "voice",
+        "activation": "ptt"
+      },
+      "processingPath": [
+        "voice",
+        "deterministic_parser",
+        "grounding",
+        "semantic_planner",
+        "clarification"
+      ],
+      "forbiddenActions": [
+        {
+          "type": "nodes.connect"
+        }
+      ],
+      "feedbackCategory": "clarification",
+      "latencyBudget": {
+        "totalMs": 2500
+      },
+      "comparison": {
+          "board": "partial",
+          "nonBoard": "partial"
+        },
+        "finalBoardState": {
+          "boardId": "board:primary",
+          "nodes": [
+            {
+              "id": "node:api-one",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "service",
+                "label": "API"
+              }
+            },
+            {
+              "id": "node:api-two",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "service",
+                "label": "API"
+              }
+            },
+            {
+              "id": "node:orders-db",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "database",
+                "label": "Orders DB"
+              }
+            }
+          ],
+          "edges": []
+        },
+        "finalNonBoardState": {
+          "meeting": {
+            "muted": false
+          },
+          "pendingClarification": {
+            "missingSlots": [
+              "source"
+            ]
+          }
+        },
+        "forbiddenMutations": [
+          {
+            "scope": "board",
+            "path": "/"
+          },
+          {
+            "scope": "nonBoard",
+            "path": "meeting"
+          }
+        ]
+      }
+    },
+    {
+      "schemaVersion": "interaction-eval-case.v1",
+      "id": "stylus-move-node",
+      "title": "Stylus moves a node through the direct pointer path",
+      "corpusVersion": "interaction-v1",
+      "modality": "stylus",
+      "surface": "replay",
+      "riskLevel": "low",
+      "datasetAssetHash": "none",
+      "description": "A pen pointer remains attributable to stylus input while converging on the shared move command and undo transaction.",
+      "capabilities": [
+        "action:move",
+        "contract:exact-once",
+        "contract:undo-round-trip"
+      ],
+      "tags": [
+        "stylus",
+        "board-mutation",
+        "direct-input"
+      ],
+      "initial": {
+        "boardState": {
+          "boardId": "board:primary",
+          "nodes": [
+            {
+              "id": "node:stylus-target",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "service",
+                "label": "Stylus target",
+                "bounds": {
+                  "x": 100,
+                  "y": 120,
+                  "width": 152,
+                  "height": 80
+                }
+              }
+            }
+          ],
+          "edges": []
+        }
+      },
+      "interaction": {
+        "channel": "stylus",
+        "input": {
+          "pointerType": "pen"
+        },
+        "sequence": [
+          {
+            "atMs": 0,
+            "type": "pointer",
+            "pointerType": "pen",
+            "phase": "down"
+          },
+          {
+            "atMs": 20,
+            "type": "pointer",
+            "pointerType": "pen",
+            "phase": "move"
+          },
+          {
+            "atMs": 40,
+            "type": "pointer",
+            "pointerType": "pen",
+            "phase": "up"
+          }
+        ],
+        "commands": [
+          {
+            "type": "objects.move",
+            "objectIds": [
+              "node:stylus-target"
+            ],
+            "delta": {
+              "x": 50,
+              "y": 20
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "applied",
+        "route": {
+          "channel": "stylus",
+          "activation": "direct"
+        },
+        "processingPath": [
+          "stylus",
+          "fixture_command",
+          "atomic_transaction"
+        ],
+        "requiredActions": [
+          {
+            "type": "objects.move",
+            "objectIds": [
+              "node:stylus-target"
+            ]
+          }
+        ],
+        "feedbackCategory": "success",
+        "latencyBudget": {
+          "totalMs": 100
+        },
+        "comparison": {
+          "board": "partial",
+          "geometryTolerance": 0.5
+        },
+        "finalBoardState": {
+          "nodes": [
+            {
+              "id": "node:stylus-target",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "service",
+                "label": "Stylus target",
+                "bounds": {
+                  "x": 150,
+                  "y": 140,
+                  "width": 152,
+                  "height": 80
+                }
+              }
+            }
+          ]
+        },
+        "exactOnce": [
+          {
+            "id": "stylus-move-once",
+            "match": {
+              "type": "stroke.annotation_updated",
+              "strokeId": "node:stylus-target"
+            },
+            "count": 1
+          }
+        ],
+        "undoRoundTrip": {
+          "board": true,
+          "requireUndoEvents": true
+        }
+      }
+    },
+    {
+      "schemaVersion": "interaction-eval-case.v1",
+      "id": "catalog-create-decision",
+      "title": "Catalog creates one decision node",
+      "corpusVersion": "interaction-v1",
+      "modality": "catalog",
+      "surface": "replay",
+      "riskLevel": "low",
+      "datasetAssetHash": "none",
+      "description": "A catalog selection converges on the canonical create command, final state, and one-step undo.",
+      "capabilities": [
+        "action:create",
+        "node:decision",
+        "contract:exact-once",
+        "contract:undo-round-trip"
+      ],
+      "tags": [
+        "catalog",
+        "board-mutation",
+        "direct-input"
+      ],
+      "initial": {
+        "boardState": {
+          "boardId": "board:primary",
+          "nodes": [],
+          "edges": []
+        }
+      },
+      "interaction": {
+        "channel": "catalog",
+        "input": {
+          "catalogId": "flow",
+          "toolId": "decision"
+        },
+        "sequence": [
+          {
+            "atMs": 0,
+            "type": "catalog",
+            "catalogId": "flow",
+            "toolId": "decision"
+          }
+        ],
+        "commands": [
+          {
+            "type": "node.create",
+            "nodeId": "node:catalog-decision",
+            "nodeType": "decision",
+            "label": "Decision",
+            "bounds": {
+              "x": 224,
+              "y": 192,
+              "width": 152,
+              "height": 96
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "applied",
+        "route": {
+          "channel": "catalog",
+          "activation": "direct"
+        },
+        "processingPath": [
+          "catalog",
+          "fixture_command",
+          "atomic_transaction"
+        ],
+        "requiredActions": [
+          {
+            "type": "node.create",
+            "nodeType": "decision",
+            "label": "Decision"
+          }
+        ],
+        "feedbackCategory": "success",
+        "latencyBudget": {
+          "totalMs": 100
+        },
+        "comparison": {
+          "board": "partial",
+          "geometryTolerance": 0.5
+        },
+        "finalBoardState": {
+          "nodes": [
+            {
+              "id": "node:catalog-decision",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "decision",
+                "label": "Decision",
+                "bounds": {
+                  "x": 224,
+                  "y": 192,
+                  "width": 152,
+                  "height": 96
+                }
+              }
+            }
+          ]
+        },
+        "exactOnce": [
+          {
+            "id": "catalog-create-once",
+            "match": {
+              "type": "stroke.committed",
+              "strokeId": "node:catalog-decision"
+            },
+            "count": 1
+          }
+        ],
+        "undoRoundTrip": {
+          "board": true,
+          "requireUndoEvents": true
+        }
+      }
+    },
+    {
+      "schemaVersion": "interaction-eval-case.v1",
+      "id": "typed-create-queue",
+      "title": "Typed command creates one queue",
+      "corpusVersion": "interaction-v1",
+      "modality": "typed",
+      "surface": "replay",
+      "riskLevel": "low",
+      "datasetAssetHash": "none",
+      "description": "Typed input converges on the same canonical command, transaction, final graph, and Undo contract as voice.",
+      "capabilities": [
+        "action:create",
+        "node:queue",
+        "contract:exact-once",
+        "contract:undo-round-trip"
+      ],
+      "tags": [
+        "typed",
+        "board-mutation",
+        "direct-input"
+      ],
+      "initial": {
+        "boardState": {
+          "boardId": "board:primary",
+          "nodes": [],
+          "edges": []
+        },
+        "nonBoardState": {
+          "selection": []
+        }
+      },
+      "interaction": {
+        "channel": "typed",
+        "input": {
+          "text": "add a queue named Events here"
+        },
+        "commands": [
+          {
+            "type": "node.create",
+            "nodeId": "node:typed-events",
+            "nodeType": "queue",
+            "label": "Events",
+            "bounds": {
+              "x": 240,
+              "y": 180,
+              "width": 152,
+              "height": 80
+            },
+            "source": "keyboard"
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "applied",
+        "route": {
+          "channel": "typed",
+          "activation": "direct"
+        },
+        "processingPath": [
+          "typed",
+          "fixture_command",
+          "atomic_transaction"
+        ],
+        "requiredActions": [
+          {
+            "type": "node.create",
+            "nodeType": "queue",
+            "label": "Events"
+          }
+        ],
+        "feedbackCategory": "success",
+        "latencyBudget": {
+          "totalMs": 100
+        },
+        "comparison": {
+          "board": "partial",
+          "geometryTolerance": 0.5
+        },
+        "finalBoardState": {
+          "nodes": [
+            {
+              "id": "node:typed-events",
+              "status": "committed",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "queue",
+                "label": "Events",
+                "bounds": {
+                  "x": 240,
+                  "y": 180,
+                  "width": 152,
+                  "height": 80
+                }
+              }
+            }
+          ]
+        },
+        "exactOnce": [
+          {
+            "id": "typed-create-once",
+            "match": {
+              "type": "stroke.committed",
+              "strokeId": "node:typed-events"
+            },
+            "count": 1
+          }
+        ],
+        "undoRoundTrip": {
+          "board": true,
+          "requireUndoEvents": true
+        }
+      }
+    },
+    {
+      "schemaVersion": "interaction-eval-case.v1",
+      "id": "pointer-move-node",
+      "title": "Pointer drag moves one node",
+      "corpusVersion": "interaction-v1",
+      "modality": "pointer",
+      "surface": "replay",
+      "riskLevel": "low",
+      "datasetAssetHash": "none",
+      "description": "A pointer drag emits one shared move command and remains one-step undoable.",
+      "capabilities": [
+        "action:move",
+        "contract:exact-once",
+        "contract:undo-round-trip"
+      ],
+      "tags": [
+        "pointer",
+        "board-mutation",
+        "direct-input"
+      ],
+      "initial": {
+        "boardState": {
+          "boardId": "board:primary",
+          "nodes": [
+            {
+              "id": "node:pointer-target",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "service",
+                "label": "Pointer target",
+                "bounds": {
+                  "x": 100,
+                  "y": 120,
+                  "width": 152,
+                  "height": 80
+                }
+              }
+            }
+          ],
+          "edges": []
+        }
+      },
+      "interaction": {
+        "channel": "pointer",
+        "input": {
+          "pointerType": "mouse"
+        },
+        "sequence": [
+          {
+            "atMs": 0,
+            "type": "pointer",
+            "pointerType": "mouse",
+            "phase": "down"
+          },
+          {
+            "atMs": 16,
+            "type": "pointer",
+            "pointerType": "mouse",
+            "phase": "move"
+          },
+          {
+            "atMs": 32,
+            "type": "pointer",
+            "pointerType": "mouse",
+            "phase": "up"
+          }
+        ],
+        "commands": [
+          {
+            "type": "objects.move",
+            "objectIds": [
+              "node:pointer-target"
+            ],
+            "delta": {
+              "x": 40,
+              "y": 30
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "applied",
+        "route": {
+          "channel": "pointer",
+          "activation": "direct"
+        },
+        "processingPath": [
+          "pointer",
+          "fixture_command",
+          "atomic_transaction"
+        ],
+        "requiredActions": [
+          {
+            "type": "objects.move",
+            "objectIds": [
+              "node:pointer-target"
+            ]
+          }
+        ],
+        "feedbackCategory": "success",
+        "latencyBudget": {
+          "totalMs": 100
+        },
+        "comparison": {
+          "board": "partial",
+          "geometryTolerance": 0.5
+        },
+        "finalBoardState": {
+          "nodes": [
+            {
+              "id": "node:pointer-target",
+              "annotation": {
+                "bounds": {
+                  "x": 140,
+                  "y": 150,
+                  "width": 152,
+                  "height": 80
+                }
+              }
+            }
+          ]
+        },
+        "exactOnce": [
+          {
+            "id": "pointer-move-once",
+            "match": {
+              "type": "stroke.annotation_updated",
+              "strokeId": "node:pointer-target"
+            },
+            "count": 1
+          }
+        ],
+        "undoRoundTrip": {
+          "board": true,
+          "requireUndoEvents": true
+        }
+      }
+    },
+    {
+      "schemaVersion": "interaction-eval-case.v1",
+      "id": "voice-ambient-no-route",
+      "title": "Ambient speech cannot enter the board command route",
+      "corpusVersion": "interaction-v1",
+      "modality": "voice",
+      "surface": "replay",
+      "riskLevel": "high",
+      "datasetAssetHash": "none",
+      "description": "Tempting board language without a wake phrase or active gate is rejected by the production VoiceCommandRouter and cannot mutate board or meeting state.",
+      "capabilities": [
+        "contract:forbidden-mutations",
+        "interaction:no-op"
+      ],
+      "tags": [
+        "voice",
+        "safety",
+        "non-board-state"
+      ],
+      "initial": {
+        "boardState": {
+          "boardId": "board:primary",
+          "nodes": [
+            {
+              "id": "node:release-api",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "service",
+                "label": "Release API"
+              }
+            }
+          ],
+          "edges": []
+        },
+        "nonBoardState": {
+          "selection": [],
+          "meeting": {
+            "muted": false
+          }
+        }
+      },
+      "interaction": {
+        "channel": "voice",
+        "input": {
+          "transcript": "we should connect the Release API after lunch"
+        }
+      },
+      "expected": {
+        "outcome": "no-op",
+        "route": {
+          "channel": "voice",
+          "activation": "none"
+        },
+        "processingPath": [
+          "voice",
+          "route_rejected"
+        ],
+        "forbiddenActions": [
+          {
+            "type": "nodes.connect"
+          }
+        ],
+        "feedbackCategory": "inactive",
+        "latencyBudget": {
+          "totalMs": 1000
+        },
+        "comparison": {
+          "board": "partial",
+          "nonBoard": "exact"
+        },
+        "finalBoardState": {
+          "boardId": "board:primary",
+          "nodes": [
+            {
+              "id": "node:release-api",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "service",
+                "label": "Release API"
+              }
+            }
+          ],
+          "edges": []
+        },
+        "finalNonBoardState": {
+          "selection": [],
+          "meeting": {
+            "muted": false
+          }
+        },
+        "forbiddenMutations": [
+          {
+            "scope": "board",
+            "path": "/"
+          },
+          {
+            "scope": "nonBoard",
+            "path": "/"
+          }
+        ]
+      }
+    },
+    {
+      "schemaVersion": "interaction-eval-case.v1",
+      "id": "remote-board-event-reduces-once",
+      "title": "Remote BoardEvents reduce exactly once",
+      "corpusVersion": "interaction-v1",
+      "modality": "remote",
+      "surface": "replay",
+      "riskLevel": "medium",
+      "datasetAssetHash": "none",
+      "description": "Collaboration input bypasses local interpretation and converges directly on the production BoardEvent reducer.",
+      "capabilities": [
+        "node:note",
+        "contract:exact-once"
+      ],
+      "tags": [
+        "remote",
+        "board-mutation",
+        "collaboration"
+      ],
+      "initial": {
+        "boardState": {
+          "boardId": "board:primary",
+          "nodes": [],
+          "edges": []
+        }
+      },
+      "interaction": {
+        "channel": "remote",
+        "input": {},
+        "sequence": [
+          {
+            "atMs": 0,
+            "type": "remote_board_event",
+            "event": {
+              "id": "event:remote-start",
+              "boardSessionId": "board:primary",
+              "actorParticipantId": "participant:remote",
+              "createdAt": "2026-07-30T00:00:00.000Z",
+              "sequence": 1,
+              "type": "stroke.started",
+              "stroke": {
+                "id": "node:remote-note",
+                "boardId": "board:primary",
+                "userId": "user:remote",
+                "tool": "marker",
+                "color": "#111827",
+                "thickness": 4,
+                "points": [
+                  {
+                    "x": 100,
+                    "y": 100,
+                    "t": 1,
+                    "inputSource": "pointer"
+                  }
+                ],
+                "createdAt": "2026-07-30T00:00:00.000Z",
+                "updatedAt": "2026-07-30T00:00:00.000Z",
+                "status": "active",
+                "annotation": {
+                  "type": "flow_node",
+                  "source": "keyboard",
+                  "nodeType": "note",
+                  "label": "Remote note",
+                  "bounds": {
+                    "x": 100,
+                    "y": 100,
+                    "width": 152,
+                    "height": 80
+                  }
+                }
+              }
+            }
+          },
+          {
+            "atMs": 20,
+            "type": "remote_board_event",
+            "event": {
+              "id": "event:remote-commit",
+              "boardSessionId": "board:primary",
+              "actorParticipantId": "participant:remote",
+              "createdAt": "2026-07-30T00:00:00.020Z",
+              "sequence": 2,
+              "type": "stroke.committed",
+              "strokeId": "node:remote-note"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "applied",
+        "route": {
+          "channel": "remote",
+          "activation": "direct"
+        },
+        "processingPath": [
+          "remote",
+          "board_event",
+          "reducer"
+        ],
+        "feedbackCategory": "success",
+        "latencyBudget": {
+          "totalMs": 100
+        },
+        "comparison": {
+          "board": "partial",
+          "geometryTolerance": 0.5
+        },
+        "finalBoardState": {
+          "nodes": [
+            {
+              "id": "node:remote-note",
+              "status": "committed",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "note",
+                "label": "Remote note",
+                "bounds": {
+                  "x": 100,
+                  "y": 100,
+                  "width": 152,
+                  "height": 80
+                }
+              }
+            }
+          ]
+        },
+        "exactOnce": [
+          {
+            "id": "remote-start-once",
+            "match": {
+              "type": "stroke.started",
+              "stroke": {
+                "id": "node:remote-note"
+              }
+            },
+            "count": 1
+          },
+          {
+            "id": "remote-commit-once",
+            "match": {
+              "type": "stroke.committed",
+              "strokeId": "node:remote-note"
+            },
+            "count": 1
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,763 @@
+{
+  "schemaVersion": "1.0",
+  "description": "Privacy-safe audio/STT smoke scenarios. Synthetic events and redacted Deepgram protocol messages exercise the same transcript-to-action oracle used for mounted external WAV assets.",
+  "scenarios": [
+    {
+      "id": "fake-ptt-create-api",
+      "adapter": "fake",
+      "privacyClass": "synthetic",
+      "evaluationClass": "core",
+      "channel": "ptt",
+      "processingPath": "deterministic",
+      "source": {
+        "events": [
+          {
+            "type": "partial",
+            "transcript": "add an"
+          },
+          {
+            "type": "final",
+            "transcript": "add an API here",
+            "confidence": 0.99
+          }
+        ]
+      },
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [],
+        "edges": [],
+        "projectGlossary": [],
+        "pointerAvailable": true
+      },
+      "finalState": {
+        "nodeCountDelta": 1,
+        "edgeCountDelta": 0,
+        "requiredNodes": [{ "nodeType": "api" }]
+      },
+      "oracle": {
+        "criticalTokens": ["api"],
+        "expectedActions": ["create_node"],
+        "expectedFinalCount": 1,
+        "minimumCriticalTokenRecall": 1,
+        "minimumActionF1": 1,
+        "requireExactActions": true
+      }
+    },
+    {
+      "id": "fake-wake-connect",
+      "adapter": "fake",
+      "privacyClass": "synthetic",
+      "evaluationClass": "core",
+      "channel": "wake",
+      "processingPath": "deterministic",
+      "source": {
+        "events": [
+          {
+            "type": "final",
+            "transcript": "Aero connect User to Database",
+            "confidence": 0.98
+          }
+        ]
+      },
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [
+          {
+            "label": "User",
+            "nodeType": "user",
+            "ordinal": 1,
+            "position": { "x": 180, "y": 240 },
+            "size": { "width": 160, "height": 92 }
+          },
+          {
+            "label": "Database",
+            "nodeType": "database",
+            "ordinal": 1,
+            "position": { "x": 520, "y": 240 },
+            "size": { "width": 180, "height": 92 }
+          }
+        ],
+        "edges": [],
+        "projectGlossary": [],
+        "pointerAvailable": false
+      },
+      "finalState": {
+        "nodeCountDelta": 0,
+        "edgeCountDelta": 1,
+        "requiredEdges": [
+          {
+            "from": { "label": "User", "nodeType": "user" },
+            "to": { "label": "Database", "nodeType": "database" }
+          }
+        ]
+      },
+      "oracle": {
+        "criticalTokens": ["connect", "user", "database"],
+        "expectedActions": ["connect"],
+        "expectedFinalCount": 1,
+        "minimumCriticalTokenRecall": 1,
+        "minimumActionF1": 1,
+        "requireExactActions": true
+      }
+    },
+    {
+      "id": "deepgram-replay-dedupes-final",
+      "adapter": "deepgram-replay",
+      "privacyClass": "redacted",
+      "evaluationClass": "core",
+      "channel": "ptt",
+      "processingPath": "deterministic",
+      "source": {
+        "messages": [
+          {
+            "type": "Connected",
+            "request_id": "redacted-request"
+          },
+          {
+            "type": "ConfigureSuccess"
+          },
+          {
+            "type": "TurnInfo",
+            "event": "Update",
+            "turn_index": 11,
+            "transcript": "add an Orders"
+          },
+          {
+            "type": "TurnInfo",
+            "event": "EndOfTurn",
+            "turn_index": 11,
+            "transcript": "add an Orders queue here",
+            "end_of_turn_confidence": 0.97
+          },
+          {
+            "type": "TurnInfo",
+            "event": "EndOfTurn",
+            "turn_index": 11,
+            "transcript": "add an Orders queue here",
+            "end_of_turn_confidence": 0.97
+          }
+        ]
+      },
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [],
+        "edges": [],
+        "projectGlossary": [],
+        "pointerAvailable": true
+      },
+      "finalState": {
+        "nodeCountDelta": 1,
+        "edgeCountDelta": 0,
+        "requiredNodes": [
+          { "label": "Orders", "nodeType": "queue" }
+        ]
+      },
+      "oracle": {
+        "criticalTokens": ["orders", "queue"],
+        "expectedActions": ["create_node"],
+        "expectedFinalCount": 1,
+        "minimumCriticalTokenRecall": 1,
+        "minimumActionF1": 1,
+        "requireExactActions": true
+      }
+    },
+    {
+      "id": "deepgram-replay-ambient-does-not-route",
+      "adapter": "deepgram-replay",
+      "privacyClass": "redacted",
+      "evaluationClass": "safety",
+      "channel": "wake",
+      "processingPath": "no_route",
+      "source": {
+        "messages": [
+          {
+            "type": "TurnInfo",
+            "event": "EndOfTurn",
+            "turn_index": 12,
+            "transcript": "we should connect the user to the database later"
+          }
+        ]
+      },
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [
+          {
+            "label": "User",
+            "nodeType": "user",
+            "ordinal": 1,
+            "position": { "x": 180, "y": 240 },
+            "size": { "width": 160, "height": 92 }
+          },
+          {
+            "label": "Database",
+            "nodeType": "database",
+            "ordinal": 1,
+            "position": { "x": 520, "y": 240 },
+            "size": { "width": 180, "height": 92 }
+          }
+        ],
+        "edges": [],
+        "projectGlossary": [],
+        "pointerAvailable": false
+      },
+      "finalState": {
+        "nodeCountDelta": 0,
+        "edgeCountDelta": 0
+      },
+      "oracle": {
+        "criticalTokens": ["user", "database"],
+        "expectedActions": [],
+        "expectedFinalCount": 1,
+        "maximumRoutedActions": 0,
+        "minimumCriticalTokenRecall": 1,
+        "minimumActionF1": 1,
+        "requireExactActions": true
+      }
+    },
+    {
+      "id": "fake-ptt-semantic-narrative",
+      "adapter": "fake",
+      "semanticAdapter": "recorded-replay",
+      "privacyClass": "synthetic",
+      "evaluationClass": "narrative",
+      "channel": "ptt",
+      "processingPath": "semantic",
+      "source": {
+        "events": [
+          {
+            "type": "final",
+            "transcript": "Please draw how a Customer sends an order request to the Orders API and the API writes it into the Orders Database"
+          }
+        ],
+        "semanticPlan": {
+          "version": "1.1",
+          "status": "resolved",
+          "issueCode": "none",
+          "clarificationQuestion": null,
+          "missingSlots": [],
+          "actions": [
+            {
+              "type": "create",
+              "nodeType": "user",
+              "label": "Customer",
+              "handle": "customer",
+              "placement": { "kind": "auto" }
+            },
+            {
+              "type": "create",
+              "nodeType": "api",
+              "label": "Orders API",
+              "handle": "orders_api",
+              "placement": { "kind": "auto" }
+            },
+            {
+              "type": "create",
+              "nodeType": "database",
+              "label": "Orders Database",
+              "handle": "orders_database",
+              "placement": { "kind": "auto" }
+            },
+            {
+              "type": "connect",
+              "from": { "kind": "plan_handle", "handle": "customer" },
+              "to": { "kind": "plan_handle", "handle": "orders_api" },
+              "label": "order request"
+            },
+            {
+              "type": "connect",
+              "from": { "kind": "plan_handle", "handle": "orders_api" },
+              "to": {
+                "kind": "plan_handle",
+                "handle": "orders_database"
+              },
+              "label": "writes"
+            }
+          ]
+        }
+      },
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [],
+        "edges": [],
+        "projectGlossary": [],
+        "pointerAvailable": false
+      },
+      "finalState": {
+        "nodeCountDelta": 3,
+        "edgeCountDelta": 2,
+        "requiredNodes": [
+          { "label": "Customer", "nodeType": "user" },
+          { "label": "Orders API", "nodeType": "api" },
+          { "label": "Orders Database", "nodeType": "database" }
+        ],
+        "requiredEdges": [
+          {
+            "from": { "label": "Customer", "nodeType": "user" },
+            "to": { "label": "Orders API", "nodeType": "api" },
+            "label": "order request"
+          },
+          {
+            "from": { "label": "Orders API", "nodeType": "api" },
+            "to": {
+              "label": "Orders Database",
+              "nodeType": "database"
+            },
+            "label": "writes"
+          }
+        ]
+      },
+      "oracle": {
+        "criticalTokens": ["customer", "orders", "api", "database"],
+        "expectedActions": [
+          "create",
+          "create",
+          "create",
+          "connect",
+          "connect"
+        ],
+        "expectedSemanticStatus": "resolved",
+        "expectedFinalCount": 1,
+        "minimumCriticalTokenRecall": 1,
+        "minimumActionF1": 1,
+        "requireExactActions": true
+      }
+    },
+    {
+      "id": "fake-wake-airboard-entity-does-not-activate",
+      "adapter": "fake",
+      "privacyClass": "synthetic",
+      "evaluationClass": "safety",
+      "channel": "wake",
+      "processingPath": "no_route",
+      "source": {
+        "events": [
+          {
+            "type": "final",
+            "transcript": "User makes a request to Airboard, and, uh, then the authentication service gets fired, and, uh, then user lands to the Airboard page. So create a flow diagram for this."
+          }
+        ]
+      },
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [],
+        "edges": [],
+        "projectGlossary": [],
+        "pointerAvailable": false
+      },
+      "finalState": {
+        "nodeCountDelta": 0,
+        "edgeCountDelta": 0
+      },
+      "oracle": {
+        "criticalTokens": ["airboard", "authentication", "page"],
+        "expectedActions": [],
+        "expectedFinalCount": 1,
+        "maximumRoutedActions": 0,
+        "minimumCriticalTokenRecall": 1,
+        "minimumActionF1": 1,
+        "requireExactActions": true
+      }
+    },
+    {
+      "id": "fake-wake-airboard-authentication-narrative-does-not-activate",
+      "adapter": "fake",
+      "privacyClass": "synthetic",
+      "evaluationClass": "safety",
+      "channel": "wake",
+      "processingPath": "no_route",
+      "source": {
+        "events": [
+          {
+            "type": "final",
+            "transcript": "User makes a request to, uh, Airboard authentication service and that, uh, authenticates the user, and the user lands to the Airboard. Create a flow diagram for this."
+          }
+        ]
+      },
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [],
+        "edges": [],
+        "projectGlossary": [],
+        "pointerAvailable": false
+      },
+      "finalState": {
+        "nodeCountDelta": 0,
+        "edgeCountDelta": 0
+      },
+      "oracle": {
+        "criticalTokens": ["user", "airboard", "authentication", "service"],
+        "expectedActions": [],
+        "expectedFinalCount": 1,
+        "maximumRoutedActions": 0,
+        "minimumCriticalTokenRecall": 1,
+        "minimumActionF1": 1,
+        "requireExactActions": true
+      }
+    },
+    {
+      "id": "fake-ptt-airboard-brand-narrative-flow",
+      "adapter": "fake",
+      "semanticAdapter": "recorded-replay",
+      "privacyClass": "synthetic",
+      "evaluationClass": "narrative",
+      "channel": "ptt",
+      "processingPath": "semantic",
+      "source": {
+        "events": [
+          {
+            "type": "final",
+            "transcript": "User makes a request to Airboard, and, uh, then the authentication service gets fired, and, uh, then user lands to the Airboard page. So create a flow diagram for this."
+          }
+        ],
+        "semanticPlan": {
+          "version": "1.1",
+          "status": "resolved",
+          "issueCode": "none",
+          "clarificationQuestion": null,
+          "missingSlots": [],
+          "actions": [
+            {
+              "type": "create",
+              "nodeType": "user",
+              "label": "User",
+              "handle": "user",
+              "placement": { "kind": "auto" }
+            },
+            {
+              "type": "create",
+              "nodeType": "service",
+              "label": "Airboard",
+              "handle": "airboard",
+              "placement": { "kind": "auto" }
+            },
+            {
+              "type": "create",
+              "nodeType": "service",
+              "label": "Authentication Service",
+              "handle": "authentication_service",
+              "placement": { "kind": "auto" }
+            },
+            {
+              "type": "create",
+              "nodeType": "custom",
+              "label": "Airboard Page",
+              "handle": "airboard_page",
+              "placement": { "kind": "auto" }
+            },
+            {
+              "type": "connect",
+              "from": { "kind": "plan_handle", "handle": "user" },
+              "to": { "kind": "plan_handle", "handle": "airboard" },
+              "label": "request"
+            },
+            {
+              "type": "connect",
+              "from": { "kind": "plan_handle", "handle": "airboard" },
+              "to": {
+                "kind": "plan_handle",
+                "handle": "authentication_service"
+              },
+              "label": "triggers"
+            },
+            {
+              "type": "connect",
+              "from": {
+                "kind": "plan_handle",
+                "handle": "authentication_service"
+              },
+              "to": { "kind": "plan_handle", "handle": "airboard_page" },
+              "label": "redirects"
+            }
+          ]
+        }
+      },
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [],
+        "edges": [],
+        "projectGlossary": [],
+        "pointerAvailable": false
+      },
+      "finalState": {
+        "nodeCountDelta": 4,
+        "edgeCountDelta": 3,
+        "spatialConstraints": {
+          "minimumNodeGap": 24,
+          "forbidNodeOverlap": true,
+          "forbidConnectorThroughUnrelatedNodes": true,
+          "forbidCollinearConnectorOverlap": true,
+          "maximumCollinearConnectorOverlap": 0,
+          "forbidConnectorLabelNodeOverlap": true,
+          "forbidConnectorLabelOverlap": true
+        },
+        "requiredNodes": [
+          { "label": "User", "nodeType": "user" },
+          { "label": "Airboard", "nodeType": "service" },
+          {
+            "label": "Authentication Service",
+            "nodeType": "service"
+          },
+          { "label": "Airboard Page", "nodeType": "custom" }
+        ],
+        "requiredEdges": [
+          {
+            "from": { "label": "User", "nodeType": "user" },
+            "to": { "label": "Airboard", "nodeType": "service" },
+            "label": "request"
+          },
+          {
+            "from": { "label": "Airboard", "nodeType": "service" },
+            "to": {
+              "label": "Authentication Service",
+              "nodeType": "service"
+            },
+            "label": "triggers"
+          },
+          {
+            "from": {
+              "label": "Authentication Service",
+              "nodeType": "service"
+            },
+            "to": { "label": "Airboard Page", "nodeType": "custom" },
+            "label": "redirects"
+          }
+        ]
+      },
+      "oracle": {
+        "criticalTokens": [
+          "user",
+          "airboard",
+          "authentication",
+          "service",
+          "page"
+        ],
+        "expectedActions": [
+          "create",
+          "create",
+          "create",
+          "create",
+          "connect",
+          "connect",
+          "connect"
+        ],
+        "expectedSemanticStatus": "resolved",
+        "expectedFinalCount": 1,
+        "expectedRoutedCommandSha256": "e781e88c65c42937bc06f68bf88be087e126957f96ff17748013e6105dddef07",
+        "minimumCriticalTokenRecall": 1,
+        "minimumActionF1": 1,
+        "requireExactActions": true
+      }
+    },
+    {
+      "id": "fake-ptt-airboard-authentication-round-trip-flow",
+      "adapter": "fake",
+      "semanticAdapter": "recorded-replay",
+      "privacyClass": "synthetic",
+      "evaluationClass": "narrative",
+      "channel": "ptt",
+      "processingPath": "semantic",
+      "source": {
+        "events": [
+          {
+            "type": "final",
+            "transcript": "User makes a request to, uh, Airboard authentication service and that, uh, authenticates the user, and the user lands to the Airboard. Create a flow diagram for this."
+          }
+        ],
+        "semanticPlan": {
+          "version": "1.1",
+          "status": "resolved",
+          "issueCode": "none",
+          "clarificationQuestion": null,
+          "missingSlots": [],
+          "actions": [
+            {
+              "type": "create",
+              "nodeType": "user",
+              "label": "User",
+              "handle": "user",
+              "placement": { "kind": "auto" }
+            },
+            {
+              "type": "create",
+              "nodeType": "service",
+              "label": "Airboard Authentication Service",
+              "handle": "airboard_authentication_service",
+              "placement": { "kind": "auto" }
+            },
+            {
+              "type": "create",
+              "nodeType": "service",
+              "label": "Airboard",
+              "handle": "airboard",
+              "placement": { "kind": "auto" }
+            },
+            {
+              "type": "connect",
+              "from": { "kind": "plan_handle", "handle": "user" },
+              "to": {
+                "kind": "plan_handle",
+                "handle": "airboard_authentication_service"
+              },
+              "label": "request"
+            },
+            {
+              "type": "connect",
+              "from": {
+                "kind": "plan_handle",
+                "handle": "airboard_authentication_service"
+              },
+              "to": { "kind": "plan_handle", "handle": "user" },
+              "label": "authenticates"
+            },
+            {
+              "type": "connect",
+              "from": { "kind": "plan_handle", "handle": "user" },
+              "to": { "kind": "plan_handle", "handle": "airboard" },
+              "label": "lands on"
+            }
+          ]
+        }
+      },
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [],
+        "edges": [],
+        "projectGlossary": [],
+        "pointerAvailable": false
+      },
+      "finalState": {
+        "nodeCountDelta": 3,
+        "edgeCountDelta": 3,
+        "spatialConstraints": {
+          "minimumNodeGap": 24,
+          "forbidNodeOverlap": true,
+          "forbidConnectorThroughUnrelatedNodes": true,
+          "forbidCollinearConnectorOverlap": true,
+          "maximumCollinearConnectorOverlap": 0,
+          "forbidConnectorLabelNodeOverlap": true,
+          "forbidConnectorLabelOverlap": true
+        },
+        "requiredNodes": [
+          { "label": "User", "nodeType": "user" },
+          {
+            "label": "Airboard Authentication Service",
+            "nodeType": "service"
+          },
+          { "label": "Airboard", "nodeType": "service" }
+        ],
+        "forbiddenNodes": [
+          { "label": "The user makes a request to Airboard" }
+        ],
+        "requiredEdges": [
+          {
+            "from": { "label": "User", "nodeType": "user" },
+            "to": {
+              "label": "Airboard Authentication Service",
+              "nodeType": "service"
+            },
+            "label": "request"
+          },
+          {
+            "from": {
+              "label": "Airboard Authentication Service",
+              "nodeType": "service"
+            },
+            "to": { "label": "User", "nodeType": "user" },
+            "label": "authenticates"
+          },
+          {
+            "from": { "label": "User", "nodeType": "user" },
+            "to": { "label": "Airboard", "nodeType": "service" },
+            "label": "lands on"
+          }
+        ]
+      },
+      "oracle": {
+        "criticalTokens": [
+          "user",
+          "airboard",
+          "authentication",
+          "service"
+        ],
+        "expectedActions": [
+          "create",
+          "create",
+          "create",
+          "connect",
+          "connect",
+          "connect"
+        ],
+        "expectedSemanticStatus": "resolved",
+        "expectedFinalCount": 1,
+        "expectedRoutedCommandSha256": "46528fd7927f01d087097f2a1967627aa77ef5104aae921496ab89c5accd9e7f",
+        "minimumCriticalTokenRecall": 1,
+        "minimumActionF1": 1,
+        "requireExactActions": true
+      }
+    },
+    {
+      "id": "fake-ptt-semantic-unsupported",
+      "adapter": "fake",
+      "semanticAdapter": "recorded-replay",
+      "privacyClass": "synthetic",
+      "evaluationClass": "safety",
+      "channel": "ptt",
+      "processingPath": "semantic",
+      "source": {
+        "events": [
+          {
+            "type": "final",
+            "transcript": "Make the Orders API pulse every time a request arrives"
+          }
+        ],
+        "semanticPlan": {
+          "version": "1.1",
+          "status": "unsupported",
+          "issueCode": "unsupported_operation",
+          "clarificationQuestion": null,
+          "missingSlots": [],
+          "actions": []
+        }
+      },
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [
+          {
+            "label": "Orders API",
+            "nodeType": "api",
+            "ordinal": 1,
+            "position": { "x": 420, "y": 260 },
+            "size": { "width": 180, "height": 92 }
+          }
+        ],
+        "edges": [],
+        "projectGlossary": [],
+        "pointerAvailable": false
+      },
+      "finalState": {
+        "nodeCountDelta": 0,
+        "edgeCountDelta": 0
+      },
+      "oracle": {
+        "criticalTokens": ["orders", "api", "pulse"],
+        "expectedActions": [],
+        "expectedSemanticStatus": "unsupported",
+        "expectedFinalCount": 1,
+        "maximumRoutedActions": 0,
+        "minimumCriticalTokenRecall": 1,
+        "minimumActionF1": 1,
+        "requireExactActions": true
+      }
+    }
+  ]
+}

@@ -63,6 +63,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </nav>
         ) : null}
         <div className="sidebar-bottom">
+          <Link href="/help">Help center</Link>
           <Link href="/app/billing">Plan & billing</Link>
           <Link href="/app/settings/profile">Settings</Link>
           <button
@@ -78,7 +79,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <main className="app-content">{children}</main>
       </div>
       {!isBoardWorkspace ? <nav className="app-mobile-nav" aria-label="Airboard mobile navigation">
-        {MAIN_NAV.slice(0, 4).map(([href, label, glyph]) => (
+        {[...MAIN_NAV.slice(0, 4), ["/help", "Help", "?"] as const].map(([href, label, glyph]) => (
           <Link className={navActive(pathname, href) ? "active" : ""} href={href} key={href}><span aria-hidden="true">{glyph}</span><small>{label}</small></Link>
         ))}
       </nav> : null}

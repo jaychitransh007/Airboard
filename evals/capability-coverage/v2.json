@@ -1,0 +1,750 @@
+{
+  "schemaVersion": "capability-coverage.v2",
+  "manifestVersion": "2.0",
+  "capabilityRegistryVersion": "1.2",
+  "description": "Fail-closed, capability-specific evidence links that cannot be inferred safely from structured Airboard corpora. Semantic nodes/actions and reference kinds are read from production at validation time; this file does not duplicate those registries.",
+  "requiredEvidence": [
+    "positive",
+    "negative",
+    "grounding",
+    "final_state"
+  ],
+  "staticCapabilities": {
+    "inputChannels": {
+      "reason": "The shared production channel contract composes local, media, catalog, and remote-event inputs while explicitly excluding legacy physical-marker and air-writing paths.",
+      "productionTypeUnion": {
+        "path": "apps/web/src/features/board/inputCapabilities.ts",
+        "typeName": "AirboardShippedInputChannel"
+      },
+      "values": [
+        "typed",
+        "voice",
+        "gesture",
+        "pointer",
+        "touchpad",
+        "stylus",
+        "keyboard",
+        "catalog",
+        "remote"
+      ]
+    },
+    "gestures": {
+      "reason": "Production exports frame owners, not stable release-evaluation names. Each release name is therefore mapped to an imported GESTURE_FRAME_PRIORITY owner.",
+      "values": [
+        "manipulation_grab",
+        "navigation_pan_zoom",
+        "undo_swipe",
+        "visibility_snap",
+        "voice_open_palm",
+        "hold_to_edit"
+      ],
+      "productionOwnerByValue": {
+        "manipulation_grab": "manipulation",
+        "navigation_pan_zoom": "navigation",
+        "undo_swipe": "undo",
+        "visibility_snap": "snap",
+        "voice_open_palm": "voice",
+        "hold_to_edit": "manipulation"
+      }
+    },
+    "surfaces": {
+      "reason": "The production Surface union is type-only. Values here cover every routable board surface; Meet values remain private-preview surfaces rather than a public availability claim.",
+      "productionTypeUnion": {
+        "path": "apps/web/src/features/board/AirboardPrototype.tsx",
+        "typeName": "Surface"
+      },
+      "values": [
+        "standalone",
+        "meet-side-panel",
+        "meet-main-stage"
+      ],
+      "availability": {
+        "standalone": "controlled_pilot",
+        "meet-side-panel": "private_preview",
+        "meet-main-stage": "private_preview"
+      }
+    }
+  },
+  "corpora": [
+    {
+      "namespace": "deterministic",
+      "path": "evals/voice-intent/deterministic-positives.v1.json",
+      "collection": "cases"
+    },
+    {
+      "namespace": "negative",
+      "path": "evals/voice-intent/meeting-negatives.v1.json",
+      "collection": "utterances"
+    },
+    {
+      "namespace": "semantic",
+      "path": "evals/voice-intent/v1.json",
+      "collection": "cases"
+    },
+    {
+      "namespace": "provider",
+      "path": "evals/provider-events/deepgram-flux.v1.json",
+      "collection": "cases"
+    },
+    {
+      "namespace": "interaction",
+      "path": "evals/interactions/v1.json",
+      "collection": "cases"
+    },
+    {
+      "namespace": "gesture",
+      "path": "evals/gesture/corpus.v1.json",
+      "collection": "assets"
+    },
+    {
+      "namespace": "audio",
+      "path": "evals/audio/stt-scenarios.v1.json",
+      "collection": "scenarios"
+    }
+  ],
+  "testSources": [
+    {
+      "namespace": "test",
+      "root": "packages/core/test",
+      "suffixes": [
+        ".test.mjs"
+      ]
+    },
+    {
+      "namespace": "test",
+      "root": "packages/gesture-engine/test",
+      "suffixes": [
+        ".test.mjs"
+      ]
+    },
+    {
+      "namespace": "test",
+      "root": "apps/web/test",
+      "suffixes": [
+        ".test.mjs"
+      ]
+    },
+    {
+      "namespace": "browser",
+      "root": "apps/web/e2e",
+      "suffixes": [
+        ".spec.ts"
+      ]
+    }
+  ],
+  "staticEvidence": [
+    {
+      "evidenceId": "test:apps/web/test/capabilityCoverageEvidence.test.mjs#grounds every shipped node type and applies its final graph",
+      "capabilities": [
+        "node:process",
+        "node:service",
+        "node:database",
+        "node:queue",
+        "node:user",
+        "node:api",
+        "node:decision",
+        "node:note",
+        "node:terminator",
+        "node:io",
+        "node:document",
+        "node:circle",
+        "node:custom"
+      ],
+      "facets": [
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "The test iterates the imported production node registry, resolves one semantic create action per exact node type, commits it through DiagramCommand/BoardEvent, and asserts canonical terminal type and geometry."
+    },
+    {
+      "evidenceId": "test:packages/core/test/semanticPlan.test.mjs#parses creates, same-plan handles, and labelled branches",
+      "capabilities": [
+        "action:create",
+        "action:branch",
+        "reference:plan_handle"
+      ],
+      "facets": [
+        "positive"
+      ],
+      "rationale": "The strict production plan parser validates the declared create/branch/reference shapes. Grounding and terminal graph evidence are supplied separately by production-grounder tests."
+    },
+    {
+      "evidenceId": "test:packages/core/test/semanticPlan.test.mjs#accepts every supported typed action variant",
+      "capabilities": [
+        "action:connect",
+        "action:reverse_connection",
+        "action:delete_connection",
+        "action:rename",
+        "action:delete",
+        "action:duplicate",
+        "action:move",
+        "action:align",
+        "action:distribute",
+        "action:layout",
+        "action:group",
+        "action:select",
+        "action:undo",
+        "action:cancel",
+        "reference:current_selection",
+        "reference:visible_label",
+        "reference:type_ordinal",
+        "reference:connection"
+      ],
+      "facets": [
+        "positive"
+      ],
+      "rationale": "The test supplies each typed production action/reference shape to the strict plan contract and asserts acceptance; it makes no grounding claim."
+    },
+    {
+      "evidenceId": "test:packages/core/test/semanticPlan.test.mjs#rejects invalid variants for every reference kind",
+      "capabilities": [
+        "reference:current_selection",
+        "reference:pointer",
+        "reference:visible_label",
+        "reference:type_ordinal",
+        "reference:plan_handle",
+        "reference:connection"
+      ],
+      "facets": [
+        "negative"
+      ],
+      "rationale": "The test enumerates every production reference kind and proves a capability-specific invalid variant is rejected before grounding."
+    },
+    {
+      "evidenceId": "test:apps/web/test/intentPipeline.test.mjs#grounds a create operation into a diagram command at the pointer",
+      "capabilities": [
+        "reference:pointer"
+      ],
+      "facets": [
+        "positive",
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "The real grounder binds a pointer reference to the captured canvas point and asserts the resulting command and selection."
+    },
+    {
+      "evidenceId": "test:apps/web/test/intentPipeline.test.mjs#grounding a selection edit without a selection fails closed",
+      "capabilities": [
+        "reference:current_selection"
+      ],
+      "facets": [
+        "negative",
+        "final_state"
+      ],
+      "rationale": "An unresolved current selection terminates without a mutation."
+    },
+    {
+      "evidenceId": "test:apps/web/test/intentPipeline.test.mjs#REGRESSION: reverses the existing edge, adds only the missing edge, and undoes both together",
+      "capabilities": [
+        "action:reverse_connection",
+        "reference:visible_label",
+        "reference:connection"
+      ],
+      "facets": [
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "The production grounder resolves visible endpoint labels and a connection reference, applies the final graph state, and proves its undo."
+    },
+    {
+      "evidenceId": "test:apps/web/test/intentPipeline.test.mjs#grounds delete_connection against endpoint bindings",
+      "capabilities": [
+        "action:delete_connection"
+      ],
+      "facets": [
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "The production grounder resolves a connector in either endpoint order, emits the exact deletion target, and fails closed for a missing endpoint."
+    },
+    {
+      "evidenceId": "test:apps/web/test/capabilityCoverageEvidence.test.mjs#grounds ordinal decision branches and applies their final graph",
+      "capabilities": [
+        "action:branch",
+        "reference:type_ordinal"
+      ],
+      "facets": [
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "The real semantic grounder resolves spatial ordinals, emits two labelled branch commands, and the production reducer reaches the asserted graph."
+    },
+    {
+      "evidenceId": "test:packages/core/test/diagramCommands.test.mjs#creates annotation-compatible nodes and snapped connectors through BoardEvents",
+      "capabilities": [
+        "action:create",
+        "action:connect"
+      ],
+      "facets": [
+        "final_state"
+      ],
+      "rationale": "Commands are reduced through real BoardEvents and the committed node/connector state is asserted."
+    },
+    {
+      "evidenceId": "test:packages/core/test/diagramCommands.test.mjs#rename, resize, and cascade delete remain undoable with existing event types",
+      "capabilities": [
+        "action:rename",
+        "action:delete"
+      ],
+      "facets": [
+        "final_state"
+      ],
+      "rationale": "Committed rename/delete state and cascade behavior are asserted through the production reducer."
+    },
+    {
+      "evidenceId": "test:packages/core/test/diagramCommands.test.mjs#groups stay renderer-compatible and duplicate with remapped memberships",
+      "capabilities": [
+        "action:group",
+        "action:duplicate"
+      ],
+      "facets": [
+        "final_state"
+      ],
+      "rationale": "The final group membership and duplicated identity graph are asserted."
+    },
+    {
+      "evidenceId": "test:packages/core/test/diagramCommands.test.mjs#moving a node keeps attached connectors bound and compensating events undo both",
+      "capabilities": [
+        "action:move"
+      ],
+      "facets": [
+        "final_state"
+      ],
+      "rationale": "Final moved-node and attached-connector geometry plus undo are asserted."
+    },
+    {
+      "evidenceId": "test:packages/core/test/diagramCommands.test.mjs#align and layout produce deterministic constraint-based geometry",
+      "capabilities": [
+        "action:align",
+        "action:layout"
+      ],
+      "facets": [
+        "final_state"
+      ],
+      "rationale": "The deterministic constraint commands assert terminal multi-object geometry."
+    },
+    {
+      "evidenceId": "test:apps/web/test/capabilityCoverageEvidence.test.mjs#grounds distribution and applies deterministic final geometry",
+      "capabilities": [
+        "action:distribute"
+      ],
+      "facets": [
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "The semantic grounder emits the production distribute-x command and the reducer asserts evenly spaced final geometry."
+    },
+    {
+      "evidenceId": "test:apps/web/test/capabilityCoverageEvidence.test.mjs#cancel remains an immediate no-mutation terminal result",
+      "capabilities": [
+        "action:cancel"
+      ],
+      "facets": [
+        "final_state"
+      ],
+      "rationale": "The production parser and resolver classify cancel as immediate handling and leave the board snapshot unchanged."
+    },
+    {
+      "evidenceId": "test:apps/web/test/capabilityCoverageEvidence.test.mjs#grounds selection and applies its final non-board state",
+      "capabilities": [
+        "action:select"
+      ],
+      "facets": [
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "The production semantic grounder resolves a visible label and asserts the exact terminal selection without a board mutation."
+    },
+    {
+      "evidenceId": "test:apps/web/test/capabilityCoverageEvidence.test.mjs#plan handles ground to committed objects and apply their final state",
+      "capabilities": [
+        "reference:plan_handle"
+      ],
+      "facets": [
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "The production semantic grounder resolves the plan handle and the reducer applies the resulting rename to the committed object."
+    },
+    {
+      "evidenceId": "browser:apps/web/e2e/voiceRouting.spec.ts#one open-palm swipe left undoes exactly one automatic voice action",
+      "capabilities": [
+        "action:undo",
+        "gesture:undo_swipe"
+      ],
+      "facets": [
+        "final_state"
+      ],
+      "rationale": "Mounted browser state proves one gesture removes exactly one committed object."
+    },
+    {
+      "evidenceId": "browser:apps/web/e2e/typedCommand.spec.ts#typing a command creates and edits objects instantly",
+      "capabilities": [
+        "channel:typed"
+      ],
+      "facets": [
+        "positive",
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "The mounted typed composer runs parse, ground, commit, render, selection, delete, and undo."
+    },
+    {
+      "evidenceId": "browser:apps/web/e2e/diagramVisibility.spec.ts#snap, keyboard, menu, and voice share one local visibility action",
+      "capabilities": [
+        "channel:typed"
+      ],
+      "facets": [
+        "negative",
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "The mounted typed path grounds visibility commands and explicitly rejects a hidden-state edit without changing BoardState."
+    },
+    {
+      "evidenceId": "test:apps/web/test/gestureObjectManipulation.test.mjs#closing a hand over an object can still move that object",
+      "capabilities": [
+        "channel:gesture",
+        "gesture:manipulation_grab"
+      ],
+      "facets": [
+        "positive",
+        "grounding"
+      ],
+      "rationale": "Production landmark manipulation resolves the intended object and emits one grab start."
+    },
+    {
+      "evidenceId": "test:apps/web/test/gestureObjectManipulation.test.mjs#closing a hand on empty canvas cannot begin a lasso or mutate the board",
+      "capabilities": [
+        "channel:gesture",
+        "gesture:manipulation_grab"
+      ],
+      "facets": [
+        "negative",
+        "final_state"
+      ],
+      "rationale": "Empty-canvas input is rejected without a target, action, lasso, or board mutation."
+    },
+    {
+      "evidenceId": "test:apps/web/test/landmarkNavigationInput.test.mjs#two raw open-hand landmark streams engage Pan and preserve shared motion",
+      "capabilities": [
+        "gesture:navigation_pan_zoom"
+      ],
+      "facets": [
+        "positive",
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "Raw two-hand landmarks are grounded into a terminal navigation state and motion."
+    },
+    {
+      "evidenceId": "test:apps/web/test/landmarkNavigationInput.test.mjs#one or incomplete landmark hands cannot reserve two-hand navigation",
+      "capabilities": [
+        "gesture:navigation_pan_zoom"
+      ],
+      "facets": [
+        "negative"
+      ],
+      "rationale": "Incomplete and single-hand inputs fail closed."
+    },
+    {
+      "evidenceId": "test:apps/web/test/interactionTrackers.test.mjs#a single presented palm swiped left emits one undo",
+      "capabilities": [
+        "gesture:undo_swipe"
+      ],
+      "facets": [
+        "positive",
+        "grounding"
+      ],
+      "rationale": "The production tracker grounds one qualifying palm trajectory to one undo edge."
+    },
+    {
+      "evidenceId": "test:apps/web/test/interactionTrackers.test.mjs#undo swipe rejects vertical motion, suppression, and repeat firing",
+      "capabilities": [
+        "gesture:undo_swipe"
+      ],
+      "facets": [
+        "negative"
+      ],
+      "rationale": "Conflicting motion, arbitration suppression, and repeats are rejected."
+    },
+    {
+      "evidenceId": "test:apps/web/test/snapGestureTracker.test.mjs#real-camera transition frames and a naturally curled snap pose remain armed",
+      "capabilities": [
+        "gesture:visibility_snap"
+      ],
+      "facets": [
+        "positive",
+        "grounding"
+      ],
+      "rationale": "Production snap state remains grounded through realistic landmark transition frames."
+    },
+    {
+      "evidenceId": "test:apps/web/test/snapGestureTracker.test.mjs#slow release and jitter do not snap",
+      "capabilities": [
+        "gesture:visibility_snap"
+      ],
+      "facets": [
+        "negative"
+      ],
+      "rationale": "Slow and jittered near-gesture motion does not trigger."
+    },
+    {
+      "evidenceId": "test:apps/web/test/palmVoiceGestureTracker.test.mjs#a stable open palm activates one voice turn after 400 ms",
+      "capabilities": [
+        "gesture:voice_open_palm"
+      ],
+      "facets": [
+        "positive",
+        "grounding"
+      ],
+      "rationale": "The production hold tracker grounds the shipped pose and duration to one activation."
+    },
+    {
+      "evidenceId": "test:apps/web/test/palmVoiceGestureTracker.test.mjs#suppression and an ambiguous hand count cannot arm the palm voice hold",
+      "capabilities": [
+        "gesture:voice_open_palm"
+      ],
+      "facets": [
+        "negative"
+      ],
+      "rationale": "Arbitration suppression and ambiguous ownership fail closed."
+    },
+    {
+      "evidenceId": "browser:apps/web/e2e/voiceRouting.spec.ts#an open palm must hold for 400 ms, activates voice once, and releases cleanly",
+      "capabilities": [
+        "gesture:voice_open_palm"
+      ],
+      "facets": [
+        "final_state"
+      ],
+      "rationale": "The mounted voice-gate UI reaches and cleanly leaves its terminal state."
+    },
+    {
+      "evidenceId": "test:apps/web/test/interactionTrackers.test.mjs#hold-to-edit scopes after holding an element still",
+      "capabilities": [
+        "gesture:hold_to_edit"
+      ],
+      "facets": [
+        "positive",
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "A held production target becomes the scoped terminal edit state."
+    },
+    {
+      "evidenceId": "test:apps/web/test/interactionTrackers.test.mjs#hold-to-edit never scopes a moving drag",
+      "capabilities": [
+        "gesture:hold_to_edit"
+      ],
+      "facets": [
+        "negative"
+      ],
+      "rationale": "A moving near-match is rejected."
+    },
+    {
+      "evidenceId": "browser:apps/web/e2e/catalogDock.spec.ts#air hover opens a category and one close-drag-release carries a shape",
+      "capabilities": [
+        "channel:catalog",
+        "gesture:manipulation_grab"
+      ],
+      "facets": [
+        "positive",
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "The mounted catalog validates direct target geometry and final placement for the shared pointer/air-cursor path."
+    },
+    {
+      "evidenceId": "browser:apps/web/e2e/directInputChannels.spec.ts#pointer, touchpad, and stylus streams ground to attributed final state",
+      "capabilities": [
+        "channel:pointer",
+        "channel:touchpad",
+        "channel:stylus"
+      ],
+      "facets": [
+        "positive",
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "Mounted production handlers move a node by primary mouse input, reject a non-primary drag, classify touchpad and pen streams, commit through BoardEvents, and assert terminal geometry/source attribution."
+    },
+    {
+      "evidenceId": "browser:apps/web/e2e/directInputChannels.spec.ts#pointer, touchpad, and stylus streams ground to attributed final state",
+      "capabilities": [
+        "channel:pointer"
+      ],
+      "facets": [
+        "negative"
+      ],
+      "rationale": "The mounted pointer path explicitly rejects a non-primary mouse drag and asserts unchanged terminal node geometry."
+    },
+    {
+      "evidenceId": "browser:apps/web/e2e/canvasViewport.spec.ts#ctrl+wheel zooms; plain wheel pans; limits hold",
+      "capabilities": [
+        "channel:touchpad"
+      ],
+      "facets": [
+        "negative"
+      ],
+      "rationale": "Mounted wheel/pinch navigation changes only the viewport under extreme input and explicitly asserts that BoardState remains empty."
+    },
+    {
+      "evidenceId": "test:apps/web/test/inputCapabilities.test.mjs#non-pen pointer events cannot be misattributed to stylus",
+      "capabilities": [
+        "channel:stylus"
+      ],
+      "facets": [
+        "negative"
+      ],
+      "rationale": "The production pointer classifier reserves stylus attribution for pen events and rejects mouse, touch, empty, and unknown pointer types."
+    },
+    {
+      "evidenceId": "test:apps/web/test/interactionTrackers.test.mjs#a category close edge never activates or consumes the tool latch",
+      "capabilities": [
+        "channel:catalog"
+      ],
+      "facets": [
+        "negative"
+      ],
+      "rationale": "A partial catalog activation cannot select a tool or consume the one-shot latch."
+    },
+    {
+      "evidenceId": "test:apps/web/test/boardSync.test.mjs#publish reports drops while disconnected and does not poison echo dedup",
+      "capabilities": [
+        "channel:remote"
+      ],
+      "facets": [
+        "negative"
+      ],
+      "rationale": "A lost collaboration transport reports the dropped event and preserves exact-once deduplication state."
+    },
+    {
+      "evidenceId": "browser:apps/web/e2e/boardSync.spec.ts#two browsers share one live board; reload rehydrates it",
+      "capabilities": [
+        "channel:remote"
+      ],
+      "facets": [
+        "positive",
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "Two mounted clients observe remote BoardEvents, reduce the shared graph, and verify the same final graph after rehydration."
+    },
+    {
+      "evidenceId": "browser:apps/web/e2e/diagramVisibility.spec.ts#snap, keyboard, menu, and voice share one local visibility action",
+      "capabilities": [
+        "channel:keyboard"
+      ],
+      "facets": [
+        "positive",
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "The mounted keyboard shortcut invokes the shared visibility action and the test observes the resulting hidden state."
+    },
+    {
+      "evidenceId": "browser:apps/web/e2e/directInputChannels.spec.ts#pointer, touchpad, and stylus streams ground to attributed final state",
+      "capabilities": [
+        "channel:keyboard"
+      ],
+      "facets": [
+        "negative"
+      ],
+      "rationale": "With the production canvas focused, an unbound keyboard input is ignored and terminal node geometry remains unchanged."
+    },
+    {
+      "evidenceId": "browser:apps/web/e2e/diagramVisibility.spec.ts#snap, keyboard, menu, and voice share one local visibility action",
+      "capabilities": [
+        "gesture:visibility_snap"
+      ],
+      "facets": [
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "A snap emitted through the production gesture hook reaches the shared visibility action and the mounted final hidden state."
+    },
+    {
+      "evidenceId": "browser:apps/web/e2e/mediaOwnership.spec.ts#standalone combines camera and voice into one Airo entry point",
+      "capabilities": [
+        "surface:standalone"
+      ],
+      "facets": [
+        "positive",
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "The mounted standalone route reaches its final media-entry UI."
+    },
+    {
+      "evidenceId": "browser:apps/web/e2e/mediaOwnership.spec.ts#standalone never opens a surprise prompt when remembered permission is not granted",
+      "capabilities": [
+        "surface:standalone"
+      ],
+      "facets": [
+        "negative"
+      ],
+      "rationale": "The standalone surface fails closed without a browser grant."
+    },
+    {
+      "evidenceId": "browser:apps/web/e2e/mediaOwnership.spec.ts#delegated main stage restores gesture and voice entry points without auto-starting capture",
+      "capabilities": [
+        "surface:meet-main-stage"
+      ],
+      "facets": [
+        "positive",
+        "grounding"
+      ],
+      "rationale": "The mounted delegated main-stage route exposes the intended controls without violating media-start policy."
+    },
+    {
+      "evidenceId": "browser:apps/web/e2e/mediaOwnership.spec.ts#undelegated main stage offers the companion window instead of media buttons",
+      "capabilities": [
+        "surface:meet-main-stage"
+      ],
+      "facets": [
+        "negative"
+      ],
+      "rationale": "The undelegated main-stage route removes invalid embedded media controls."
+    },
+    {
+      "evidenceId": "browser:apps/web/e2e/meetMediaBridge.spec.ts#hidden diagram restores raw Meet camera and resumes the compositor without recapturing",
+      "capabilities": [
+        "surface:meet-main-stage"
+      ],
+      "facets": [
+        "final_state"
+      ],
+      "rationale": "The mounted bridge reaches and recovers the final main-stage compositor state."
+    },
+    {
+      "evidenceId": "browser:apps/web/e2e/mediaOwnership.spec.ts#delegated side panel stays compact and points at the shared board",
+      "capabilities": [
+        "surface:meet-side-panel"
+      ],
+      "facets": [
+        "positive",
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "The mounted delegated side panel resolves to its compact shared-board UI."
+    },
+    {
+      "evidenceId": "browser:apps/web/e2e/mediaOwnership.spec.ts#undelegated side panel stays compact and routes media to the companion window",
+      "capabilities": [
+        "surface:meet-side-panel"
+      ],
+      "facets": [
+        "negative"
+      ],
+      "rationale": "The undelegated side panel fails over instead of exposing invalid capture."
+    }
+  ],
+  "physicalMedia": {
+    "policy": "declarative_on_pr_required_on_release",
+    "audioManifest": "evals/audio/corpus.v1.json",
+    "gestureManifest": "evals/gesture/corpus.v1.json",
+    "participantManifest": "evals/datasets/participant-splits.v1.json",
+    "note": "PR coverage is synthetic, redacted, or emulated. It must never be presented as participant or real-device evidence. Release mode requires the consented participant-held-out assets declared by these manifests."
+  }
+}

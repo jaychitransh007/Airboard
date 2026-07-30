@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { FeatureGrid, MarketingPage } from "../../src/features/product/PublicShell";
 import {
   CHROME_EXTENSION_PUBLICLY_INSTALLABLE,
@@ -30,6 +30,7 @@ const PAGES: Record<string, PageSpec> = {
 
 export default async function MarketingSlugPage({ params }: { params: Promise<{ marketingSlug: string }> }) {
   const { marketingSlug } = await params;
+  if (marketingSlug === "docs") redirect("/help");
   if (marketingSlug === "pricing") return <Pricing />;
   if (marketingSlug === "download") return <Download />;
   const page = PAGES[marketingSlug];

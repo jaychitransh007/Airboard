@@ -91,6 +91,13 @@ export type StrokeAnnotation = {
   nodeType?: AnnotationNodeType;
   snappedStartStrokeId?: string;
   snappedEndStrokeId?: string;
+  /**
+   * Signed board-space lane displacement for parallel or reciprocal
+   * connectors. The renderer keeps the endpoints attached to their nodes and
+   * offsets the route body so sibling edges and their labels do not collapse
+   * onto one another.
+   */
+  routeOffset?: number;
   fillColor?: string;
   strokeColor?: string;
   opacity?: number;

@@ -114,8 +114,7 @@ export function shouldUseSemanticIntentFallback(
     result.status !== "inactive" &&
     Boolean(result.normalizedText) &&
     result.issue.code !== "activation_required" &&
-    result.issue.code !== "empty_command" &&
-    result.issue.code !== "unsupported_count"
+    result.issue.code !== "empty_command"
   );
 }
 

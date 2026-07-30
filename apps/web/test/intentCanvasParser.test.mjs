@@ -336,6 +336,12 @@ test("connectors are deletable by voice: between-form and disconnect-form", () =
     activationPolicy: "externally_activated",
   });
   assert.equal(arrowForm.command.kind, "delete_connection");
+
+  const meetingAdministration = parseIntentCanvasCommand(
+    "disconnect the call from my end and rejoin",
+    { activationPolicy: "externally_activated" },
+  );
+  assert.equal(meetingAdministration.status, "unrecognized");
 });
 
 test("resize by voice: selection and named targets, every dimension", () => {

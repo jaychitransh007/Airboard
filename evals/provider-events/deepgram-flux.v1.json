@@ -1,0 +1,123 @@
+{
+  "schemaVersion": "1.0",
+  "provider": "deepgram-flux",
+  "description": "Privacy-safe provider-message replays. These fixtures contain protocol metadata and redacted transcripts only; no audio.",
+  "cases": [
+    {
+      "id": "connected-configured-final",
+      "channel": "ptt",
+      "messages": [
+        { "type": "Connected", "request_id": "request-1" },
+        { "type": "ConfigureSuccess" },
+        { "type": "TurnInfo", "event": "Update", "turn_index": 1, "transcript": "Airo add" },
+        { "type": "TurnInfo", "event": "EndOfTurn", "turn_index": 1, "transcript": "add an API here", "end_of_turn_confidence": 0.98 }
+      ],
+      "expected": {
+        "connected": 1,
+        "configured": 1,
+        "acceptedFinals": ["add an API here"],
+        "commandKinds": ["create_node"],
+        "fatalErrors": 0
+      }
+    },
+    {
+      "id": "duplicate-final-is-exact-once",
+      "channel": "ptt",
+      "messages": [
+        { "type": "TurnInfo", "event": "EndOfTurn", "turn_index": 7, "transcript": "add a database here" },
+        { "type": "TurnInfo", "event": "EndOfTurn", "turn_index": 7, "transcript": "add a database here" }
+      ],
+      "expected": {
+        "connected": 0,
+        "configured": 0,
+        "acceptedFinals": ["add a database here"],
+        "commandKinds": ["create_node"],
+        "fatalErrors": 0
+      }
+    },
+    {
+      "id": "same-words-new-turn-is-new-command",
+      "channel": "ptt",
+      "messages": [
+        { "type": "TurnInfo", "event": "EndOfTurn", "turn_index": 8, "transcript": "undo" },
+        { "type": "TurnInfo", "event": "EndOfTurn", "turn_index": 9, "transcript": "undo" }
+      ],
+      "expected": {
+        "connected": 0,
+        "configured": 0,
+        "acceptedFinals": ["undo", "undo"],
+        "commandKinds": ["undo", "undo"],
+        "fatalErrors": 0
+      }
+    },
+    {
+      "id": "wake-channel-final",
+      "channel": "wake",
+      "messages": [
+        { "type": "TurnInfo", "event": "EndOfTurn", "sequence_id": "wake-1", "transcript": "Airo connect user to database" }
+      ],
+      "expected": {
+        "connected": 0,
+        "configured": 0,
+        "acceptedFinals": ["Airo connect user to database"],
+        "commandKinds": ["connect"],
+        "fatalErrors": 0
+      }
+    },
+    {
+      "id": "empty-and-unknown-events-are-noops",
+      "channel": "ptt",
+      "messages": [
+        { "type": "TurnInfo", "event": "EndOfTurn", "turn_index": 2, "transcript": "   " },
+        { "type": "Metadata", "request_id": "metadata-1" }
+      ],
+      "expected": {
+        "connected": 0,
+        "configured": 0,
+        "acceptedFinals": [],
+        "commandKinds": [],
+        "fatalErrors": 0
+      }
+    },
+    {
+      "id": "provider-error-never-routes",
+      "channel": "ptt",
+      "messages": [
+        { "type": "Error", "code": "UPSTREAM_FAILED", "description": "provider unavailable" }
+      ],
+      "expected": {
+        "connected": 0,
+        "configured": 0,
+        "acceptedFinals": [],
+        "commandKinds": [],
+        "fatalErrors": 1
+      }
+    },
+    {
+      "id": "malformed-json-never-routes",
+      "channel": "ptt",
+      "rawMessages": ["{\"type\":"],
+      "expected": {
+        "connected": 0,
+        "configured": 0,
+        "acceptedFinals": [],
+        "commandKinds": [],
+        "fatalErrors": 1
+      }
+    },
+    {
+      "id": "configure-failure-is-nonfatal-and-nonmutating",
+      "channel": "ptt",
+      "messages": [
+        { "type": "ConfigureFailure", "code": "KEYTERM_LIMIT", "description": "too many keyterms" }
+      ],
+      "expected": {
+        "connected": 0,
+        "configured": 0,
+        "acceptedFinals": [],
+        "commandKinds": [],
+        "fatalErrors": 0
+      }
+    }
+  ]
+}

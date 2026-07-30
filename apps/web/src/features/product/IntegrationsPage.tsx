@@ -213,6 +213,7 @@ export function IntegrationsPage() {
         <div className="integration-footnote">
           <strong>No Meet activity required.</strong>
           <span>After installation and consent, open or refresh a meeting. Airboard engages the camera track automatically and verifies the outbound sender.</span>
+          <Link href="/help/integrations/google-meet">Read the complete Google Meet guide →</Link>
         </div>
       </section>
 

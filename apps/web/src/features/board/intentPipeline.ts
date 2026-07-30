@@ -9,6 +9,8 @@
 
 import {
   AIRBOARD_SEMANTIC_NODE_CAPABILITIES,
+  nodeVisualDefaultSize,
+  type AnnotationNodeType,
   type AnnotationPoint,
   type BoardState,
   type DiagramCommand,
@@ -64,6 +66,12 @@ type IntentResolution =
 
 export type SemanticIntentResolutionContext = IntentResolutionContext & {
   pointerAvailable: boolean;
+  /**
+   * Whole-plan, topology-aware centers for auto-created handles. Production
+   * and eval coordinators compute this once before grounding so incidental
+   * hand position and per-node viewport clamping cannot collapse a graph.
+   */
+  autoCreateCenters?: ReadonlyMap<string, AnnotationPoint>;
 };
 
 type SemanticActionResolution =
@@ -86,7 +94,13 @@ export function resolveSemanticPlanAction(
 
   switch (action.type) {
     case "create": {
-      const center = resolveSemanticCreateCenter(action.placement, context, planHandles);
+      const center = resolveSemanticCreateCenter(
+        action.placement,
+        action.nodeType,
+        context,
+        planHandles,
+        context.autoCreateCenters?.get(action.handle),
+      );
       if ("error" in center) {
         return center;
       }
@@ -632,23 +646,73 @@ function spatialSemanticNodes(state: BoardState): SpatialSemanticNode[] {
 
 function resolveSemanticCreateCenter(
   placement: SemanticPlacement,
+  nodeType: AnnotationNodeType,
   context: SemanticIntentResolutionContext,
   planHandles: ReadonlyMap<string, string[]>,
+  plannedCenter?: AnnotationPoint,
 ): { point: AnnotationPoint } | { error: string } {
   if (placement.kind === "auto") {
-    const index = planHandles.size;
+    if (plannedCenter) {
+      return { point: plannedCenter };
+    }
+    const size = nodeVisualDefaultSize(nodeType);
+    const originX = context.viewOrigin?.x ?? 0;
+    const originY = context.viewOrigin?.y ?? 0;
+    const viewportCenter = {
+      x: originX + context.canvasWidth / 2,
+      y: originY + context.canvasHeight / 2,
+    };
+    const stepX = size.width + 96;
+    const stepY = size.height + 96;
+    const occupiedBounds = Object.values(context.boardState.strokes)
+      .filter(
+        (stroke) =>
+          stroke.status === "committed" &&
+          stroke.annotation?.bounds &&
+          stroke.annotation.type !== "connector" &&
+          stroke.annotation.type !== "arrow",
+      )
+      .map((stroke) => stroke.annotation!.bounds!);
+    const offsets = semanticAutoPlacementOffsets(planHandles.size + occupiedBounds.length + 1);
+    for (const offset of offsets) {
+      const point = {
+        x: viewportCenter.x + offset.x * stepX,
+        y: viewportCenter.y + offset.y * stepY,
+      };
+      const bounds = {
+        x: point.x - size.width / 2,
+        y: point.y - size.height / 2,
+        width: size.width,
+        height: size.height,
+      };
+      if (
+        bounds.x < originX + 24 ||
+        bounds.y < originY + 24 ||
+        bounds.x + bounds.width > originX + context.canvasWidth - 24 ||
+        bounds.y + bounds.height > originY + context.canvasHeight - 24
+      ) {
+        continue;
+      }
+      if (
+        occupiedBounds.every(
+          (occupied) =>
+            bounds.x + bounds.width + 48 <= occupied.x ||
+            occupied.x + occupied.width + 48 <= bounds.x ||
+            bounds.y + bounds.height + 48 <= occupied.y ||
+            occupied.y + occupied.height + 48 <= bounds.y,
+        )
+      ) {
+        return { point };
+      }
+    }
     return {
       point: {
-        x: clampNumber(
-          context.pointer.x + (index % 3) * 184,
-          (context.viewOrigin?.x ?? 0) + 100,
-          (context.viewOrigin?.x ?? 0) + context.canvasWidth - 100,
-        ),
-        y: clampNumber(
-          context.pointer.y + Math.floor(index / 3) * 120,
-          (context.viewOrigin?.y ?? 0) + 70,
-          (context.viewOrigin?.y ?? 0) + context.canvasHeight - 70,
-        ),
+        x: viewportCenter.x,
+        y:
+          originY +
+          context.canvasHeight +
+          48 +
+          planHandles.size * stepY,
       },
     };
   }
@@ -681,6 +745,20 @@ function resolveSemanticCreateCenter(
             ? { x: center.x, y: center.y - gapY }
             : { x: center.x, y: center.y + gapY },
   };
+}
+
+function semanticAutoPlacementOffsets(minimumCount: number): AnnotationPoint[] {
+  const offsets: AnnotationPoint[] = [{ x: 0, y: 0 }];
+  const targetCount = Math.max(minimumCount, 25);
+  for (let ring = 1; offsets.length < targetCount; ring += 1) {
+    for (let y = -ring; y <= ring; y += 1) {
+      for (let x = -ring; x <= ring; x += 1) {
+        if (Math.max(Math.abs(x), Math.abs(y)) !== ring) continue;
+        offsets.push({ x, y });
+      }
+    }
+  }
+  return offsets;
 }
 
 function semanticPlacementCommands(

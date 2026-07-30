@@ -11,6 +11,7 @@ const [
   mediaPipeTracker,
   palmPose,
   gestureFrameArbitration,
+  gestureFrameCoordinator,
 ] = await Promise.all([
   readFile(new URL("apps/web/src/features/board/AirboardPrototype.tsx", root), "utf8"),
   readFile(new URL("apps/web/app/globals.css", root), "utf8"),
@@ -21,6 +22,10 @@ const [
   readFile(new URL("packages/gesture-engine/src/palmPresentation.ts", root), "utf8"),
   readFile(
     new URL("apps/web/src/features/board/gestureFrameArbitration.ts", root),
+    "utf8",
+  ),
+  readFile(
+    new URL("apps/web/src/features/board/gestureFrameCoordinator.ts", root),
     "utf8",
   ),
 ]);
@@ -91,7 +96,21 @@ const required = [
     "onPreempted?.()",
     "lower-priority lifecycle cleanup",
   ],
-  [board, "arbitrateGestureFrame({", "production gesture-frame arbitration"],
+  [
+    board,
+    "coordinateRawLandmarkFrame<",
+    "production raw-landmark coordination",
+  ],
+  [
+    gestureFrameCoordinator,
+    "const { owner } = coordinateGestureFrame({",
+    "raw-landmark to frame-coordinator routing",
+  ],
+  [
+    gestureFrameCoordinator,
+    "arbitrateGestureFrame(input.stages)",
+    "production gesture-frame arbitration",
+  ],
   [styles, ".canvas-copilot {", "copilot styling"],
 ];
 
@@ -128,13 +147,13 @@ for (const [marker, expectedCount, label] of [
     );
   }
 }
-const arbitrationCallStart = board.indexOf("arbitrateGestureFrame({");
+const arbitrationCallStart = board.indexOf("coordinateRawLandmarkFrame<");
 const arbitrationCallEnd = board.indexOf(
-  'if (frameOwner !== "manipulation")',
+  "rawLandmarkFrameProcessorRef.current = processRawLandmarkFrame",
   arbitrationCallStart,
 );
 if (arbitrationCallStart === -1 || arbitrationCallEnd === -1) {
-  throw new Error("The production gesture-frame arbiter is not connected.");
+  throw new Error("The production raw-landmark coordinator is not connected.");
 }
 const productionArbitrationCall = board.slice(
   arbitrationCallStart,
@@ -155,6 +174,11 @@ for (const marker of [
   if (!productionArbitrationCall.includes(marker)) {
     throw new Error(`The production gesture arbiter is missing ${marker}.`);
   }
+}
+if (board.includes("arbitrateGestureFrame(")) {
+  throw new Error(
+    "The board bypasses the production gesture-frame coordinator.",
+  );
 }
 const priorityMarkers = [
   '"navigation"',

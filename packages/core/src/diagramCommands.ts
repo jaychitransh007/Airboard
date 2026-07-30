@@ -480,6 +480,12 @@ function planConnectNodes(planner: CommandPlanner, command: ConnectNodesCommand)
     snappedEndStrokeId: command.toId,
     strokeColor: command.style?.strokeColor ?? "#334155",
   };
+  const routeOffset = nextConnectorRouteOffset(
+    planner.state,
+    command.fromId,
+    command.toId,
+  );
+  if (routeOffset !== 0) annotation.routeOffset = routeOffset;
   if (command.label !== undefined) annotation.label = command.label;
   if (command.style?.opacity !== undefined) annotation.opacity = command.style.opacity;
   planner.createStroke(
@@ -521,6 +527,17 @@ function planReverseConnection(
   updated.snappedEndStrokeId = reversedToId;
   updated.start = endpoints.start;
   updated.end = endpoints.end;
+  const routeOffset = nextConnectorRouteOffset(
+    planner.state,
+    reversedFromId,
+    reversedToId,
+    connector.id,
+  );
+  if (routeOffset === 0) {
+    delete updated.routeOffset;
+  } else {
+    updated.routeOffset = routeOffset;
+  }
   if (command.label !== undefined) {
     updated.label = command.label;
   }
@@ -913,6 +930,35 @@ function connectorEndpoints(
     start: pointOnNodeBoundary(from, fromNodeType, toCenter),
     end: pointOnNodeBoundary(to, toNodeType, fromCenter),
   };
+}
+
+function nextConnectorRouteOffset(
+  state: BoardState,
+  fromId: string,
+  toId: string,
+  excludedConnectorId?: string,
+): number {
+  const siblingCount = activeSemanticStrokes(state).filter((stroke) => {
+    if (stroke.id === excludedConnectorId) return false;
+    const annotation = stroke.annotation;
+    if (
+      annotation?.type !== "connector" ||
+      !annotation.snappedStartStrokeId ||
+      !annotation.snappedEndStrokeId
+    ) {
+      return false;
+    }
+    return (
+      (annotation.snappedStartStrokeId === fromId &&
+        annotation.snappedEndStrokeId === toId) ||
+      (annotation.snappedStartStrokeId === toId &&
+        annotation.snappedEndStrokeId === fromId)
+    );
+  }).length;
+  if (siblingCount === 0) return 0;
+  const lane = Math.ceil(siblingCount / 2);
+  const direction = siblingCount % 2 === 1 ? 1 : -1;
+  return direction * lane * 72;
 }
 
 function translateAnnotation(annotation: StrokeAnnotation, dx: number, dy: number): void {

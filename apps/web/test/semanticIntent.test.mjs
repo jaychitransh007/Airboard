@@ -152,6 +152,17 @@ test("routes parser failures but not safe deterministic commands to semantic pla
     true,
   );
   assert.equal(shouldUseSemanticIntentFallback(parseIntentCanvasCommand("add a queue", external)), false);
+  assert.equal(
+    shouldUseSemanticIntentFallback(parseIntentCanvasCommand("add 21 circles", external)),
+    true,
+  );
+  const airboardNarrative = parseIntentCanvasCommand(
+    "User makes a request to Airboard, and, uh, then the authentication service gets fired, and, uh, then user lands to the Airboard page. So create a flow diagram for this.",
+    external,
+  );
+  assert.equal(airboardNarrative.status, "unrecognized");
+  assert.equal(airboardNarrative.issue.code, "unknown_command");
+  assert.equal(shouldUseSemanticIntentFallback(airboardNarrative), true);
   assert.equal(shouldUseSemanticIntentFallback(parseIntentCanvasCommand("", external)), false);
 });
 

@@ -13,6 +13,30 @@ export function getConnectorRoutePoints(annotation: StrokeAnnotation): Annotatio
 
   const dx = end.x - start.x;
   const dy = end.y - start.y;
+  const routeOffset =
+    typeof annotation.routeOffset === "number" &&
+    Number.isFinite(annotation.routeOffset)
+      ? annotation.routeOffset
+      : 0;
+  if (routeOffset !== 0) {
+    const length = Math.hypot(dx, dy);
+    if (length > 0) {
+      const normalX = -dy / length;
+      const normalY = dx / length;
+      return [
+        start,
+        {
+          x: start.x + normalX * routeOffset,
+          y: start.y + normalY * routeOffset,
+        },
+        {
+          x: end.x + normalX * routeOffset,
+          y: end.y + normalY * routeOffset,
+        },
+        end,
+      ];
+    }
+  }
   if (Math.abs(dx) < 18 || Math.abs(dy) < 18) {
     return [start, end];
   }

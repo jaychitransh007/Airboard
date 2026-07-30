@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev --port 3000",
-    "build": "node ../../scripts/verify-camera-layer-contract.mjs && node ../../scripts/verify-automated-command-contract.mjs && next build",
+    "dev": "node ../../scripts/generate-help-content.mjs && next dev --port 3000",
+    "build": "node ../../scripts/generate-help-content.mjs && node ../../scripts/verify-camera-layer-contract.mjs && node ../../scripts/verify-automated-command-contract.mjs && next build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test",
     "e2e": "playwright test"
@@ -20,7 +20,9 @@
     "@supabase/supabase-js": "^2.110.0",
     "next": "^15.3.5",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",

@@ -29,7 +29,10 @@ const {
   AIRBOARD_SEMANTIC_PLAN_CONTRACT_VERSION,
   AIRBOARD_SEMANTIC_PLAN_TOOL_NAME,
 } = await import("@airboard/core/semantic-plan");
-const { OpenAiResponsesSemanticIntentProvider } = await import(
+const {
+  AIRBOARD_SEMANTIC_INTENT_PROMPT_VERSION,
+  OpenAiResponsesSemanticIntentProvider,
+} = await import(
   "../src/semanticIntent/openaiResponses.ts"
 );
 const {
@@ -153,6 +156,18 @@ test("normalizes a correlated rich semantic request and pending clarification", 
   assert.equal(backwardCompatibleContext.ok, true);
   assert.deepEqual(backwardCompatibleContext.value.context.edges, []);
   assert.deepEqual(backwardCompatibleContext.value.context.projectGlossary, []);
+
+  const unsupportedCount = parseSemanticIntentRequest(
+    {
+      voiceTurnId: "voice-turn-count",
+      transcript: "add 21 circles",
+      parserIssue: "unsupported_count",
+      context: { selectionCount: 0, selected: [], objects: [], pointerAvailable: false },
+    },
+    runtimeConfig,
+  );
+  assert.equal(unsupportedCount.ok, true);
+  assert.equal(unsupportedCount.value.parserIssue, "unsupported_count");
 });
 
 test("rejects unsafe, uncorrelated, oversized, and disallowed semantic requests", () => {
@@ -275,13 +290,35 @@ test("uses one required strict Responses function tool and captures provider met
   assert.equal("text" in payload, false);
   assert.match(payload.instructions, /condition block/i);
   assert.match(payload.instructions, /branch action/i);
+  assert.match(payload.instructions, /low-risk, reversible details/i);
+  assert.match(payload.instructions, /return clarification instead of guessing/i);
+  assert.match(payload.instructions, /issueCode unsupported_operation/i);
+  assert.match(payload.instructions, /no missingSlots/i);
+  assert.doesNotMatch(payload.instructions, /never ask a clarification question/i);
   assert.match(payload.instructions, /literal node or edge labels/i);
   assert.match(payload.instructions, /desired-state correction/i);
   assert.match(payload.instructions, /reverse_connection/i);
   assert.match(payload.instructions, /currently, user one is making the call to user two/i);
   assert.match(payload.instructions, /request is flowing from X to Y/i);
   assert.match(payload.instructions, /next edge starts at the receiver X/i);
+  assert.match(payload.instructions, /every stated causal or temporal transition/i);
+  assert.match(payload.instructions, /never turn a complete subject-predicate clause/i);
+  assert.match(payload.instructions, /relationship-coverage check/i);
+  assert.match(payload.instructions, /and that/i);
+  assert.match(payload.instructions, /narrativeRelationshipCoverage/i);
+  assert.match(payload.instructions, /service gets fired/i);
+  assert.match(payload.instructions, /Authentication Service to Airboard Page/i);
+  assert.match(payload.instructions, /Airboard Authentication Service to User/i);
   const modelInput = JSON.parse(payload.input);
+  assert.equal(AIRBOARD_SEMANTIC_INTENT_PROMPT_VERSION, "2.7");
+  assert.equal(
+    modelInput.semanticPlanContractVersion,
+    AIRBOARD_SEMANTIC_PLAN_CONTRACT_VERSION,
+  );
+  assert.equal(
+    modelInput.semanticPromptVersion,
+    AIRBOARD_SEMANTIC_INTENT_PROMPT_VERSION,
+  );
   assert.equal(modelInput.transcript, "Airo now add a condition block");
   assert.equal(modelInput.dialogueMode, "clarification_answer");
   assert.equal(modelInput.explicitMetaCommand, null);
@@ -290,6 +327,96 @@ test("uses one required strict Responses function tool and captures provider met
   assert.equal(modelInput.clarificationAnswer.literalValue, "Airo now add a condition block");
   assert.match(modelInput.clarificationAnswer.instruction, /missing slots/i);
   assert.equal(capturedInit.body.includes(runtimeConfig.apiKey), false);
+});
+
+test("sends narrative coverage hints and rejects a schema-valid partial graph", async () => {
+  let modelInput;
+  const partialPlan = {
+    version: AIRBOARD_SEMANTIC_PLAN_CONTRACT_VERSION,
+    status: "resolved",
+    issueCode: "none",
+    clarificationQuestion: null,
+    missingSlots: [],
+    actions: [
+      {
+        type: "create",
+        nodeType: "user",
+        label: "User",
+        handle: "user",
+        placement: { kind: "auto" },
+      },
+      {
+        type: "create",
+        nodeType: "service",
+        label: "Airboard Authentication Service",
+        handle: "authentication-service",
+        placement: { kind: "auto" },
+      },
+      {
+        type: "create",
+        nodeType: "custom",
+        label: "Airboard",
+        handle: "airboard",
+        placement: { kind: "auto" },
+      },
+      {
+        type: "connect",
+        from: { kind: "plan_handle", handle: "user" },
+        to: { kind: "plan_handle", handle: "authentication-service" },
+        label: "request",
+      },
+    ],
+  };
+  const provider = new OpenAiResponsesSemanticIntentProvider(
+    runtimeConfig,
+    async (_url, init) => {
+      modelInput = JSON.parse(JSON.parse(init.body).input);
+      return response({
+        status: "completed",
+        output: [
+          {
+            type: "function_call",
+            name: AIRBOARD_SEMANTIC_PLAN_TOOL_NAME,
+            arguments: JSON.stringify(partialPlan),
+          },
+        ],
+      });
+    },
+  );
+
+  await assert.rejects(
+    provider.resolve(
+      {
+        voiceTurnId: "voice-turn-narrative-coverage",
+        transcript:
+          "User makes a request to, uh, Airboard authentication service and that, uh, authenticates the user, and the user lands to the Airboard. Create a flow diagram for this.",
+        parserIssue: "unknown_command",
+        context: {
+          selectionCount: 0,
+          selected: [],
+          objects: [],
+          edges: [],
+          projectGlossary: [],
+          pointerAvailable: false,
+        },
+      },
+      "gpt-5.6-terra",
+    ),
+    (error) => {
+      assert.equal(error instanceof SemanticIntentProviderError, true);
+      assert.equal(error.kind, "invalid_output");
+      assert.match(error.message, /omitted explicit narrative relationships \(1\/3\)/iu);
+      return true;
+    },
+  );
+  assert.equal(
+    modelInput.narrativeRelationshipCoverage.explicitRelationshipCount,
+    3,
+  );
+  assert.deepEqual(
+    modelInput.narrativeRelationshipCoverage.cues.map(({ kind }) => kind),
+    ["request", "authenticate", "land"],
+  );
 });
 
 test("rejects missing, malformed, multiple, and schema-invalid tool calls", async () => {

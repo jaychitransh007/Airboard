@@ -1,17 +1,34 @@
 export const VOICE_TRACE_STAGES = [
+  "capture_started",
   "capture_metadata",
+  "audio_dropped",
+  "stt_connection",
+  "stt_finalization",
   "stt_final",
+  "routing",
   "wake_classification",
   "parser_outcome",
   "semantic_request",
   "semantic_result",
   "semantic_failure",
+  "grounding",
   "preview",
   "clarification",
+  "feedback",
+  "retry",
+  "correction",
   "action_applied",
   "action_failed",
   "action_undone",
   "turn_completed",
+  "gesture_perception_health",
+  "gesture_candidate_scores",
+  "gesture_arbitration_owner",
+  "gesture_suppression",
+  "gesture_transition",
+  "gesture_target",
+  "gesture_action",
+  "gesture_cancellation",
 ] as const;
 
 export type VoiceTraceStage = (typeof VOICE_TRACE_STAGES)[number];
@@ -90,9 +107,23 @@ export function createVoiceTraceReporter(
   apiBaseUrl: string,
   fetchImpl: typeof fetch = fetch,
   accessToken?: string,
+  observe?: (event: VoiceTraceEvent) => void,
 ): (voiceTurnId: string, stage: VoiceTraceStage, data?: Record<string, unknown>) => void {
   const pendingByTurn = new Map<string, Promise<void>>();
   return (voiceTurnId, stage, data = {}) => {
+    // Capture event time at the call site. Network posts are deliberately
+    // serialized per turn, so deriving occurredAt inside the queued callback
+    // would add telemetry backlog to product latency.
+    const occurredAt = new Date().toISOString();
+    const sanitizedData = sanitizeTraceValue(data, 0);
+    if (observe && isRecord(sanitizedData)) {
+      observe({
+        voiceTurnId,
+        stage,
+        occurredAt,
+        data: sanitizedData,
+      });
+    }
     const previous = pendingByTurn.get(voiceTurnId) ?? Promise.resolve();
     const next = previous
       .catch(() => undefined)
@@ -103,6 +134,7 @@ export function createVoiceTraceReporter(
             voiceTurnId,
             stage,
             data,
+            occurredAt,
             ...(accessToken ? { accessToken } : {}),
           },
           fetchImpl,

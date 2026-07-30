@@ -97,10 +97,10 @@ These are fixable in the repo and each would make a public "supported product" c
 ### Docs drift / honesty
 | ID | Title | Owner | Verification | Evidence | Recommendation |
 |----|-------|-------|--------------|----------|----------------|
-| RGB-034 | `Platform Support Matrix.md` still describes the retired Meet add-on architecture, not the shipped 0.8.0 camera overlay | Product | Reported | `Docs/Platform Support Matrix.md` vs `extensions/chrome-meet-bridge` | Update to the shipped Meet channel. |
-| RGB-035 | `Intent Canvas Implementation Notes.md` still documents a removed Preview→Apply confirmation step (contradicts README + code) | Product | Reported | `Docs/Intent Canvas Implementation Notes.md` | Update to the no-confirmation model. |
-| RGB-036 | README understates voice-trace storage as "in-memory only" — durable, org-scoped, 14-day storage is implemented | Product | Verified | `README.md` vs `voice_trace_events` schema + lifecycle purge | Correct the README. |
-| RGB-037 | Two conflicting readiness sources of truth | Founder / Product | Verified | `Public Beta Readiness…` (stale: "identity not started") vs `Official Launch Readiness.md` + shipped `auth.ts` | Mark the Public Beta checklist historical/superseded; keep one source of truth. |
+| RGB-034 | `Platform Support Matrix.md` still describes the retired Meet add-on architecture, not the shipped 0.8.0 camera overlay | Product | Corrected 2026-07-30 | `Docs/Platform Support Matrix.md` and `extensions/chrome-meet-bridge` | Current channel and release limits now match the private camera-overlay extension. |
+| RGB-035 | `Intent Canvas Implementation Notes.md` still documents a removed Preview→Apply confirmation step (contradicts README + code) | Product | Corrected 2026-07-30 | `Docs/Intent Canvas Implementation Notes.md` | Current workflow now documents immediate, undoable command application. |
+| RGB-036 | README understates voice-trace storage as "in-memory only" — durable, org-scoped, 14-day storage is implemented | Product | Corrected 2026-07-30 | `README.md`, `voice_trace_events` schema, and lifecycle purge | README now distinguishes durable authenticated storage from the local in-memory fallback. |
+| RGB-037 | Two conflicting readiness sources of truth | Founder / Product | Corrected 2026-07-30 | `Public Beta Readiness…`, `Official Launch Readiness.md`, and `ops/launch-evidence.json` | Historical checklist is explicitly superseded; official readiness remains the current authority. |
 
 ---
 

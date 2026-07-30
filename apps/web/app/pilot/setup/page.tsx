@@ -27,6 +27,7 @@ export default function PilotSetupPage() {
       <section>
         <h2>What the audience sees</h2>
         <p>Only your normal Meet camera tile with the Airboard diagram composite. Account settings, controls, logs, selection feedback, and the private renderer never enter the audience output.</p>
+        <p><a href="/help/integrations/google-meet">Open the complete Google Meet guide →</a></p>
       </section>
     </PilotInfoPage>
   );

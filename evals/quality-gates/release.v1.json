@@ -1,0 +1,292 @@
+{
+  "schemaVersion": "airboard-quality-gate-config.v1",
+  "configVersion": "release.v1",
+  "reportSchemaVersion": "airboard-quality-report.v1",
+  "blessedBaseline": {
+    "version": "airboard-blessed-baseline.v2",
+    "artifactPath": "blessed-baseline.v2.json",
+    "artifactSha256": "b1b69bc1c92aae1defb07acb9adf257ad401c4372e47c32c2e865e3a70e813a3",
+    "metricsSha256": "ffe21393e153ff0113625056684533a668f65b247c56844dd63845e313228ddc",
+    "provenance": {
+      "kind": "versioned_policy_reference",
+      "evidenceArtifact": "blessed-baseline.v2.json",
+      "assertsMediaAvailability": false,
+      "assertsEvaluationEvidence": false,
+      "note": "This comparison reference and evaluator do not independently attest restricted-media availability or report provenance."
+    },
+    "metrics": {
+      "contract": {
+        "passRate": 1
+      },
+      "safety": {
+        "passRate": 1
+      },
+      "atomicity": {
+        "passRate": 1
+      },
+      "undo": {
+        "passRate": 1
+      },
+      "semantic": {
+        "coreAccuracy": 0.97,
+        "overallAccuracy": 0.94,
+        "slices": {
+          "clarification": {
+            "accuracy": 0.92,
+            "critical": true
+          },
+          "compound_commands": {
+            "accuracy": 0.93,
+            "critical": false
+          },
+          "indian_english": {
+            "accuracy": 0.91,
+            "critical": true
+          },
+          "non_board_speech": {
+            "accuracy": 0.99,
+            "critical": true
+          }
+        }
+      },
+      "gesture": {
+        "precision": 0.97,
+        "recall": 0.94,
+        "duplicateRate": 0.003,
+        "criticalFalseTriggerCount": 0,
+        "acquireLatencyP95Ms": 450,
+        "releaseLatencyP95Ms": 250,
+        "frameProcessingP95Ms": 25,
+        "slices": {
+          "core_lighting": {
+            "score": 0.94,
+            "critical": false
+          },
+          "low_light": {
+            "score": 0.9,
+            "critical": true
+          },
+          "tracking_loss": {
+            "score": 0.96,
+            "critical": true
+          },
+          "two_hand": {
+            "score": 0.92,
+            "critical": true
+          }
+        }
+      },
+      "stt": {
+        "criticalTokenRecall": 0.985
+      },
+      "latency": {
+        "deterministicEndToActionP95Ms": 850,
+        "semanticEndToActionP95Ms": 2200
+      },
+      "ambient": {
+        "actionCount": 0,
+        "observedHours": 30
+      },
+      "cost": {
+        "costPerSuccessUsd": 0.05
+      }
+    }
+  },
+  "releasePolicy": {
+    "requiredMetrics": [
+      "contract.passRate",
+      "safety.passRate",
+      "atomicity.passRate",
+      "undo.passRate",
+      "semantic.coreAccuracy",
+      "semantic.overallAccuracy",
+      "semantic.slices",
+      "gesture.precision",
+      "gesture.recall",
+      "gesture.duplicateRate",
+      "gesture.criticalFalseTriggerCount",
+      "gesture.acquireLatencyP95Ms",
+      "gesture.releaseLatencyP95Ms",
+      "gesture.frameProcessingP95Ms",
+      "gesture.slices",
+      "stt.criticalTokenRecall",
+      "latency.deterministicEndToActionP95Ms",
+      "latency.semanticEndToActionP95Ms",
+      "ambient.actionCount",
+      "ambient.observedHours",
+      "cost.costPerSuccessUsd"
+    ],
+    "absoluteGates": [
+      {
+        "id": "contract-pass-rate",
+        "metric": "contract.passRate",
+        "operator": "gte",
+        "threshold": 1
+      },
+      {
+        "id": "safety-pass-rate",
+        "metric": "safety.passRate",
+        "operator": "gte",
+        "threshold": 1
+      },
+      {
+        "id": "atomicity-pass-rate",
+        "metric": "atomicity.passRate",
+        "operator": "gte",
+        "threshold": 1
+      },
+      {
+        "id": "undo-pass-rate",
+        "metric": "undo.passRate",
+        "operator": "gte",
+        "threshold": 1
+      },
+      {
+        "id": "semantic-core-accuracy",
+        "metric": "semantic.coreAccuracy",
+        "operator": "gte",
+        "threshold": 0.95
+      },
+      {
+        "id": "semantic-overall-accuracy",
+        "metric": "semantic.overallAccuracy",
+        "operator": "gte",
+        "threshold": 0.9
+      },
+      {
+        "id": "gesture-precision",
+        "metric": "gesture.precision",
+        "operator": "gte",
+        "threshold": 0.95
+      },
+      {
+        "id": "gesture-recall",
+        "metric": "gesture.recall",
+        "operator": "gte",
+        "threshold": 0.9
+      },
+      {
+        "id": "gesture-duplicate-rate",
+        "metric": "gesture.duplicateRate",
+        "operator": "lt",
+        "threshold": 0.01
+      },
+      {
+        "id": "gesture-critical-false-triggers",
+        "metric": "gesture.criticalFalseTriggerCount",
+        "operator": "eq",
+        "threshold": 0
+      },
+      {
+        "id": "gesture-acquire-latency-p95",
+        "metric": "gesture.acquireLatencyP95Ms",
+        "operator": "lte",
+        "threshold": 500
+      },
+      {
+        "id": "gesture-release-latency-p95",
+        "metric": "gesture.releaseLatencyP95Ms",
+        "operator": "lte",
+        "threshold": 300
+      },
+      {
+        "id": "gesture-frame-processing-p95",
+        "metric": "gesture.frameProcessingP95Ms",
+        "operator": "lte",
+        "threshold": 33.34
+      },
+      {
+        "id": "stt-critical-token-recall",
+        "metric": "stt.criticalTokenRecall",
+        "operator": "gte",
+        "threshold": 0.97
+      },
+      {
+        "id": "deterministic-end-to-action-p95",
+        "metric": "latency.deterministicEndToActionP95Ms",
+        "operator": "lt",
+        "threshold": 1000
+      },
+      {
+        "id": "semantic-end-to-action-p95",
+        "metric": "latency.semanticEndToActionP95Ms",
+        "operator": "lt",
+        "threshold": 2500
+      },
+      {
+        "id": "ambient-action-count",
+        "metric": "ambient.actionCount",
+        "operator": "eq",
+        "threshold": 0
+      },
+      {
+        "id": "ambient-observed-hours",
+        "metric": "ambient.observedHours",
+        "operator": "gte",
+        "threshold": 30
+      }
+    ],
+    "sliceGates": [
+      {
+        "id": "semantic-slice-floor",
+        "metric": "semantic.slices",
+        "scoreField": "accuracy",
+        "operator": "gte",
+        "threshold": 0.85,
+        "requiredSliceIds": [
+          "clarification",
+          "compound_commands",
+          "indian_english",
+          "non_board_speech"
+        ]
+      },
+      {
+        "id": "gesture-slice-floor",
+        "metric": "gesture.slices",
+        "scoreField": "score",
+        "operator": "gte",
+        "threshold": 0.85,
+        "requiredSliceIds": [
+          "core_lighting",
+          "low_light",
+          "tracking_loss",
+          "two_hand"
+        ]
+      }
+    ],
+    "baselineGates": [
+      {
+        "id": "cost-per-success-regression",
+        "kind": "relative_max",
+        "metric": "cost.costPerSuccessUsd",
+        "maximumRegression": 0.1
+      },
+      {
+        "id": "semantic-critical-slice-regression",
+        "kind": "critical_slice_absolute_drop",
+        "metric": "semantic.slices",
+        "scoreField": "accuracy",
+        "criticalField": "critical",
+        "criticalSliceIds": [
+          "clarification",
+          "indian_english",
+          "non_board_speech"
+        ],
+        "maximumRegression": 0.03
+      },
+      {
+        "id": "gesture-critical-slice-regression",
+        "kind": "critical_slice_absolute_drop",
+        "metric": "gesture.slices",
+        "scoreField": "score",
+        "criticalField": "critical",
+        "criticalSliceIds": [
+          "low_light",
+          "tracking_loss",
+          "two_hand"
+        ],
+        "maximumRegression": 0.03
+      }
+    ]
+  }
+}
