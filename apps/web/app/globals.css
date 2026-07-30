@@ -3897,11 +3897,6 @@ button.screen-underlay-active {
     gap: 2px;
   }
 
-  .canvas-toolbar .toolbar-button:nth-child(2),
-  .canvas-toolbar .toolbar-button:nth-child(3) {
-    display: none;
-  }
-
   .canvas-workspace {
     overflow: hidden;
   }

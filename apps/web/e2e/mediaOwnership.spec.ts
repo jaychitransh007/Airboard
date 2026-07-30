@@ -100,7 +100,7 @@ test("delegated side panel stays compact and points at the shared board", async 
   expect(await page.evaluate(() => window.__gumCalls)).toBe(0);
 });
 
-test("standalone keeps its camera and voice entry points", async ({ page }) => {
+test("standalone combines camera and voice into one Airo entry point", async ({ page }) => {
   await spyOnGetUserMedia(page);
   await page.goto("/?testStandalone=1");
 
@@ -108,8 +108,55 @@ test("standalone keeps its camera and voice entry points", async ({ page }) => {
   await expect(onboarding).toBeVisible();
   await onboarding.click();
 
-  await expect(page.getByRole("button", { name: /Enable hand tracking/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Airo listening/ })).toBeVisible();
+  const toolbar = page.locator(".canvas-toolbar");
+  await expect(
+    toolbar.getByRole("button", { name: "Enable Airo voice and hand tracking" }),
+  ).toBeVisible();
+  await expect(toolbar.getByRole("button", { name: /Enable hand tracking/ })).toHaveCount(0);
+  await expect(toolbar.getByRole("button", { name: /Airo listening/ })).toHaveCount(0);
+
+  const controlOrder = await toolbar
+    .locator(":scope > button, :scope > .canvas-more > button")
+    .evaluateAll((buttons) =>
+      buttons.map((button) => button.getAttribute("aria-label") ?? button.textContent?.trim()),
+    );
+  expect(controlOrder).toEqual([
+    "Enable Airo voice and hand tracking",
+    "Choose a screen or window to show behind Airboard",
+    "More board actions",
+    "Open board settings",
+  ]);
+
+  await toolbar.getByRole("button", { name: "More board actions" }).click();
+  await expect(page.getByRole("menuitem", { name: "Undo" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Hide diagram" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Export PNG" })).toBeVisible();
+  for (const removedAction of [
+    "Rename canvas",
+    "Clear board",
+    "Pause inputs",
+    "Enable hands",
+    "Start Airo listening",
+  ]) {
+    await expect(page.getByRole("menuitem", { name: removedAction })).toHaveCount(0);
+  }
+  await toolbar.getByRole("button", { name: "More board actions" }).click();
+
+  // Compact view keeps the same four controls visible instead of hiding
+  // whichever actions happen to occupy particular child positions.
+  await page.setViewportSize({ width: 375, height: 812 });
+  for (const controlName of [
+    "Enable Airo voice and hand tracking",
+    "Choose a screen or window to show behind Airboard",
+    "More board actions",
+    "Open board settings",
+  ]) {
+    await expect(toolbar.getByRole("button", { name: controlName })).toBeVisible();
+  }
+  const toolbarBounds = await toolbar.boundingBox();
+  expect(toolbarBounds).not.toBeNull();
+  expect(toolbarBounds!.x + toolbarBounds!.width).toBeLessThanOrEqual(375);
+
   // Nothing auto-starts capture; media remains user-initiated on standalone.
   expect(await page.evaluate(() => window.__gumCalls)).toBe(0);
 });
@@ -159,7 +206,9 @@ test("standalone never opens a surprise prompt when remembered permission is not
   });
 
   await page.goto("/?testStandalone=1");
-  await expect(page.getByRole("button", { name: /Enable hand tracking/ })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Enable Airo voice and hand tracking" }),
+  ).toBeVisible();
   await page.waitForTimeout(500);
   expect(await page.evaluate(() => window.__gumCalls)).toBe(0);
 });

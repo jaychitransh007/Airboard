@@ -5137,6 +5137,43 @@ export function AirboardPrototype({
     void startCamera();
   }, [cameraStatus, standaloneEditor, startCamera, stopCamera]);
 
+  const airoVoiceAvailable = voiceCaptureAvailable && speechSupported;
+  const airoHandsAvailable = cameraCaptureAvailable;
+  const airoInputsActive =
+    (airoVoiceAvailable || airoHandsAvailable) &&
+    (speechArmed || cameraStatus === "active");
+
+  const toggleAiroInputs = useCallback(() => {
+    if (airoInputsActive) {
+      if (airoVoiceAvailable && speechArmed) {
+        toggleVoiceInput();
+      }
+      if (airoHandsAvailable && cameraStatus === "active") {
+        toggleCameraInput();
+      }
+      return;
+    }
+
+    if (airoVoiceAvailable) {
+      toggleVoiceInput();
+    }
+    if (airoHandsAvailable) {
+      toggleCameraInput();
+    }
+    if (!airoVoiceAvailable && !airoHandsAvailable) {
+      setCopilotVisibility(true);
+      requestAnimationFrame(() => intentCommandInputRef.current?.focus());
+    }
+  }, [
+    airoHandsAvailable,
+    airoInputsActive,
+    airoVoiceAvailable,
+    cameraStatus,
+    speechArmed,
+    toggleCameraInput,
+    toggleVoiceInput,
+  ]);
+
   useEffect(() => {
     if (
       !standaloneEditor ||
@@ -6841,48 +6878,20 @@ export function AirboardPrototype({
               </div>
             </div>
             <div className="toolbar canvas-toolbar">
-              <button type="button" className="toolbar-button" onClick={undoLastAction}>
-                <span aria-hidden="true">↶</span>
-                <span>Undo</span>
-              </button>
               <button
                 type="button"
-                className="toolbar-button"
+                className={`toolbar-button${airoInputsActive ? " active" : ""}`}
+                disabled={cameraStatus === "starting" || cameraStatus === "tracker_loading"}
                 aria-label={
-                  speechArmed
-                    ? "Stop Airo listening"
-                    : speechSupported
-                      ? "Start Airo listening"
-                      : "Airo listening unavailable; focus the typed command"
+                  airoInputsActive
+                    ? "Turn off Airo voice and hand tracking"
+                    : "Enable Airo voice and hand tracking"
                 }
-                onClick={() => {
-                  if (speechSupported) {
-                    toggleVoiceInput();
-                  } else {
-                    setCopilotVisibility(true);
-                    requestAnimationFrame(() => intentCommandInputRef.current?.focus());
-                  }
-                }}
+                onClick={toggleAiroInputs}
               >
                 <span aria-hidden="true">✦</span>
                 <span>Airo</span>
               </button>
-              {cameraCaptureAvailable ? (
-                <button
-                  type="button"
-                  className={`toolbar-button${cameraStatus === "active" ? " active" : ""}`}
-                  disabled={cameraStatus === "starting" || cameraStatus === "tracker_loading"}
-                  aria-label={
-                    cameraStatus === "active"
-                      ? "Turn off the camera"
-                      : "Enable hand tracking with the camera"
-                  }
-                  onClick={toggleCameraInput}
-                >
-                  <span aria-hidden="true">◎</span>
-                  <span>Hands</span>
-                </button>
-              ) : null}
               <button
                 type="button"
                 className={`toolbar-button${screenUnderlayStatus === "active" ? " active" : ""}`}
@@ -6908,30 +6917,6 @@ export function AirboardPrototype({
                       : "Use screen"}
                   </span>
               </button>
-              {!diagramVisible ? (
-                <button
-                  type="button"
-                  className="toolbar-button diagram-visibility-button active"
-                  data-testid="diagram-visibility-status"
-                  onClick={() => setDiagramVisibility(true, "menu")}
-                >
-                  <span aria-hidden="true">◉</span>
-                  <span>Show diagram</span>
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className={`toolbar-icon-button${settingsOpen ? " active" : ""}`}
-                aria-label={settingsOpen ? "Close board settings" : "Open board settings"}
-                aria-expanded={settingsOpen}
-                aria-controls="canvas-settings"
-                onClick={() => {
-                  setSettingsOpen((value) => !value);
-                  setMoreMenuOpen(false);
-                }}
-              >
-                <span aria-hidden="true">⚙</span>
-              </button>
               <div className="canvas-more">
                 <button
                   type="button"
@@ -6948,34 +6933,17 @@ export function AirboardPrototype({
                 </button>
                 {moreMenuOpen ? (
                   <div className="canvas-more-menu" role="menu">
-                    {cameraCaptureAvailable ? (
-                      <button
-                        type="button"
-                        role="menuitem"
-                        disabled={cameraStatus === "starting" || cameraStatus === "tracker_loading"}
-                        onClick={() => {
-                          setMoreMenuOpen(false);
-                          toggleCameraInput();
-                        }}
-                      >
-                        <span aria-hidden="true">◎</span>
-                        {cameraStatus === "active" ? "Disable hands" : "Enable hands"}
-                      </button>
-                    ) : null}
-                    {voiceCaptureAvailable ? (
-                      <button
-                        type="button"
-                        role="menuitem"
-                        disabled={!speechSupported}
-                        onClick={() => {
-                          setMoreMenuOpen(false);
-                          toggleVoiceInput();
-                        }}
-                      >
-                        <span aria-hidden="true">◉</span>
-                        {speechArmed ? "Stop Airo listening" : "Start Airo listening"}
-                      </button>
-                    ) : null}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        undoLastAction();
+                        setMoreMenuOpen(false);
+                      }}
+                    >
+                      <span aria-hidden="true">↶</span>
+                      Undo
+                    </button>
                     <button
                       type="button"
                       role="menuitem"
@@ -6987,30 +6955,6 @@ export function AirboardPrototype({
                     >
                       <span aria-hidden="true">{diagramVisible ? "◌" : "◉"}</span>
                       {diagramVisible ? "Hide diagram" : "Show diagram"}
-                    </button>
-                    {onRenameBoard ? (
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setMoreMenuOpen(false);
-                          beginTitleEdit();
-                        }}
-                      >
-                        <span aria-hidden="true">✎</span>
-                        Rename canvas
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setInputPaused((value) => !value);
-                        setMoreMenuOpen(false);
-                      }}
-                    >
-                      <span aria-hidden="true">{inputPaused ? "▶" : "Ⅱ"}</span>
-                      {inputPaused ? "Resume inputs" : "Pause inputs"}
                     </button>
                     <button
                       type="button"
@@ -7039,21 +6983,22 @@ export function AirboardPrototype({
                         Move to Trash
                       </button>
                     ) : null}
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="danger"
-                      onClick={() => {
-                        handleClearClick();
-                        if (clearArmed) setMoreMenuOpen(false);
-                      }}
-                    >
-                      <span aria-hidden="true">⌫</span>
-                      {clearArmed ? "Confirm clear board" : "Clear board…"}
-                    </button>
                   </div>
                 ) : null}
               </div>
+              <button
+                type="button"
+                className={`toolbar-icon-button${settingsOpen ? " active" : ""}`}
+                aria-label={settingsOpen ? "Close board settings" : "Open board settings"}
+                aria-expanded={settingsOpen}
+                aria-controls="canvas-settings"
+                onClick={() => {
+                  setSettingsOpen((value) => !value);
+                  setMoreMenuOpen(false);
+                }}
+              >
+                <span aria-hidden="true">⚙</span>
+              </button>
             </div>
           </>
         ) : (

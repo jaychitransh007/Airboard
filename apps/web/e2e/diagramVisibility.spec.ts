@@ -87,8 +87,8 @@ test("snap, keyboard, menu, and voice share one local visibility action", async 
 
   await page.getByLabel("More board actions").click();
   await page.getByTestId("diagram-visibility-menu-action").click();
-  await expect(page.getByTestId("diagram-visibility-status")).toBeVisible();
-  await page.getByTestId("diagram-visibility-status").click();
+  await page.getByLabel("More board actions").click();
+  await page.getByTestId("diagram-visibility-menu-action").click();
   await expect(page.locator("main.airboard-shell")).not.toHaveClass(/diagram-hidden/);
 
   const command = page.getByTestId("intent-command-input");
