@@ -56,8 +56,8 @@ test("metamorphic expansion is deterministic and exceeds 600 stable scenarios", 
   });
 
   assert.deepEqual(first, second);
-  assert.equal(source.semanticPromptVersion, "2.7");
-  assert.equal(first.metamorphic.semanticPromptVersion, "2.7");
+  assert.equal(source.semanticPromptVersion, "2.8");
+  assert.equal(first.metamorphic.semanticPromptVersion, "2.8");
   assert.ok(first.cases.length >= SEMANTIC_METAMORPHIC_MIN_SCENARIOS);
   const nonPendingCases = source.cases.filter(
     ({ pendingClarification }) => pendingClarification === undefined,
@@ -106,6 +106,9 @@ test("source corpus covers long narratives and high-risk semantic boundaries", a
   const requiredCases = [
     "airboard-brand-narrative-flow",
     "airboard-authentication-round-trip-flow",
+    "existing-board-fan-in-dense-data-dataset",
+    "existing-board-fan-in-one-edge-existing",
+    "existing-board-fan-in-already-satisfied",
     "lengthy-checkout-narrative-475",
     "acoustic-repair-api-queue",
     "clarify-dense-duplicate-cache-delete",
@@ -127,6 +130,20 @@ test("source corpus covers long narratives and high-risk semantic boundaries", a
     true,
     "every semantic seed should declare its expected board delta",
   );
+
+  const denseFanIn = sourceById.get(
+    "existing-board-fan-in-dense-data-dataset",
+  );
+  assert.equal(denseFanIn.context.objects.length >= 8, true);
+  assert.equal(denseFanIn.context.selectionCount, 0);
+  assert.deepEqual(denseFanIn.expected.actionTypeCounts, { connect: 2 });
+
+  const alreadySatisfied = sourceById.get(
+    "existing-board-fan-in-already-satisfied",
+  );
+  assert.equal(alreadySatisfied.expected.status, "already_satisfied");
+  assert.deepEqual(alreadySatisfied.expected.actionTypeCounts, {});
+  assert.equal(alreadySatisfied.expected.finalState.edgeCountDelta, 0);
 
   const lengthy = sourceById.get("lengthy-checkout-narrative-475");
   assert.ok(lengthy.transcript.length >= 450);

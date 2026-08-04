@@ -45,7 +45,7 @@ test("owner changes and safety events post immediately", () => {
     interactionId: "gesture-interaction-2",
     frameAtMs: 20,
     stage: "arbitration_owner",
-    data: { owner: "undo" },
+    data: { owner: "snap" },
   });
   report({
     interactionId: "gesture-interaction-2",

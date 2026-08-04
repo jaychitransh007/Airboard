@@ -69,6 +69,17 @@ Core service:
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `AIRBOARD_SESSION_SIGNING_SECRET`, `AIRBOARD_ALLOWED_ORIGINS`, `AIRBOARD_APP_URL`
 - `NEXT_PUBLIC_AIRBOARD_API_URL`, `AIRBOARD_API_TOKEN`, `AIRBOARD_CRON_SECRET`
+- `NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_ID` and
+  `AIRBOARD_CHROME_EXTENSION_ID` must be identical so both the renderer and API
+  trust only the reviewed package; the configured
+  `NEXT_PUBLIC_CHROME_EXTENSION_VERSION` must match the reviewed Meet package;
+  validate the deployed API/web pair with `pnpm verify:extension-deployment`
+  before producing an artifact with `pnpm release:extension`
+- after Web Store approval, `NEXT_PUBLIC_CHROME_WEB_STORE_URL` must be the
+  listing whose final path segment is that exact extension ID; mismatched or
+  malformed listing URLs fail closed and keep the public install action hidden
+- `AIRBOARD_CHROME_EXTENSION_ENABLED=true` for an active Meet release; set it
+  to `false` for the documented emergency disable path
 
 Commercial providers:
 

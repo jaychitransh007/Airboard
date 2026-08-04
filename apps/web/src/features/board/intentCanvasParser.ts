@@ -69,11 +69,22 @@ export type IntentCanvasOperation =
       to: IntentCanvasConnectionReference;
       label?: string;
     }
+  | {
+      /** Bind one uniquely identifiable loose line without creating a duplicate. */
+      kind: "attach_connection";
+      from: IntentCanvasConnectionReference;
+      to: IntentCanvasConnectionReference;
+      /** `from … to …` is directed; `with/to/between X and Y` preserves the line's existing orientation. */
+      endpointOrder: "directed" | "undirected";
+      /** How the user identified the pre-existing line itself. */
+      lineReference: "selected" | "pointer" | "unique_existing";
+    }
   | { kind: "rename_object"; target: IntentCanvasConnectionReference; label: string }
   | {
       kind: "delete_connection";
       from: IntentCanvasConnectionReference;
       to: IntentCanvasConnectionReference;
+      scope: "one" | "all";
     }
   | {
       kind: "resize_selection";
@@ -262,6 +273,27 @@ export function parseIntentCanvasCommand(
     ]);
   }
 
+  // This is deliberately parsed before the generic compound-command guard:
+  // "the disconnected line to Client and Planner" contains an `and`, but it
+  // names the two endpoints of one atomic repair rather than two mutations.
+  const attachment = parseAttachConnectionCommand(commandText);
+  if (attachment) {
+    return "command" in attachment
+      ? parsed(
+          base,
+          attachment.command,
+          attachment.confidence,
+          attachment.message,
+        )
+      : reject(
+          base,
+          "clarification",
+          attachment.code,
+          attachment.message,
+          attachment.examples,
+        );
+  }
+
   if (hasCompoundMutation(normalizedText)) {
     return reject(
       base,
@@ -331,6 +363,61 @@ export function parseIntentCanvasCommand(
     "I didn’t recognize that as a board command. Try creating, connecting, moving, arranging, or undoing.",
     ["Airboard, create an API here", "Airboard, connect this to that as calls", "Airboard, undo"],
   );
+}
+
+function parseAttachConnectionCommand(
+  text: string,
+): ParseSuccess | ParseFailure | null {
+  const cleaned = cleanText(text).replace(/[.!?]+$/u, "").trim();
+  const prefix =
+    /^(?:connect|attach|reconnect|link|join|snap)\s+(?:(?:the|an?)\s+)?(?:(existing|selected|this)\s+)?(?:disconnected|detached|dangling|loose|free|unconnected)\s+(?:line|connector|connection|arrow|edge|link)\s+/iu;
+  const prefixMatch = prefix.exec(cleaned);
+  if (!prefixMatch) return null;
+  const remainder = cleaned.slice(prefixMatch[0].length);
+  const qualifier = prefixMatch[1]?.toLocaleLowerCase("en-US");
+  const lineReference = qualifier === "selected"
+    ? "selected"
+    : qualifier === "this"
+      ? "pointer"
+      : "unique_existing";
+  const directed = /^(?:from\s+)?(.+?)\s+to\s+(.+)$/iu.exec(remainder);
+  const undirected = directed
+    ? null
+    : /^(?:to|with|between)\s+(.+?)\s+and\s+(.+)$/iu.exec(remainder);
+  const match = directed ?? undirected;
+  const from = match?.[1] ? parseConnectionReference(match[1]) : null;
+  const to = match?.[2] ? parseConnectionReference(match[2]) : null;
+  if (!from || !to) {
+    return {
+      code: "missing_connection_endpoint",
+      message:
+        "Name both objects for the disconnected line, for example “attach the disconnected line from Client to Planner.”",
+      examples: [
+        "Attach the disconnected line from Client to Planner",
+        "Connect the loose connector with Client and Planner",
+      ],
+    };
+  }
+  if (connectionReferenceKey(from) === connectionReferenceKey(to)) {
+    return {
+      code: "same_connection_endpoint",
+      message: "The disconnected line needs two distinct endpoint objects.",
+      examples: ["Attach the disconnected line from Client to Planner"],
+    };
+  }
+  return {
+    command: {
+      kind: "attach_connection",
+      from,
+      to,
+      endpointOrder: directed ? "directed" : "undirected",
+      lineReference,
+    },
+    confidence: confidence(0.99, "exact_pattern"),
+    message: directed
+      ? `Attach the existing line from ${describeConnectionReference(from)} to ${describeConnectionReference(to)}.`
+      : `Attach the existing line to ${describeConnectionReference(from)} and ${describeConnectionReference(to)} while preserving its direction.`,
+  };
 }
 
 type ParseSuccess = {
@@ -431,10 +518,14 @@ function parseDeleteConnectionCommand(text: string): ParseSuccess | ParseFailure
       examples: ["Delete the connection between API and Database"],
     };
   }
+  const scope =
+    between && /^(?:delete|remove)\s+(?:every|all)\s+/iu.test(text)
+      ? "all"
+      : "one";
   return {
-    command: { kind: "delete_connection", from, to },
+    command: { kind: "delete_connection", from, to, scope },
     confidence: confidence(0.97, "exact_pattern"),
-    message: `Delete the connection between ${describeConnectionReference(from)} and ${describeConnectionReference(to)}.`,
+    message: `Delete ${scope === "all" ? "all connections" : "the connection"} between ${describeConnectionReference(from)} and ${describeConnectionReference(to)}.`,
   };
 }
 

@@ -9,8 +9,10 @@ main-stage canvas, screen share, or second audience surface is required.
 
 1. Chrome installs the reviewed extension package and opens Airboard's
    integration page.
-2. Airboard preserves the extension identity through sign-in and exchanges a
-   one-time link for a revocable installation credential.
+2. The extension persists a random UUID for this Chrome profile. Airboard
+   preserves that installation identity through sign-in, keeps the shared
+   package ID only for browser messaging, and exchanges a one-time link for a
+   revocable installation credential.
 3. The toolbar popup requires affirmative camera, microphone, and voice
    processing confirmation. Raw media is processed live and is not stored by
    the extension.
@@ -26,14 +28,19 @@ main-stage canvas, screen share, or second audience surface is required.
 Settings are persisted to the installation record. Installation credentials
 use a revocable 90-day sliding window and rotate when status is refreshed. A
 revoked or long-dormant installation fails closed and asks the user to connect
-again.
+again. On the first 0.8 status refresh, an authenticated legacy row keyed by
+the shared package ID is atomically claimed by this profile's UUID. A different
+profile cannot reuse that migrated row and must connect separately.
 
 ## Privacy and trust boundary
 
 - The production package has one host permission: the Airboard API origin.
 - Content scripts run only on `https://meet.google.com/*`.
 - Frames and PCM chunks move only between Meet, the extension-owned relay, and
-  the allowlisted Airboard renderer. The extension stores no raw media.
+  the allowlisted Airboard renderer. Each mounted renderer/relay/Meet chain is
+  bound to a fresh 256-bit nonce, and the production web build additionally
+  accepts only the exact Chrome Web Store extension ID. The extension stores
+  no raw media.
 - The renderer performs on-device hand tracking. Airo sends microphone audio
   to the configured transcription provider only while Airo is enabled.
 - Chrome's camera and microphone indicators remain visible. Leaving the
@@ -58,11 +65,22 @@ Local development also permits `http://localhost:3000` and
 
 ## Chrome Web Store package
 
-Run:
+For local packaging or the one-time unsubmitted draft used to obtain a Web
+Store ID, run:
 
 ```sh
 pnpm build:extension
 ```
+
+For every tester or publication artifact, run:
+
+```sh
+pnpm release:extension
+```
+
+The release command refuses to package when the deployed renderer/API version,
+bridge protocol, exact renderer and API package IDs, kill switch, or the
+destinations compiled into the extension do not match.
 
 The upload-ready archive and SHA-256 checksum are written to
 `dist/chrome-extension/`. The script excludes development origins, includes

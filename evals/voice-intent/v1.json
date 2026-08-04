@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
-  "semanticPromptVersion": "2.7",
-  "description": "Airboard semantic voice-intent regression corpus for production plan contract 1.1 and semantic prompt 2.7. Every case is an independently replayable finalized voice turn.",
+  "semanticPromptVersion": "2.8",
+  "description": "Airboard semantic voice-intent regression corpus for production plan contract 1.1 and semantic prompt 2.8. Every case is an independently replayable finalized voice turn.",
   "cases": [
     {
       "id": "create-condition-block",
@@ -1367,6 +1367,264 @@
           "edgeCountDelta": 0,
           "requiredNodes": [
             { "label": "Billing Service", "nodeType": "service", "ordinal": 2 }
+          ]
+        }
+      }
+    },
+    {
+      "id": "existing-board-fan-in-two-datasets",
+      "description": "Updates an existing diagram by expanding one recipient clause into two correctly directed, identically labelled connectors.",
+      "transcript": "The planner gets the additional context from the golden dataset and historical dataset.",
+      "parserIssue": "unknown_command",
+      "context": {
+        "selectionCount": 1,
+        "selected": [
+          { "label": "Planner", "nodeType": "process", "ordinal": 1, "selected": true, "position": { "x": 620, "y": 260 }, "size": { "width": 180, "height": 92 } }
+        ],
+        "objects": [
+          { "label": "Golden Dataset", "nodeType": "database", "ordinal": 1, "selected": false, "position": { "x": 220, "y": 140 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Historical Dataset", "nodeType": "database", "ordinal": 2, "selected": false, "position": { "x": 220, "y": 380 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Planner", "nodeType": "process", "ordinal": 1, "selected": true, "position": { "x": 620, "y": 260 }, "size": { "width": 180, "height": 92 } }
+        ],
+        "edges": [],
+        "projectGlossary": [
+          { "term": "Planner" },
+          { "term": "Golden Dataset" },
+          { "term": "Historical Dataset" }
+        ],
+        "pointerAvailable": false
+      },
+      "expected": {
+        "status": "resolved",
+        "actionTypeCounts": { "connect": 2 },
+        "selectionCount": 2,
+        "finalState": {
+          "nodeCountDelta": 0,
+          "edgeCountDelta": 2,
+          "requiredNodes": [
+            { "label": "Planner", "nodeType": "process" },
+            { "label": "Golden Dataset", "nodeType": "database" },
+            { "label": "Historical Dataset", "nodeType": "database" }
+          ],
+          "requiredEdges": [
+            { "from": { "label": "Golden Dataset" }, "to": { "label": "Planner" }, "label": "additional context" },
+            { "from": { "label": "Historical Dataset" }, "to": { "label": "Planner" }, "label": "additional context" }
+          ],
+          "forbiddenNodes": [
+            { "label": "Additional Context" },
+            { "label": "Schema Data" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "existing-board-fan-in-observed-stt-repair",
+      "description": "Repairs the observed Planner/Golden Dataset transcription drift only when the selected recipient and remaining source make the repair unique.",
+      "transcript": "So this will accept the additional content from the schema data and another additional context from the historical dataset.",
+      "parserIssue": "unknown_command",
+      "context": {
+        "selectionCount": 1,
+        "selected": [
+          { "label": "Planner", "nodeType": "process", "ordinal": 1, "selected": true, "position": { "x": 620, "y": 260 }, "size": { "width": 180, "height": 92 } }
+        ],
+        "objects": [
+          { "label": "Golden Dataset", "nodeType": "database", "ordinal": 1, "selected": false, "position": { "x": 220, "y": 140 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Historical Dataset", "nodeType": "database", "ordinal": 2, "selected": false, "position": { "x": 220, "y": 380 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Planner", "nodeType": "process", "ordinal": 1, "selected": true, "position": { "x": 620, "y": 260 }, "size": { "width": 180, "height": 92 } }
+        ],
+        "edges": [],
+        "projectGlossary": [
+          { "term": "Planner" },
+          { "term": "Golden Dataset" },
+          { "term": "Historical Dataset" }
+        ],
+        "pointerAvailable": false
+      },
+      "expected": {
+        "status": "resolved",
+        "actionTypeCounts": { "connect": 2 },
+        "selectionCount": 2,
+        "finalState": {
+          "nodeCountDelta": 0,
+          "edgeCountDelta": 2,
+          "requiredEdges": [
+            { "from": { "label": "Golden Dataset" }, "to": { "label": "Planner" }, "label": "additional context" },
+            { "from": { "label": "Historical Dataset" }, "to": { "label": "Planner" }, "label": "additional context" }
+          ],
+          "forbiddenNodes": [
+            { "label": "Schema Data" },
+            { "label": "Additional Content" },
+            { "label": "Additional Context" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "existing-board-fan-in-dense-data-dataset",
+      "description": "Resolves the production Data/Dataset wording by whole-label canonical equivalence even when unrelated board objects invalidate closed-world inference.",
+      "transcript": "Planner receives the additional context from the historical data and golden dataset.",
+      "parserIssue": "unknown_command",
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [
+          { "label": "Historical Dataset", "nodeType": "database", "ordinal": 1, "selected": false, "position": { "x": 140, "y": 120 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Golden Dataset", "nodeType": "database", "ordinal": 2, "selected": false, "position": { "x": 140, "y": 340 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Planner", "nodeType": "process", "ordinal": 1, "selected": false, "position": { "x": 500, "y": 230 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Policy Store", "nodeType": "database", "ordinal": 3, "selected": false, "position": { "x": 820, "y": 90 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Feature Service", "nodeType": "service", "ordinal": 1, "selected": false, "position": { "x": 820, "y": 230 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Evaluation Runner", "nodeType": "process", "ordinal": 2, "selected": false, "position": { "x": 820, "y": 370 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Audit Queue", "nodeType": "queue", "ordinal": 1, "selected": false, "position": { "x": 1080, "y": 160 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Schema Registry", "nodeType": "database", "ordinal": 4, "selected": false, "position": { "x": 1080, "y": 320 }, "size": { "width": 180, "height": 92 } }
+        ],
+        "edges": [
+          {
+            "from": { "label": "Policy Store", "nodeType": "database", "ordinal": 3 },
+            "to": { "label": "Feature Service", "nodeType": "service", "ordinal": 1 },
+            "label": "feeds",
+            "occurrence": 1
+          }
+        ],
+        "projectGlossary": [
+          { "term": "Planner" },
+          { "term": "Historical Dataset" },
+          { "term": "Golden Dataset" }
+        ],
+        "pointerAvailable": false
+      },
+      "expected": {
+        "status": "resolved",
+        "actionTypeCounts": { "connect": 2 },
+        "actionDetails": [
+          {
+            "type": "connect",
+            "from": { "kind": "visible_label", "label": "Historical Dataset", "occurrence": null },
+            "to": { "kind": "visible_label", "label": "Planner", "occurrence": null },
+            "label": "additional context"
+          },
+          {
+            "type": "connect",
+            "from": { "kind": "visible_label", "label": "Golden Dataset", "occurrence": null },
+            "to": { "kind": "visible_label", "label": "Planner", "occurrence": null },
+            "label": "additional context"
+          }
+        ],
+        "selectionCount": 2,
+        "finalState": {
+          "nodeCountDelta": 0,
+          "edgeCountDelta": 2,
+          "requiredEdges": [
+            { "from": { "label": "Historical Dataset" }, "to": { "label": "Planner" }, "label": "additional context" },
+            { "from": { "label": "Golden Dataset" }, "to": { "label": "Planner" }, "label": "additional context" },
+            { "from": { "label": "Policy Store" }, "to": { "label": "Feature Service" }, "label": "feeds" }
+          ],
+          "forbiddenEdges": [
+            { "from": { "label": "Planner" }, "to": { "label": "Historical Dataset" }, "label": "additional context" },
+            { "from": { "label": "Planner" }, "to": { "label": "Golden Dataset" }, "label": "additional context" }
+          ],
+          "forbiddenNodes": [
+            { "label": "Historical Data" },
+            { "label": "Additional Context" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "existing-board-fan-in-one-edge-existing",
+      "description": "Emits only the missing relationship when the Data/Dataset request is partially satisfied.",
+      "transcript": "Planner receives the additional context from the historical data and golden dataset.",
+      "parserIssue": "unknown_command",
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [
+          { "label": "Historical Dataset", "nodeType": "database", "ordinal": 1, "selected": false, "position": { "x": 180, "y": 120 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Golden Dataset", "nodeType": "database", "ordinal": 2, "selected": false, "position": { "x": 180, "y": 360 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Planner", "nodeType": "process", "ordinal": 1, "selected": false, "position": { "x": 560, "y": 240 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Policy Store", "nodeType": "database", "ordinal": 3, "selected": false, "position": { "x": 900, "y": 240 }, "size": { "width": 180, "height": 92 } }
+        ],
+        "edges": [
+          {
+            "from": { "label": "Historical Dataset", "nodeType": "database", "ordinal": 1 },
+            "to": { "label": "Planner", "nodeType": "process", "ordinal": 1 },
+            "label": "additional context",
+            "occurrence": 1
+          }
+        ],
+        "projectGlossary": [
+          { "term": "Planner" },
+          { "term": "Historical Dataset" },
+          { "term": "Golden Dataset" }
+        ],
+        "pointerAvailable": false
+      },
+      "expected": {
+        "status": "resolved",
+        "actionTypeCounts": { "connect": 1 },
+        "actionDetails": [
+          {
+            "type": "connect",
+            "from": { "kind": "visible_label", "label": "Golden Dataset", "occurrence": null },
+            "to": { "kind": "visible_label", "label": "Planner", "occurrence": null },
+            "label": "additional context"
+          }
+        ],
+        "selectionCount": 2,
+        "finalState": {
+          "nodeCountDelta": 0,
+          "edgeCountDelta": 1,
+          "requiredEdges": [
+            { "from": { "label": "Historical Dataset" }, "to": { "label": "Planner" }, "label": "additional context" },
+            { "from": { "label": "Golden Dataset" }, "to": { "label": "Planner" }, "label": "additional context" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "existing-board-fan-in-already-satisfied",
+      "description": "Treats a fully satisfied supported request as a recognized, mutation-free orchestration outcome rather than semantic failure.",
+      "transcript": "Planner receives the additional context from the historical data and golden dataset.",
+      "parserIssue": "unknown_command",
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [
+          { "label": "Historical Dataset", "nodeType": "database", "ordinal": 1, "selected": false, "position": { "x": 180, "y": 120 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Golden Dataset", "nodeType": "database", "ordinal": 2, "selected": false, "position": { "x": 180, "y": 360 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Planner", "nodeType": "process", "ordinal": 1, "selected": false, "position": { "x": 560, "y": 240 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Policy Store", "nodeType": "database", "ordinal": 3, "selected": false, "position": { "x": 900, "y": 240 }, "size": { "width": 180, "height": 92 } }
+        ],
+        "edges": [
+          {
+            "from": { "label": "Historical Dataset", "nodeType": "database", "ordinal": 1 },
+            "to": { "label": "Planner", "nodeType": "process", "ordinal": 1 },
+            "label": "additional context",
+            "occurrence": 1
+          },
+          {
+            "from": { "label": "Golden Dataset", "nodeType": "database", "ordinal": 2 },
+            "to": { "label": "Planner", "nodeType": "process", "ordinal": 1 },
+            "label": "additional context",
+            "occurrence": 1
+          }
+        ],
+        "projectGlossary": [
+          { "term": "Planner" },
+          { "term": "Historical Dataset" },
+          { "term": "Golden Dataset" }
+        ],
+        "pointerAvailable": false
+      },
+      "expected": {
+        "status": "already_satisfied",
+        "actionTypeCounts": {},
+        "selectionCount": 0,
+        "finalState": {
+          "nodeCountDelta": 0,
+          "edgeCountDelta": 0,
+          "requiredEdges": [
+            { "from": { "label": "Historical Dataset" }, "to": { "label": "Planner" }, "label": "additional context" },
+            { "from": { "label": "Golden Dataset" }, "to": { "label": "Planner" }, "label": "additional context" }
           ]
         }
       }

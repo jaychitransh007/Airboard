@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
 import { createHash } from "node:crypto";
 import type { ApiConfig } from "./config";
+import { installationTokenMatches } from "./installationCredential";
 import { bearerToken, verifySignedToken } from "./signedTokens";
 
 export type AccountRole = "owner" | "admin" | "billing" | "member" | "viewer";
@@ -37,8 +38,10 @@ type MembershipRow = {
 
 export class AuthService {
   readonly client: SupabaseClient | null;
+  private readonly config: ApiConfig;
 
-  constructor(private readonly config: ApiConfig) {
+  constructor(config: ApiConfig) {
+    this.config = config;
     this.client =
       config.supabaseUrl && config.supabaseServiceRoleKey
         ? createClient(config.supabaseUrl, config.supabaseServiceRoleKey, {
@@ -80,7 +83,10 @@ export class AuthService {
     }
   }
 
-  async authenticate(request: RequestLike): Promise<AuthContext | null> {
+  async authenticate(
+    request: RequestLike,
+    options: { allowInstallation?: boolean } = {},
+  ): Promise<AuthContext | null> {
     const query = request.query as Record<string, unknown> | undefined;
     const queryToken = typeof query?.access_token === "string" ? query.access_token : null;
     const token = bearerToken(request.headers) ?? queryToken;
@@ -117,17 +123,24 @@ export class AuthService {
       token,
       "installation",
     );
-    if (installation?.installationId && installation.organizationId && this.client) {
+    if (installation) {
+      // Installation credentials are intentionally capability-scoped. They
+      // can reach only the media/session endpoints that explicitly opt in,
+      // never the general account or control-plane API surface.
+      if (!options.allowInstallation) return null;
+      if (!installation.installationId || !installation.organizationId || !this.client) {
+        return null;
+      }
       const { data: installRow } = await this.client
         .from("platform_installations")
-        .select("id,installed_by,organization_id,status,token_hash")
+        .select("id,installed_by,organization_id,status,token_hash,previous_token_hash,previous_token_expires_at")
         .eq("id", installation.installationId)
         .eq("organization_id", installation.organizationId)
         .maybeSingle();
+      const presentedTokenHash = sha256(token);
       if (
         installRow?.installed_by &&
-        installRow.status !== "revoked" &&
-        installRow.token_hash === sha256(token)
+        installationTokenMatches(installRow, presentedTokenHash)
       ) {
         const { data: profile } = await this.client
           .from("profiles")
@@ -135,7 +148,11 @@ export class AuthService {
           .eq("id", installRow.installed_by)
           .maybeSingle();
         if (profile) {
-          const context = await this.contextForProfile(profile as ProfileRow, "installation");
+          const context = await this.contextForProfile(
+            profile as ProfileRow,
+            "installation",
+            installation.organizationId,
+          );
           if (context && context.organizationId === installation.organizationId) return context;
         }
       }
@@ -378,6 +395,7 @@ export class AuthService {
   private async contextForProfile(
     profile: ProfileRow,
     tokenKind: AuthContext["tokenKind"],
+    organizationId?: string,
   ): Promise<AuthContext | null> {
     if (!this.client) {
       return null;
@@ -387,8 +405,9 @@ export class AuthService {
       .select("organization_id,role,status")
       .eq("profile_id", profile.id)
       .eq("status", "active");
-    if (profile.default_organization_id) {
-      membershipQuery = membershipQuery.eq("organization_id", profile.default_organization_id);
+    const targetOrganizationId = organizationId ?? profile.default_organization_id;
+    if (targetOrganizationId) {
+      membershipQuery = membershipQuery.eq("organization_id", targetOrganizationId);
     }
     const { data, error } = await membershipQuery
       .order("created_at", { ascending: true })

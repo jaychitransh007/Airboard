@@ -7,8 +7,9 @@ confirm the decoded remote image, compression quality, and recovery behavior.
 
 ## Prerequisites
 
-- Serve the Airboard build being accepted from an origin allowlisted in
-  `extensions/chrome-meet-bridge/compositor.js`.
+- Serve the Airboard build being accepted from an origin allowlisted by the
+  extension-owned `engine-relay.js`; Meet accepts messages only from that exact
+  mounted relay iframe.
 - Load/reload the unpacked bridge and confirm extension version **0.8.0**.
 - Join one real Meet from the presenter Chrome profile and another from a
   separate browser/device/account. Keep the remote client muted to avoid echo.
@@ -32,7 +33,8 @@ confirm the decoded remote image, compression quality, and recovery behavior.
 4. On the remote client, confirm:
    - labels read normally (not mirrored);
    - the pointer/hand stays aligned at the center and cropped edges;
-   - the person passes in front of ink with a usable hair/shoulder boundary;
+   - the complete diagram remains above the camera image, including where ink
+     crosses the presenter, with no segmentation cut-out or halo claimed;
    - the board contains no Airboard controls, selection feedback, or cursors;
    - motion and glow remain usable after Meet compression.
 5. Turn **Meeting overlay** off in the popup and confirm the existing sender

@@ -1,6 +1,6 @@
 ---
 title: Camera gestures
-description: Perform the shipped hand poses for aiming, choosing, moving, placing, erasing, speaking, undoing, panning, zooming, and hiding.
+description: Perform the shipped hand poses for aiming, choosing, moving, placing, erasing, speaking, panning, zooming, and hiding.
 category: using-the-board
 categoryLabel: Using the board
 order: 6
@@ -41,14 +41,13 @@ holding state, position the preview, then reopen.
 Choose **Eraser**. Close over an object, wait for the erase state, sweep across
 the intended targets, then reopen.
 
-## Speak and undo
+## Speak to Airo
 
 Hold one open palm still, without sideways motion, for about 0.4 seconds to
 open push-to-talk. Lower or relax it when finished.
 
-For undo, show one open palm and deliberately swipe left. Release the palm
-before performing another undo. A still palm addresses Airo; sideways movement
-is what distinguishes undo.
+Camera motion does not trigger Undo. Use the board toolbar, press
+`Cmd/Ctrl+Z`, or say “Airo, undo.”
 
 ## Pan, zoom, and hide
 

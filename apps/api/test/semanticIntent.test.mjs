@@ -309,8 +309,12 @@ test("uses one required strict Responses function tool and captures provider met
   assert.match(payload.instructions, /service gets fired/i);
   assert.match(payload.instructions, /Authentication Service to Airboard Page/i);
   assert.match(payload.instructions, /Airboard Authentication Service to User/i);
+  assert.match(payload.instructions, /relation-only request/i);
+  assert.match(payload.instructions, /Recipient constructions reverse/i);
+  assert.match(payload.instructions, /Golden Dataset to Planner/i);
+  assert.match(payload.instructions, /create no Schema Data node/i);
   const modelInput = JSON.parse(payload.input);
-  assert.equal(AIRBOARD_SEMANTIC_INTENT_PROMPT_VERSION, "2.7");
+  assert.equal(AIRBOARD_SEMANTIC_INTENT_PROMPT_VERSION, "2.8");
   assert.equal(
     modelInput.semanticPlanContractVersion,
     AIRBOARD_SEMANTIC_PLAN_CONTRACT_VERSION,

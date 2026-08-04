@@ -2,6 +2,28 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ApiConfig } from "./config";
 import { AuthService, type AccountRole, type AuthContext } from "./auth";
+import {
+  CHROME_BRIDGE_MARKER,
+  CHROME_BRIDGE_PROTOCOL_VERSION,
+  CHROME_EXTENSION_VERSION,
+  chromeStatusHandshakeError,
+  parseChromeExtensionCompatibilityHeaders,
+} from "./chromeExtensionCompatibility";
+import {
+  chromeExtensionPackageAllowed,
+  parseChromeInstallationIdentity,
+  type ChromeInstallationIdentity,
+} from "./chromeInstallationIdentity";
+import {
+  chromePreflightVersionSupported,
+  chromeStatusDependencyFailure,
+  parseChromePreflightEvidence,
+} from "./chromeInstallationState";
+import { reconcileChromeInstallationIdentity } from "./chromeInstallationReconciliation";
+import {
+  effectiveChromeExtensionPolicy,
+  failClosedChromeExtensionPolicy,
+} from "./chromeExtensionPolicy";
 import { bearerToken, issueSignedToken, verifySignedToken } from "./signedTokens";
 
 const TRIAL_DURATION_MS = 72 * 60 * 60 * 1_000;
@@ -34,6 +56,19 @@ const ANALYTICS_EVENT_NAMES = new Set([
 const FORBIDDEN_ANALYTICS_KEYS = /audio|video|transcript|meeting.?url|meeting.?title|board.?text|label|token|secret|password|content/i;
 
 type JsonRecord = Record<string, unknown>;
+type ChromeCredentialRotationResult = {
+  installation_id: string;
+  rotation_mode: "rotated" | "promoted";
+};
+type ChromePreflightCommitResult = {
+  installed_by: string;
+  trial_activated: boolean;
+  trial_expires_at: string | null;
+};
+type ChromeConsentCommitResult = {
+  installed_by: string;
+  consented_at: string;
+};
 
 export function registerControlPlaneRoutes(
   server: FastifyInstance,
@@ -44,6 +79,15 @@ export function registerControlPlaneRoutes(
     supabaseEnabled: auth.enabled,
     developmentAccessEnabled: config.localEntitlements,
     providers: await auth.providerAvailability(),
+  }));
+
+  server.get("/integrations/extension/compatibility", async () => ({
+    bridge: CHROME_BRIDGE_MARKER,
+    protocolVersion: CHROME_BRIDGE_PROTOCOL_VERSION,
+    extensionVersion: CHROME_EXTENSION_VERSION,
+    compatibleExtensionVersions: config.chromeExtensionCompatibleVersions,
+    extensionId: config.chromeExtensionId ?? null,
+    enabled: config.chromeExtensionEnabled,
   }));
 
   server.post("/auth/development", async (request, reply) => {
@@ -456,11 +500,14 @@ function registerIntegrationRoutes(server: FastifyInstance, config: ApiConfig, a
     const context = await requireAuth(auth, request, reply);
     if (!context) return;
     if (!auth.client) return { installations: [] };
-    const { data, error } = await auth.client
+    let installationQuery = auth.client
       .from("platform_installations")
-      .select("id,platform,status,version,settings,external_installation_id,consented_at,last_seen_at,last_success_at,last_error_code,created_at")
-      .eq("organization_id", context.organizationId)
-      .order("created_at", { ascending: false });
+      .select("id,platform,status,version,settings,external_installation_id,external_package_id,consented_at,last_seen_at,last_success_at,last_error_code,created_at")
+      .eq("organization_id", context.organizationId);
+    if (!auth.hasRole(context, ADMIN_ROLES)) {
+      installationQuery = installationQuery.eq("installed_by", context.profileId);
+    }
+    const { data, error } = await installationQuery.order("created_at", { ascending: false });
     if (error) return reply.code(500).send({ error: "INSTALLATION_LIST_FAILED" });
     return { installations: data ?? [] };
   });
@@ -492,45 +539,113 @@ function registerIntegrationRoutes(server: FastifyInstance, config: ApiConfig, a
   server.post<{ Body: unknown }>("/integrations/extension-link", async (request, reply) => {
     const context = await requireAuth(auth, request, reply);
     if (!context) return;
+    if (!config.chromeExtensionEnabled) {
+      return reply.code(503).send({ error: "CHROME_EXTENSION_DISABLED" });
+    }
     const body = record(request.body);
-    const externalInstallationId = boundedString(body.extensionId, 8, 128);
-    if (!externalInstallationId) return reply.code(400).send({ error: "EXTENSION_ID_REQUIRED" });
+    const identity = parseChromeInstallationIdentity(body);
+    if (!identity.ok) return reply.code(400).send({ error: identity.error });
+    if (!chromeExtensionPackageAllowed(identity.value.packageId, config.chromeExtensionId)) {
+      return reply.code(403).send({ error: "INSTALLATION_PACKAGE_MISMATCH" });
+    }
+    const externalPackageId = identity.value.packageId;
+    const externalInstallationId = identity.value.instanceId;
     if (!auth.client) return reply.code(503).send({ error: "CONTROL_PLANE_UNAVAILABLE" });
-    const { data: installation, error } = await auth.client
+    const { data: existingInstallation, error: existingError } = await auth.client
       .from("platform_installations")
-      .upsert(
-        {
+      .select("id,installed_by,status,link_token_hash")
+      .eq("organization_id", context.organizationId)
+      .eq("platform", "chrome_meet")
+      .eq("external_installation_id", externalInstallationId)
+      .maybeSingle();
+    if (existingError) return reply.code(500).send({ error: "INSTALLATION_LINK_FAILED" });
+    if (
+      existingInstallation &&
+      !auth.hasRole(context, ADMIN_ROLES) &&
+      existingInstallation.installed_by !== context.profileId
+    ) {
+      return reply.code(403).send({ error: "INSTALLATION_ACCESS_REQUIRED" });
+    }
+    const installationId = existingInstallation?.id ?? crypto.randomUUID();
+    const linkToken = issueSignedToken(config.sessionSigningSecret, {
+      purpose: "installation_link",
+      sub: context.profileId,
+      organizationId: context.organizationId,
+      installationId,
+      ttlSeconds: 10 * 60,
+    });
+    const linkExpiresAt = new Date(Date.now() + 10 * 60 * 1_000).toISOString();
+    const linkCredential = {
+      external_package_id: externalPackageId,
+      version: boundedString(body.version, 1, 40),
+      link_token_hash: sha256(linkToken),
+      link_token_expires_at: linkExpiresAt,
+      updated_at: new Date().toISOString(),
+    };
+    let linkSave;
+    if (existingInstallation) {
+      const revivingRevoked = existingInstallation.status === "revoked";
+      let linkSaveQuery = auth.client
+        .from("platform_installations")
+        .update({
+          ...linkCredential,
+          ...(revivingRevoked
+            ? {
+                status: "pending",
+                token_hash: null,
+                token_expires_at: null,
+                previous_token_hash: null,
+                previous_token_expires_at: null,
+              }
+            : {}),
+        })
+        .eq("id", installationId)
+        .eq("organization_id", context.organizationId)
+        .eq("platform", "chrome_meet")
+        .eq("external_installation_id", externalInstallationId)
+        .eq("status", existingInstallation.status);
+      linkSaveQuery = existingInstallation.link_token_hash
+        ? linkSaveQuery.eq("link_token_hash", existingInstallation.link_token_hash)
+        : linkSaveQuery.is("link_token_hash", null);
+      if (!auth.hasRole(context, ADMIN_ROLES)) {
+        linkSaveQuery = linkSaveQuery.eq("installed_by", context.profileId);
+      }
+      linkSave = await linkSaveQuery.select("id").maybeSingle();
+    } else {
+      linkSave = await auth.client
+        .from("platform_installations")
+        .insert({
+          id: installationId,
           organization_id: context.organizationId,
           installed_by: context.profileId,
           platform: "chrome_meet",
           external_installation_id: externalInstallationId,
           status: "pending",
-          version: boundedString(body.version, 1, 40),
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "organization_id,platform,external_installation_id" },
-      )
-      .select("id")
-      .single();
-    if (error || !installation) return reply.code(500).send({ error: "INSTALLATION_LINK_FAILED" });
-    const linkToken = issueSignedToken(config.sessionSigningSecret, {
-      purpose: "installation_link",
-      sub: context.profileId,
-      organizationId: context.organizationId,
-      installationId: installation.id,
-      ttlSeconds: 10 * 60,
-    });
-    await writeAudit(auth, context, request, "installation.link_started", "installation", installation.id);
-    return { linkToken, installationId: installation.id, expiresIn: 600 };
+          ...linkCredential,
+        })
+        .select("id")
+        .maybeSingle();
+    }
+    const { data: linkedInstallation, error: linkSaveError } = linkSave;
+    // A concurrent link/revoke is safe: no current credential was cleared, and
+    // only the request that won the compare-and-set receives a usable link.
+    if (linkSaveError || !linkedInstallation) {
+      return reply.code(409).send({ error: "INSTALLATION_LINK_CONFLICT" });
+    }
+    await writeAudit(auth, context, request, "installation.link_started", "installation", installationId);
+    return { linkToken, installationId, expiresIn: 600 };
   });
 
   server.post<{ Body: unknown }>("/integrations/extension-exchange", async (request, reply) => {
+    if (!config.chromeExtensionEnabled) {
+      return reply.code(503).send({ error: "CHROME_EXTENSION_DISABLED" });
+    }
     const body = record(request.body);
     const linkToken = boundedString(body.linkToken, 20, 4_096);
     const claims = linkToken
       ? verifySignedToken(config.sessionSigningSecret, linkToken, "installation_link")
       : null;
-    if (!claims?.installationId || !claims.organizationId || !auth.client) {
+    if (!linkToken || !claims?.installationId || !claims.organizationId || !auth.client) {
       return reply.code(401).send({ error: "INVALID_LINK_TOKEN" });
     }
     const installationToken = issueSignedToken(config.sessionSigningSecret, {
@@ -541,20 +656,32 @@ function registerIntegrationRoutes(server: FastifyInstance, config: ApiConfig, a
       ttlSeconds: 90 * 24 * 60 * 60,
     });
     const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1_000).toISOString();
-    const { error } = await auth.client
+    let exchangeQuery = auth.client
       .from("platform_installations")
       .update({
+        installed_by: claims.sub,
         status: "connected",
         token_hash: sha256(installationToken),
         previous_token_hash: null,
         previous_token_expires_at: null,
         token_expires_at: expiresAt,
+        link_token_hash: null,
+        link_token_expires_at: null,
         last_seen_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
       .eq("id", claims.installationId)
-      .eq("organization_id", claims.organizationId);
-    if (error) return reply.code(500).send({ error: "INSTALLATION_EXCHANGE_FAILED" });
+      .eq("organization_id", claims.organizationId)
+      .eq("link_token_hash", sha256(linkToken))
+      .neq("status", "revoked")
+      .gt("link_token_expires_at", new Date().toISOString());
+    if (config.chromeExtensionId) {
+      exchangeQuery = exchangeQuery.eq("external_package_id", config.chromeExtensionId);
+    }
+    const { data, error } = await exchangeQuery
+      .select("id")
+      .maybeSingle();
+    if (error || !data) return reply.code(401).send({ error: "INVALID_LINK_TOKEN" });
     return { installationToken, expiresIn: 90 * 24 * 60 * 60, expiresAt };
   });
 
@@ -562,32 +689,71 @@ function registerIntegrationRoutes(server: FastifyInstance, config: ApiConfig, a
     const installation = await requireInstallation(config, auth, request, reply);
     if (!installation) return;
     if (!auth.client) return reply.code(503).send({ error: "CONTROL_PLANE_UNAVAILABLE" });
-    const refreshedToken = issueSignedToken(config.sessionSigningSecret, {
-      purpose: "installation",
-      sub: installation.profileId,
-      organizationId: installation.organizationId,
-      installationId: installation.installationId,
-      ttlSeconds: 90 * 24 * 60 * 60,
-    });
-    const refreshedExpiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1_000).toISOString();
-    const { error: refreshError } = await auth.client
-      .from("platform_installations")
-      .update({
-        previous_token_hash: installation.presentedTokenHash,
-        previous_token_expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1_000).toISOString(),
-        token_hash: sha256(refreshedToken),
-        token_expires_at: refreshedExpiresAt,
-        last_seen_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", installation.installationId)
-      .eq("organization_id", installation.organizationId);
-    if (refreshError) return reply.code(503).send({ error: "INSTALLATION_TOKEN_REFRESH_FAILED" });
+    const presentedCompatibility = parseChromeExtensionCompatibilityHeaders(
+      request.headers,
+      config.chromeExtensionCompatibleVersions,
+    );
+    if (!presentedCompatibility.ok) {
+      return reply.code(409).send({ error: presentedCompatibility.error });
+    }
+    const presentedIdentity = chromeInstallationIdentityFromHeaders(request);
+    if (!presentedIdentity.ok) {
+      return reply.code(400).send({ error: presentedIdentity.error });
+    }
+    const storedIdentity = {
+      platform: installation.platform,
+      externalInstallationId: installation.externalInstallationId,
+      externalPackageId: installation.externalPackageId,
+    };
+    const handshakeError = chromeStatusHandshakeError(
+      storedIdentity,
+      presentedIdentity.value,
+      presentedCompatibility.value,
+    );
+    if (handshakeError) {
+      return reply.code(409).send({ error: handshakeError });
+    }
+    if (presentedIdentity.value) {
+      const reconciliation = reconcileChromeInstallationIdentity(
+        storedIdentity,
+        presentedIdentity.value,
+      );
+      if (!reconciliation.ok) {
+        return reply.code(409).send({ error: reconciliation.error });
+      }
+      if (reconciliation.action === "migrate") {
+        const { data: migratedInstallation, error: migrationError } = await auth.client
+          .from("platform_installations")
+          .update({
+            external_installation_id: reconciliation.externalInstallationId,
+            external_package_id: reconciliation.externalPackageId,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", installation.installationId)
+          .eq("organization_id", installation.organizationId)
+          .eq("external_installation_id", installation.externalInstallationId)
+          .select("id")
+          .maybeSingle();
+        if (migrationError || !migratedInstallation) {
+          return reply.code(409).send({ error: "INSTALLATION_IDENTITY_MIGRATION_CONFLICT" });
+        }
+      }
+    }
+    const responseCompatibility = {
+      bridge: CHROME_BRIDGE_MARKER,
+      protocolVersion: CHROME_BRIDGE_PROTOCOL_VERSION,
+      // Once the compatibility parser accepts an overlap window, echo the
+      // validated client version so existing background builds can keep their
+      // exact equality check throughout a staged Web Store rollout.
+      extensionVersion:
+        presentedCompatibility.value?.extensionVersion ?? CHROME_EXTENSION_VERSION,
+    };
     const [installationResult, policyResult, entitlementResult] = await Promise.all([
       auth.client
         .from("platform_installations")
-        .select("id,status,version,settings,consented_at,last_error_code")
+        .select("id,status,version,settings,external_installation_id,external_package_id,consented_at,last_error_code")
         .eq("id", installation.installationId)
+        .eq("organization_id", installation.organizationId)
         .single(),
       auth.client
         .from("organization_policies")
@@ -604,12 +770,75 @@ function registerIntegrationRoutes(server: FastifyInstance, config: ApiConfig, a
         .maybeSingle(),
     ]);
     if (installationResult.error) return reply.code(404).send({ error: "INSTALLATION_NOT_FOUND" });
+    if (installationResult.data.status === "revoked") {
+      return reply.code(401).send({ error: "INSTALLATION_TOKEN_REVOKED" });
+    }
+    const dependencyFailure = chromeStatusDependencyFailure({
+      policyError: policyResult.error,
+      policy: policyResult.data,
+      entitlementError: entitlementResult.error,
+      entitlement: entitlementResult.data,
+    });
+    if (dependencyFailure) {
+      // A non-2xx response would make the background honor its cached allow
+      // decision until freshness expires. Return a valid, explicitly denied
+      // status instead, without rotating the credential, so media stops now
+      // and the same browser token can retry after the dependency recovers.
+      return {
+        installation: {
+          ...installationResult.data,
+          last_error_code: dependencyFailure,
+        },
+        policy: failClosedChromeExtensionPolicy(policyResult.data),
+        entitlement: null,
+        compatibility: responseCompatibility,
+        degraded: { code: dependencyFailure },
+        serverTime: new Date().toISOString(),
+      };
+    }
+    const policy = effectiveChromeExtensionPolicy(
+      policyResult.data,
+      config.chromeExtensionEnabled,
+    );
+    const refreshedToken = issueSignedToken(config.sessionSigningSecret, {
+      purpose: "installation",
+      sub: installation.profileId,
+      organizationId: installation.organizationId,
+      installationId: installation.installationId,
+      ttlSeconds: 90 * 24 * 60 * 60,
+    });
+    const refreshedExpiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1_000).toISOString();
+    const { data: refreshedInstallation, error: refreshError } = await auth.client
+      .rpc("rotate_chrome_installation_credential", {
+        p_installation_id: installation.installationId,
+        p_organization_id: installation.organizationId,
+        p_presented_token_hash: installation.presentedTokenHash,
+        p_presented_token_expires_at: installation.presentedTokenExpiresAt,
+        p_new_token_hash: sha256(refreshedToken),
+        p_token_expires_at: refreshedExpiresAt,
+        p_previous_token_expires_at: new Date(
+          Date.now() + 7 * 24 * 60 * 60 * 1_000,
+        ).toISOString(),
+      })
+      .maybeSingle();
+    if (refreshError) return reply.code(503).send({ error: "INSTALLATION_TOKEN_REFRESH_FAILED" });
+    const rotation = refreshedInstallation as ChromeCredentialRotationResult | null;
+    if (!rotation) {
+      return reply.code(409).send({ error: "INSTALLATION_TOKEN_ROTATION_CONFLICT" });
+    }
+    const promotedPrevious = rotation.rotation_mode === "promoted";
+    if (!promotedPrevious && rotation.rotation_mode !== "rotated") {
+      return reply.code(503).send({ error: "INSTALLATION_TOKEN_REFRESH_FAILED" });
+    }
     return {
       installation: installationResult.data,
-      policy: policyResult.data,
+      policy,
       entitlement: entitlementResult.data,
-      installationToken: refreshedToken,
-      tokenExpiresAt: refreshedExpiresAt,
+      installationToken: promotedPrevious ? installation.presentedToken : refreshedToken,
+      tokenExpiresAt: promotedPrevious
+        ? installation.presentedTokenExpiresAt
+        : refreshedExpiresAt,
+      compatibility: responseCompatibility,
       serverTime: new Date().toISOString(),
     };
   });
@@ -617,6 +846,9 @@ function registerIntegrationRoutes(server: FastifyInstance, config: ApiConfig, a
   server.patch<{ Body: unknown }>("/integrations/extension/settings", async (request, reply) => {
     const installation = await requireInstallation(config, auth, request, reply);
     if (!installation) return;
+    if (!config.chromeExtensionEnabled) {
+      return reply.code(503).send({ error: "CHROME_EXTENSION_DISABLED" });
+    }
     const settings = booleanSettings(record(request.body), [
       "overlayEnabled", "neonTheme", "videoEnabled", "audioEnabled", "personOcclusion",
     ]);
@@ -627,8 +859,12 @@ function registerIntegrationRoutes(server: FastifyInstance, config: ApiConfig, a
       auth.client.from("organization_policies").select("allowed_platforms,camera_enabled,voice_enabled,gesture_enabled").eq("organization_id", installation.organizationId).maybeSingle(),
     ]);
     if (currentResult.error || !currentResult.data) return reply.code(404).send({ error: "INSTALLATION_NOT_FOUND" });
+    if (policyResult.error || !policyResult.data) {
+      return reply.code(503).send({ error: "INSTALLATION_POLICY_UNAVAILABLE" });
+    }
     const policy = policyResult.data;
-    const allowedPlatform = !policy || !Array.isArray(policy.allowed_platforms) || policy.allowed_platforms.includes("chrome_meet");
+    const allowedPlatform = Array.isArray(policy.allowed_platforms) &&
+      policy.allowed_platforms.includes("chrome_meet");
     const nextSettings = { ...(record(currentResult.data.settings)), ...settings };
     if (!allowedPlatform) nextSettings.overlayEnabled = false;
     if (policy?.camera_enabled === false) {
@@ -641,6 +877,7 @@ function registerIntegrationRoutes(server: FastifyInstance, config: ApiConfig, a
       .update({ settings: nextSettings, last_seen_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq("id", installation.installationId)
       .eq("organization_id", installation.organizationId)
+      .neq("status", "revoked")
       .select("id,settings")
       .maybeSingle();
     if (error || !data) return reply.code(404).send({ error: "INSTALLATION_NOT_FOUND" });
@@ -651,10 +888,25 @@ function registerIntegrationRoutes(server: FastifyInstance, config: ApiConfig, a
     const context = await requireAuth(auth, request, reply);
     if (!context) return;
     if (!auth.client || !boundedUuid(request.params.installationId)) return reply.code(404).send({ error: "INSTALLATION_NOT_FOUND" });
+    const { data: existingInstallation, error: lookupError } = await auth.client
+      .from("platform_installations")
+      .select("id,installed_by")
+      .eq("id", request.params.installationId)
+      .eq("organization_id", context.organizationId)
+      .maybeSingle();
+    if (lookupError || !existingInstallation) {
+      return reply.code(404).send({ error: "INSTALLATION_NOT_FOUND" });
+    }
+    if (
+      !auth.hasRole(context, ADMIN_ROLES) &&
+      existingInstallation.installed_by !== context.profileId
+    ) {
+      return reply.code(403).send({ error: "INSTALLATION_ACCESS_REQUIRED" });
+    }
     const settings = booleanSettings(record(request.body).settings, ["overlayEnabled", "neonTheme", "videoEnabled", "audioEnabled", "personOcclusion"]);
     const status = record(request.body).revoked === true ? "revoked" : undefined;
     if (!Object.keys(settings).length && !status) return reply.code(400).send({ error: "INSTALLATION_CHANGE_REQUIRED" });
-    const update: JsonRecord = { updated_at: new Date().toISOString(), ...(Object.keys(settings).length ? { settings } : {}), ...(status ? { status, token_hash: null, token_expires_at: null, previous_token_hash: null, previous_token_expires_at: null } : {}) };
+    const update: JsonRecord = { updated_at: new Date().toISOString(), ...(Object.keys(settings).length ? { settings } : {}), ...(status ? { status, token_hash: null, token_expires_at: null, previous_token_hash: null, previous_token_expires_at: null, link_token_hash: null, link_token_expires_at: null } : {}) };
     const { data, error } = await auth.client.from("platform_installations").update(update)
       .eq("id", request.params.installationId).eq("organization_id", context.organizationId)
       .select("id,status,settings").maybeSingle();
@@ -666,31 +918,29 @@ function registerIntegrationRoutes(server: FastifyInstance, config: ApiConfig, a
   server.post<{ Body: unknown }>("/integrations/extension/consent", async (request, reply) => {
     const installation = await requireInstallation(config, auth, request, reply);
     if (!installation) return;
+    if (!config.chromeExtensionEnabled) {
+      return reply.code(503).send({ error: "CHROME_EXTENSION_DISABLED" });
+    }
     const body = record(request.body);
     if (body.camera !== true || body.microphone !== true || body.voiceProcessing !== true) {
       return reply.code(400).send({ error: "AFFIRMATIVE_CONSENT_REQUIRED" });
     }
     if (!auth.client) return reply.code(503).send({ error: "CONTROL_PLANE_UNAVAILABLE" });
-    const consentedAt = new Date().toISOString();
-    const { data: installRow, error } = await auth.client
-      .from("platform_installations")
-      .update({ consented_at: consentedAt, updated_at: consentedAt })
-      .eq("id", installation.installationId)
-      .select("installed_by")
-      .single();
-    if (error || !installRow?.installed_by) return reply.code(500).send({ error: "CONSENT_SAVE_FAILED" });
-    await auth.client.from("consent_records").insert(
-      ["camera", "microphone", "voice_processing"].map((consentType) => ({
-        profile_id: installRow.installed_by,
-        organization_id: installation.organizationId,
-        installation_id: installation.installationId,
-        consent_type: consentType,
-        document_version: "2026-07-18",
-        granted: true,
-        source: "chrome_extension_popup",
-      })),
-    );
-    return { consented: true, consentedAt };
+    const { data: consent, error: consentError } = await auth.client
+      .rpc("commit_chrome_installation_consent", {
+        p_installation_id: installation.installationId,
+        p_organization_id: installation.organizationId,
+        p_presented_token_hash: installation.presentedTokenHash,
+      })
+      .maybeSingle();
+    if (consentError) {
+      return reply.code(503).send({ error: "INSTALLATION_CONSENT_COMMIT_FAILED" });
+    }
+    const committedConsent = consent as ChromeConsentCommitResult | null;
+    if (!committedConsent?.installed_by || !committedConsent.consented_at) {
+      return reply.code(409).send({ error: "INSTALLATION_CONSENT_CONFLICT" });
+    }
+    return { consented: true, consentedAt: committedConsent.consented_at };
   });
 
   server.post<{ Body: unknown }>(
@@ -698,124 +948,68 @@ function registerIntegrationRoutes(server: FastifyInstance, config: ApiConfig, a
     async (request, reply) => {
       const installation = await requireInstallation(config, auth, request, reply);
       if (!installation) return;
+      if (!config.chromeExtensionEnabled) {
+        return reply.code(503).send({ error: "CHROME_EXTENSION_DISABLED" });
+      }
       const body = record(request.body);
-      const framesEncoded = boundedInteger(body.framesEncoded, 1, 1_000_000_000);
-      const outboundBytes = boundedInteger(body.bytesSent, 1, Number.MAX_SAFE_INTEGER);
-      if (body.senderAttached !== true || !framesEncoded || !outboundBytes || !auth.client) {
+      const evidence = parseChromePreflightEvidence(body);
+      if (!evidence.ok || !auth.client) {
         return reply.code(400).send({ error: "VERIFIED_OUTBOUND_COMPOSITE_REQUIRED" });
       }
+      if (!chromePreflightVersionSupported(
+        evidence.value.extensionVersion,
+        config.chromeExtensionCompatibleVersions,
+      )) {
+        return reply.code(409).send({ error: "DEPLOYMENT_VERSION_MISMATCH" });
+      }
+      const {
+        framesComposited,
+        framesEncoded,
+        bytesSent: outboundBytes,
+        extensionVersion,
+      } = evidence.value;
       const now = new Date();
-      const { data: installationRow, error: installationError } = await auth.client
-        .from("platform_installations")
-        .update({
-          status: "connected",
-          version: boundedString(body.extensionVersion, 1, 40),
-          last_success_at: now.toISOString(),
-          last_seen_at: now.toISOString(),
-          last_error_code: null,
-          updated_at: now.toISOString(),
+      const { data: preflight, error: preflightError } = await auth.client
+        .rpc("complete_chrome_installation_preflight", {
+          p_installation_id: installation.installationId,
+          p_organization_id: installation.organizationId,
+          p_presented_token_hash: installation.presentedTokenHash,
+          p_extension_version: extensionVersion,
         })
-        .eq("id", installation.installationId)
-        .not("consented_at", "is", null)
-        .select("installed_by")
         .maybeSingle();
-      if (installationError || !installationRow?.installed_by) {
-        return reply.code(409).send({ error: "MEDIA_CONSENT_REQUIRED" });
+      if (preflightError) {
+        return reply.code(503).send({ error: "INSTALLATION_PREFLIGHT_COMMIT_FAILED" });
       }
-      const { data: trial } = await auth.client
-        .from("trial_eligibility")
-        .select("id,status")
-        .eq("organization_id", installation.organizationId)
-        .maybeSingle();
-      let trialExpiresAt: string | null = null;
-      if (trial?.status === "eligible") {
-        trialExpiresAt = new Date(now.getTime() + TRIAL_DURATION_MS).toISOString();
-        const { data: activated } = await auth.client
-          .from("trial_eligibility")
-          .update({
-            status: "activated",
-            activated_at: now.toISOString(),
-            expires_at: trialExpiresAt,
-            activation_source: "chrome_meet_sender_verified",
-            updated_at: now.toISOString(),
-          })
-          .eq("id", trial.id)
-          .eq("status", "eligible")
-          .select("id")
-          .maybeSingle();
-        if (activated) {
-          await auth.client
-            .from("entitlements")
-            .update({
-              plan: "personal_trial",
-              status: "trialing",
-              source: "trial",
-              starts_at: now.toISOString(),
-              valid_until: trialExpiresAt,
-              updated_at: now.toISOString(),
-            })
-            .eq("organization_id", installation.organizationId)
-            .eq("source", "trial");
-          const { data: profile } = await auth.client
-            .from("profiles")
-            .select("email,display_name")
-            .eq("id", installationRow.installed_by)
-            .maybeSingle();
-          if (profile?.email) {
-            await auth.client.from("notification_jobs").insert([
-              {
-                organization_id: installation.organizationId,
-                profile_id: installationRow.installed_by,
-                template_key: "trial_welcome",
-                recipient_email: profile.email,
-                payload: { displayName: profile.display_name, expiresAt: trialExpiresAt },
-                send_after: now.toISOString(),
-              },
-              {
-                organization_id: installation.organizationId,
-                profile_id: installationRow.installed_by,
-                template_key: "trial_24_hours_remaining",
-                recipient_email: profile.email,
-                payload: { displayName: profile.display_name, expiresAt: trialExpiresAt },
-                send_after: new Date(new Date(trialExpiresAt).getTime() - 24 * 60 * 60 * 1_000).toISOString(),
-              },
-              {
-                organization_id: installation.organizationId,
-                profile_id: installationRow.installed_by,
-                template_key: "trial_6_hours_remaining",
-                recipient_email: profile.email,
-                payload: { displayName: profile.display_name, expiresAt: trialExpiresAt },
-                send_after: new Date(new Date(trialExpiresAt).getTime() - 6 * 60 * 60 * 1_000).toISOString(),
-              },
-              {
-                organization_id: installation.organizationId,
-                profile_id: installationRow.installed_by,
-                template_key: "trial_expired",
-                recipient_email: profile.email,
-                payload: { displayName: profile.display_name, expiresAt: trialExpiresAt },
-                send_after: trialExpiresAt,
-              },
-            ]);
-          }
-        }
+      const committedPreflight = preflight as ChromePreflightCommitResult | null;
+      if (!committedPreflight?.installed_by) {
+        return reply.code(409).send({ error: "INSTALLATION_PREFLIGHT_CONFLICT" });
       }
+      const trialExpiresAt = committedPreflight.trial_activated && committedPreflight.trial_expires_at
+        ? committedPreflight.trial_expires_at
+        : null;
       await Promise.all([
         auth.client.from("product_events").upsert(
           {
             event_id: `extension-preflight-${installation.installationId}`,
-            profile_id: installationRow.installed_by,
+            profile_id: committedPreflight.installed_by,
             organization_id: installation.organizationId,
             installation_id: installation.installationId,
             event_name: "preflight.passed",
             schema_version: 1,
-            properties: { platform: "chrome_meet", senderAttached: true },
+            properties: {
+              platform: "chrome_meet",
+              senderAttached: true,
+              framesComposited,
+              framesEncoded,
+              bytesSent: outboundBytes,
+            },
             occurred_at: now.toISOString(),
           },
           { onConflict: "event_id", ignoreDuplicates: true },
         ),
         auth.client.from("audit_events").insert({
           organization_id: installation.organizationId,
-          actor_profile_id: installationRow.installed_by,
+          actor_profile_id: committedPreflight.installed_by,
           actor_type: "system",
           action: "installation.preflight_passed",
           target_type: "installation",
@@ -1892,7 +2086,7 @@ async function requireInstallation(
   }
   const { data } = await auth.client
     .from("platform_installations")
-    .select("id,organization_id,token_hash,previous_token_hash,previous_token_expires_at,status")
+    .select("id,organization_id,platform,external_installation_id,external_package_id,token_hash,previous_token_hash,previous_token_expires_at,status")
     .eq("id", claims.installationId)
     .eq("organization_id", claims.organizationId)
     .maybeSingle();
@@ -1902,11 +2096,55 @@ async function requireInstallation(
     && data.previous_token_expires_at
     && new Date(data.previous_token_expires_at).getTime() > Date.now(),
   );
-  if (!token || !data || data.status === "revoked" || (data.token_hash !== presentedTokenHash && !previousStillValid)) {
+  if (
+    !token ||
+    !data ||
+    typeof data.token_hash !== "string" ||
+    data.status === "revoked" ||
+    (data.token_hash !== presentedTokenHash && !previousStillValid)
+  ) {
     reply.code(401).send({ error: "INSTALLATION_TOKEN_REVOKED" });
     return null;
   }
-  return { installationId: data.id, organizationId: data.organization_id, profileId: claims.sub, presentedTokenHash };
+  const storedPackageId = data.external_package_id ?? data.external_installation_id;
+  if (
+    data.platform === "chrome_meet" &&
+    !chromeExtensionPackageAllowed(storedPackageId, config.chromeExtensionId)
+  ) {
+    reply.code(401).send({ error: "INSTALLATION_PACKAGE_MISMATCH" });
+    return null;
+  }
+  return {
+    installationId: data.id,
+    organizationId: data.organization_id,
+    profileId: claims.sub,
+    presentedToken: token,
+    presentedTokenHash: presentedTokenHash as string,
+    presentedTokenExpiresAt: new Date(claims.exp * 1_000).toISOString(),
+    currentTokenHash: data.token_hash,
+    platform: data.platform,
+    externalInstallationId: data.external_installation_id,
+    externalPackageId: data.external_package_id,
+  };
+}
+
+function chromeInstallationIdentityFromHeaders(request: FastifyRequest):
+  | { ok: true; value: ChromeInstallationIdentity | null }
+  | { ok: false; error: "EXTENSION_ID_REQUIRED" | "INSTALLATION_INSTANCE_ID_REQUIRED" } {
+  const extensionId = singleHeader(request.headers["x-airboard-extension-id"]);
+  const installationInstanceId = singleHeader(
+    request.headers["x-airboard-installation-instance-id"],
+  );
+  if (!extensionId && !installationInstanceId) {
+    // Pre-identity clients remain operational while the web/API are deployed
+    // ahead of the extension. They are upgraded on their first 0.8+ refresh.
+    return { ok: true, value: null };
+  }
+  return parseChromeInstallationIdentity({ extensionId, installationInstanceId });
+}
+
+function singleHeader(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value.join(",") : value;
 }
 
 async function defaultWorkspaceId(auth: AuthService, organizationId: string): Promise<string | null> {

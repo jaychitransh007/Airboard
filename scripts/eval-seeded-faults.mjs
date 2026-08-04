@@ -896,7 +896,6 @@ async function coordinateSeededGesture(recorder, phase, winner) {
         stages: {
           navigation: { update: () => winner === "navigation" },
           snap: { update: () => false },
-          undo: { update: () => false },
           voice: { observe: () => undefined },
           manipulation: {
             run: () => {

@@ -705,6 +705,243 @@
       }
     },
     {
+      "id": "deepgram-replay-observed-dataset-drift-recovers-downstream",
+      "adapter": "deepgram-replay",
+      "semanticAdapter": "recorded-replay",
+      "privacyClass": "redacted",
+      "evaluationClass": "narrative",
+      "channel": "ptt",
+      "processingPath": "semantic",
+      "source": {
+        "messages": [
+          {
+            "type": "TurnInfo",
+            "event": "EndOfTurn",
+            "turn_index": 21,
+            "transcript": "So this will accept the additional content from the schema data and another additional context from the historical dataset.",
+            "end_of_turn_confidence": 0.7422
+          },
+          {
+            "type": "TurnInfo",
+            "event": "EndOfTurn",
+            "turn_index": 21,
+            "transcript": "So this will accept the additional content from the schema data and another additional context from the historical dataset.",
+            "end_of_turn_confidence": 0.7422
+          }
+        ],
+        "semanticPlan": {
+          "version": "1.1",
+          "status": "resolved",
+          "issueCode": "none",
+          "clarificationQuestion": null,
+          "missingSlots": [],
+          "actions": [
+            {
+              "type": "connect",
+              "from": {
+                "kind": "visible_label",
+                "label": "Golden Dataset",
+                "occurrence": null
+              },
+              "to": {
+                "kind": "visible_label",
+                "label": "Planner",
+                "occurrence": null
+              },
+              "label": "additional context"
+            },
+            {
+              "type": "connect",
+              "from": {
+                "kind": "visible_label",
+                "label": "Historical Data",
+                "occurrence": null
+              },
+              "to": {
+                "kind": "visible_label",
+                "label": "Planner",
+                "occurrence": null
+              },
+              "label": "additional context"
+            }
+          ]
+        }
+      },
+      "context": {
+        "selectionCount": 1,
+        "selected": [
+          {
+            "label": "Planner",
+            "nodeType": "process",
+            "ordinal": 1,
+            "selected": true,
+            "position": { "x": 620, "y": 260 },
+            "size": { "width": 180, "height": 92 }
+          }
+        ],
+        "objects": [
+          {
+            "label": "Golden Dataset",
+            "nodeType": "database",
+            "ordinal": 1,
+            "position": { "x": 220, "y": 140 },
+            "size": { "width": 180, "height": 92 }
+          },
+          {
+            "label": "Historical Dataset",
+            "nodeType": "database",
+            "ordinal": 2,
+            "position": { "x": 220, "y": 380 },
+            "size": { "width": 180, "height": 92 }
+          },
+          {
+            "label": "Planner",
+            "nodeType": "process",
+            "ordinal": 1,
+            "selected": true,
+            "position": { "x": 620, "y": 260 },
+            "size": { "width": 180, "height": 92 }
+          }
+        ],
+        "edges": [],
+        "projectGlossary": [
+          { "term": "Planner" },
+          { "term": "Golden Dataset" },
+          { "term": "Historical Dataset" }
+        ],
+        "pointerAvailable": false
+      },
+      "finalState": {
+        "nodeCountDelta": 0,
+        "edgeCountDelta": 2,
+        "requiredEdges": [
+          {
+            "from": { "label": "Golden Dataset" },
+            "to": { "label": "Planner" },
+            "label": "additional context"
+          },
+          {
+            "from": { "label": "Historical Dataset" },
+            "to": { "label": "Planner" },
+            "label": "additional context"
+          }
+        ],
+        "forbiddenNodes": [
+          { "label": "Schema Data" },
+          { "label": "Additional Context" }
+        ]
+      },
+      "oracle": {
+        "criticalTokens": ["schema", "historical", "dataset", "context"],
+        "expectedActions": ["connect", "connect"],
+        "expectedSemanticStatus": "resolved",
+        "expectedFinalCount": 1,
+        "minimumCriticalTokenRecall": 1,
+        "minimumActionF1": 1,
+        "requireExactActions": true
+      }
+    },
+    {
+      "id": "fake-ptt-existing-board-fan-in-already-satisfied",
+      "adapter": "fake",
+      "semanticAdapter": "recorded-replay",
+      "privacyClass": "synthetic",
+      "evaluationClass": "core",
+      "channel": "ptt",
+      "processingPath": "semantic",
+      "source": {
+        "events": [
+          {
+            "type": "final",
+            "transcript": "Planner receives the additional context from the historical data and golden dataset."
+          }
+        ],
+        "semanticProviderResponse": {
+          "outcome": "already_satisfied",
+          "plan": null,
+          "provider": "airboard-deterministic",
+          "model": "existing-board-fan-in-v1",
+          "metadata": {
+            "providerProcessingMs": 0,
+            "totalLatencyMs": 1,
+            "usage": null
+          }
+        }
+      },
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [
+          {
+            "label": "Historical Dataset",
+            "nodeType": "database",
+            "ordinal": 1,
+            "position": { "x": 180, "y": 120 },
+            "size": { "width": 180, "height": 92 }
+          },
+          {
+            "label": "Golden Dataset",
+            "nodeType": "database",
+            "ordinal": 2,
+            "position": { "x": 180, "y": 360 },
+            "size": { "width": 180, "height": 92 }
+          },
+          {
+            "label": "Planner",
+            "nodeType": "process",
+            "ordinal": 1,
+            "position": { "x": 560, "y": 240 },
+            "size": { "width": 180, "height": 92 }
+          }
+        ],
+        "edges": [
+          {
+            "from": { "label": "Historical Dataset", "nodeType": "database", "ordinal": 1 },
+            "to": { "label": "Planner", "nodeType": "process", "ordinal": 1 },
+            "label": "additional context",
+            "occurrence": 1
+          },
+          {
+            "from": { "label": "Golden Dataset", "nodeType": "database", "ordinal": 2 },
+            "to": { "label": "Planner", "nodeType": "process", "ordinal": 1 },
+            "label": "additional context",
+            "occurrence": 1
+          }
+        ],
+        "projectGlossary": [
+          { "term": "Planner" },
+          { "term": "Historical Dataset" },
+          { "term": "Golden Dataset" }
+        ],
+        "pointerAvailable": false
+      },
+      "finalState": {
+        "nodeCountDelta": 0,
+        "edgeCountDelta": 0,
+        "requiredEdges": [
+          {
+            "from": { "label": "Historical Dataset" },
+            "to": { "label": "Planner" },
+            "label": "additional context"
+          },
+          {
+            "from": { "label": "Golden Dataset" },
+            "to": { "label": "Planner" },
+            "label": "additional context"
+          }
+        ]
+      },
+      "oracle": {
+        "criticalTokens": ["planner", "historical", "data", "golden", "dataset"],
+        "expectedActions": [],
+        "expectedSemanticStatus": "already_satisfied",
+        "expectedFinalCount": 1,
+        "minimumCriticalTokenRecall": 1,
+        "minimumActionF1": 1,
+        "requireExactActions": true
+      }
+    },
+    {
       "id": "fake-ptt-semantic-unsupported",
       "adapter": "fake",
       "semanticAdapter": "recorded-replay",
@@ -754,6 +991,83 @@
         "expectedSemanticStatus": "unsupported",
         "expectedFinalCount": 1,
         "maximumRoutedActions": 0,
+        "minimumCriticalTokenRecall": 1,
+        "minimumActionF1": 1,
+        "requireExactActions": true
+      }
+    },
+    {
+      "id": "fake-ptt-production-disconnected-line-repair",
+      "adapter": "fake",
+      "privacyClass": "synthetic",
+      "evaluationClass": "core",
+      "channel": "ptt",
+      "processingPath": "deterministic",
+      "source": {
+        "events": [
+          {
+            "type": "final",
+            "transcript": "Connect existing disconnected line to Client and Planner.",
+            "confidence": 0.811
+          }
+        ]
+      },
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [
+          { "label": "User", "nodeType": "service", "ordinal": 1, "position": { "x": 100, "y": 240 }, "size": { "width": 120, "height": 80 } },
+          { "label": "Client", "nodeType": "service", "ordinal": 2, "position": { "x": 380, "y": 240 }, "size": { "width": 152, "height": 80 } },
+          { "label": "Planner", "nodeType": "service", "ordinal": 3, "position": { "x": 720, "y": 240 }, "size": { "width": 152, "height": 80 } }
+        ],
+        "edges": [
+          {
+            "from": { "label": "User", "nodeType": "service", "ordinal": 1 },
+            "to": { "label": "Client", "nodeType": "service", "ordinal": 2 },
+            "label": "makes a request",
+            "occurrence": 1
+          },
+          {
+            "from": { "label": "User", "nodeType": "service", "ordinal": 1 },
+            "to": { "label": "Planner", "nodeType": "service", "ordinal": 3 },
+            "label": "request goes to",
+            "occurrence": 1,
+            "seedGeometry": {
+              "start": { "x": 520, "y": 400 },
+              "end": { "x": 644, "y": 240 }
+            }
+          }
+        ],
+        "projectGlossary": [],
+        "pointerAvailable": false
+      },
+      "finalState": {
+        "nodeCountDelta": 0,
+        "edgeCountDelta": 0,
+        "requiredEdges": [
+          {
+            "from": { "label": "Client" },
+            "to": { "label": "Planner" },
+            "label": "request goes to",
+            "geometryAttached": true
+          }
+        ],
+        "forbiddenEdges": [
+          {
+            "from": { "label": "User" },
+            "to": { "label": "Planner" },
+            "label": "request goes to"
+          }
+        ]
+      },
+      "oracle": {
+        "criticalTokens": ["connect", "existing", "disconnected", "line", "client", "planner"],
+        "criticalTokenRoles": {
+          "action": ["connect"],
+          "visible_label": ["client", "planner"]
+        },
+        "expectedActions": ["attach_connection"],
+        "expectedFinalCount": 1,
         "minimumCriticalTokenRecall": 1,
         "minimumActionF1": 1,
         "requireExactActions": true

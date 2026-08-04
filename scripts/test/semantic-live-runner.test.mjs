@@ -12,6 +12,8 @@ const ROOT = resolve(import.meta.dirname, "../..");
 
 test("live semantic runner retries one transient failure and emits privacy-safe reports", async (t) => {
   let requests = 0;
+  let responseMode = "plan";
+  const authorizationHeaders = [];
   const server = createServer((request, response) => {
     if (request.method !== "POST" || request.url !== "/intent/resolve") {
       response.writeHead(404).end();
@@ -20,12 +22,33 @@ test("live semantic runner retries one transient failure and emits privacy-safe 
     request.resume();
     request.on("end", () => {
       requests += 1;
+      authorizationHeaders.push(request.headers.authorization);
       response.setHeader("Content-Type", "application/json");
       if (requests === 1) {
         response.writeHead(503).end(
           JSON.stringify({
             error: "SEMANTIC_INTENT_PROVIDER_UNAVAILABLE",
             message: "Transient provider failure.",
+          }),
+        );
+        return;
+      }
+      if (responseMode === "already_satisfied") {
+        response.writeHead(200).end(
+          JSON.stringify({
+            outcome: "already_satisfied",
+            plan: null,
+            provider: "airboard-deterministic",
+            model: "existing-board-fan-in-v1",
+            metadata: {
+              responseModel: "existing-board-fan-in-v1",
+              providerProcessingMs: 0,
+              totalLatencyMs: 1,
+              usage: null,
+              providerRequestId: null,
+              responseId: null,
+              clientRequestId: "must-not-be-reported",
+            },
           }),
         );
         return;
@@ -101,12 +124,17 @@ test("live semantic runner retries one transient failure and emits privacy-safe 
       env: {
         ...process.env,
         AIRBOARD_EVAL_OUTPUT_DIR: outputRoot,
+        AIRBOARD_EVAL_API_TOKEN: "protected-eval-token",
       },
       timeout: 10_000,
     },
   );
 
   assert.equal(requests, 2);
+  assert.deepEqual(authorizationHeaders, [
+    "Bearer protected-eval-token",
+    "Bearer protected-eval-token",
+  ]);
   assert.match(stdout, /1\/1 passed/u);
   const report = JSON.parse(
     await readFile(
@@ -122,7 +150,7 @@ test("live semantic runner retries one transient failure and emits privacy-safe 
       report.summary.semanticPlannerLatencyP95Ms,
     true,
   );
-  assert.equal(report.versions.prompt, "2.7");
+  assert.equal(report.versions.prompt, "2.8");
   assert.equal(report.results[0].groundingStatus, "applied");
   assert.equal(report.results[0].groundedCommands.length, 1);
   assert.equal(report.results[0].eventDelta.length, 2);
@@ -133,6 +161,44 @@ test("live semantic runner retries one transient failure and emits privacy-safe 
   assert.equal(report.results[0].metadata.clientRequestId, undefined);
   assert.equal(
     JSON.stringify(report).includes("must-not-be-reported"),
+    false,
+  );
+
+  responseMode = "already_satisfied";
+  const noChangeRun = await execFileAsync(
+    process.execPath,
+    [
+      "scripts/eval-voice-intent.mjs",
+      "--api-url",
+      `http://127.0.0.1:${address.port}`,
+      "--case",
+      "existing-board-fan-in-already-satisfied",
+    ],
+    {
+      cwd: ROOT,
+      env: {
+        ...process.env,
+        AIRBOARD_EVAL_OUTPUT_DIR: outputRoot,
+        AIRBOARD_EVAL_API_TOKEN: "protected-eval-token",
+      },
+      timeout: 10_000,
+    },
+  );
+  assert.match(noChangeRun.stdout, /1\/1 passed/u);
+  const noChangeReport = JSON.parse(
+    await readFile(
+      join(outputRoot, "semantic", "semantic-contract.json"),
+      "utf8",
+    ),
+  );
+  assert.equal(noChangeReport.results[0].outcome, "already_satisfied");
+  assert.equal(noChangeReport.results[0].plan, null);
+  assert.equal(noChangeReport.results[0].groundingStatus, "already_satisfied");
+  assert.deepEqual(noChangeReport.results[0].eventDelta, []);
+  assert.equal(noChangeReport.results[0].effects.edgeCountDelta, 0);
+  assert.equal(noChangeReport.results[0].undo.applicable, false);
+  assert.equal(
+    JSON.stringify(noChangeReport).includes("must-not-be-reported"),
     false,
   );
 });

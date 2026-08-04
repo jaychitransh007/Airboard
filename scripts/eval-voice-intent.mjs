@@ -25,6 +25,7 @@ import {
 } from "../apps/api/src/semanticIntent/contract.ts";
 import {
   evaluateGroundedSemanticPlan,
+  evaluateSemanticNoChange,
   validateGroundedSemanticOutcome,
 } from "./lib/semantic-grounding-eval.mjs";
 import {
@@ -39,7 +40,10 @@ const DEFAULT_API_URL = "http://127.0.0.1:4000";
 const DEFAULT_ORIGIN = "http://localhost:3000";
 const DEFAULT_TIMEOUT_MS = 20_000;
 const DEFAULT_ATTEMPTS = 1;
-const VALID_STATUSES = new Set(SEMANTIC_PLAN_RESOLUTION_STATUSES);
+const VALID_EXPECTED_OUTCOMES = new Set([
+  ...SEMANTIC_PLAN_RESOLUTION_STATUSES,
+  "already_satisfied",
+]);
 const VALID_ISSUE_CODES = new Set(SEMANTIC_PLAN_ISSUE_CODES);
 const VALID_MISSING_SLOTS = new Set(SEMANTIC_PLAN_MISSING_SLOTS);
 const VALID_ACTION_TYPES = new Set(
@@ -89,6 +93,7 @@ async function main() {
     process.env.AIRBOARD_INTENT_MODEL ??
     undefined;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const apiToken = cleanSecret(process.env.AIRBOARD_EVAL_API_TOKEN);
   const attempts =
     options.attempts ??
     parseAttempts(process.env.AIRBOARD_EVAL_ATTEMPTS) ??
@@ -111,6 +116,7 @@ async function main() {
         origin,
         model,
         timeoutMs,
+        apiToken,
         fixtureCase,
         attempt,
       });
@@ -120,7 +126,7 @@ async function main() {
         : "[no plan]";
       const planOutcome = result.plan
         ? `${result.plan.status}${result.plan.issueCode === "none" ? "" : `/${result.plan.issueCode}`}`
-        : "request failed";
+        : result.outcome ?? "request failed";
       const attemptLabel = attempts === 1 ? "" : ` ${String(attempt).padStart(2)}/${attempts}`;
       console.log(
         `${result.passed ? "PASS" : "FAIL"} ${fixtureCase.id.padEnd(31)}${attemptLabel} ${formatMilliseconds(result.latencyMs).padStart(8)} ${planOutcome} ${actionSummary}`,
@@ -202,6 +208,7 @@ async function main() {
             casesById.get(result.caseId)?.expected?.status ?? "unknown",
           actual:
             result.plan?.status ??
+            result.outcome ??
             (result.failureClass === "provider_infrastructure"
               ? "provider_infrastructure"
               : "invalid_output"),
@@ -238,7 +245,15 @@ async function runCase(argumentsValue) {
   };
 }
 
-async function runCaseOnce({ apiUrl, origin, model, timeoutMs, fixtureCase, attempt }) {
+async function runCaseOnce({
+  apiUrl,
+  origin,
+  model,
+  timeoutMs,
+  apiToken,
+  fixtureCase,
+  attempt,
+}) {
   const voiceTurnId = createVoiceTurnId(fixtureCase.id, attempt);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -249,6 +264,7 @@ async function runCaseOnce({ apiUrl, origin, model, timeoutMs, fixtureCase, atte
       headers: {
         "Content-Type": "application/json",
         Origin: origin,
+        ...(apiToken ? { Authorization: `Bearer ${apiToken}` } : {}),
       },
       body: JSON.stringify({
         voiceTurnId,
@@ -288,10 +304,47 @@ async function runCaseOnce({ apiUrl, origin, model, timeoutMs, fixtureCase, atte
       };
     }
 
+    if (isAlreadySatisfiedPayload(payload)) {
+      const failures =
+        fixtureCase.expected.status === "already_satisfied"
+          ? []
+          : [
+              `expected status ${fixtureCase.expected.status}, received already_satisfied`,
+            ];
+      const grounding = evaluateSemanticNoChange(fixtureCase.context);
+      failures.push(
+        ...validateGroundedSemanticOutcome(
+          grounding,
+          fixtureCase.expected,
+          "already_satisfied",
+        ),
+      );
+      const latencyMs = performance.now() - startedAt;
+      return {
+        passed: failures.length === 0,
+        failures,
+        attempt,
+        latencyMs,
+        providerLatencyMs,
+        outcome: "already_satisfied",
+        plan: null,
+        grounding,
+        voiceTurnId,
+        caseId: fixtureCase.id,
+        failureClass: failures.length === 0 ? null : "quality",
+        retryableInfrastructure: false,
+        provider: payload.provider,
+        model: payload.model,
+        metadata: sanitizeProviderMetadata(payload.metadata),
+      };
+    }
+
     const rawPlan = isRecord(payload) && isRecord(payload.plan) ? payload.plan : payload;
     const parsedPlan = parseSemanticPlan(rawPlan);
     const failures = parsedPlan.ok
-      ? validateExpectedOutcome(parsedPlan.value, fixtureCase.expected)
+      ? fixtureCase.expected.status === "already_satisfied"
+        ? ["expected already_satisfied, received an executable semantic plan"]
+        : validateExpectedOutcome(parsedPlan.value, fixtureCase.expected)
       : [
           `plan violates production contract ${AIRBOARD_SEMANTIC_PLAN_CONTRACT_VERSION} at ${parsedPlan.error.path}: ${parsedPlan.error.message}`,
         ];
@@ -323,6 +376,7 @@ async function runCaseOnce({ apiUrl, origin, model, timeoutMs, fixtureCase, atte
       latencyMs,
       providerLatencyMs,
       plan: parsedPlan.ok ? parsedPlan.value : null,
+      outcome: parsedPlan.ok ? parsedPlan.value.status : null,
       grounding,
       voiceTurnId,
       caseId: fixtureCase.id,
@@ -734,6 +788,10 @@ function sanitizeProviderMetadata(metadata) {
   };
 }
 
+function cleanSecret(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
 function sanitizeResultForReport(result) {
   const grounding = result.grounding;
   return {
@@ -756,6 +814,7 @@ function sanitizeResultForReport(result) {
           endToActionMs: result.latencyMs,
         },
     plan: result.plan,
+    outcome: result.outcome ?? null,
     groundedCommands: grounding?.commands ?? [],
     eventDelta: grounding?.eventDelta ?? [],
     initialBoardState: grounding?.initialBoardState ?? null,
@@ -941,6 +1000,22 @@ async function readJsonResponse(response) {
   }
 }
 
+function isAlreadySatisfiedPayload(value) {
+  if (!isRecord(value)) return false;
+  const keys = ["metadata", "model", "outcome", "plan", "provider"];
+  return (
+    Object.keys(value).length === keys.length &&
+    keys.every((key) => Object.prototype.hasOwnProperty.call(value, key)) &&
+    value.outcome === "already_satisfied" &&
+    value.plan === null &&
+    typeof value.provider === "string" &&
+    Boolean(value.provider.trim()) &&
+    typeof value.model === "string" &&
+    Boolean(value.model.trim()) &&
+    isRecord(value.metadata)
+  );
+}
+
 function validateCorpus(corpus, fixturePath) {
   if (!isRecord(corpus) || corpus.schemaVersion !== "1.0" || !Array.isArray(corpus.cases)) {
     throw new Error(`${fixturePath} is not a voice-intent corpus with schemaVersion 1.0`);
@@ -969,7 +1044,7 @@ function validateCorpus(corpus, fixturePath) {
     ) {
       throw new Error(`${fixturePath} contains a malformed pending clarification`);
     }
-    if (!VALID_STATUSES.has(fixtureCase.expected.status)) {
+    if (!VALID_EXPECTED_OUTCOMES.has(fixtureCase.expected.status)) {
       throw new Error(`${fixturePath} case ${fixtureCase.id} has an invalid expected status`);
     }
     if (
@@ -1133,6 +1208,9 @@ Options:
   --attempts N        Repeat every case 1-20 times (AIRBOARD_EVAL_ATTEMPTS)
   --timeout-ms N      Per-case client timeout (default 20000)
   --help              Show this help
+
+Environment:
+  AIRBOARD_EVAL_API_TOKEN  Protected shared token for authenticated live API runs
 `);
 }
 

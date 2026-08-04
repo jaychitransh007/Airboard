@@ -29,13 +29,19 @@ ARG NEXT_PUBLIC_SUPABASE_URL
 ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
 ARG NEXT_PUBLIC_CHROME_WEB_STORE_URL
 ARG NEXT_PUBLIC_CHROME_EXTENSION_VERSION
+ARG NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_ID
+ARG NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_COMPATIBLE_VERSIONS
 ENV NEXT_PUBLIC_AIRBOARD_API_URL=$NEXT_PUBLIC_AIRBOARD_API_URL
 ENV NEXT_PUBLIC_GOOGLE_MEET_CLOUD_PROJECT_NUMBER=$NEXT_PUBLIC_GOOGLE_MEET_CLOUD_PROJECT_NUMBER
 ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
 ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
 ENV NEXT_PUBLIC_CHROME_WEB_STORE_URL=$NEXT_PUBLIC_CHROME_WEB_STORE_URL
 ENV NEXT_PUBLIC_CHROME_EXTENSION_VERSION=$NEXT_PUBLIC_CHROME_EXTENSION_VERSION
+ENV NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_ID=$NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_ID
+ENV NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_COMPATIBLE_VERSIONS=$NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_COMPATIBLE_VERSIONS
 ENV NODE_ENV=production
+RUN node -e "const id=process.env.NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_ID||''; if(!/^[a-p]{32}$/.test(id)) throw new Error('NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_ID must be the reviewed 32-character Web Store ID'); const current=process.env.NEXT_PUBLIC_CHROME_EXTENSION_VERSION||''; const values=(process.env.NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_COMPATIBLE_VERSIONS||current).split(',').map(value=>value.trim()); const compatible=[...new Set(values)]; if(compatible.length>8||values.some(value=>!/^\\d+\\.\\d+\\.\\d+$/.test(value))||!compatible.includes(current)) throw new Error('Chrome compatible versions must contain at most 8 semantic versions and include the current version');"
+RUN node -e "const value=(process.env.NEXT_PUBLIC_CHROME_WEB_STORE_URL||'').trim(); if(value){ const id=process.env.NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_ID||''; let url; try{url=new URL(value)}catch{throw new Error('NEXT_PUBLIC_CHROME_WEB_STORE_URL must be a valid URL')} const parts=url.pathname.split('/').filter(Boolean); const listed=parts.at(-1)||''; if(url.origin!=='https://chromewebstore.google.com'||url.username||url.password||parts[0]!=='detail'||(parts.length!==2&&parts.length!==3)||!/^([a-p]{32})$/.test(listed)||listed!==id) throw new Error('NEXT_PUBLIC_CHROME_WEB_STORE_URL must be the detail page for NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_ID'); }"
 RUN pnpm --filter @airboard/web build
 
 FROM node:22-bookworm-slim AS runtime

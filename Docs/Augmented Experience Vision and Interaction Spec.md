@@ -93,7 +93,6 @@ HandLandmarker-backed pose and motion harness before it ships.
 | Close hand (grab) on element | 1 | Canvas | Grab → move; reopen = drop | shipped |
 | Grab + hold still ~600ms | 1 | On element | **Scope element** → scoped voice edit | shipped |
 | Open palm, held still ~400ms | 1 (only tracked hand) | Anywhere | **Push-to-talk** (command mic) | shipped |
-| Open palm, swipe left | 1 (only tracked hand) | Anywhere | **Undo** one action or cancel an interpreting command | shipped |
 | Point + pinch on dock | 1 | Catalog dock | Open category / arm shape tool | shipped |
 | Two open palms, move together | 2 | Anywhere | **Pan** the canvas (bounded infinite plane) | shipped |
 | Two closed hands, spread/converge | 2 | Anywhere | **Zoom** (anchored at hand midpoint, 25–300%) | shipped |
@@ -105,27 +104,26 @@ HandLandmarker-backed pose and motion harness before it ships.
 Canonical recognition architecture (2026-07-26, as built):
 `HandLandmarker.detectForVideo()` is the only camera inference path. It emits
 21 landmarks per hand. Airboard computes pose evidence from those landmarks,
-feeds it to temporal state machines for hold/swipe/contact-release behavior,
+feeds it to temporal state machines for hold/motion/contact-release behavior,
 and arbitrates one owner per frame. The MediaPipe `GestureRecognizer` and its
 canned labels are not runtime inputs.
 
-Separation model (2026-07-26, as built): **hand count is the first-level switch** —
+Separation model (2026-07-30, as built): **hand count is the first-level switch** —
 two-hand navigation outranks and suppresses every single-hand gesture (object
-controller reset, voice/undo gates suppressed); within two-hand, pose separates pan (open)
+controller reset, voice gate suppressed); within two-hand, pose separates pan (open)
 from zoom (closed) and a session never morphs between them (release-then-re-engage
 with debounce and flicker-rebase). Within one-hand, location separates the dock
 (screen-space hit test, wins over board objects) from the canvas, and pose separates
-point / grab / Airboard-defined command pose; push-to-talk and Undo now share
-the open-palm pose and are separated by motion — a still palm opens the mic
-while a leftward swipe undoes. Runtime ownership is Navigation → Snap → Undo →
-Voice → Move/Place/Erase, so Undo's higher priority cancels an armed voice hold
-the instant a swipe declares intent. Mouse parity: ctrl/⌘+wheel
+point / grab / Airboard-defined command pose. A still open palm opens the mic;
+lateral motion cancels that hold candidate and remains pointer movement.
+Runtime ownership is Navigation → Snap → Voice observation →
+Move/Place/Erase. Mouse parity: ctrl/⌘+wheel
 zooms at the cursor, plain wheel pans; the viewport
 resets when switching input modes.
 
-Explicitly **not** gestures (false-positive risk too high): delete and clear. These
-stay voice ("delete this", "clear the board") and keyboard. Undo is the shipped
-landmark-defined open-palm swipe-left motion gesture.
+Explicitly **not** gestures (false-positive risk too high): delete, clear, and
+Undo. Delete and clear stay voice/keyboard actions. Undo remains available
+through the toolbar, `Cmd/Ctrl+Z`, and the explicit “Airo, undo” command.
 
 ## 4. Shape Catalog (replaces the button stack)
 

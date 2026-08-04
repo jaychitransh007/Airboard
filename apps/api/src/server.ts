@@ -248,7 +248,7 @@ export async function buildServer(config: ApiConfig) {
     if (!sessionStartLimiter.allow(clientKey(request))) {
       return reply.code(429).send({ error: "RATE_LIMITED" });
     }
-    const account = await auth.authenticate(request);
+    const account = await auth.authenticate(request, { allowInstallation: true });
     if (!account) {
       return reply.code(401).send({ error: "OWNER_AUTH_REQUIRED" });
     }

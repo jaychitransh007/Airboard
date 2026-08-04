@@ -12,10 +12,12 @@
     "shippedGestures": [
       "manipulation_grab",
       "navigation_pan_zoom",
-      "undo_swipe",
       "visibility_snap",
       "voice_open_palm",
       "hold_to_edit"
+    ],
+    "retiredGestures": [
+      "undo_swipe"
     ],
     "coreConditions": [
       "standalone-normal-light",

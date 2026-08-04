@@ -6,7 +6,21 @@ const readyPanel = document.getElementById("ready-panel");
 const errorNode = document.getElementById("error");
 const stateDot = document.getElementById("state-dot");
 
-document.getElementById("connect").addEventListener("click", () => chrome.tabs.create({ url: `${APP_URL}/app/integrations?setup=chrome_meet&extensionId=${chrome.runtime.id}&version=${chrome.runtime.getManifest().version}` }));
+document.getElementById("connect").addEventListener("click", () => {
+  chrome.runtime.sendMessage({ type: "AIRBOARD_GET_STATE" }, (state) => {
+    if (!state?.installationInstanceId) {
+      showError("This Chrome installation is still initializing. Try again.");
+      return;
+    }
+    const params = new URLSearchParams({
+      setup: "chrome_meet",
+      extensionId: chrome.runtime.id,
+      installationInstanceId: state.installationInstanceId,
+      version: chrome.runtime.getManifest().version,
+    });
+    chrome.tabs.create({ url: `${APP_URL}/app/integrations?${params.toString()}` });
+  });
+});
 document.getElementById("settings").addEventListener("click", () => chrome.tabs.create({ url: `${APP_URL}/app/settings/preferences` }));
 document.getElementById("open-meet").addEventListener("click", () => chrome.tabs.create({ url: "https://meet.google.com/new" }));
 document.getElementById("refresh").addEventListener("click", refresh);
@@ -34,8 +48,19 @@ function render(state) {
   consentPanel.hidden = !state.linked || state.consented;
   readyPanel.hidden = !state.linked || !state.consented;
   const diagnostics = state.diagnostics || {};
-  const verified = state.preflightComplete || (diagnostics.senderAttached && diagnostics.framesEncoded > 0 && diagnostics.bytesSent > 0);
-  const ready = state.linked && state.consented && state.entitled && verified;
+  const verified = Boolean(
+    state.statusFresh &&
+    diagnostics.meetingDetected &&
+    diagnostics.engineMounted &&
+    diagnostics.engaged &&
+    diagnostics.meetingSessionId &&
+    diagnostics.meetingSessionId === state.verifiedMeetingSessionId &&
+    timestampInFuture(state.verificationExpiresAt) &&
+    diagnostics.senderAttached &&
+    diagnostics.framesEncoded > 0 &&
+    diagnostics.bytesSent > 0
+  );
+  const ready = state.linked && state.consented && state.entitled && state.statusFresh && verified;
   stateDot.className = `dot ${ready ? "ready" : state.linked ? "progress" : ""}`;
   document.querySelectorAll("[data-setting]").forEach((node) => {
     node.checked = state.settings?.[node.dataset.setting] !== false;
@@ -67,6 +92,7 @@ function render(state) {
   if (state.lastError) showError(errorMessage(state.lastError)); else errorNode.hidden = true;
 }
 function nextAction(state, diagnostics) {
+  if (!state.statusFresh) return "Refreshing account access. Reconnect if this persists.";
   if (!state.entitled) return "Reconnect Airboard or check your plan.";
   if (!diagnostics.meetingDetected) return "Open a Google Meet meeting to continue.";
   if (!diagnostics.engineMounted) return "The private engine is starting. Refresh Meet if this persists.";
@@ -76,6 +102,13 @@ function nextAction(state, diagnostics) {
 function errorMessage(code) {
   const messages = {
     INSTALLATION_RECONNECT_REQUIRED: "This installation credential expired or was revoked. Connect Airboard again.",
+    INSTALLATION_STATUS_STALE: "Airboard could not refresh account access. Check your connection or reconnect this browser.",
+    DEPLOYMENT_VERSION_MISMATCH: "Airboard's web, API, and extension versions do not match. Update the extension or try again after the service rollout completes.",
+    INSTALLATION_INSTANCE_MISMATCH: "This browser profile no longer owns the saved installation. Connect Airboard again from this popup.",
+    INSTALLATION_IDENTITY_REQUIRED: "This installation must be upgraded and connected again before it can use Airboard.",
+    INSTALLATION_PACKAGE_MISMATCH: "This installation belongs to a different extension package. Reinstall Airboard from its reviewed listing.",
+    INSTALLATION_PLATFORM_MISMATCH: "This credential is not valid for the Google Meet extension. Connect Airboard again.",
+    INSTALLATION_IDENTITY_MIGRATION_CONFLICT: "This upgraded browser must reconnect so it can receive its own installation identity.",
     CONNECT_AIRBOARD_FIRST: "Connect this browser to Airboard first.",
     "camera-unavailable: NotAllowedError": "Chrome cannot access the camera. Allow camera access for meet.google.com.",
     "microphone-unavailable: NotAllowedError": "Chrome cannot access the microphone. Allow microphone access for meet.google.com.",
@@ -83,4 +116,10 @@ function errorMessage(code) {
   return messages[code] || String(code || "Unknown error");
 }
 function showError(message) { errorNode.hidden = false; errorNode.textContent = errorMessage(message); }
+function timestampInFuture(value) {
+  return typeof value === "string" && new Date(value).getTime() > Date.now();
+}
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type === "AIRBOARD_STATE_CHANGED") render(message.state);
+});
 load();

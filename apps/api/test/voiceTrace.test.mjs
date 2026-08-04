@@ -82,6 +82,11 @@ test("removes customer speech and board labels from operational voice traces", (
         ],
       },
       metrics: { latencyMs: 120 },
+      actionFailure: {
+        message: "I couldn’t find the visible label Historical Dataset.",
+        detail: "Grounding failed for customer board object Golden Dataset.",
+        issueCode: "grounding_missing_label",
+      },
     }),
     {
       transcript: "[CONTENT_REDACTED]",
@@ -96,6 +101,11 @@ test("removes customer speech and board labels from operational voice traces", (
         ],
       },
       metrics: { latencyMs: 120 },
+      actionFailure: {
+        message: "[CONTENT_REDACTED]",
+        detail: "[CONTENT_REDACTED]",
+        issueCode: "grounding_missing_label",
+      },
     },
   );
 });

@@ -11,6 +11,7 @@ import {
 import { publicTranscriptionConfig } from "../src/transcription/publicConfig.ts";
 import {
   parseTranscriptionControlMessage,
+  resolveTranscriptionConfigure,
   resolveTranscriptionStart,
 } from "../src/transcription/protocol.ts";
 
@@ -30,6 +31,7 @@ test("loads provider and model configuration without exposing the server API key
     provider: "deepgram",
     defaultModel: "flux-general-multi",
     allowedModels: ["flux-general-en", "flux-general-multi"],
+    dynamicKeyterms: true,
   });
   assert.equal(JSON.stringify(publicConfig).includes("server-secret"), false);
 
@@ -88,6 +90,27 @@ test("parses canonical and migration-compatible client messages", () => {
   );
   assert.deepEqual(
     parseTranscriptionControlMessage(
+      JSON.stringify({
+        type: "transcription.configure",
+        keyterms: ["Planner", "Golden Dataset", "Historical Dataset"],
+      }),
+    ),
+    {
+      ok: true,
+      value: {
+        type: "transcription.configure",
+        keyterms: ["Planner", "Golden Dataset", "Historical Dataset"],
+      },
+    },
+  );
+  assert.equal(
+    parseTranscriptionControlMessage(
+      JSON.stringify({ type: "transcription.configure" }),
+    ).ok,
+    false,
+  );
+  assert.deepEqual(
+    parseTranscriptionControlMessage(
       JSON.stringify({ type: "start", config: { sampleRateHz: 48000 } }),
     ),
     { ok: true, value: { type: "transcription.start", sampleRate: 48000 } },
@@ -140,6 +163,54 @@ test("resolves only allowed models and merges domain keyterms case-insensitively
   );
   assert.equal(rejected.ok, false);
   assert.equal(rejected.error.code, "MODEL_NOT_ALLOWED");
+
+  const configured = resolveTranscriptionConfigure(
+    {
+      type: "transcription.configure",
+      keyterms: ["Planner", "Golden Dataset", "Historical Dataset"],
+    },
+    config,
+  );
+  assert.equal(configured.ok, true);
+  assert.deepEqual(configured.value, [
+    "Airo",
+    "API",
+    "Planner",
+    "Golden Dataset",
+    "Historical Dataset",
+  ]);
+});
+
+test("keeps the wake head while prioritizing live board labels over a large static tail", () => {
+  const config = loadTranscriptionConfig({
+    AIRBOARD_TRANSCRIPTION_KEYTERMS: Array.from(
+      { length: 100 },
+      (_, index) => `static-${index}`,
+    ).join(","),
+  });
+  const resolved = resolveTranscriptionStart(
+    {
+      type: "transcription.start",
+      sampleRate: 16000,
+      keyterms: ["Planner", "Golden Dataset", "Historical Dataset"],
+    },
+    config,
+  );
+  assert.equal(resolved.ok, true);
+  assert.deepEqual(resolved.value.keyterms.slice(0, 11), [
+    "static-0",
+    "static-1",
+    "static-2",
+    "static-3",
+    "static-4",
+    "static-5",
+    "static-6",
+    "static-7",
+    "Planner",
+    "Golden Dataset",
+    "Historical Dataset",
+  ]);
+  assert.equal(resolved.value.keyterms.length, 100);
 });
 
 test("builds a Flux V2 URL and Configure message with repeated keyterms", () => {

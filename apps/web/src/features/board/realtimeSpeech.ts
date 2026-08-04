@@ -25,6 +25,7 @@ export type RealtimeTranscriptionConfig = {
   provider: string | null;
   defaultModel: string | null;
   allowedModels: string[];
+  dynamicKeyterms: boolean;
 };
 
 export type RealtimeSpeechMetadata = {
@@ -79,6 +80,8 @@ export type RealtimeSpeechOptions = {
   model?: string | undefined;
   /** Domain vocabulary used by providers that support key-term biasing. */
   keyterms?: string[];
+  /** Advertised by the gateway before the client sends mid-stream updates. */
+  dynamicKeyterms?: boolean;
   sampleRate?: number;
   audioBufferSize?: number;
   /** Audio frames are dropped above this socket backlog to keep latency bounded. */
@@ -88,6 +91,7 @@ export type RealtimeSpeechOptions = {
 
 export type RealtimeSpeechSession = {
   start(): void;
+  updateKeyterms(keyterms: readonly string[]): void;
   stop(): void;
   abort(): void;
   isListening(): boolean;
@@ -199,6 +203,7 @@ type ServerMessage = {
   message?: string;
   code?: string;
   fatal?: boolean;
+  keytermCount?: number;
 };
 
 const WEB_SOCKET_CONNECTING = 0;
@@ -213,6 +218,8 @@ const DROPPED_FRAME_WARNING_THRESHOLD = 8;
 // keyterms per session and reject the whole Configure message if more are sent.
 // The shared Airboard vocabulary exceeds this, so bound it at the protocol edge.
 const MAX_REALTIME_KEYTERMS = 100;
+const MAX_REALTIME_KEYTERM_LENGTH = 100;
+const MAX_REALTIME_KEYTERM_CHARACTERS = 1_000;
 
 export function supportsRealtimeSpeech(): boolean {
   if (typeof window === "undefined") {
@@ -261,6 +268,7 @@ export async function fetchRealtimeTranscriptionConfig(
     allowedModels: Array.isArray(payload.allowedModels)
       ? payload.allowedModels.filter((model): model is string => typeof model === "string")
       : [],
+    dynamicKeyterms: payload.dynamicKeyterms === true,
   };
 }
 
@@ -324,6 +332,8 @@ export function createRealtimeSpeechSession(
   let audioCaptureStarting = false;
   let consecutiveDroppedFrames = 0;
   let dropWarningActive = false;
+  let currentKeyterms = boundedKeyterms(options.keyterms ?? []);
+  let lastSentKeytermFingerprint: string | null = null;
 
   const setListening = (nextListening: boolean) => {
     if (listening === nextListening) {
@@ -421,11 +431,36 @@ export function createRealtimeSpeechSession(
         sampleRate: targetSampleRate,
         ...(cleanOptionalString(options.language) ? { language: options.language!.trim() } : {}),
         ...(requestedModel ? { model: requestedModel } : {}),
-        ...(options.keyterms?.length
-          ? { keyterms: boundedKeyterms(options.keyterms) }
+        ...(currentKeyterms.length
+          ? { keyterms: currentKeyterms }
           : {}),
       }),
     );
+    lastSentKeytermFingerprint = keytermFingerprint(currentKeyterms);
+  };
+
+  const sendKeytermUpdate = () => {
+    if (
+      options.dynamicKeyterms !== true ||
+      !metadata ||
+      !socket ||
+      socket.readyState !== WEB_SOCKET_OPEN ||
+      state === "stopping" ||
+      state === "ended"
+    ) {
+      return;
+    }
+    const fingerprint = keytermFingerprint(currentKeyterms);
+    if (fingerprint === lastSentKeytermFingerprint) {
+      return;
+    }
+    socket.send(
+      JSON.stringify({
+        type: "transcription.configure",
+        keyterms: currentKeyterms,
+      }),
+    );
+    lastSentKeytermFingerprint = fingerprint;
   };
 
   const sendPcmFrame = (inputFrame: Float32Array) => {
@@ -602,6 +637,9 @@ export function createRealtimeSpeechSession(
           sampleRate: message.sampleRate,
         };
         callbacks.onReady?.(metadata);
+        // A label can be created or renamed while the provider connection is
+        // opening. Apply the latest complete vocabulary before audio capture.
+        sendKeytermUpdate();
         void connectAudioCapture();
         return;
       }
@@ -629,6 +667,15 @@ export function createRealtimeSpeechSession(
           ...(cleanOptionalString(message.provider) ? { provider: message.provider!.trim() } : {}),
           ...(cleanOptionalString(message.model) ? { model: message.model!.trim() } : {}),
           ...(cleanOptionalString(message.message) ? { message: message.message!.trim() } : {}),
+        });
+        return;
+      case "transcription.configured":
+        callbacks.onProviderStatus?.({
+          status: "configured",
+          message:
+            typeof message.keytermCount === "number"
+              ? `${message.keytermCount} transcription keyterms active`
+              : "Transcription keyterms updated",
         });
         return;
       case "transcription.error": {
@@ -739,6 +786,17 @@ export function createRealtimeSpeechSession(
       }
       state = "starting";
       void prepareSession();
+    },
+    updateKeyterms(keyterms) {
+      const nextKeyterms = boundedKeyterms(keyterms);
+      if (
+        keytermFingerprint(nextKeyterms) ===
+        keytermFingerprint(currentKeyterms)
+      ) {
+        return;
+      }
+      currentKeyterms = nextKeyterms;
+      sendKeytermUpdate();
     },
     stop() {
       if (state === "idle") {
@@ -911,18 +969,32 @@ function cleanOptionalString(value: unknown): string | null {
 export function boundedKeyterms(keyterms: readonly string[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
+  let totalCharacters = 0;
   for (const raw of keyterms) {
     const term = raw.trim();
-    if (!term || seen.has(term)) {
+    const lookup = term.toLocaleLowerCase("en-US");
+    if (
+      !term ||
+      term.length > MAX_REALTIME_KEYTERM_LENGTH ||
+      seen.has(lookup) ||
+      totalCharacters + term.length > MAX_REALTIME_KEYTERM_CHARACTERS
+    ) {
       continue;
     }
-    seen.add(term);
+    seen.add(lookup);
     result.push(term);
+    totalCharacters += term.length;
     if (result.length >= MAX_REALTIME_KEYTERMS) {
       break;
     }
   }
   return result;
+}
+
+function keytermFingerprint(keyterms: readonly string[]): string {
+  return keyterms
+    .map((term) => term.toLocaleLowerCase("en-US"))
+    .join("\u0000");
 }
 
 function describeRealtimeSpeechError(error: unknown): string {

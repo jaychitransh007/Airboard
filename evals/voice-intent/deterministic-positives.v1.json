@@ -2050,6 +2050,17 @@
       "text": "delete the connection between API and Database",
       "expected": {
         "kind": "delete_connection",
+        "scope": "one",
+        "fromKind": "named",
+        "toKind": "named"
+      }
+    },
+    {
+      "id": "parity-delete-all-connections",
+      "text": "delete all connections between API and Database",
+      "expected": {
+        "kind": "delete_connection",
+        "scope": "all",
         "fromKind": "named",
         "toKind": "named"
       }
@@ -2059,6 +2070,7 @@
       "text": "disconnect this from that",
       "expected": {
         "kind": "delete_connection",
+        "scope": "one",
         "fromKind": "deictic",
         "toKind": "deictic"
       }
@@ -2117,6 +2129,39 @@
       "text": "Airo, select all the nodes",
       "expected": {
         "kind": "select_all"
+      }
+    },
+    {
+      "id": "production-regression-attach-existing-disconnected-line",
+      "text": "Connect existing disconnected line to Client and Planner.",
+      "expected": {
+        "kind": "attach_connection",
+        "endpointOrder": "undirected",
+        "lineReference": "unique_existing",
+        "fromKind": "named",
+        "toKind": "named"
+      }
+    },
+    {
+      "id": "attach-loose-connector-from-to-paraphrase",
+      "text": "Attach the loose connector from Client to Planner",
+      "expected": {
+        "kind": "attach_connection",
+        "endpointOrder": "directed",
+        "lineReference": "unique_existing",
+        "fromKind": "named",
+        "toKind": "named"
+      }
+    },
+    {
+      "id": "production-regression-attach-existing-disconnected-line-with-endpoints",
+      "text": "Connect the existing disconnected line with Client and Planner",
+      "expected": {
+        "kind": "attach_connection",
+        "endpointOrder": "undirected",
+        "lineReference": "unique_existing",
+        "fromKind": "named",
+        "toKind": "named"
       }
     }
   ]

@@ -1,6 +1,7 @@
 export * from "./boardReducer.ts";
 export * from "./diagramCommands.ts";
 export * from "./events.ts";
+export * from "./existingBoardFanIn.ts";
 export * from "./permissions.ts";
 export * from "./semanticCapabilities.ts";
 export * from "./nodeVisuals.ts";

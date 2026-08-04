@@ -1,6 +1,6 @@
 {
   "releaseTarget": "controlled-pilot",
-  "lastReviewed": "2026-07-25",
+  "lastReviewed": "2026-08-04",
   "gates": {
     "release-owner": {
       "description": "A named business and technical release owner accepts the controlled-pilot scope and stop-ship authority.",
@@ -32,10 +32,10 @@
     },
     "database-migrations": {
       "description": "Every production migration is applied and verified against the target database.",
-      "status": "pending",
+      "status": "verified",
       "owner": "Engineering",
-      "evidence": "",
-      "notes": "Apply migrations to production and attach the migration-list output."
+      "evidence": "Supabase project ljqxegqdfhqcmkbivldr checked 2026-08-04: remote migration history matches the repository through 20260804100000; public-schema lint reports no errors; rotate_chrome_installation_credential, commit_chrome_installation_consent, and complete_chrome_installation_preflight are SECURITY DEFINER functions executable by postgres and service_role only, with anon and authenticated explicitly denied.",
+      "notes": "20260804100000 corrects Supabase default function privileges discovered during the post-migration production ACL verification."
     },
     "automated-regression": {
       "description": "Type checks, unit tests, builds, voice evaluations and browser journeys pass on the release commit.",
@@ -183,6 +183,13 @@
       "owner": "Finance",
       "evidence": "",
       "notes": "Implement reconciliation before paid GA."
+    },
+    "chrome-deployment-compatibility": {
+      "description": "The deployed web renderer and API report the same bridge protocol and extension version, and both restrict trust/credentials to the packaged release's exact Web Store ID.",
+      "status": "pending",
+      "owner": "Engineering",
+      "evidence": "",
+      "notes": "Deploy the release web/API first, then retain the successful pnpm verify:extension-deployment output."
     },
     "chrome-store-approval": {
       "description": "The production Chrome extension is approved and publicly installable.",

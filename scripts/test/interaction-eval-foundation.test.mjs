@@ -345,6 +345,121 @@ test("production interaction executor observes routing and never copies the expe
   assert.equal(observation.evidenceProvenance.outcomeObservation, "production");
 });
 
+test("production interaction executor keeps ambiguous existing-line grounding terminal", async () => {
+  const node = (id, label, x) => ({
+    id,
+    annotation: {
+      type: "flow_node",
+      nodeType: "service",
+      label,
+      bounds: { x, y: 100, width: 120, height: 60 },
+    },
+  });
+  const loose = (id, y) => ({
+    id,
+    annotation: {
+      type: "connector",
+      start: { x: 320, y },
+      end: { x: 520, y },
+    },
+  });
+  const observation = await executeInteractionEvalCase({
+    id: "ambiguous-existing-line-terminal",
+    surface: "replay",
+    initial: {
+      boardState: {
+        boardId: "board:primary",
+        nodes: [node("node:client", "Client", 100), node("node:planner", "Planner", 600)],
+        edges: [loose("edge:one", 240), loose("edge:two", 300)],
+      },
+      nonBoardState: { selection: [] },
+    },
+    interaction: {
+      channel: "voice",
+      input: {
+        activation: "ptt",
+        transcript: "Connect the existing disconnected line with Client and Planner.",
+        // This fixture would create a new edge if evaluator fallback drifted
+        // from production. Existing-line ambiguity must stop before it.
+        semanticPlan: {
+          version: "1.1",
+          status: "resolved",
+          issueCode: null,
+          clarificationQuestion: null,
+          missingSlots: [],
+          actions: [{
+            type: "connect",
+            from: { kind: "visible_label", label: "Client", occurrence: null },
+            to: { kind: "visible_label", label: "Planner", occurrence: null },
+            label: null,
+          }],
+        },
+      },
+    },
+    expected: { outcome: "rejected" },
+  });
+
+  assert.equal(observation.outcome, "rejected");
+  assert.deepEqual(observation.processingPath, [
+    "voice",
+    "deterministic_parser",
+    "grounding",
+    "rejected",
+  ]);
+  assert.equal(observation.semanticPlan, undefined);
+  assert.deepEqual(observation.groundedCommands, []);
+  assert.deepEqual(observation.events, []);
+  assert.equal(observation.stageOutcomes.transaction.status, "not_started");
+});
+
+test("production interaction executor reports an already-attached repeat as no-op", async () => {
+  const observation = await executeInteractionEvalCase({
+    id: "healthy-existing-line-repeat",
+    surface: "replay",
+    initial: {
+      boardState: {
+        boardId: "board:primary",
+        nodes: [
+          { id: "node:client", annotation: { type: "flow_node", nodeType: "service", label: "Client", bounds: { x: 100, y: 100, width: 120, height: 60 } } },
+          { id: "node:planner", annotation: { type: "flow_node", nodeType: "service", label: "Planner", bounds: { x: 600, y: 100, width: 120, height: 60 } } },
+        ],
+        edges: [{
+          id: "edge:attached",
+          annotation: {
+            type: "connector",
+            start: { x: 220, y: 130 },
+            end: { x: 600, y: 130 },
+            snappedStartStrokeId: "node:client",
+            snappedEndStrokeId: "node:planner",
+          },
+        }],
+      },
+      nonBoardState: { selection: [] },
+    },
+    interaction: {
+      channel: "voice",
+      input: {
+        activation: "ptt",
+        transcript: "Connect existing disconnected line to Client and Planner.",
+      },
+    },
+    expected: { outcome: "no-op" },
+  });
+
+  assert.equal(observation.outcome, "no-op");
+  assert.equal(observation.feedbackCategory, "no-op");
+  assert.deepEqual(observation.processingPath, [
+    "voice",
+    "deterministic_parser",
+    "grounding",
+    "no-op",
+  ]);
+  assert.deepEqual(observation.events, []);
+  assert.deepEqual(observation.undoEvents, []);
+  assert.equal(observation.stageOutcomes.grounding.status, "already_satisfied");
+  assert.equal(observation.stageOutcomes.transaction.status, "not_started");
+});
+
 test("pre-grounded direct commands are labeled harness-only", async () => {
   const observation = await executeInteractionEvalCase({
     id: "fixture-command",

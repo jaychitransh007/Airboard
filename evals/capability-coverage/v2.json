@@ -33,7 +33,6 @@
       "values": [
         "manipulation_grab",
         "navigation_pan_zoom",
-        "undo_swipe",
         "visibility_snap",
         "voice_open_palm",
         "hold_to_edit"
@@ -41,7 +40,6 @@
       "productionOwnerByValue": {
         "manipulation_grab": "manipulation",
         "navigation_pan_zoom": "navigation",
-        "undo_swipe": "undo",
         "visibility_snap": "snap",
         "voice_open_palm": "voice",
         "hold_to_edit": "manipulation"
@@ -281,6 +279,28 @@
       "rationale": "Commands are reduced through real BoardEvents and the committed node/connector state is asserted."
     },
     {
+      "evidenceId": "test:apps/web/test/intentPipeline.test.mjs#REGRESSION: repairs the unique visually detached line in place",
+      "capabilities": [
+        "action:connect"
+      ],
+      "facets": [
+        "positive",
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "The production text and semantic grounders both recognize stale connector geometry, emit one atomic connection.attach command, preserve identity and style, and prove exact Undo."
+    },
+    {
+      "evidenceId": "test:apps/web/test/intentPipeline.test.mjs#disconnected-line grounding never steals a healthy mismatched connector",
+      "capabilities": [
+        "action:connect"
+      ],
+      "facets": [
+        "negative"
+      ],
+      "rationale": "An explicit disconnected-line request still fails closed rather than replacing a geometrically healthy endpoint belonging to another relationship."
+    },
+    {
       "evidenceId": "test:packages/core/test/diagramCommands.test.mjs#rename, resize, and cascade delete remain undoable with existing event types",
       "capabilities": [
         "action:rename",
@@ -367,15 +387,27 @@
       "rationale": "The production semantic grounder resolves the plan handle and the reducer applies the resulting rename to the committed object."
     },
     {
-      "evidenceId": "browser:apps/web/e2e/voiceRouting.spec.ts#one open-palm swipe left undoes exactly one automatic voice action",
+      "evidenceId": "browser:apps/web/e2e/voiceRouting.spec.ts#open-palm swipe motion is inert and voice undo restores the board",
       "capabilities": [
-        "action:undo",
-        "gesture:undo_swipe"
+        "channel:gesture"
       ],
       "facets": [
+        "negative",
         "final_state"
       ],
-      "rationale": "Mounted browser state proves one gesture removes exactly one committed object."
+      "rationale": "Mounted browser state proves the retired open-palm swipe cannot mutate the board or emit gesture Undo."
+    },
+    {
+      "evidenceId": "browser:apps/web/e2e/voiceRouting.spec.ts#open-palm swipe motion is inert and voice undo restores the board",
+      "capabilities": [
+        "action:undo",
+        "channel:voice"
+      ],
+      "facets": [
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "After the inert camera motion, the mounted wake-routed voice Undo restores the committed board state."
     },
     {
       "evidenceId": "browser:apps/web/e2e/typedCommand.spec.ts#typing a command creates and edits objects instantly",
@@ -446,27 +478,6 @@
         "negative"
       ],
       "rationale": "Incomplete and single-hand inputs fail closed."
-    },
-    {
-      "evidenceId": "test:apps/web/test/interactionTrackers.test.mjs#a single presented palm swiped left emits one undo",
-      "capabilities": [
-        "gesture:undo_swipe"
-      ],
-      "facets": [
-        "positive",
-        "grounding"
-      ],
-      "rationale": "The production tracker grounds one qualifying palm trajectory to one undo edge."
-    },
-    {
-      "evidenceId": "test:apps/web/test/interactionTrackers.test.mjs#undo swipe rejects vertical motion, suppression, and repeat firing",
-      "capabilities": [
-        "gesture:undo_swipe"
-      ],
-      "facets": [
-        "negative"
-      ],
-      "rationale": "Conflicting motion, arbitration suppression, and repeats are rejected."
     },
     {
       "evidenceId": "test:apps/web/test/snapGestureTracker.test.mjs#real-camera transition frames and a naturally curled snap pose remain armed",

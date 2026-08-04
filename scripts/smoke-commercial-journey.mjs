@@ -97,21 +97,32 @@ async function main() {
     session.session.id,
   );
 
-  const extensionId = `smoke-extension-${Date.now()}`;
+  const extensionId = "abcdefghijklmnopabcdefghijklmnop";
+  const installationInstanceId = crypto.randomUUID();
   const extensionLink = (await call("/integrations/extension-link", {
     method: "POST",
-    body: { extensionId, version: "0.7.0-smoke" },
+    body: { extensionId, installationInstanceId, version: "0.8.0" },
   })).body;
   const extension = (await call("/integrations/extension-exchange", {
     method: "POST",
     auth: false,
     body: { linkToken: extensionLink.linkToken },
   })).body;
-  let installationHeaders = { authorization: `Bearer ${extension.installationToken}` };
+  let installationHeaders = {
+    authorization: `Bearer ${extension.installationToken}`,
+    "x-airboard-extension-id": extensionId,
+    "x-airboard-installation-instance-id": installationInstanceId,
+    "x-airboard-bridge": "airboard-media-bridge",
+    "x-airboard-bridge-protocol-version": "1",
+    "x-airboard-extension-version": "0.8.0",
+  };
   const extensionStatus = (await call("/integrations/extension/status", { auth: false, headers: installationHeaders })).body;
   assert.ok(extensionStatus.installation.id);
   assert.ok(extensionStatus.installationToken);
-  installationHeaders = { authorization: `Bearer ${extensionStatus.installationToken}` };
+  installationHeaders = {
+    ...installationHeaders,
+    authorization: `Bearer ${extensionStatus.installationToken}`,
+  };
   const savedSettings = (await call("/integrations/extension/settings", {
     method: "PATCH",
     auth: false,
@@ -129,7 +140,13 @@ async function main() {
     method: "POST",
     auth: false,
     headers: installationHeaders,
-    body: { senderAttached: true, framesEncoded: 60, bytesSent: 65_536, extensionVersion: "0.7.0-smoke" },
+    body: {
+      senderAttached: true,
+      framesEncoded: 60,
+      bytesSent: 65_536,
+      extensionVersion: "0.8.0",
+      meetingSessionId: `smoke-meeting-${Date.now()}`,
+    },
   });
   assert.equal(verifiedComposite.body.verified, true);
 

@@ -26,8 +26,8 @@ preview integration that composites the diagram into your meeting camera.
 ## How changes are applied
 
 Airboard applies valid commands immediately. There is no Preview or Apply step.
-Undo is the safety net: use the toolbar, press `Cmd/Ctrl+Z`, say “Airo, undo,”
-or use the supported open-palm undo gesture.
+Undo is the safety net: use the toolbar, press `Cmd/Ctrl+Z`, or say
+“Airo, undo.”
 
 If Airboard cannot safely understand or ground a command, it rejects the
 command or asks a focused question instead of guessing.

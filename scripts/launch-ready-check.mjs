@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { normalizeChromeWebStoreUrlForExtension } from "./lib/chrome-deployment-compatibility.mjs";
 
 const supportedScopes = new Set([
   "controlled-pilot",
@@ -58,13 +59,60 @@ const hasStrongValue = (name) => {
   const value = env[name]?.trim() ?? "";
   return value.length >= 32 && !/replace|development|example|changeme/i.test(value);
 };
+const chromeExtensionVersionPattern = /^\d+\.\d+\.\d+$/;
+const chromeCompatibleVersions = (name) => {
+  const currentVersion = env.NEXT_PUBLIC_CHROME_EXTENSION_VERSION?.trim() ?? "";
+  if (!chromeExtensionVersionPattern.test(currentVersion)) return null;
+  const configured = env[name]?.trim();
+  const candidates = configured
+    ? env[name].split(",").map((version) => version.trim())
+    : [currentVersion];
+  const versions = [...new Set(candidates)];
+  return candidates.some((version) => !chromeExtensionVersionPattern.test(version)) ||
+    versions.length === 0 ||
+    versions.length > 8 ||
+    !versions.includes(currentVersion)
+    ? null
+    : versions;
+};
+const sameVersionSet = (left, right) =>
+  Boolean(
+    left &&
+    right &&
+    left.length === right.length &&
+    left.every((version) => right.includes(version)),
+  );
+const allowedOriginsIncludeApp = () => {
+  try {
+    const appOrigin = new URL(env.AIRBOARD_APP_URL ?? "").origin;
+    const allowedOrigins = (env.AIRBOARD_ALLOWED_ORIGINS ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    return allowedOrigins.includes(appOrigin) &&
+      allowedOrigins.every((value) => {
+        const url = new URL(value);
+        return value === url.origin &&
+          url.protocol === "https:" &&
+          !["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+      });
+  } catch {
+    return false;
+  }
+};
+const isChromeWebStoreDetailUrl = () => {
+  return Boolean(normalizeChromeWebStoreUrlForExtension(
+    env.NEXT_PUBLIC_CHROME_WEB_STORE_URL,
+    env.NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_ID,
+  ));
+};
 
 const baseConfiguration = [
   ["node-production", "NODE_ENV is production", () => env.NODE_ENV === "production"],
   ["app-url", "AIRBOARD_APP_URL is a non-local HTTPS URL", () => isHttps("AIRBOARD_APP_URL") && nonLocalUrl("AIRBOARD_APP_URL")],
   ["api-url", "NEXT_PUBLIC_AIRBOARD_API_URL is a non-local HTTPS URL", () => isHttps("NEXT_PUBLIC_AIRBOARD_API_URL") && nonLocalUrl("NEXT_PUBLIC_AIRBOARD_API_URL")],
   ["websocket-url", "AIRBOARD_WS_URL is a non-local WSS URL", () => isWss("AIRBOARD_WS_URL") && nonLocalUrl("AIRBOARD_WS_URL")],
-  ["cors", "AIRBOARD_ALLOWED_ORIGINS is configured without local origins or wildcard", () => present("AIRBOARD_ALLOWED_ORIGINS") && !/localhost|127\\.0\\.0\\.1|\\*/.test(env.AIRBOARD_ALLOWED_ORIGINS ?? "")],
+  ["cors", "AIRBOARD_ALLOWED_ORIGINS explicitly includes AIRBOARD_APP_URL without local origins or wildcard", () => present("AIRBOARD_ALLOWED_ORIGINS") && allowedOriginsIncludeApp()],
   ["supabase-server", "Supabase server URL and service role key are production values", () => nonLocalUrl("SUPABASE_URL") && present("SUPABASE_SERVICE_ROLE_KEY")],
   ["supabase-browser", "Supabase browser URL and anonymous key are production values", () => nonLocalUrl("NEXT_PUBLIC_SUPABASE_URL") && present("NEXT_PUBLIC_SUPABASE_ANON_KEY")],
   ["signing-secret", "AIRBOARD_SESSION_SIGNING_SECRET is a non-placeholder value of at least 32 characters", () => hasStrongValue("AIRBOARD_SESSION_SIGNING_SECRET")],
@@ -85,7 +133,14 @@ const paidConfiguration = [
 ];
 
 const chromeConfiguration = [
-  ["chrome-store-url", "A public Chrome Web Store detail URL is configured", () => isHttps("NEXT_PUBLIC_CHROME_WEB_STORE_URL") && /chromewebstore\\.google\\.com/.test(env.NEXT_PUBLIC_CHROME_WEB_STORE_URL ?? "")],
+  ["chrome-store-url", "The public Chrome Web Store detail URL belongs to the configured extension ID", isChromeWebStoreDetailUrl],
+  ["chrome-extension-version", "The packaged Chrome extension version is a semantic version", () => chromeExtensionVersionPattern.test(env.NEXT_PUBLIC_CHROME_EXTENSION_VERSION?.trim() ?? "")],
+  ["chrome-renderer-overlap", "The renderer compatibility window is bounded and contains the current extension version", () => Boolean(chromeCompatibleVersions("NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_COMPATIBLE_VERSIONS"))],
+  ["chrome-api-overlap", "The API compatibility window is bounded and contains the current extension version", () => Boolean(chromeCompatibleVersions("AIRBOARD_CHROME_EXTENSION_COMPATIBLE_VERSIONS"))],
+  ["chrome-overlap-parity", "The renderer and API advertise the same Chrome compatibility window", () => sameVersionSet(chromeCompatibleVersions("NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_COMPATIBLE_VERSIONS"), chromeCompatibleVersions("AIRBOARD_CHROME_EXTENSION_COMPATIBLE_VERSIONS"))],
+  ["chrome-extension-id", "The exact Chrome Web Store extension ID is configured", () => /^[a-p]{32}$/.test(env.NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_ID ?? "")],
+  ["chrome-api-extension-id", "The API is restricted to the same Chrome Web Store extension ID", () => env.AIRBOARD_CHROME_EXTENSION_ID === env.NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_ID && /^[a-p]{32}$/.test(env.AIRBOARD_CHROME_EXTENSION_ID ?? "")],
+  ["chrome-kill-switch", "The Chrome extension release switch is explicitly enabled", () => env.AIRBOARD_CHROME_EXTENSION_ENABLED === "true"],
 ];
 
 const evidenceByScope = {
@@ -122,6 +177,7 @@ const evidenceByScope = {
     "billing-reconciliation",
   ],
   "chrome-public": [
+    "chrome-deployment-compatibility",
     "chrome-store-approval",
     "meet-receiver-matrix",
     "chrome-permission-review",

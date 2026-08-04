@@ -14,7 +14,6 @@ function stages(winner = "manipulation") {
   return {
     navigation: { update: () => winner === "navigation" },
     snap: { update: () => winner === "snap" },
-    undo: { update: () => winner === "undo" },
     voice: { observe: () => undefined },
     manipulation: { run: () => undefined },
   };
@@ -27,11 +26,11 @@ test("coordinates production arbitration and emits content-free stages", () => {
     timestampMs: 1234,
     handsDetected: 1,
     inferenceMs: 7.5,
-    stages: stages("undo"),
+    stages: stages("snap"),
     report: journal.append,
   });
 
-  assert.equal(result.owner, "undo");
+  assert.equal(result.owner, "snap");
   assert.deepEqual(
     journal.snapshot().map((event) => event.stage),
     ["perception_health", "arbitration_owner"],
@@ -204,12 +203,6 @@ test("live and injected landmarks execute the same production frame stages", () 
               return false;
             },
           },
-          undo: {
-            update: () => {
-              order.push("undo");
-              return false;
-            },
-          },
           voice: {
             observe: () => order.push("voice"),
           },
@@ -232,7 +225,6 @@ test("live and injected landmarks execute the same production frame stages", () 
       "stages",
       "navigation",
       "snap",
-      "undo",
       "voice",
       "manipulation",
       "apply",

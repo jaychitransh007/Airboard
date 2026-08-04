@@ -13,13 +13,12 @@
  * remains the final fallback and runs after every voice observation.
  *
  * Keeping advancement and effects together matches the stateful trackers used
- * by the board: an Undo tracker can cross its threshold and apply Undo in the
- * same callback, while lower-priority trackers never observe that frame.
+ * by the board: a Snap tracker can cross its threshold and toggle visibility
+ * in the same callback, while lower-priority trackers never observe that frame.
  */
 export const GESTURE_FRAME_PRIORITY = [
   "navigation",
   "snap",
-  "undo",
   "voice",
   "manipulation",
 ] as const;
@@ -59,7 +58,6 @@ export type GestureFrameArbitrationInput = Readonly<
 const CLAIMING_PRIORITY: readonly ClaimingGestureFrameOwner[] = [
   "navigation",
   "snap",
-  "undo",
 ];
 
 /**

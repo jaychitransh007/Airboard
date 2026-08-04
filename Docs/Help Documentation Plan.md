@@ -58,7 +58,7 @@ excellent *sources* (§4).
 | `/docs` (`[marketingSlug]/page.tsx:18`) | Three cards, ~90 words total | A stub. Linked from the footer, so it reads as a broken promise. |
 | `/pilot/setup` | Meet install steps, three short sections | Only covers Meet; pilot-scoped framing. |
 | First-run overlay (`AirboardPrototype.tsx:7561`) | Six bullets on gestures and voice | Renders **only** when a camera is available, input mode is Intent Canvas, and it is not the desktop overlay. Mouse-only and touchpad users see no first-run help at all. |
-| "Gesture guide" `<details>` (`AirboardPrototype.tsx:8337`) | Aim / choose / move / place / erase / speak / undo | Collapsed inside the sidebar; not discoverable; no pan, zoom, or snap entries. |
+| "Gesture guide" `<details>` (`AirboardPrototype.tsx:8337`) | Aim / choose / move / place / erase / speak | Collapsed inside the sidebar; not discoverable; no pan, zoom, or snap entries. |
 | Canvas `aria-label` (`AirboardPrototype.tsx:7610`) | Tab, Enter/F2, typed commands | The only place keyboard navigation is described anywhere. |
 | `extensions/chrome-meet-bridge/README.md` | Install journey, trust boundary | Developer-oriented (`chrome://extensions`, Load unpacked). |
 | `/support` | Form | Asks users to supply "error code" and "trace ID" — and nothing in the product or docs explains what those are. |
@@ -209,7 +209,7 @@ about this codebase does not survive contact with the release cadence.
 
 **Prerequisite:** RGB-034 through RGB-037 are fixed *before* the affected help
 pages are written, not after. Doc 06 can start immediately — the Gesture
-Interaction Audit is current as of 26 July 2026 and is not implicated.
+Interaction Audit is current as of 30 July 2026.
 
 ---
 
@@ -219,7 +219,7 @@ Scope confirmed as full `ONB-008` + `ONB-014`. Both are P0 in the Gesture
 Interaction Audit backlog and NOT STARTED in the
 [Public Beta checklist](./Public%20Beta%20Readiness%20and%20Platform%20Onboarding%20Checklist.md):
 
-> **ONB-008** — The user practices choose, move, place, erase, undo, snap, pan,
+> **ONB-008** — The user practices choose, move, place, erase, snap, pan,
 > and zoom; sees pose/contact/release quality and conflict explanations;
 > completes a sample object journey; and can retry or choose another input mode.
 >
@@ -231,9 +231,8 @@ Interaction Audit backlog and NOT STARTED in the
 
 The "conflict explanations" requirement in ONB-008 is already written — it is
 the **Confusable gesture pairs** table in the Gesture Interaction Audit
-(push-to-talk vs. undo, aim vs. push-to-talk, move vs. place vs. erase, move
-vs. scoped voice edit, one-hand move vs. two-hand zoom, two-open-hand pan vs.
-open-palm undo, eraser vs. move). Doc 06 turns each row into a user-facing
+(aim vs. push-to-talk, move vs. place vs. erase, move vs. scoped voice edit,
+one-hand move vs. two-hand zoom, eraser vs. move). Doc 06 turns each row into a user-facing
 "if this happens, do this" explanation, and the trainer shows the matching
 explanation when it detects that specific confusion live.
 
@@ -241,7 +240,7 @@ explanation when it detects that specific confusion live.
 
 | Piece | Location | Responsibility |
 | --- | --- | --- |
-| Trainer UI | `apps/web/src/features/onboarding/GestureTrainer.tsx` (new) | Eight practice stations, one per ONB-008 gesture, plus the sample object journey |
+| Trainer UI | `apps/web/src/features/onboarding/GestureTrainer.tsx` (new) | Seven practice stations, one per ONB-008 gesture, plus the sample object journey |
 | Pose-quality channel | `packages/gesture-engine` (extend) | Expose the pose scores, contact/release evidence, and arbitration owner that the engine already computes internally, as a read-only per-frame quality signal |
 | Calibration | `apps/web/src/features/onboarding/gestureCalibration.ts` (new) | Dominant hand, comfortable range, camera framing, close-hand strength, snap timing. Derived scalars only — **never raw landmarks**. Persisted via `/me/preferences`, mirrored to `localStorage`, resettable |
 | Route | `apps/web/app/app/onboarding/gestures/page.tsx` (new) | `/onboarding` currently just redirects to `/app` (`apps/web/app/onboarding/page.tsx`) |
@@ -285,7 +284,7 @@ gate.
   in the same block.** Not in a separate appendix.
 - Gesture descriptions use the exact performance language from the Gesture
   Interaction Audit, near-verbatim. Paraphrasing pose descriptions is how
-  timing details ("about 0.4 seconds", "release before another undo") get
+  timing details ("about 0.4 seconds", "return to neutral before repeating") get
   lost.
 - Explain the *why* for safety behavior: no confirmation step, undo as the
   safety net, ambient speech that cannot mutate the board.

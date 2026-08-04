@@ -4,7 +4,6 @@ import test from "node:test";
 import { estimatePalmPresentation } from "@airboard/gesture-engine";
 
 import { selectSingleLandmarkPose } from "../src/features/board/landmarkPoseSelection.ts";
-import { UndoGestureTracker } from "../src/features/board/undoGestureTracker.ts";
 import { PalmVoiceGestureTracker } from "../src/features/board/palmVoiceGestureTracker.ts";
 
 function landmarkArray(entries) {
@@ -71,8 +70,8 @@ function rotate(landmarks, angle, center = { x: 0.5, y: 0.58 }) {
   });
 }
 
-test("raw rotated open-palm landmarks followed by a visible left swipe emit one Undo", () => {
-  const tracker = new UndoGestureTracker();
+test("raw rotated open-palm swipe motion cannot activate a command gesture", () => {
+  const tracker = new PalmVoiceGestureTracker();
   const base = rotate(openPalm(), Math.PI / 2);
   const update = (dx, timestampMs) => {
     const pose = selectSingleLandmarkPose(
@@ -89,9 +88,10 @@ test("raw rotated open-palm landmarks followed by a visible left swipe emit one 
   };
 
   assert.equal(update(0, 0), null);
-  assert.equal(update(0.1, 80), "tracking");
-  assert.equal(update(0.22, 180), "undo");
-  assert.equal(update(0.3, 260), null, "the same held palm cannot fire twice");
+  assert.equal(update(0.1, 80), null);
+  assert.equal(update(0.22, 180), null);
+  assert.equal(update(0.3, 260), null);
+  assert.equal(tracker.engaged, false);
 });
 
 test("raw rotated open-palm landmarks held still activate and release Voice once", () => {

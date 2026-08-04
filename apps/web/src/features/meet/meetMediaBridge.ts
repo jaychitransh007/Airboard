@@ -1,3 +1,11 @@
+import {
+  CONFIGURED_CHROME_EXTENSION_ORIGIN,
+  extensionRelayMessageFields,
+  extensionRelayNonceFromHash,
+  isTrustedExtensionRelayMessage,
+  UNPACKED_EXTENSION_RELAY_ALLOWED,
+} from "./extensionRelayTrust.ts";
+
 /**
  * Client side of the Airboard media bridge.
  *
@@ -12,7 +20,7 @@
  *
  * Protocol (all messages carry `bridge: "airboard-media-bridge", v: 1`):
  *   frame -> host: hello | start-video {maxWidth} | frame-ack {id} | stop-video
- *                | start-audio | stop-audio
+ *                | start-audio | audio-ack {seq} | stop-audio
  *   host -> frame: ready | frame {id, bitmap} | audio-chunk {seq, sampleRate, samples}
  *                | ended {reason, channel} | error {message, channel}
  * `channel` ("video" | "audio") scopes end/error events so one capture
@@ -44,6 +52,12 @@ export type MeetMediaBridgeEnv = {
   hostWindow: unknown;
   /** The only origins accepted for host messages. */
   allowedOrigins: readonly string[];
+  /** Exact published extension origin accepted in addition to allowedOrigins. */
+  trustedExtensionOrigin?: string;
+  /** 256-bit frame binding required on every message in an extension relay. */
+  relayNonce?: string;
+  /** Allows a nonce-bound unpacked extension only when no published ID exists. */
+  allowNonceBoundExtensionOrigin?: boolean;
   helloAttempts?: number;
   helloIntervalMs?: number;
   firstFrameTimeoutMs?: number;
@@ -72,11 +86,22 @@ function makeMessage(type: string, fields?: Record<string, unknown>): BridgeMess
   return { bridge: MEET_MEDIA_BRIDGE_MARKER, v: MEET_MEDIA_BRIDGE_VERSION, type, ...fields };
 }
 
+function makeEnvMessage(
+  env: MeetMediaBridgeEnv,
+  type: string,
+  fields?: Record<string, unknown>,
+): BridgeMessage {
+  return makeMessage(type, {
+    ...fields,
+    ...extensionRelayMessageFields(env.relayNonce ?? null),
+  });
+}
+
 function parseHostMessage(
   event: MeetMediaBridgeEvent,
   env: MeetMediaBridgeEnv,
 ): BridgeMessage | null {
-  if (event.source !== env.hostWindow || !env.allowedOrigins.includes(event.origin)) {
+  if (event.source !== env.hostWindow) {
     return null;
   }
   const data = event.data as BridgeMessage | null;
@@ -87,6 +112,19 @@ function parseHostMessage(
     data.v !== MEET_MEDIA_BRIDGE_VERSION ||
     typeof data.type !== "string"
   ) {
+    return null;
+  }
+  const exactOrNonceBoundExtension =
+    (Boolean(env.trustedExtensionOrigin) || env.allowNonceBoundExtensionOrigin === true) &&
+    isTrustedExtensionRelayMessage(event, {
+      configuredOrigin: env.trustedExtensionOrigin ?? null,
+      relayNonce: env.relayNonce ?? null,
+      allowNonceBoundUnpacked: env.allowNonceBoundExtensionOrigin === true,
+    });
+  if (!env.allowedOrigins.includes(event.origin) && !exactOrNonceBoundExtension) {
+    return null;
+  }
+  if (env.relayNonce && data.relayNonce !== env.relayNonce) {
     return null;
   }
   return data;
@@ -129,7 +167,7 @@ export function probeMeetMediaBridge(env: MeetMediaBridgeEnv): Promise<MeetMedia
         return;
       }
       sent += 1;
-      env.postToHost(makeMessage("hello"));
+      env.postToHost(makeEnvMessage(env, "hello"));
       timer = setTimeout(sendHello, intervalMs);
     };
     sendHello();
@@ -213,8 +251,8 @@ function createBridge(env: MeetMediaBridgeEnv): MeetMediaBridge {
     startVideo(handlers) {
       return startChannel<MeetMediaBridgeVideoSession>({
         channel: "video",
-        startMessage: makeMessage("start-video", { maxWidth: 640 }),
-        stopMessage: makeMessage("stop-video"),
+        startMessage: makeEnvMessage(env, "start-video", { maxWidth: 640 }),
+        stopMessage: makeEnvMessage(env, "stop-video"),
         timeoutError: "The Meet media bridge did not deliver video frames.",
         onEnded: handlers.onEnded,
         makeSession: (stop) => ({ stop }),
@@ -226,7 +264,7 @@ function createBridge(env: MeetMediaBridgeEnv): MeetMediaBridge {
           if (!bitmap) {
             return false;
           }
-          env.postToHost(makeMessage("frame-ack", { id: message.id }));
+          env.postToHost(makeEnvMessage(env, "frame-ack", { id: message.id }));
           handlers.onFrame(bitmap);
           return true;
         },
@@ -235,8 +273,8 @@ function createBridge(env: MeetMediaBridgeEnv): MeetMediaBridge {
     startAudio(handlers) {
       return startChannel<MeetMediaBridgeAudioSession>({
         channel: "audio",
-        startMessage: makeMessage("start-audio"),
-        stopMessage: makeMessage("stop-audio"),
+        startMessage: makeEnvMessage(env, "start-audio"),
+        stopMessage: makeEnvMessage(env, "stop-audio"),
         timeoutError: "The Meet media bridge did not deliver microphone audio.",
         onEnded: handlers.onEnded,
         makeSession: (stop) => ({ stop }),
@@ -246,10 +284,14 @@ function createBridge(env: MeetMediaBridgeEnv): MeetMediaBridge {
           }
           const samples = message.samples as ArrayBuffer | undefined;
           const sampleRate = typeof message.sampleRate === "number" ? message.sampleRate : 0;
-          if (!samples || sampleRate <= 0) {
+          const seq = typeof message.seq === "number" && Number.isSafeInteger(message.seq)
+            ? message.seq
+            : 0;
+          if (!samples || sampleRate <= 0 || seq <= 0) {
             return false;
           }
           handlers.onChunk(new Float32Array(samples), sampleRate);
+          env.postToHost(makeEnvMessage(env, "audio-ack", { seq }));
           return true;
         },
       });
@@ -318,9 +360,11 @@ export async function createBridgedMicStream(bridge: MeetMediaBridge): Promise<M
 }
 
 /**
- * Browser wrapper: probes for the bridge extension from inside the Meet
- * add-on iframe. Under test hooks the harness page may emulate the host in
- * the same window, so the frame's own origin is also accepted.
+ * Browser wrapper: probes through the immediate parent. In the Marketplace
+ * add-on that parent is Meet itself; in the Chrome camera-overlay product it
+ * is engine.html, which relays to Meet and reports sanitized compositor state
+ * to the extension background worker. Using window.top here bypasses that
+ * relay and prevents server preflight from ever completing.
  */
 export function probeMeetMediaBridgeInWindow(): Promise<MeetMediaBridge | null> {
   if (typeof window === "undefined") {
@@ -329,17 +373,24 @@ export function probeMeetMediaBridgeInWindow(): Promise<MeetMediaBridge | null> 
   const testHooks = process.env.NEXT_PUBLIC_AIRBOARD_TEST_HOOKS === "1";
   let hostWindow: Window;
   try {
-    hostWindow = window.top ?? window;
+    hostWindow = window.parent;
   } catch {
     return Promise.resolve(null);
   }
   if (hostWindow === window && !testHooks) {
     return Promise.resolve(null);
   }
+  const relayNonce = extensionRelayNonceFromHash(window.location.hash);
   const allowedOrigins = [
     "https://meet.google.com",
+    ...(CONFIGURED_CHROME_EXTENSION_ORIGIN ? [CONFIGURED_CHROME_EXTENSION_ORIGIN] : []),
     ...(testHooks ? [window.location.origin] : []),
   ];
+  const hostTargetOrigin = relayNonce
+    ? CONFIGURED_CHROME_EXTENSION_ORIGIN ?? "*"
+    : testHooks
+      ? "*"
+      : "https://meet.google.com";
   return probeMeetMediaBridge({
     listen: (handler) => {
       const domHandler = (event: MessageEvent) => handler(event);
@@ -347,12 +398,19 @@ export function probeMeetMediaBridgeInWindow(): Promise<MeetMediaBridge | null> 
       return () => window.removeEventListener("message", domHandler);
     },
     postToHost: (message, transfer) => {
-      // The hello/start payloads carry no sensitive data; responses are
-      // validated against hostWindow + allowedOrigins on receipt.
-      hostWindow.postMessage(message, "*", transfer ?? []);
+      hostWindow.postMessage(message, hostTargetOrigin, transfer ?? []);
     },
     hostWindow,
     allowedOrigins,
+    ...(CONFIGURED_CHROME_EXTENSION_ORIGIN
+      ? { trustedExtensionOrigin: CONFIGURED_CHROME_EXTENSION_ORIGIN }
+      : {}),
+    ...(relayNonce ? { relayNonce } : {}),
+    allowNonceBoundExtensionOrigin: Boolean(
+      relayNonce &&
+        !CONFIGURED_CHROME_EXTENSION_ORIGIN &&
+        UNPACKED_EXTENSION_RELAY_ALLOWED,
+    ),
   });
 }
 
@@ -457,17 +515,20 @@ export function probeMeetCameraOverlay(
 
     const overlayHandle: MeetCameraOverlay = {
       start() {
-        env.postToHost(makeMessage("overlay-start"));
+        env.postToHost(makeEnvMessage(env, "overlay-start"));
       },
       stop() {
-        env.postToHost(makeMessage("overlay-stop"));
+        env.postToHost(makeEnvMessage(env, "overlay-stop"));
       },
       trySendFrame(bitmap, scrim) {
         if (inFlight >= 2) {
           return false;
         }
         inFlight += 1;
-        env.postToHost(makeMessage("overlay-frame", { id: nextId++, scrim, bitmap }), [bitmap]);
+        env.postToHost(
+          makeEnvMessage(env, "overlay-frame", { id: nextId++, scrim, bitmap }),
+          [bitmap],
+        );
         return true;
       },
       dispose() {
@@ -486,14 +547,14 @@ export function probeMeetCameraOverlay(
         return;
       }
       sent += 1;
-      env.postToHost(makeMessage("overlay-hello"));
+      env.postToHost(makeEnvMessage(env, "overlay-hello"));
       timer = setTimeout(sendHello, intervalMs);
     };
     sendHello();
   });
 }
 
-/** Browser wrapper for the camera-overlay probe (Meet iframe or test hooks). */
+/** Browser wrapper for the camera-overlay probe (Meet or extension relay parent). */
 export function probeMeetCameraOverlayInWindow(
   onState: (state: MeetCameraOverlayState) => void,
 ): Promise<MeetCameraOverlay | null> {
@@ -503,17 +564,24 @@ export function probeMeetCameraOverlayInWindow(
   const testHooks = process.env.NEXT_PUBLIC_AIRBOARD_TEST_HOOKS === "1";
   let hostWindow: Window;
   try {
-    hostWindow = window.top ?? window;
+    hostWindow = window.parent;
   } catch {
     return Promise.resolve(null);
   }
   if (hostWindow === window && !testHooks) {
     return Promise.resolve(null);
   }
+  const relayNonce = extensionRelayNonceFromHash(window.location.hash);
   const allowedOrigins = [
     "https://meet.google.com",
+    ...(CONFIGURED_CHROME_EXTENSION_ORIGIN ? [CONFIGURED_CHROME_EXTENSION_ORIGIN] : []),
     ...(testHooks ? [window.location.origin] : []),
   ];
+  const hostTargetOrigin = relayNonce
+    ? CONFIGURED_CHROME_EXTENSION_ORIGIN ?? "*"
+    : testHooks
+      ? "*"
+      : "https://meet.google.com";
   return probeMeetCameraOverlay(
     {
       listen: (handler) => {
@@ -522,10 +590,19 @@ export function probeMeetCameraOverlayInWindow(
         return () => window.removeEventListener("message", domHandler);
       },
       postToHost: (message, transfer) => {
-        hostWindow.postMessage(message, "*", transfer ?? []);
+        hostWindow.postMessage(message, hostTargetOrigin, transfer ?? []);
       },
       hostWindow,
       allowedOrigins,
+      ...(CONFIGURED_CHROME_EXTENSION_ORIGIN
+        ? { trustedExtensionOrigin: CONFIGURED_CHROME_EXTENSION_ORIGIN }
+        : {}),
+      ...(relayNonce ? { relayNonce } : {}),
+      allowNonceBoundExtensionOrigin: Boolean(
+        relayNonce &&
+          !CONFIGURED_CHROME_EXTENSION_ORIGIN &&
+          UNPACKED_EXTENSION_RELAY_ALLOWED,
+      ),
     },
     onState,
   );

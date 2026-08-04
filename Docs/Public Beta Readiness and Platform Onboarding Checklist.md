@@ -197,7 +197,7 @@ Goal: an administrator can install Airboard safely, and a participant can become
 - [ ] **[NOT STARTED] ONB-007 — Add input-mode selection and permission diagnostics.**
   - Acceptance: Gesture, voice, pointer/touchpad, and typed input are offered according to policy and client capability; denied permissions produce clear recovery steps.
 - [ ] **[NOT STARTED] ONB-008 — Add guided gesture practice with live feedback.**
-  - Acceptance: The user practices choose, move, place, erase, undo, snap, pan, and zoom; sees pose/contact/release quality and conflict explanations; completes a sample object journey; and can retry or choose another input mode.
+  - Acceptance: The user practices choose, move, place, erase, snap, pan, and zoom; sees pose/contact/release quality and conflict explanations; completes a sample object journey; and can retry or choose another input mode.
 - [ ] **[NOT STARTED] ONB-009 — Guarantee a keyboard/pointer fallback on every supported surface.**
   - Acceptance: Core create, select, move, edit, undo, and delete actions remain usable without camera or microphone.
 - [ ] **[NOT STARTED] ONB-010 — Add role-aware first-run guidance and accessible help.**

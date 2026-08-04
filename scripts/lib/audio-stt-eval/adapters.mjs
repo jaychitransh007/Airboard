@@ -443,7 +443,9 @@ async function streamMeetBridgeScenario({
         // The priming sample is discarded while realtimeSpeech is still in
         // `starting`, exactly as an early extension chunk would be.
         emitHostMessage("audio-chunk", {
-          seq: 0,
+          // The production bridge rejects non-positive sequence numbers, so
+          // this priming chunk must itself be protocol-valid.
+          seq: 1,
           sampleRate: asset.wav.sampleRate,
           samples: new Float32Array(1).buffer,
         });
@@ -598,7 +600,7 @@ async function streamMeetBridgeScenario({
             1_000,
         ),
       );
-      let sequence = 1;
+      let sequence = 2;
       for (
         let sampleOffset = 0;
         sampleOffset < asset.wav.sampleCount;

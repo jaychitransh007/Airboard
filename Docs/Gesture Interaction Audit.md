@@ -1,7 +1,7 @@
 # Airboard gesture interaction audit
 
 > **Status:** Implemented gesture vocabulary and product-gap source of truth
-> **Last reviewed:** 26 July 2026
+> **Last reviewed:** 30 July 2026
 > **Primary audiences:** Corporate employees, content creators, and online tutors
 
 Airboard uses gesture context, not pose alone. A closed hand has a different
@@ -19,13 +19,16 @@ name the active context and provide pointer, keyboard, menu, or voice fallbacks.
 | Erase | Choose Eraser first, close one hand over an object, wait for the erase state, sweep across targets, then reopen | Deletes touched objects as one recoverable undo action | Intent Canvas |
 | Global push-to-talk | Start Airo once; hold one Airboard-defined open palm still for about 0.4 seconds; speak; lower or relax the hand | Opens and closes the global voice gate | Voice-capable hands surface |
 | Scoped voice edit | Close one hand over an object and hold it nearly still for about 0.6 seconds; speak the change | Addresses the voice command to that object | Voice-capable hands surface |
-| Undo | Show one Airboard-defined open palm and swipe left in one clear horizontal motion; release before another undo | Undoes one action or cancels an interpreting command | Hands-enabled surface |
 | Hide / restore diagram | With one hand, touch thumb to middle finger while keeping thumb-index separated, then perform a fast middle-finger flick that increases the fingertip gap; return to neutral | Toggles diagram only after release motion, not on contact alone | Standalone canvas and meeting overlay |
 | Pan canvas | Hold two open hands for about 0.15 seconds, then move them together | Pans the viewport | Intent Canvas |
 | Zoom canvas | Hold two closed hands for about 0.15 seconds, then spread or converge them | Zooms around the hand midpoint | Intent Canvas |
 
 Touchpad writing, keyboard shortcuts, toolbar controls, typed commands, and
 voice commands are input fallbacks, not camera gestures.
+
+Camera Undo has been removed. Use the toolbar, `Cmd/Ctrl+Z`, or the explicit
+“Airo, undo” command. Open-palm motion cannot cancel a command or mutate the
+board.
 
 ## Open gesture backlog
 
@@ -44,12 +47,10 @@ commitments.
 
 | Gestures | Why they are close | Current separation | Remaining risk |
 | --- | --- | --- | --- |
-| Push-to-talk vs undo | Both are one-hand open-palm gestures | Both use the same open palm; motion is the discriminator — voice requires a stable 0.4-second still hold, Undo requires a leftward swipe. Undo holds higher priority and cancels an armed voice hold the moment leftward intent appears | Medium: separation is motion-based, not pose-based, so a slow or paused swipe could momentarily arm voice; the 0.4-second still-hold, stillness radius, cooldown, and one-shot latching bound the effect. |
 | Aim vs push-to-talk | A casual hand can briefly resemble a command pose | Voice requires a high-scoring open-palm geometry (flat, fingers extended) held still for 0.4 seconds; a relaxed aiming hand is not a presented flat palm and has no voice meaning | A user may rest an open palm in view while presenting; the 0.4-second still-hold, cooldown, and one-shot latching reduce accidental activation. |
 | Move vs place vs erase | All use a closed hand and drag | Select + object body means move; an armed catalog tool means place; Eraser means erase. The chosen mode locks until release. | If the active tool or lock feedback is not visible, the same pose appears unpredictable. |
 | Move vs scoped voice edit | Both begin by closing over an object | Movement beyond tolerance locks out voice; a nearly still 0.6-second hold scopes speech | Fine positioning with a pause can feel like voice activation. |
 | One-hand move vs two-hand zoom | Both use closed hands | Two-hand navigation now reserves the stream on its first valid frame, before its engage debounce, so a zoom cannot pre-grab an object | Tracking loss that drops one hand can end navigation; the release debounce prevents an immediate mode switch. |
-| Two-open-hand pan vs open-palm undo | Both use open hands | Two tracked hands suppress every single-hand Undo action | One hand temporarily leaving frame ends the reservation after the navigation release debounce. |
 | Eraser vs move | Both close over an object | Erasing requires Eraser to be the active tool; Select cannot erase | Mode visibility is essential in a live session. |
 
 ## Fixes applied in this audit
@@ -59,13 +60,12 @@ commitments.
 - `HandLandmarker.detectForVideo()` is the sole camera perception backend for
   every gesture. Airboard derives pose scores and motion from the same 21
   landmarks; the MediaPipe canned gesture classifier is not in the runtime.
-- Voice and Undo share one Airboard landmark definition — the open palm (all
-  four fingers extended and palm presented) — and are separated by motion: a
-  still hold opens the voice gate, a leftward swipe undoes.
-- Runtime ownership is locked in this order: two-hand navigation, Snap, Undo,
-  Voice, then Move/Place/Erase. A higher-priority candidate suppresses
+- Open-palm recognition is reserved for voice activation: all four fingers
+  extended and the palm presented, held still for 0.4 seconds. Lateral motion
+  cancels the hold candidate and never becomes an Undo action.
+- Runtime ownership is locked in this order: two-hand navigation, Snap,
+  Voice observation, then Move/Place/Erase. A higher-priority candidate suppresses
   every action below it.
-- Undo is suppressed while any voice gate is open.
 - Push-to-talk is suppressed during navigation, movement, placement, erasing,
   paused input, and other active interactions.
 - Gesture lasso multi-select was removed because the selected group had no

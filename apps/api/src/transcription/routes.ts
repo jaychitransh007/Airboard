@@ -2,7 +2,11 @@ import type { FastifyInstance } from "fastify";
 import WebSocket, { type RawData } from "ws";
 import type { ApiConfig } from "../config";
 import { createTranscriptionProvider } from "./factory";
-import { parseTranscriptionControlMessage, resolveTranscriptionStart } from "./protocol";
+import {
+  parseTranscriptionControlMessage,
+  resolveTranscriptionConfigure,
+  resolveTranscriptionStart,
+} from "./protocol";
 import { publicTranscriptionConfig } from "./publicConfig";
 import type {
   RealtimeTranscriptionSession,
@@ -34,7 +38,7 @@ export function registerTranscriptionRoutes(server: FastifyInstance, config: Api
     }
     const authorize = async () => {
       if (configuredApiTokenAllowed(request, config.apiToken) || config.localEntitlements) return true;
-      return Boolean(auth && (await auth.authenticate(request)));
+      return Boolean(auth && (await auth.authenticate(request, { allowInstallation: true })));
     };
 
     const clientSocket = socket as unknown as WebSocket;
@@ -128,7 +132,49 @@ export function registerTranscriptionRoutes(server: FastifyInstance, config: Api
     const start = async (rawMessage: string) => {
       const parsed = parseTranscriptionControlMessage(rawMessage);
       if (!parsed.ok) {
-        sendError(clientSocket, parsed.error.code, parsed.error.message, true);
+        sendError(
+          clientSocket,
+          parsed.error.code,
+          parsed.error.message,
+          !isConfigureControlMessage(rawMessage),
+        );
+        return;
+      }
+
+      if (parsed.value.type === "transcription.configure") {
+        if (!active) {
+          sendError(
+            clientSocket,
+            "TRANSCRIPTION_NOT_READY",
+            "Wait for transcription.ready before updating keyterms.",
+            false,
+          );
+          return;
+        }
+        const resolved = resolveTranscriptionConfigure(
+          parsed.value,
+          config.transcription,
+        );
+        if (!resolved.ok) {
+          sendError(clientSocket, resolved.error.code, resolved.error.message, false);
+          return;
+        }
+        try {
+          active.session.updateKeyterms(resolved.value);
+          send(clientSocket, {
+            type: "transcription.configured",
+            keytermCount: resolved.value.length,
+          });
+        } catch (error) {
+          sendError(
+            clientSocket,
+            "TRANSCRIPTION_CONFIGURE_FAILED",
+            error instanceof Error
+              ? error.message
+              : "The transcription vocabulary could not be updated.",
+            false,
+          );
+        }
         return;
       }
 
@@ -352,6 +398,18 @@ export function registerTranscriptionRoutes(server: FastifyInstance, config: Api
       releaseStreamSlot();
     });
   });
+}
+
+function isConfigureControlMessage(input: string): boolean {
+  try {
+    const value = JSON.parse(input) as { type?: unknown };
+    return (
+      value?.type === "transcription.configure" ||
+      value?.type === "configure"
+    );
+  } catch {
+    return false;
+  }
 }
 
 function sendError(

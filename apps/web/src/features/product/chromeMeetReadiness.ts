@@ -6,6 +6,7 @@ export type ChromeMeetDiagnostics = {
   senderAttached?: boolean;
   framesEncoded?: number;
   bytesSent?: number;
+  meetingSessionId?: string | null;
 };
 
 export type ChromeMeetExtensionState = {
@@ -13,7 +14,11 @@ export type ChromeMeetExtensionState = {
   consented: boolean;
   entitled: boolean;
   preflightComplete: boolean;
+  statusFresh?: boolean;
+  verifiedMeetingSessionId?: string | null;
+  verificationExpiresAt?: string | null;
   installationId?: string | null;
+  installationInstanceId?: string | null;
   settings?: Record<string, boolean>;
   diagnostics?: ChromeMeetDiagnostics;
   lastError?: string | null;
@@ -29,12 +34,32 @@ export type ChromeMeetReadinessStep = {
 
 export function chromeMeetReadiness(
   extension: ChromeMeetExtensionState | null,
-  options: { detected: boolean; serverLinked: boolean; serverConsented: boolean; serverVerified: boolean },
+  options: {
+    detected: boolean;
+    serverLinked: boolean;
+    serverConsented: boolean;
+    serverVerified: boolean;
+    nowMs?: number;
+  },
 ): ChromeMeetReadinessStep[] {
   const linked = extension?.linked === true || options.serverLinked;
   const consented = extension?.consented === true || options.serverConsented;
   const diagnostics = extension?.diagnostics;
-  const verified = extension?.preflightComplete === true || options.serverVerified;
+  const nowMs = options.nowMs ?? Date.now();
+  const liveSessionVerified = Boolean(
+    extension?.entitled === true &&
+    extension?.statusFresh === true &&
+    diagnostics?.meetingDetected === true &&
+    diagnostics.engineMounted === true &&
+    diagnostics.engaged === true &&
+    diagnostics.meetingSessionId &&
+    diagnostics.meetingSessionId === extension.verifiedMeetingSessionId &&
+    typeof extension.verificationExpiresAt === "string" &&
+    new Date(extension.verificationExpiresAt).getTime() > nowMs &&
+    diagnostics.senderAttached === true &&
+    (diagnostics.framesEncoded ?? 0) > 0 &&
+    (diagnostics.bytesSent ?? 0) > 0,
+  );
   return [
     {
       id: "installed",
@@ -69,8 +94,12 @@ export function chromeMeetReadiness(
     {
       id: "sender",
       label: "Outgoing video verified",
-      detail: verified ? "Meet encoded and sent the Airboard composite." : "Waiting for encoded frames and outbound bytes.",
-      complete: verified,
+      detail: liveSessionVerified
+        ? "Meet is currently encoding and sending the Airboard composite."
+        : options.serverVerified
+          ? "A previous meeting was verified; open Meet to verify the current session."
+          : "Waiting for encoded frames and outbound bytes from the current meeting.",
+      complete: liveSessionVerified,
     },
   ];
 }

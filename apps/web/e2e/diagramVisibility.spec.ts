@@ -137,9 +137,9 @@ test("gesture guide teaches the exact conflict-safe poses", async ({ page }) => 
   await expect(
     page.getByText(/hold one open palm still/i),
   ).toBeVisible();
-  await expect(
-    page.getByText(/sweep it left in one clear horizontal motion/i),
-  ).toBeVisible();
+  await expect(page.locator(".gesture-guide dt", { hasText: "Undo" })).toHaveCount(0);
+  await expect(page.getByText(/swipe left/i)).toHaveCount(0);
+  await expect(page.getByText(/Cmd\/Ctrl\+Z always undoes/i)).toBeVisible();
   await expect(page.getByText(/held palm is reserved for voice/i)).toHaveCount(0);
   await expect(
     page.getByText(/Hold two closed hands briefly/i),

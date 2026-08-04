@@ -163,6 +163,7 @@ test("builds the provider-neutral websocket and config endpoints", async () => {
     provider: "deepgram",
     defaultModel: "flux-general-en",
     allowedModels: ["flux-general-en", "nova-3"],
+    dynamicKeyterms: false,
   });
 });
 
@@ -302,6 +303,101 @@ test("streams exact 80ms frames, emits live callbacks, and releases resources on
   assert.ok(events.some(([type, value]) => type === "interim" && value === "add a data"));
   assert.ok(events.some(([type, value]) => type === "final" && value === "add a database"));
   assert.ok(events.some(([type, value]) => type === "end" && value === "stopped"));
+});
+
+test("queues the latest board vocabulary until ready and configures it mid-session exactly once", async () => {
+  const socket = new FakeSocket();
+  const media = createMediaStreamHarness();
+  const audio = createWorkletAudioHarness();
+  const providerEvents = [];
+  const session = createRealtimeSpeechSession(
+    {
+      onFinal() {},
+      onProviderStatus: (event) => providerEvents.push(event),
+    },
+    {
+      url: "ws://localhost/transcription/ws",
+      keyterms: ["Airo", "database"],
+      dynamicKeyterms: true,
+    },
+    {
+      createWebSocket: () => socket,
+      getUserMedia: async () => media.stream,
+      createAudioContext: () => audio.context,
+      createAudioWorkletNode: () => audio.worklet,
+      createAudioWorkletModuleUrl: () => "blob:test",
+      revokeAudioWorkletModuleUrl() {},
+    },
+  );
+
+  session.start();
+  await new Promise((resolve) => setImmediate(resolve));
+  socket.open();
+  assert.deepEqual(JSON.parse(socket.sent[0]), {
+    type: "transcription.start",
+    sampleRate: 16_000,
+    keyterms: ["Airo", "database"],
+  });
+
+  session.updateKeyterms([
+    "Airo",
+    "Planner",
+    "Golden Dataset",
+    "Historical Dataset",
+  ]);
+  assert.equal(socket.sent.length, 1);
+
+  socket.serverMessage({
+    type: "transcription.ready",
+    provider: "deepgram",
+    model: "flux-general-en",
+    sampleRate: 16_000,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(JSON.parse(socket.sent[1]), {
+    type: "transcription.configure",
+    keyterms: [
+      "Airo",
+      "Planner",
+      "Golden Dataset",
+      "Historical Dataset",
+    ],
+  });
+
+  session.updateKeyterms([
+    "airo",
+    "Planner",
+    "Golden Dataset",
+    "Historical Dataset",
+  ]);
+  assert.equal(socket.sent.length, 2);
+  session.updateKeyterms([
+    "Airo",
+    "Planner",
+    "Golden Dataset",
+    "Historical Dataset",
+    "Feature Store",
+  ]);
+  assert.deepEqual(JSON.parse(socket.sent[2]), {
+    type: "transcription.configure",
+    keyterms: [
+      "Airo",
+      "Planner",
+      "Golden Dataset",
+      "Historical Dataset",
+      "Feature Store",
+    ],
+  });
+
+  socket.serverMessage({
+    type: "transcription.configured",
+    keytermCount: 5,
+  });
+  assert.deepEqual(providerEvents.at(-1), {
+    status: "configured",
+    message: "5 transcription keyterms active",
+  });
+  session.abort();
 });
 
 test("streams bridged PCM without creating an AudioContext or requiring user activation", async () => {

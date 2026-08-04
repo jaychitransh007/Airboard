@@ -6,7 +6,7 @@ import {
   arbitrateGestureFrame,
 } from "../src/features/board/gestureFrameArbitration.ts";
 
-const claimingOwners = ["navigation", "snap", "undo"];
+const claimingOwners = ["navigation", "snap"];
 
 function runScenario(winner) {
   const inspected = [];
@@ -29,7 +29,6 @@ function runScenario(winner) {
   const owner = arbitrateGestureFrame({
     navigation: stage("navigation"),
     snap: stage("snap"),
-    undo: stage("undo"),
     voice: {
       observe: () => {
         inspected.push("voice");
@@ -55,7 +54,6 @@ test("publishes the production gesture ownership order", () => {
   assert.deepEqual(GESTURE_FRAME_PRIORITY, [
     "navigation",
     "snap",
-    "undo",
     "voice",
     "manipulation",
   ]);
@@ -101,7 +99,6 @@ test("voice observes an open-palm frame without taking it away from the pointer"
   const owner = arbitrateGestureFrame({
     navigation: { update: neverClaims },
     snap: { update: neverClaims },
-    undo: { update: neverClaims },
     voice: {
       observe: () => {
         observed.push("voice-hold");
@@ -137,7 +134,6 @@ test("simultaneous claims still produce one owner: the highest-priority stage", 
   const owner = arbitrateGestureFrame({
     navigation: claimingStage("navigation"),
     snap: claimingStage("snap"),
-    undo: claimingStage("undo"),
     voice: {
       observe: () => {
         inspected.push("voice");
@@ -161,7 +157,6 @@ test("simultaneous claims still produce one owner: the highest-priority stage", 
   assert.deepEqual(executed, ["navigation"]);
   assert.deepEqual(preempted, [
     "snap",
-    "undo",
     "voice",
     "manipulation",
   ]);

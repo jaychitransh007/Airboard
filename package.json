@@ -9,6 +9,8 @@
     "dev:desktop": "pnpm --filter @airboard/desktop dev",
     "build": "pnpm -r build",
     "build:extension": "node scripts/package-chrome-extension.mjs",
+    "verify:extension-deployment": "node --env-file-if-exists=.env scripts/check-chrome-deployment.mjs",
+    "release:extension": "node --env-file-if-exists=.env scripts/check-chrome-deployment.mjs && node scripts/package-chrome-extension.mjs",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "eval:voice": "node scripts/eval-voice-intent.mjs",

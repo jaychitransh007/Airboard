@@ -90,6 +90,228 @@ test("semantic eval uses production grounding, atomic commit, and one-step Undo"
   );
 });
 
+test("current_selection remains the request-time target across a multi-action plan", () => {
+  const planner = {
+    label: "Planner",
+    nodeType: "process",
+    ordinal: 1,
+    selected: true,
+    position: { x: 620, y: 260 },
+    size: { width: 180, height: 92 },
+  };
+  const context = {
+    ...emptyContext,
+    selectionCount: 1,
+    selected: [planner],
+    objects: [
+      {
+        label: "Golden Dataset",
+        nodeType: "database",
+        ordinal: 1,
+        selected: false,
+        position: { x: 220, y: 140 },
+        size: { width: 180, height: 92 },
+      },
+      {
+        label: "Historical Dataset",
+        nodeType: "database",
+        ordinal: 2,
+        selected: false,
+        position: { x: 220, y: 380 },
+        size: { width: 180, height: 92 },
+      },
+      planner,
+    ],
+  };
+  const result = evaluateGroundedSemanticPlan(
+    {
+      version: "1.1",
+      status: "resolved",
+      issueCode: "none",
+      clarificationQuestion: null,
+      missingSlots: [],
+      actions: [
+        {
+          type: "connect",
+          from: {
+            kind: "visible_label",
+            label: "Golden Dataset",
+            occurrence: 1,
+          },
+          to: { kind: "current_selection" },
+          label: "additional context",
+        },
+        {
+          type: "connect",
+          from: {
+            kind: "visible_label",
+            label: "Historical Dataset",
+            occurrence: 1,
+          },
+          to: { kind: "current_selection" },
+          label: "additional context",
+        },
+      ],
+    },
+    context,
+  );
+
+  assert.equal(result.status, "applied");
+  assert.equal(result.effects.edgeCountDelta, 2);
+  assert.equal(result.undo.roundTripPassed, true);
+  assert.deepEqual(
+    validateGroundedSemanticOutcome(
+      result,
+      {
+        selectionCount: 2,
+        finalState: {
+          nodeCountDelta: 0,
+          edgeCountDelta: 2,
+          requiredEdges: [
+            {
+              from: { label: "Golden Dataset" },
+              to: { label: "Planner" },
+              label: "additional context",
+            },
+            {
+              from: { label: "Historical Dataset" },
+              to: { label: "Planner" },
+              label: "additional context",
+            },
+          ],
+        },
+      },
+      "resolved",
+    ),
+    [],
+  );
+});
+
+test("Data/Dataset repair reaches the exact final graph and remains one-step undoable", () => {
+  const context = {
+    ...emptyContext,
+    objects: [
+      {
+        label: "Historical Dataset",
+        nodeType: "database",
+        ordinal: 1,
+        position: { x: 180, y: 120 },
+        size: { width: 180, height: 92 },
+      },
+      {
+        label: "Golden Dataset",
+        nodeType: "database",
+        ordinal: 2,
+        position: { x: 180, y: 360 },
+        size: { width: 180, height: 92 },
+      },
+      {
+        label: "Planner",
+        nodeType: "process",
+        ordinal: 1,
+        position: { x: 560, y: 240 },
+        size: { width: 180, height: 92 },
+      },
+    ],
+  };
+  const result = evaluateGroundedSemanticPlan(
+    {
+      version: "1.1",
+      status: "resolved",
+      issueCode: "none",
+      clarificationQuestion: null,
+      missingSlots: [],
+      actions: [
+        {
+          type: "connect",
+          from: {
+            kind: "visible_label",
+            label: "Historical Data",
+            occurrence: null,
+          },
+          to: {
+            kind: "visible_label",
+            label: "Planner",
+            occurrence: null,
+          },
+          label: "additional context",
+        },
+        {
+          type: "connect",
+          from: {
+            kind: "visible_label",
+            label: "Golden Dataset",
+            occurrence: null,
+          },
+          to: {
+            kind: "visible_label",
+            label: "Planner",
+            occurrence: null,
+          },
+          label: "additional context",
+        },
+      ],
+    },
+    context,
+  );
+  assert.equal(result.status, "applied");
+  assert.equal(result.eventDelta.length, 4);
+  assert.equal(result.undo.applicable, true);
+  assert.equal(result.undo.roundTripPassed, true);
+  assert.deepEqual(
+    validateGroundedSemanticOutcome(
+      result,
+      {
+        selectionCount: 2,
+        finalState: {
+          nodeCountDelta: 0,
+          edgeCountDelta: 2,
+          requiredEdges: [
+            {
+              from: { label: "Historical Dataset" },
+              to: { label: "Planner" },
+              label: "additional context",
+            },
+            {
+              from: { label: "Golden Dataset" },
+              to: { label: "Planner" },
+              label: "additional context",
+            },
+          ],
+        },
+      },
+      "resolved",
+    ),
+    [],
+  );
+
+  const destructive = evaluateGroundedSemanticPlan(
+    {
+      version: "1.1",
+      status: "resolved",
+      issueCode: "none",
+      clarificationQuestion: null,
+      missingSlots: [],
+      actions: [
+        {
+          type: "delete",
+          targets: [
+            {
+              kind: "visible_label",
+              label: "Historical Data",
+              occurrence: null,
+            },
+          ],
+        },
+      ],
+    },
+    context,
+  );
+  assert.equal(destructive.status, "grounding_failed");
+  assert.equal(destructive.mutationApplied, false);
+  assert.deepEqual(destructive.eventDelta, []);
+});
+
 test("ambiguous references fail closed before any board event escapes", () => {
   const context = {
     ...emptyContext,

@@ -108,7 +108,7 @@ These are fixable in the repo and each would make a public "supported product" c
 
 These are already enforced fail-closed by `ops/launch-evidence.json` / `pnpm launch:check` and are **not** duplicated as backlog items. Summary of what remains human/legal/ops/deploy:
 
-- Production config: `NODE_ENV=production`, non-local HTTPS/WSS URLs, real Supabase keys, ≥32-char signing/API/cron secrets, `AIRBOARD_LOCAL_ENTITLEMENTS=false`, Resend key.
+- Production config: `NODE_ENV=production`, non-local HTTPS/WSS URLs, real Supabase keys, ≥32-char signing/API/cron secrets, `AIRBOARD_LOCAL_ENTITLEMENTS=false`, `AIRBOARD_CHROME_EXTENSION_ENABLED=true` for the active Meet release, Resend key.
 - Applied production migrations; deployment + commercial smoke evidence.
 - Legal/counsel approval; subprocessor review; threat model; independent pentest.
 - Backup/restore drill; incident tabletop; monitoring/alert routing; real public status page; support SLA/staffing.

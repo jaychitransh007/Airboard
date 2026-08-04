@@ -3,14 +3,14 @@
   "name": "Airboard for Google Meet",
   "short_name": "Airboard",
   "version": "0.8.0",
-  "description": "Runs Airboard as a neon overlay on your outgoing Meet camera, with camera and Airo microphone input enabled by default after installation.",
+  "description": "Adds live neon diagrams to your outgoing Meet camera after you connect Airboard and confirm camera and microphone use.",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
   },
-  "permissions": ["storage"],
+  "permissions": ["storage", "alarms"],
   "host_permissions": [
     "https://airboard-pilot-api-634900453473.asia-south1.run.app/*",
     "http://127.0.0.1:4000/*"

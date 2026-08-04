@@ -27,13 +27,13 @@ import {
   type StrokePoint,
 } from "@airboard/core";
 import {
-  AIRBOARD_TRANSCRIPTION_KEYTERMS,
   classifyBrowserWakeTranscript,
   createBrowserWakeSpeechSession,
   supportsBrowserSpeech,
   type BrowserWakeSpeechSession,
 } from "./browserSpeech";
 import {
+  allowsSemanticFallbackAfterGroundingFailure,
   boardContentChanged,
   buildSemanticIntentContext,
   describeSemanticPlan,
@@ -44,6 +44,7 @@ import { computeSemanticAutoLayout } from "./semanticAutoLayout";
 import { commitCommandTurn } from "./commandTurnCoordinator";
 import { strokeInputSourceForPointer } from "./inputCapabilities";
 import { parseDesiredGraphCorrection } from "./desiredGraphCorrection";
+import { resolveExistingBoardFanIn } from "./existingBoardFanIn";
 import {
   snapshotBoardEvents,
   startBoardSync,
@@ -107,6 +108,13 @@ import {
   type MeetMediaBridge,
   type MeetMediaBridgeVideoSession,
 } from "../meet/meetMediaBridge";
+import {
+  CONFIGURED_CHROME_EXTENSION_ORIGIN,
+  extensionRelayMessageFields,
+  extensionRelayNonceFromHash,
+  isTrustedExtensionRelayMessage,
+  UNPACKED_EXTENSION_RELAY_ALLOWED,
+} from "../meet/extensionRelayTrust.ts";
 import { CatalogGlyph } from "./catalogGlyphs";
 import { boardDeletionSnapshot, validateBoardTitle } from "./boardLifecycle";
 import { HoldToEditTracker } from "./holdToEditTracker";
@@ -116,11 +124,6 @@ import {
   shouldReserveLandmarkNavigation,
 } from "./landmarkNavigationInput";
 import { selectSingleLandmarkPose } from "./landmarkPoseSelection";
-import {
-  UndoGestureTracker,
-  type UndoGestureFrame,
-  type UndoGestureEvent,
-} from "./undoGestureTracker";
 import {
   SnapGestureTracker,
   snapLandmarkFrameConfidence,
@@ -145,6 +148,13 @@ import {
   type RealtimeSpeechSession,
   type RealtimeTranscriptionConfig,
 } from "./realtimeSpeech";
+import { buildSessionKeyterms } from "./voiceSessionKeyterms";
+import {
+  headlessMeetVoiceRetryDelayMs,
+  shouldRetryHeadlessMeetSpeechConfig,
+  shouldRetryHeadlessMeetVoiceAfterEnd,
+  shouldStartHeadlessMeetVoice,
+} from "./headlessMeetVoice";
 import {
   fetchSemanticIntentConfig,
   resolveSemanticIntent,
@@ -307,7 +317,7 @@ type CopilotActivityEntry = {
   tone: "neutral" | "active" | "success" | "warning";
 };
 
-type PrepareIntentCommandResult = "previewed" | "applied" | "rejected";
+type PrepareIntentCommandResult = "previewed" | "applied" | "no-op" | "rejected";
 
 type IntentPreparationOutcome = {
   result: PrepareIntentCommandResult;
@@ -355,7 +365,7 @@ type UndoAction =
       originatingInteractionId?: string;
     };
 
-type UndoSource = "button" | "keyboard" | "gesture" | "voice" | "semantic";
+type UndoSource = "button" | "keyboard" | "voice" | "semantic";
 
 type PendingIntent = {
   parsed: ParsedIntentCanvasCommand | null;
@@ -547,39 +557,6 @@ type VoiceGateUi =
   | { mode: "ptt" }
   | { mode: "scoped"; strokeId: string; label: string };
 
-/**
- * Realtime STT keyterms for one session: the wake-word head keeps its top
- * priority, the live board labels bias recognition toward the names actually
- * on screen, and the static command vocabulary fills the remainder. The
- * transport layer caps the merged list at the provider limit, keeping earlier
- * entries, which is why the order here matters.
- */
-const KEYTERM_WAKE_HEAD_COUNT = 8;
-function buildSessionKeyterms(state: BoardState): string[] {
-  return [
-    ...AIRBOARD_TRANSCRIPTION_KEYTERMS.slice(0, KEYTERM_WAKE_HEAD_COUNT),
-    ...collectBoardVoiceKeyterms(state),
-    ...AIRBOARD_TRANSCRIPTION_KEYTERMS.slice(KEYTERM_WAKE_HEAD_COUNT),
-  ];
-}
-
-function collectBoardVoiceKeyterms(state: BoardState): string[] {
-  const labels = new Set<string>();
-  for (const stroke of Object.values(state.strokes)) {
-    if (stroke.status !== "committed") {
-      continue;
-    }
-    const label = stroke.annotation?.label?.trim();
-    if (label && label.length <= 40) {
-      labels.add(label);
-      if (labels.size >= 40) {
-        break;
-      }
-    }
-  }
-  return [...labels];
-}
-
 function parseDiagramVisibilityIntent(text: string): "hide" | "show" | null {
   const normalized = text
     .toLowerCase()
@@ -674,23 +651,44 @@ export function AirboardPrototype({
   const effectiveAccessToken = accessToken ?? bridgedAccessToken;
   const syncAuthenticationReady = !headlessMeetOverlay || Boolean(effectiveAccessToken);
   useEffect(() => {
-    if (typeof window === "undefined" || accessToken) return;
+    if (typeof window === "undefined" || accessToken || !headlessMeetOverlay) return;
+    const relayNonce = extensionRelayNonceFromHash(window.location.hash);
+    const relayTrust = {
+      configuredOrigin: CONFIGURED_CHROME_EXTENSION_ORIGIN,
+      relayNonce,
+      allowNonceBoundUnpacked: UNPACKED_EXTENSION_RELAY_ALLOWED,
+    };
     const receiveHostAuthentication = (event: MessageEvent) => {
       const data = event.data as Record<string, unknown> | null;
       if (
         event.source === window.parent &&
-        event.origin.startsWith("chrome-extension://") &&
+        isTrustedExtensionRelayMessage(event, relayTrust) &&
         data?.bridge === "airboard-extension-auth" &&
-        data.type === "installation-token" &&
-        typeof data.token === "string" &&
-        data.token.length <= 4_096
+        data.v === 1 &&
+        data.type === "installation-token"
       ) {
-        setBridgedAccessToken(data.token);
+        if (typeof data.token === "string" && data.token.length <= 4_096) {
+          setBridgedAccessToken(data.token);
+        } else if (data.token === null) {
+          setBridgedAccessToken(undefined);
+        }
       }
     };
     window.addEventListener("message", receiveHostAuthentication);
+    // The extension may have posted its credential before React hydrated this
+    // frame. Request the current value after the listener is attached so
+    // authentication never depends on iframe/load timing.
+    window.parent.postMessage(
+      {
+        bridge: "airboard-extension-auth",
+        v: 1,
+        type: "installation-token-request",
+        ...extensionRelayMessageFields(relayNonce),
+      },
+      CONFIGURED_CHROME_EXTENSION_ORIGIN ?? "*",
+    );
     return () => window.removeEventListener("message", receiveHostAuthentication);
-  }, [accessToken]);
+  }, [accessToken, headlessMeetOverlay]);
   const gestureInteractionIdRef = useRef<string | null>(null);
   const voiceCaptureInteractionIdRef = useRef<string | null>(null);
   const gestureTraceJournalRef = useRef<GestureTraceJournal | null>(null);
@@ -784,7 +782,14 @@ export function AirboardPrototype({
   // Flipped on unmount so an in-flight startCamera can release what it acquires.
   const cameraMountedRef = useRef(true);
   const headlessCameraRequestedRef = useRef(false);
-  const headlessVoiceRequestedRef = useRef(false);
+  const headlessVoiceRequestedCredentialRef = useRef<string | null>(null);
+  const headlessVoiceCredentialRef = useRef<string | undefined>(effectiveAccessToken);
+  const headlessVoiceRetryAttemptRef = useRef(0);
+  const headlessVoiceRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const headlessSpeechConfigRetryAttemptRef = useRef(0);
+  const headlessSpeechConfigRetryTimerRef =
+    useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [headlessVoiceRetryRevision, setHeadlessVoiceRetryRevision] = useState(0);
   const standaloneCameraResumeAttemptedRef = useRef(false);
   const standaloneVoiceResumeAttemptedRef = useRef(false);
   const pipelineRef = useRef(new GesturePipeline());
@@ -831,10 +836,6 @@ export function AirboardPrototype({
   const palmVoiceGestureTrackerRef = useRef<PalmVoiceGestureTracker | null>(null);
   if (palmVoiceGestureTrackerRef.current === null) {
     palmVoiceGestureTrackerRef.current = new PalmVoiceGestureTracker();
-  }
-  const undoGestureTrackerRef = useRef<UndoGestureTracker | null>(null);
-  if (undoGestureTrackerRef.current === null) {
-    undoGestureTrackerRef.current = new UndoGestureTracker();
   }
   const snapGestureTrackerRef = useRef<SnapGestureTracker | null>(null);
   if (snapGestureTrackerRef.current === null) {
@@ -1304,10 +1305,26 @@ export function AirboardPrototype({
     sync.publish(event);
   }, []);
 
+  const refreshRealtimeSpeechKeyterms = useCallback(
+    (
+      state: BoardState = boardRef.current,
+      selectedIds: readonly string[] = selectedAnnotationIdsRef.current,
+    ) => {
+      const session = speechSessionRef.current;
+      if (session && "updateKeyterms" in session) {
+        session.updateKeyterms(buildSessionKeyterms(state, selectedIds));
+      }
+    },
+    [],
+  );
+
   const applyLocalEvent = useCallback(
     (event: BoardEvent) => {
       boardRef.current = applyBoardEvent(boardRef.current, event);
       appendBoundedBoardEvents(boardEventLogRef.current, [event]);
+      if (event.type !== "cursor.moved" && !event.type.startsWith("participant.")) {
+        refreshRealtimeSpeechKeyterms();
+      }
       render();
       updateStats();
       publishBoardEvent(event);
@@ -1315,7 +1332,13 @@ export function AirboardPrototype({
         schedulePersistentSnapshot(boardRef.current);
       }
     },
-    [publishBoardEvent, render, schedulePersistentSnapshot, updateStats],
+    [
+      publishBoardEvent,
+      refreshRealtimeSpeechKeyterms,
+      render,
+      schedulePersistentSnapshot,
+      updateStats,
+    ],
   );
 
   /** A peer's event: apply and render, never re-publish (that would loop). */
@@ -1323,13 +1346,21 @@ export function AirboardPrototype({
     (event: BoardEvent) => {
       boardRef.current = applyBoardEvent(boardRef.current, event);
       appendBoundedBoardEvents(boardEventLogRef.current, [event]);
+      if (event.type !== "cursor.moved" && !event.type.startsWith("participant.")) {
+        refreshRealtimeSpeechKeyterms();
+      }
       render();
       updateStats();
       if (event.type !== "cursor.moved" && !event.type.startsWith("participant.")) {
         schedulePersistentSnapshot(boardRef.current);
       }
     },
-    [render, schedulePersistentSnapshot, updateStats],
+    [
+      refreshRealtimeSpeechKeyterms,
+      render,
+      schedulePersistentSnapshot,
+      updateStats,
+    ],
   );
   const applyRemoteEventRef = useRef(applyRemoteEvent);
   useEffect(() => {
@@ -1873,6 +1904,7 @@ export function AirboardPrototype({
           undoStackRef.current = [];
           setSelectedAnnotationId(null);
           setSelectedAnnotationIds([]);
+          refreshRealtimeSpeechKeyterms(result.initialState, []);
           render();
           updateStats();
           setCommandFeedback("Joined the live board session.");
@@ -2832,7 +2864,6 @@ export function AirboardPrototype({
         voiceRouter.reset();
         setVoiceGate(null);
         palmVoiceGestureTrackerRef.current!.reset();
-        undoGestureTrackerRef.current!.reset();
         hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
         hybridPinchClosedRef.current = false;
       }
@@ -3512,6 +3543,7 @@ export function AirboardPrototype({
         const restoredSelection = action.selectionBefore.filter(
           (strokeId) => boardRef.current.strokes[strokeId]?.status === "committed",
         );
+        refreshRealtimeSpeechKeyterms(boardRef.current, restoredSelection);
         setSelectedAnnotationIds(restoredSelection);
         setSelectedAnnotationId(restoredSelection[restoredSelection.length - 1] ?? null);
         setCommandFeedback("Undid the last diagram command.");
@@ -3543,92 +3575,13 @@ export function AirboardPrototype({
       });
       setCommandFeedback("Restored the erased objects.");
     },
-    [applyLocalEvent, render, reportVoiceTrace, updateStats],
-  );
-
-  const processUndoGestureFrame = useCallback(
-    (frame: UndoGestureFrame): UndoGestureEvent => {
-      const result = undoGestureTrackerRef.current!.update(frame);
-      reportGestureStage(
-        "candidate_scores",
-        {
-          candidate: "undo",
-          score: frame.score,
-          suppressed: frame.suppressed,
-          state: result ?? "idle",
-        },
-        frame.timestampMs,
-      );
-      if (frame.suppressed) {
-        reportGestureStage(
-          "suppression",
-          { candidate: "undo", reason: "higher_priority_owner" },
-          frame.timestampMs,
-        );
-      }
-      if (result === "tracking") {
-        // Open-palm motion has declared possible Undo intent. Cancel any
-        // incomplete voice hold, but keep the pointer live until the complete
-        // directional swipe actually fires.
-        palmVoiceGestureTrackerRef.current!.reset();
-        reportGestureStage(
-          "transition",
-          { gesture: "undo", transition: "tracking" },
-          frame.timestampMs,
-        );
-        return "tracking";
-      }
-      if (result !== "undo") {
-        return null;
-      }
-
-      const wasInterpreting = speechRecognitionStatusRef.current === "interpreting";
-      semanticIntentRequestIdRef.current += 1;
-      voiceCorrectionPendingRef.current = null;
-      voiceRouter.reset();
-      setVoiceGate(null);
-      palmVoiceGestureTrackerRef.current!.reset();
-      hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
-      setLastGestureIntent({ intent: "undo", confidence: 1 });
-
-      if (wasInterpreting) {
-        setSpeechRecognitionStatus(speechSessionRef.current ? "waiting" : "idle");
-        setCommandFeedback("Swipe-left undo stopped the command before it changed the board.");
-        appendCopilotActivity({
-          source: "Board",
-          title: "Command stopped",
-          detail: "Open-palm swipe left cancelled the in-progress Airo request.",
-          tone: "success",
-        });
-        reportGestureStage(
-          "action",
-          { gesture: "undo", applied: false, outcome: "semantic_cancelled" },
-          frame.timestampMs,
-        );
-        return "undo";
-      }
-
-      const hadUndo = undoStackRef.current.length > 0;
-      undoLastAction("gesture", gestureInteractionIdRef.current ?? undefined);
-      setCommandFeedback(
-        hadUndo
-          ? "Open-palm swipe left recognized — undid the last board change."
-          : "Open-palm swipe left recognized, but there is nothing to undo yet.",
-      );
-      appendCopilotActivity({
-        source: "Board",
-        title: hadUndo ? "Undo gesture applied" : "Nothing to undo",
-        detail: "Recognized one open palm swiping left.",
-        tone: hadUndo ? "success" : "warning",
-      });
-      reportGestureStage(
-        "action",
-        { gesture: "undo", applied: hadUndo, outcome: hadUndo ? "undone" : "empty" },
-        frame.timestampMs,
-      );
-      return "undo";
-    },
-    [appendCopilotActivity, reportGestureStage, undoLastAction, voiceRouter],
+    [
+      applyLocalEvent,
+      refreshRealtimeSpeechKeyterms,
+      render,
+      reportVoiceTrace,
+      updateStats,
+    ],
   );
 
   const cancelPendingIntent = useCallback((message = "Cancelled the pending command.") => {
@@ -3692,6 +3645,7 @@ export function AirboardPrototype({
           : (workingSelectionIds[workingSelectionIds.length - 1] ?? null);
       let commands: DiagramCommand[] = [];
       let affectedStrokeIds: string[] = [];
+      let alreadySatisfied = false;
 
       try {
         for (const step of parsedSteps) {
@@ -3735,6 +3689,7 @@ export function AirboardPrototype({
             affectedStrokeIds = [...affectedStrokeIds, ...result.affectedStrokeIds];
           }
           commands = [...commands, ...resolved.commands];
+          alreadySatisfied = alreadySatisfied || resolved.alreadySatisfied === true;
           if (resolved.selectionAfter) {
             workingSelectionIds = resolved.selectionAfter.filter(
               (strokeId) => previewState.strokes[strokeId]?.status === "committed",
@@ -3752,6 +3707,22 @@ export function AirboardPrototype({
             diagramCommandCount: commands.length,
             selectionCount: workingSelectionIds.length,
           });
+        }
+        if (commands.length === 0 && alreadySatisfied) {
+          setSelectedAnnotationIds(workingSelectionIds);
+          setSelectedAnnotationId(workingPrimarySelectionId);
+          setCommandFeedback("That line is already attached to those objects.");
+          setIntentCommandText("");
+          if (voiceTurnId) {
+            reportVoiceTrace(voiceTurnId, "feedback", {
+              category: "no-op",
+              actionable: false,
+            });
+            reportVoiceTrace(voiceTurnId, "turn_completed", {
+              outcome: "no-op",
+            });
+          }
+          return "no-op";
         }
         const previewIds = [
           ...new Set([...affectedStrokeIds, ...workingSelectionIds]),
@@ -3887,11 +3858,20 @@ export function AirboardPrototype({
       };
       let previewState = baseState;
       const initialSelectionIds = executionSnapshot?.selectionIds ?? selectedAnnotationIds;
+      // current_selection is a reference to the user's request-time snapshot.
+      // Actions may change the final UI selection, but those incidental
+      // selectionAfter values must not retarget later actions in the same plan.
+      const referenceSelectionIds = [...initialSelectionIds];
       let workingSelectionIds = initialSelectionIds.filter(
         (strokeId) => previewState.strokes[strokeId]?.status === "committed",
       );
       const initialPrimarySelectionId =
         executionSnapshot?.primarySelectionId ?? selectedAnnotationId;
+      const referencePrimarySelectionId =
+        initialPrimarySelectionId &&
+        referenceSelectionIds.includes(initialPrimarySelectionId)
+          ? initialPrimarySelectionId
+          : (referenceSelectionIds[referenceSelectionIds.length - 1] ?? null);
       let workingPrimarySelectionId =
         initialPrimarySelectionId && workingSelectionIds.includes(initialPrimarySelectionId)
           ? initialPrimarySelectionId
@@ -3920,8 +3900,8 @@ export function AirboardPrototype({
               canvasHeight,
               viewOrigin,
               autoCreateCenters,
-              selectionIds: workingSelectionIds,
-              primarySelectionId: workingPrimarySelectionId,
+              selectionIds: referenceSelectionIds,
+              primarySelectionId: referencePrimarySelectionId,
               hoverStrokeId: workingHoverStrokeId,
               strokeColor,
             },
@@ -3933,15 +3913,27 @@ export function AirboardPrototype({
                 status: "rejected",
                 source: "semantic",
                 actionType: action.type,
+                issueCode: resolved.errorCode ?? "grounding_failed",
+                ...(resolved.candidateCount !== undefined
+                  ? { candidateCount: resolved.candidateCount }
+                  : {}),
               });
               reportVoiceTrace(voiceTurnId, "action_failed", {
                 phase: "semantic_grounding",
                 actionType: action.type,
-                message: resolved.error,
+                issueCode: resolved.errorCode ?? "grounding_failed",
               });
             }
             cancelPendingIntent(`Plan could not be grounded: ${resolved.error}`);
             return "rejected";
+          }
+          if (voiceTurnId && resolved.repairKinds?.length) {
+            reportVoiceTrace(voiceTurnId, "grounding", {
+              status: "repaired",
+              source: "semantic",
+              actionType: action.type,
+              repairKinds: resolved.repairKinds,
+            });
           }
           if (commands.length + resolved.commands.length > 40) {
             cancelPendingIntent("That plan expands to too many board changes. Split it into two requests.");
@@ -3977,16 +3969,32 @@ export function AirboardPrototype({
         if (commands.length === 0) {
           setSelectedAnnotationIds(workingSelectionIds);
           setSelectedAnnotationId(workingPrimarySelectionId);
-          setCommandFeedback("Applied the requested selection.");
+          const selectionOnly = plan.actions.every(
+            (action) => action.type === "select",
+          );
+          setCommandFeedback(
+            selectionOnly
+              ? "Applied the requested selection."
+              : "The requested board state is already satisfied.",
+          );
           setIntentCommandText("");
           if (voiceTurnId) {
-            reportVoiceTrace(voiceTurnId, "action_applied", {
-              actionCount: plan.actions.length,
-              affectedObjectCount: workingSelectionIds.length,
+            if (selectionOnly) {
+              reportVoiceTrace(voiceTurnId, "action_applied", {
+                actionCount: plan.actions.length,
+                affectedObjectCount: workingSelectionIds.length,
+              });
+            } else {
+              reportVoiceTrace(voiceTurnId, "feedback", {
+                category: "no-op",
+                actionable: false,
+              });
+            }
+            reportVoiceTrace(voiceTurnId, "turn_completed", {
+              outcome: selectionOnly ? "applied" : "no-op",
             });
-            reportVoiceTrace(voiceTurnId, "turn_completed", { outcome: "applied" });
           }
-          return "applied";
+          return selectionOnly ? "applied" : "no-op";
         }
 
         const previewIds = [...new Set([...affectedStrokeIds, ...workingSelectionIds])];
@@ -4205,6 +4213,73 @@ export function AirboardPrototype({
           stepCount: desiredGraphCorrection.actions.length,
         };
       }
+      const deterministicFanIn = resolveExistingBoardFanIn(
+        instruction,
+        buildSemanticIntentContext(
+          boardRef.current,
+          selectedAnnotationIdsRef.current,
+          false,
+        ),
+      );
+      if (deterministicFanIn.status === "already_satisfied") {
+        pendingSemanticClarificationRef.current = null;
+        setIntentCommandText(instruction);
+        setSpeechRecognitionStatus("command-recognized");
+        setCommandFeedback("The requested connections are already present.");
+        appendCopilotActivity({
+          source: "Airo",
+          title: "Diagram already up to date",
+          detail: "The requested connections are already present.",
+          tone: "success",
+        });
+        if (voiceTurnId) {
+          reportVoiceTrace(voiceTurnId, "parser_outcome", {
+            status: "parsed",
+            operationKind: "existing_board_fan_in",
+            confidence: 1,
+          });
+          reportVoiceTrace(voiceTurnId, "grounding", {
+            status: "already_satisfied",
+            source: "deterministic",
+            sourceCount: deterministicFanIn.sourceLabels.length,
+          });
+          reportVoiceTrace(voiceTurnId, "feedback", {
+            category: "no-op",
+            actionable: false,
+          });
+          reportVoiceTrace(voiceTurnId, "turn_completed", {
+            outcome: "no-op",
+          });
+        }
+        return {
+          result: "no-op",
+          preparedText: instruction,
+          source: "deterministic",
+          stepCount: 0,
+        };
+      }
+      if (deterministicFanIn.status === "resolved") {
+        pendingSemanticClarificationRef.current = null;
+        setIntentCommandText(instruction);
+        if (voiceTurnId) {
+          reportVoiceTrace(voiceTurnId, "parser_outcome", {
+            status: "parsed",
+            operationKind: "existing_board_fan_in",
+            confidence: 1,
+          });
+        }
+        const fanInResult = prepareSemanticActionPlan(
+          deterministicFanIn.plan,
+          instruction,
+          voiceTurnId,
+        );
+        return {
+          result: fanInResult,
+          preparedText: instruction,
+          source: "deterministic",
+          stepCount: deterministicFanIn.plan.actions.length,
+        };
+      }
       const directResult = prepareIntentCommand(instruction, voiceTurnId);
       if (directResult !== "rejected") {
         pendingSemanticClarificationRef.current = null;
@@ -4220,6 +4295,21 @@ export function AirboardPrototype({
         activationPolicy: "externally_activated",
       });
       const deterministicGroundingFailed = deterministic.status === "parsed";
+      const terminalConnectionGroundingFailure =
+        deterministic.status === "parsed" &&
+        !allowsSemanticFallbackAfterGroundingFailure(deterministic.command);
+      if (terminalConnectionGroundingFailure) {
+        // These requests identify an existing line. If deterministic
+        // grounding cannot identify it uniquely, semantic fallback has no
+        // loose-line reference and could create/delete the wrong connector.
+        pendingSemanticClarificationRef.current = null;
+        return {
+          result: "rejected",
+          preparedText: instruction,
+          source: "deterministic",
+          stepCount: 0,
+        };
+      }
       if (!deterministicGroundingFailed && !shouldUseSemanticIntentFallback(deterministic)) {
         return {
           result: "rejected",
@@ -4349,6 +4439,45 @@ export function AirboardPrototype({
             stepCount: 0,
           };
         }
+        if (resolution.outcome === "already_satisfied") {
+          pendingSemanticClarificationRef.current = null;
+          setIntentCommandText(instruction);
+          setSpeechRecognitionStatus("command-recognized");
+          setCommandFeedback("The requested connections are already present.");
+          appendCopilotActivity({
+            source: "Airo",
+            title: "Diagram already up to date",
+            detail: "The requested connections are already present.",
+            tone: "success",
+          });
+          if (voiceTurnId) {
+            reportVoiceTrace(voiceTurnId, "semantic_result", {
+              status: "already_satisfied",
+              issueCode: "none",
+              provider: resolution.provider,
+              model: resolution.model,
+              actionCount: 0,
+              responseId: resolution.metadata.responseId,
+              providerRequestId: resolution.metadata.providerRequestId,
+              providerProcessingMs: resolution.metadata.providerProcessingMs,
+              totalLatencyMs: resolution.metadata.totalLatencyMs,
+              usage: resolution.metadata.usage,
+            });
+            reportVoiceTrace(voiceTurnId, "feedback", {
+              category: "no-op",
+              actionable: false,
+            });
+            reportVoiceTrace(voiceTurnId, "turn_completed", {
+              outcome: "no-op",
+            });
+          }
+          return {
+            result: "no-op",
+            preparedText: instruction,
+            source: "semantic",
+            stepCount: 0,
+          };
+        }
         const plan = resolution.plan;
         if (plan.status !== "resolved") {
           // Clarification is a focused request for missing/ambiguous structure,
@@ -4473,6 +4602,7 @@ export function AirboardPrototype({
       }
     },
     [
+      appendCopilotActivity,
       hoverStrokeId,
       prepareIntentCommand,
       prepareSemanticActionPlan,
@@ -4596,6 +4726,7 @@ export function AirboardPrototype({
         });
       }
       const finalSelection = commit.selectionIds;
+      refreshRealtimeSpeechKeyterms(nextState, finalSelection);
       const primary = finalSelection[finalSelection.length - 1] ?? null;
       setSelectedAnnotationIds(finalSelection);
       setSelectedAnnotationId(primary);
@@ -4646,6 +4777,7 @@ export function AirboardPrototype({
   }, [
     appendCopilotActivity,
     cancelPendingIntent,
+    refreshRealtimeSpeechKeyterms,
     render,
     updateStats,
   ]);
@@ -5048,8 +5180,6 @@ export function AirboardPrototype({
       openPttGate: () => openVoiceGate({ mode: "ptt" }),
       emitPalmVoiceGestureFrame: (frame: PalmVoiceGestureFrame) =>
         processPalmVoiceGestureFrame(frame),
-      emitUndoGestureFrame: (frame: UndoGestureFrame) =>
-        processUndoGestureFrame(frame) === "undo",
       emitSnapGestureFrame: (frame: SnapGestureFrame) =>
         processSnapGestureFrame(frame) === "snap",
       emitHybridGestureOutput: (output: HybridGestureControllerOutput) =>
@@ -5161,13 +5291,64 @@ export function AirboardPrototype({
     processDetectedHandsForTest,
     processPalmVoiceGestureFrame,
     processSnapGestureFrame,
-    processUndoGestureFrame,
     render,
     routeFinalTranscript,
     setDiagramVisibility,
     undoLastAction,
     voiceRouter,
   ]);
+
+  const cancelHeadlessVoiceRetry = useCallback(() => {
+    if (headlessVoiceRetryTimerRef.current !== null) {
+      clearTimeout(headlessVoiceRetryTimerRef.current);
+      headlessVoiceRetryTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleHeadlessVoiceRetry = useCallback(() => {
+    if (
+      !headlessMeetOverlay ||
+      !effectiveAccessToken ||
+      !cameraMountedRef.current ||
+      headlessVoiceRetryTimerRef.current !== null
+    ) {
+      return;
+    }
+    const delayMs = headlessMeetVoiceRetryDelayMs(
+      headlessVoiceRetryAttemptRef.current,
+    );
+    headlessVoiceRetryAttemptRef.current += 1;
+    headlessVoiceRetryTimerRef.current = setTimeout(() => {
+      headlessVoiceRetryTimerRef.current = null;
+      headlessVoiceRequestedCredentialRef.current = null;
+      setHeadlessVoiceRetryRevision((revision) => revision + 1);
+    }, delayMs);
+  }, [effectiveAccessToken, headlessMeetOverlay]);
+
+  const cancelHeadlessSpeechConfigRetry = useCallback(() => {
+    if (headlessSpeechConfigRetryTimerRef.current !== null) {
+      clearTimeout(headlessSpeechConfigRetryTimerRef.current);
+      headlessSpeechConfigRetryTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleHeadlessSpeechConfigRetry = useCallback(() => {
+    if (
+      !headlessMeetOverlay ||
+      !cameraMountedRef.current ||
+      headlessSpeechConfigRetryTimerRef.current !== null
+    ) {
+      return;
+    }
+    const delayMs = headlessMeetVoiceRetryDelayMs(
+      headlessSpeechConfigRetryAttemptRef.current,
+    );
+    headlessSpeechConfigRetryAttemptRef.current += 1;
+    headlessSpeechConfigRetryTimerRef.current = setTimeout(() => {
+      headlessSpeechConfigRetryTimerRef.current = null;
+      setSpeechConfigRevision((revision) => revision + 1);
+    }, delayMs);
+  }, [headlessMeetOverlay]);
 
   const startVoiceCommand = useCallback(() => {
     if (!voiceCaptureAvailable) {
@@ -5180,8 +5361,11 @@ export function AirboardPrototype({
     const activeSession = speechSessionRef.current;
     if (activeSession) {
       semanticIntentRequestIdRef.current += 1;
-      activeSession.stop();
       speechSessionRef.current = null;
+      // Clear ownership before stop(): a session that has not opened its socket
+      // can report "stopped" synchronously. That intentional stop must never be
+      // mistaken for an unexpected provider close by the headless retry path.
+      activeSession.stop();
       voiceRouter.reset();
       setVoiceGate(null);
       setSpeechArmed(false);
@@ -5313,6 +5497,10 @@ export function AirboardPrototype({
           onListening: (listening) => {
             setSpeechListening(listening);
             if (listening) {
+              if (headlessMeetOverlay) {
+                cancelHeadlessVoiceRetry();
+                headlessVoiceRetryAttemptRef.current = 0;
+              }
               if (standaloneEditor) {
                 setMediaResumeEnabled("microphone", true, window.localStorage);
                 void refreshStandaloneMediaPermissions();
@@ -5391,6 +5579,12 @@ export function AirboardPrototype({
             );
           },
           onEnd: (reason) => {
+            // A rotated credential or model switch may already have installed
+            // a replacement session. The stale callback must not attribute its
+            // close to the new voice turn or reset the new session's router/UI.
+            if (speechSessionRef.current !== realtimeSession) {
+              return;
+            }
             const voiceTurnId = voiceCaptureInteractionIdRef.current;
             if (voiceTurnId) {
               reportVoiceTrace(voiceTurnId, "stt_connection", {
@@ -5400,17 +5594,22 @@ export function AirboardPrototype({
             }
             voiceRouter.reset();
             setVoiceGate(null);
-            // If this session was already superseded (e.g. a model switch aborted
-            // it and started a fresh one), it must not touch shared UI state — the
-            // current session owns it. This prevents a stale "connection closed"
-            // message from overwriting a freshly-starting session.
-            if (speechSessionRef.current !== realtimeSession) {
-              return;
-            }
             speechSessionRef.current = null;
             setSpeechListening(false);
             setSpeechArmed(false);
-            if (reason === "error" || reason === "closed") {
+            const shouldRetryHeadless =
+              shouldRetryHeadlessMeetVoiceAfterEnd(
+                headlessMeetOverlay,
+                reason,
+              );
+            if (
+              reason === "error" ||
+              reason === "closed" ||
+              shouldRetryHeadless
+            ) {
+              if (shouldRetryHeadless) {
+                scheduleHeadlessVoiceRetry();
+              }
               setSpeechRecognitionStatus("error");
               if (reason === "closed") {
                 setCommandFeedback(
@@ -5432,7 +5631,12 @@ export function AirboardPrototype({
             undefined,
           // Board labels bias this session's recognition toward the names on
           // screen; the transport bounds the merged list to the provider cap.
-          keyterms: buildSessionKeyterms(boardRef.current),
+          keyterms: buildSessionKeyterms(
+            boardRef.current,
+            selectedAnnotationIdsRef.current,
+          ),
+          dynamicKeyterms:
+            realtimeTranscriptionConfig?.dynamicKeyterms === true,
         },
         // On Meet surfaces the iframe cannot capture the microphone itself;
         // the bridge extension streams it from the meeting page instead.
@@ -5446,6 +5650,9 @@ export function AirboardPrototype({
           : {},
       );
       if (!realtimeSession) {
+        if (headlessMeetOverlay) {
+          scheduleHeadlessVoiceRetry();
+        }
         setSpeechRecognitionStatus("error");
         setCommandFeedback(
           "This browser cannot stream microphone audio. Typed commands remain available.",
@@ -5612,8 +5819,12 @@ export function AirboardPrototype({
       setCommandFeedback("Speech recognition is already active. Try again in a moment.");
     }
   }, [
+    cancelHeadlessVoiceRetry,
     dispatchVoiceDecision,
+    effectiveAccessToken,
+    headlessMeetOverlay,
     realtimeTranscriptionConfig?.defaultModel,
+    realtimeTranscriptionConfig?.dynamicKeyterms,
     refreshStandaloneMediaPermissions,
     routeFinalTranscript,
     speechEngine,
@@ -5623,6 +5834,7 @@ export function AirboardPrototype({
     isMeetSurface,
     meetMediaBridge,
     reportVoiceTrace,
+    scheduleHeadlessVoiceRetry,
     syncVoiceGateUi,
     voiceCaptureAvailable,
     voiceRouter,
@@ -5725,7 +5937,6 @@ export function AirboardPrototype({
     gestureActionEvidenceTrackerRef.current?.reset();
     setCanvasNavMode(null);
     snapGestureTrackerRef.current?.reset();
-    undoGestureTrackerRef.current?.reset();
     if (palmVoiceGestureTrackerRef.current?.engaged) {
       closeVoiceGate("ptt");
     }
@@ -5989,17 +6200,55 @@ export function AirboardPrototype({
 
   useEffect(() => {
     if (
-      headlessMeetOverlay &&
-      meetMediaBridge &&
-      speechSupported &&
-      speechEngine === "realtime" &&
-      !speechSessionRef.current &&
-      !headlessVoiceRequestedRef.current
+      !headlessMeetOverlay ||
+      headlessVoiceCredentialRef.current === effectiveAccessToken
     ) {
-      headlessVoiceRequestedRef.current = true;
+      return;
+    }
+
+    // Installation credentials rotate and are cleared on revoke. Never keep a
+    // WebSocket authenticated with the superseded token, and let the following
+    // auto-start effect establish a new session only after a replacement token
+    // has arrived.
+    headlessVoiceCredentialRef.current = effectiveAccessToken;
+    headlessVoiceRequestedCredentialRef.current = null;
+    headlessVoiceRetryAttemptRef.current = 0;
+    cancelHeadlessVoiceRetry();
+    const activeSession = speechSessionRef.current;
+    if (activeSession) {
+      speechSessionRef.current = null;
+      activeSession.abort();
+      setSpeechArmed(false);
+      setSpeechListening(false);
+      setSpeechRecognitionStatus("idle");
+    }
+  }, [cancelHeadlessVoiceRetry, effectiveAccessToken, headlessMeetOverlay]);
+
+  useEffect(() => {
+    const credential = effectiveAccessToken ?? null;
+    if (shouldStartHeadlessMeetVoice({
+      headlessMeetOverlay,
+      bridgeReady: meetMediaBridge !== null,
+      authenticationReady: syncAuthenticationReady,
+      credential,
+      speechSupported,
+      speechEngine,
+      hasActiveSession: speechSessionRef.current !== null,
+      requestedCredential: headlessVoiceRequestedCredentialRef.current,
+    })) {
+      headlessVoiceRequestedCredentialRef.current = credential;
       startVoiceCommand();
     }
-  }, [headlessMeetOverlay, meetMediaBridge, speechEngine, speechSupported, startVoiceCommand]);
+  }, [
+    effectiveAccessToken,
+    headlessMeetOverlay,
+    headlessVoiceRetryRevision,
+    meetMediaBridge,
+    speechEngine,
+    speechSupported,
+    startVoiceCommand,
+    syncAuthenticationReady,
+  ]);
 
   const clearBoard = useCallback(() => {
     semanticIntentRequestIdRef.current += 1;
@@ -6123,6 +6372,7 @@ export function AirboardPrototype({
 
   useEffect(() => {
     let cancelled = false;
+    cancelHeadlessSpeechConfigRetry();
     setSpeechEngine("loading");
     setSpeechSupported(false);
 
@@ -6143,6 +6393,8 @@ export function AirboardPrototype({
         if (cancelled) {
           return;
         }
+        cancelHeadlessSpeechConfigRetry();
+        headlessSpeechConfigRetryAttemptRef.current = 0;
         setRealtimeTranscriptionConfig(config);
         const configuredModel =
           config.defaultModel ?? config.allowedModels[0] ?? "";
@@ -6174,7 +6426,7 @@ export function AirboardPrototype({
           `${reason} Add the provider key on the API to enable Airo; typed commands remain available.`,
         );
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (cancelled) {
           return;
         }
@@ -6187,12 +6439,23 @@ export function AirboardPrototype({
         setCommandFeedback(
           `${reason} Start the Airboard API, or keep using typed commands.`,
         );
+        if (
+          headlessMeetOverlay &&
+          shouldRetryHeadlessMeetSpeechConfig(error)
+        ) {
+          scheduleHeadlessSpeechConfigRetry();
+        }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [speechConfigRevision]);
+  }, [
+    cancelHeadlessSpeechConfigRetry,
+    headlessMeetOverlay,
+    scheduleHeadlessSpeechConfigRetry,
+    speechConfigRevision,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -6333,42 +6596,10 @@ export function AirboardPrototype({
   );
 
   /**
-   * Airboard's landmark-defined open palm moving left is Undo. A stationary
-   * open palm can still arm Voice and drive the cursor. Only a completed
-   * directional swipe owns the frame and preempts pointer manipulation.
-   */
-  const updateUndoGesture = useCallback(
-    (hands: readonly DetectedHand[], timestampMs: number): UndoGestureEvent => {
-      const openPalm = selectSingleLandmarkPose(
-        hands,
-        estimatePalmPresentation,
-      );
-      const voiceSnapshot = voiceRouter.snapshot;
-      return processUndoGestureFrame({
-        score: openPalm.score,
-        point: openPalm.point,
-        timestampMs,
-        suppressed:
-          openPalm.trackedHands !== 1 ||
-          inputPaused ||
-          Boolean(voiceSnapshot?.open) ||
-          canvasNavTrackerRef.current?.reserving === true ||
-          objectInteractionRef.current !== null ||
-          cameraGrabActiveRef.current ||
-          cameraPlacementActiveRef.current ||
-          activeStrokeIdRef.current !== null ||
-          pointerStrokeIdRef.current !== null ||
-          pointerErasingRef.current,
-      });
-    },
-    [inputPaused, processUndoGestureFrame, voiceRouter],
-  );
-
-  /**
    * Airboard's landmark-defined open palm held still briefly opens the command
    * mic gate. Dropping the palm closes it after a short release debounce, with
-   * one activation per neutral-hand reset. Undo owns the same open palm swept
-   * left, so a still palm means "talk" and a leftward sweep means "undo".
+   * one activation per neutral-hand reset. Moving the palm remains pointer
+   * input and never mutates the board as an Undo action.
    */
   const updatePalmVoiceGesture = useCallback(
     (hands: readonly DetectedHand[], timestampMs: number) => {
@@ -6593,12 +6824,6 @@ export function AirboardPrototype({
               snapGestureTrackerRef.current!.reset();
             },
           },
-          undo: {
-            update: () => updateUndoGesture(hands, timestampMs) === "undo",
-            onPreempted: () => {
-              undoGestureTrackerRef.current!.reset();
-            },
-          },
           voice: {
             // Voice observes the same open-palm frames that drive normal
             // hover. A still hold can open the mic without freezing the air
@@ -6709,7 +6934,6 @@ export function AirboardPrototype({
       reportGestureTrace,
       updatePalmVoiceGesture,
       updateSnapGesture,
-      updateUndoGesture,
     ],
   );
   rawLandmarkFrameProcessorRef.current = processRawLandmarkFrame;
@@ -6722,7 +6946,6 @@ export function AirboardPrototype({
       closeVoiceGate("ptt");
     }
     palmVoiceGestureTrackerRef.current!.reset();
-    undoGestureTrackerRef.current!.reset();
   }, [closeVoiceGate, inputMode, inputPaused]);
 
   /**
@@ -7083,10 +7306,17 @@ export function AirboardPrototype({
   ]);
 
   useEffect(() => {
+    cameraMountedRef.current = true;
     return () => {
       // Signal any in-flight startCamera to release what it acquires after its await.
       cameraMountedRef.current = false;
-      speechSessionRef.current?.abort();
+      cancelHeadlessVoiceRetry();
+      cancelHeadlessSpeechConfigRetry();
+      const activeSpeechSession = speechSessionRef.current;
+      speechSessionRef.current = null;
+      activeSpeechSession?.abort();
+      meetBridgeSessionRef.current?.stop();
+      meetBridgeSessionRef.current = null;
       trackerRef.current?.close();
       const video = videoRef.current;
       const stream = video?.srcObject as MediaStream | null;
@@ -7098,7 +7328,7 @@ export function AirboardPrototype({
         screenUnderlayVideoRef.current.srcObject = null;
       }
     };
-  }, []);
+  }, [cancelHeadlessSpeechConfigRetry, cancelHeadlessVoiceRetry]);
 
   const handlePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -8122,7 +8352,7 @@ export function AirboardPrototype({
                   </button>
                 </form>
                 <footer className="canvas-copilot-hint">
-                  <span><strong>Undo:</strong> show one open palm and swipe left</span>
+                  <span><strong>Undo:</strong> toolbar, Cmd/Ctrl+Z, or say “Airo, undo”</span>
                   <span>Shift+Enter for a new line</span>
                 </footer>
               </aside>
@@ -8478,12 +8708,8 @@ export function AirboardPrototype({
                     hands</strong> spread apart or together to zoom.
                   </li>
                   <li>
-                    <strong>One open palm swiped left</strong> undoes the last change.
-                    Release the palm before swiping again.
-                  </li>
-                  <li>
-                    Everything applies instantly. Use the toolbar, Cmd/Ctrl+Z, or an
-                    open-palm swipe to undo; the Airo panel shows each board action.
+                    Everything applies instantly. Use the toolbar, Cmd/Ctrl+Z, or say
+                    “Airo, undo”; the Airo panel shows each board action.
                   </li>
                 </ul>
                 <button
@@ -8929,12 +9155,15 @@ export function AirboardPrototype({
                 {cameraOverlayEnabled && cameraOverlayState?.engaged ? (
                   <p className="hint" data-testid="camera-overlay-live">
                     {cameraOverlayState.verification?.senderAttached &&
+                    cameraOverlayState.verification.framesComposited > 0 &&
+                    cameraOverlayState.verification.lastCompositeAt > 0 &&
+                    cameraOverlayState.verification.lastVerifiedAt > 0 &&
                     cameraOverlayState.verification.framesEncoded > 0 &&
                     cameraOverlayState.verification.bytesSent > 0
                       ? "Verified in this Meet client: the composited camera track is attached to Meet and encoding outbound video."
                       : cameraOverlayState.verification
                         ? "The compositor is engaged. Waiting for Meet to attach and encode its output track…"
-                        : "The compositor is engaged. Reload extension 0.5.0 for real outbound-track verification."}
+                        : "The compositor is engaged. Reload the current extension for real outbound-track verification."}
                   </p>
                 ) : null}
                 {cameraOverlayEnabled && cameraOverlayState?.verification ? (
@@ -9231,7 +9460,7 @@ export function AirboardPrototype({
                     <>
                     <p className="hint">
                       {voiceCaptureAvailable
-                        ? "Start Airo once. Hold an open palm still for 0.4 seconds to speak; sweep that same open palm left to undo. Use a relaxed hand to aim and a closed hand to move."
+                        ? "Start Airo once. Hold an open palm still for 0.4 seconds to speak. Use a relaxed hand to aim and a closed hand to move."
                         : "Click Enable hands to use the meeting camera. Use a relaxed hand to aim and a closed hand to move. Voice is not available on this surface yet."}
                     </p>
                     <details className="advanced-settings gesture-guide">
@@ -9289,13 +9518,6 @@ export function AirboardPrototype({
                             </div>
                           </>
                         ) : null}
-                        <div>
-                          <dt>Undo</dt>
-                          <dd>
-                            Show one open palm and sweep it left in one clear horizontal
-                            motion (no pause). Release before another undo.
-                          </dd>
-                        </div>
                         <div>
                           <dt>Hide or show diagram</dt>
                           <dd>
@@ -9507,8 +9729,8 @@ export function AirboardPrototype({
             ) : inputMode === "gesture" ? (
               <p className="hint">
                 {voiceCaptureAvailable
-                  ? "Use the Gesture guide above for exact poses. A held open palm activates voice; sweeping that same open palm left undoes. A relaxed hand aims, a closed hand moves, and thumb-middle snaps hide or restore the diagram."
-                  : "Use the Gesture guide above for exact poses. A relaxed hand aims, a closed hand moves, a flat-palm swipe left undoes, and thumb-middle snaps hide or restore the diagram."}
+                  ? "Use the Gesture guide above for exact poses. A held open palm activates voice. A relaxed hand aims, a closed hand moves, and thumb-middle snaps hide or restore the diagram. Use Cmd/Ctrl+Z or the toolbar to undo."
+                  : "Use the Gesture guide above for exact poses. A relaxed hand aims, a closed hand moves, and thumb-middle snaps hide or restore the diagram. Use Cmd/Ctrl+Z or the toolbar to undo."}
               </p>
             ) : (
               <p className="hint">Mouse or trackpad draws. Hold Shift or Alt while dragging to erase.</p>

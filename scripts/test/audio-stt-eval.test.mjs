@@ -374,6 +374,47 @@ test("live semantic adapter authenticates, retries one transient response, and p
   assert.equal(result.plan.status, "unsupported");
 });
 
+test("live semantic adapter accepts the explicit already-satisfied result", async () => {
+  const adapter = createLiveSemanticApiAdapter({
+    apiBaseUrl: "http://127.0.0.1:4000",
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({
+          outcome: "already_satisfied",
+          plan: null,
+          provider: "airboard-deterministic",
+          model: "existing-board-fan-in-v1",
+          metadata: {
+            providerProcessingMs: 0,
+            totalLatencyMs: 1,
+            usage: null,
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+  });
+  const result = await adapter.resolve({
+    interactionId: "audio-live-already-satisfied",
+    transcript:
+      "Planner receives additional context from Historical Data and Golden Dataset",
+    parserIssue: "unknown_command",
+    context: {
+      selectionCount: 0,
+      selected: [],
+      objects: [],
+      edges: [],
+      projectGlossary: [],
+      pointerAvailable: false,
+    },
+  });
+  assert.equal(result.outcome, "already_satisfied");
+  assert.equal(result.plan, null);
+  assert.equal(result.retryCount, 0);
+});
+
 test("malformed semantic output is a blocking quality failure, not provider infrastructure", async () => {
   const malformedScenario = {
     ...scenario({
@@ -966,7 +1007,11 @@ test("CLI passes offline smoke scenarios and fails closed when assets are requir
   );
   assert.equal(offline.status, 0, offline.stderr || offline.stdout);
   assert.match(offline.stdout, /audio\/STT evaluation: PASS/u);
-  assert.match(offline.stdout, /10\/10 passed/u);
+  assert.match(
+    offline.stdout,
+    /\((\d+)\/\1 passed, 0 skipped\)/u,
+    "the offline corpus must pass in full without coupling this harness test to its case count",
+  );
 
   const required = spawnSync(
     process.execPath,

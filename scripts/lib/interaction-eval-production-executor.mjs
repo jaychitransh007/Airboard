@@ -7,7 +7,10 @@ import {
 } from "../../packages/core/src/index.ts";
 import { commitCommandTurn } from "../../apps/web/src/features/board/commandTurnCoordinator.ts";
 import { parseIntentCanvasCommand } from "../../apps/web/src/features/board/intentCanvasParser.ts";
-import { resolveIntentOperation } from "../../apps/web/src/features/board/intentPipeline.ts";
+import {
+  allowsSemanticFallbackAfterGroundingFailure,
+  resolveIntentOperation,
+} from "../../apps/web/src/features/board/intentPipeline.ts";
 import { VoiceCommandRouter } from "../../apps/web/src/features/board/voiceCommandRouter.ts";
 
 const PRODUCTION_ROUTE_COMPONENTS = Object.freeze([
@@ -201,7 +204,11 @@ function executeVoiceInteraction(
         strokeColor: "#111111",
       });
       if ("error" in resolution) {
-        const semantic = semanticFixtureOutcome(input.semanticPlan);
+        const semantic = allowsSemanticFallbackAfterGroundingFailure(
+          parsed.command,
+        )
+          ? semanticFixtureOutcome(input.semanticPlan)
+          : null;
         if (semantic) {
           semanticPlan = semantic.plan;
           outcome = semantic.outcome;
@@ -229,6 +236,28 @@ function executeVoiceInteraction(
             transaction: { status: "not_started", eventCount: 0 },
           };
         }
+      } else if (resolution.commands.length === 0) {
+        selectionIds = (resolution.selectionAfter ?? selectionIds).filter(
+          (strokeId) => boardState.strokes[strokeId]?.status === "committed",
+        );
+        nonBoardState = {
+          ...nonBoardState,
+          selection: [...selectionIds],
+        };
+        groundedCommands = [];
+        const alreadySatisfied = resolution.alreadySatisfied === true;
+        outcome = alreadySatisfied ? "no-op" : "applied";
+        feedbackCategory = alreadySatisfied ? "no-op" : "success";
+        processingPath.push(alreadySatisfied ? "no-op" : "selection_change");
+        stageOutcomes = {
+          ...stageOutcomes,
+          parser: { status: "parsed", operationKind: parsed.command.kind },
+          grounding: {
+            status: alreadySatisfied ? "already_satisfied" : "resolved",
+            commandCount: 0,
+          },
+          transaction: { status: "not_started", eventCount: 0 },
+        };
       } else {
         const commit = commitCommandTurn({
           snapshot: { boardState, selectionIds },
@@ -681,6 +710,28 @@ function seedProjectedBoard(projected = {}) {
       },
       commandContext("seed-edge", index),
     ).state;
+    if (annotation.start && annotation.end) {
+      const current = state.strokes[edge.id];
+      const nextAnnotation = {
+        ...current.annotation,
+        ...annotation,
+        start: { ...annotation.start },
+        end: { ...annotation.end },
+      };
+      state = applyBoardEvent(state, {
+        id: `event:seed-edge-geometry:${index}`,
+        boardSessionId: state.boardId,
+        actorParticipantId: "participant:eval",
+        createdAt: "2026-07-30T00:00:00.000Z",
+        type: "stroke.annotation_updated",
+        strokeId: edge.id,
+        annotation: nextAnnotation,
+        points: [
+          { ...nextAnnotation.start, t: 1, inputSource: "pointer" },
+          { ...nextAnnotation.end, t: 2, inputSource: "pointer" },
+        ],
+      });
+    }
   }
   return state;
 }

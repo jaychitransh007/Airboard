@@ -23,7 +23,9 @@ export function registerVoiceTraceRoutes(
     if (!originAllowed(request.headers.origin, config.allowedOrigins)) {
       return reply.code(403).send({ error: "ORIGIN_NOT_ALLOWED" });
     }
-    const context = auth ? await auth.authenticate(request) : null;
+    const context = auth
+      ? await auth.authenticate(request, { allowInstallation: true })
+      : null;
     if (!(await diagnosticAccessAllowed(request, config, auth, context))) {
       return reply.code(401).send({ error: "AUTH_REQUIRED" });
     }

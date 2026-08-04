@@ -32,6 +32,17 @@ export function createRecordedSemanticAdapter() {
     id: "recorded-replay",
     async resolve({ scenario }) {
       const fixture = scenario.source?.semanticProviderResponse;
+      if (isAlreadySatisfiedPayload(fixture)) {
+        return {
+          outcome: "already_satisfied",
+          plan: null,
+          provider: cleanString(fixture.provider) ?? "recorded",
+          model: cleanString(fixture.model) ?? "recorded-fixture",
+          latencyMs: 0,
+          metadata: sanitizeMetadata(fixture.metadata),
+          retryCount: 0,
+        };
+      }
       const plan = fixture?.plan ?? scenario.source?.semanticPlan;
       return fixtureResolution(
         plan,
@@ -168,6 +179,17 @@ async function requestSemanticPlan({
         },
       );
     }
+    if (isAlreadySatisfiedPayload(payload)) {
+      return {
+        outcome: "already_satisfied",
+        plan: null,
+        provider: cleanString(payload.provider) ?? "api",
+        model: cleanString(payload.model) ?? model ?? "server-default",
+        latencyMs: performance.now() - startedAt,
+        metadata: sanitizeMetadata(payload.metadata),
+        retryCount: 0,
+      };
+    }
     const parsed = parseSemanticPlan(
       isRecord(payload?.plan) ? payload.plan : payload,
     );
@@ -178,6 +200,7 @@ async function requestSemanticPlan({
       );
     }
     return {
+      outcome: "plan",
       plan: parsed.value,
       provider: cleanString(payload?.provider) ?? "api",
       model:
@@ -202,6 +225,7 @@ function fixtureResolution(plan, provider, model, metadata = null) {
     );
   }
   return {
+    outcome: "plan",
     plan: parsed.value,
     provider,
     model,
@@ -209,6 +233,20 @@ function fixtureResolution(plan, provider, model, metadata = null) {
     metadata: sanitizeMetadata(metadata),
     retryCount: 0,
   };
+}
+
+function isAlreadySatisfiedPayload(value) {
+  if (!isRecord(value)) return false;
+  const keys = ["metadata", "model", "outcome", "plan", "provider"];
+  return (
+    Object.keys(value).length === keys.length &&
+    keys.every((key) => Object.prototype.hasOwnProperty.call(value, key)) &&
+    value.outcome === "already_satisfied" &&
+    value.plan === null &&
+    cleanString(value.provider) !== null &&
+    cleanString(value.model) !== null &&
+    isRecord(value.metadata)
+  );
 }
 
 async function readJson(response) {

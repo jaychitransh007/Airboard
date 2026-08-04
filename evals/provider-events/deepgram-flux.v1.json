@@ -106,6 +106,37 @@
       }
     },
     {
+      "id": "observed-dataset-entity-drift-routes-once-to-semantic-fallback",
+      "channel": "ptt",
+      "messages": [
+        {
+          "type": "TurnInfo",
+          "event": "EndOfTurn",
+          "turn_index": 21,
+          "transcript": "So this will accept the additional content from the schema data and another additional context from the historical dataset.",
+          "end_of_turn_confidence": 0.7422
+        },
+        {
+          "type": "TurnInfo",
+          "event": "EndOfTurn",
+          "turn_index": 21,
+          "transcript": "So this will accept the additional content from the schema data and another additional context from the historical dataset.",
+          "end_of_turn_confidence": 0.7422
+        }
+      ],
+      "expected": {
+        "connected": 0,
+        "configured": 0,
+        "acceptedFinals": [
+          "So this will accept the additional content from the schema data and another additional context from the historical dataset."
+        ],
+        "commandKinds": [
+          "unrecognized:unknown_command"
+        ],
+        "fatalErrors": 0
+      }
+    },
+    {
       "id": "configure-failure-is-nonfatal-and-nonmutating",
       "channel": "ptt",
       "messages": [
@@ -116,6 +147,35 @@
         "configured": 0,
         "acceptedFinals": [],
         "commandKinds": [],
+        "fatalErrors": 0
+      }
+    },
+    {
+      "id": "production-disconnected-line-final-is-exact-once",
+      "channel": "ptt",
+      "messages": [
+        {
+          "type": "TurnInfo",
+          "event": "EndOfTurn",
+          "turn_index": 22,
+          "transcript": "Connect existing disconnected line to Client and Planner.",
+          "end_of_turn_confidence": 0.811
+        },
+        {
+          "type": "TurnInfo",
+          "event": "EndOfTurn",
+          "turn_index": 22,
+          "transcript": "Connect existing disconnected line to Client and Planner.",
+          "end_of_turn_confidence": 0.811
+        }
+      ],
+      "expected": {
+        "connected": 0,
+        "configured": 0,
+        "acceptedFinals": [
+          "Connect existing disconnected line to Client and Planner."
+        ],
+        "commandKinds": ["attach_connection"],
         "fatalErrors": 0
       }
     }

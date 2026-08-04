@@ -75,23 +75,40 @@ export type SemanticIntentParserIssue =
   | "unsupported_branching"
   | "grounding_failed";
 
-export type SemanticIntentResolution = {
-  plan: SemanticPlan;
+export type SemanticIntentResolutionMetadata = {
+  responseId: string | null;
+  responseModel: string;
+  providerRequestId: string | null;
+  clientRequestId: string;
+  providerProcessingMs: number | null;
+  totalLatencyMs: number;
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  } | null;
+};
+
+export type SemanticIntentResolution =
+  | {
+      outcome: "plan";
+      plan: SemanticPlan;
+      provider: string;
+      model: string;
+      metadata: SemanticIntentResolutionMetadata;
+    }
+  | {
+      outcome: "already_satisfied";
+      plan: null;
+      provider: string;
+      model: string;
+      metadata: SemanticIntentResolutionMetadata;
+    };
+
+type SemanticIntentResolutionWireBase = {
   provider: string;
   model: string;
-  metadata: {
-    responseId: string | null;
-    responseModel: string;
-    providerRequestId: string | null;
-    clientRequestId: string;
-    providerProcessingMs: number | null;
-    totalLatencyMs: number;
-    usage: {
-      inputTokens: number;
-      outputTokens: number;
-      totalTokens: number;
-    } | null;
-  };
+  metadata: SemanticIntentResolutionMetadata;
 };
 
 export type ResolveSemanticIntentOptions = {
@@ -238,29 +255,66 @@ function parseSemanticIntentResolution(input: unknown): SemanticIntentResolution
   if (!isRecord(input)) {
     throw new SemanticIntentClientError("INVALID_SEMANTIC_INTENT_RESPONSE", 502);
   }
-  const exactKeys = ["metadata", "model", "plan", "provider"];
+  const wireBase = parseSemanticIntentWireBase(input);
+  if (!wireBase) {
+    throw new SemanticIntentClientError("INVALID_SEMANTIC_INTENT_RESPONSE", 502);
+  }
+  const alreadySatisfiedKeys = ["metadata", "model", "outcome", "plan", "provider"];
   if (
-    Object.keys(input).length !== exactKeys.length ||
-    !exactKeys.every((key) => Object.prototype.hasOwnProperty.call(input, key))
+    Object.keys(input).length === alreadySatisfiedKeys.length &&
+    alreadySatisfiedKeys.every((key) =>
+      Object.prototype.hasOwnProperty.call(input, key),
+    ) &&
+    input.outcome === "already_satisfied" &&
+    input.plan === null
+  ) {
+    return {
+      outcome: "already_satisfied",
+      plan: null,
+      ...wireBase,
+    };
+  }
+  const planKeys = ["metadata", "model", "plan", "provider"];
+  if (
+    Object.keys(input).length !== planKeys.length ||
+    !planKeys.every((key) => Object.prototype.hasOwnProperty.call(input, key))
   ) {
     throw new SemanticIntentClientError("INVALID_SEMANTIC_INTENT_RESPONSE", 502);
   }
   const parsedPlan = parseSemanticPlan(input.plan);
-  const metadata = parseSemanticIntentMetadata(input.metadata);
-  if (!parsedPlan.ok || !metadata || typeof input.provider !== "string" || typeof input.model !== "string") {
+  if (!parsedPlan.ok) {
     throw new SemanticIntentClientError("INVALID_SEMANTIC_INTENT_RESPONSE", 502);
   }
   return {
+    outcome: "plan",
     plan: parsedPlan.value,
-    provider: input.provider,
-    model: input.model,
+    ...wireBase,
+  };
+}
+
+function parseSemanticIntentWireBase(
+  input: Record<string, unknown>,
+): SemanticIntentResolutionWireBase | null {
+  const metadata = parseSemanticIntentMetadata(input.metadata);
+  if (
+    !metadata ||
+    typeof input.provider !== "string" ||
+    !input.provider.trim() ||
+    typeof input.model !== "string" ||
+    !input.model.trim()
+  ) {
+    return null;
+  }
+  return {
+    provider: input.provider.trim(),
+    model: input.model.trim(),
     metadata,
   };
 }
 
 function parseSemanticIntentMetadata(
   input: unknown,
-): SemanticIntentResolution["metadata"] | null {
+): SemanticIntentResolutionMetadata | null {
   if (!isRecord(input)) {
     return null;
   }
@@ -306,7 +360,7 @@ function parseSemanticIntentMetadata(
 
 function parseSemanticIntentUsage(
   input: unknown,
-): SemanticIntentResolution["metadata"]["usage"] {
+): SemanticIntentResolutionMetadata["usage"] {
   if (input === null) {
     return null;
   }

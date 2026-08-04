@@ -1711,6 +1711,158 @@
           }
         ]
       }
+    },
+    {
+      "schemaVersion": "interaction-eval-case.v1",
+      "id": "voice-reanchors-existing-disconnected-line",
+      "title": "Voice reanchors one stale existing connector",
+      "corpusVersion": "interaction-v1",
+      "modality": "voice",
+      "surface": "replay",
+      "riskLevel": "medium",
+      "datasetAssetHash": "none",
+      "description": "Regression for the production request that retained snapped IDs while its rendered connector geometry was visibly detached.",
+      "capabilities": [
+        "action:connect",
+        "node:service",
+        "contract:exact-once",
+        "contract:undo-round-trip"
+      ],
+      "tags": [
+        "voice",
+        "board-mutation",
+        "connector-repair",
+        "production-regression"
+      ],
+      "initial": {
+        "boardState": {
+          "boardId": "board:primary",
+          "nodes": [
+            {
+              "id": "node:user",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "service",
+                "label": "User",
+                "bounds": { "x": 20, "y": 210, "width": 128, "height": 80 }
+              }
+            },
+            {
+              "id": "node:client",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "service",
+                "label": "Client",
+                "bounds": { "x": 300, "y": 210, "width": 152, "height": 80 }
+              }
+            },
+            {
+              "id": "node:planner",
+              "annotation": {
+                "type": "flow_node",
+                "nodeType": "service",
+                "label": "Planner",
+                "bounds": { "x": 650, "y": 210, "width": 152, "height": 80 }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "edge:user-client",
+              "annotation": {
+                "type": "connector",
+                "label": "makes a request",
+                "snappedStartStrokeId": "node:user",
+                "snappedEndStrokeId": "node:client"
+              }
+            },
+            {
+              "id": "edge:request-goes-to",
+              "annotation": {
+                "type": "connector",
+                "label": "request goes to",
+                "strokeColor": "#67e8f9",
+                "opacity": 0.8,
+                "start": { "x": 520, "y": 420 },
+                "end": { "x": 650, "y": 250 },
+                "snappedStartStrokeId": "node:user",
+                "snappedEndStrokeId": "node:planner"
+              }
+            }
+          ]
+        },
+        "nonBoardState": {
+          "selection": ["node:client"],
+          "mode": "selected"
+        }
+      },
+      "interaction": {
+        "channel": "voice",
+        "input": {
+          "activation": "ptt",
+          "transcript": "Connect existing disconnected line to Client and Planner."
+        }
+      },
+      "expected": {
+        "outcome": "applied",
+        "route": { "channel": "voice", "activation": "ptt" },
+        "processingPath": [
+          "voice",
+          "deterministic_parser",
+          "grounding",
+          "atomic_transaction"
+        ],
+        "requiredActions": [
+          {
+            "type": "connection.attach",
+            "connectorId": "edge:request-goes-to",
+            "fromId": "node:client",
+            "toId": "node:planner"
+          }
+        ],
+        "feedbackCategory": "success",
+        "latencyBudget": { "totalMs": 1000 },
+        "comparison": {
+          "board": "partial",
+          "geometryTolerance": { "position": 1, "size": 0.5 }
+        },
+        "finalBoardState": {
+          "edges": [
+            {
+              "id": "edge:request-goes-to",
+              "status": "committed",
+              "annotation": {
+                "type": "connector",
+                "label": "request goes to",
+                "strokeColor": "#67e8f9",
+                "opacity": 0.8,
+                "start": { "x": 452, "y": 250 },
+                "end": { "x": 650, "y": 250 },
+                "snappedStartStrokeId": "node:client",
+                "snappedEndStrokeId": "node:planner"
+              }
+            }
+          ]
+        },
+        "finalNonBoardState": {
+          "selection": ["edge:request-goes-to"],
+          "mode": "selected"
+        },
+        "exactOnce": [
+          {
+            "id": "existing-connector-updated-once",
+            "match": {
+              "type": "stroke.annotation_updated",
+              "strokeId": "edge:request-goes-to"
+            },
+            "count": 1
+          }
+        ],
+        "undoRoundTrip": {
+          "board": true,
+          "requireUndoEvents": true
+        }
+      }
     }
   ]
 }

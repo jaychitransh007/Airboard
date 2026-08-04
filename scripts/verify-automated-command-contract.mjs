@@ -6,7 +6,6 @@ const [
   board,
   styles,
   router,
-  undoTracker,
   palmVoiceTracker,
   mediaPipeTracker,
   palmPose,
@@ -16,7 +15,6 @@ const [
   readFile(new URL("apps/web/src/features/board/AirboardPrototype.tsx", root), "utf8"),
   readFile(new URL("apps/web/app/globals.css", root), "utf8"),
   readFile(new URL("apps/web/src/features/board/voiceCommandRouter.ts", root), "utf8"),
-  readFile(new URL("apps/web/src/features/board/undoGestureTracker.ts", root), "utf8"),
   readFile(new URL("apps/web/src/features/board/palmVoiceGestureTracker.ts", root), "utf8"),
   readFile(new URL("packages/gesture-engine/src/mediapipe.ts", root), "utf8"),
   readFile(new URL("packages/gesture-engine/src/palmPresentation.ts", root), "utf8"),
@@ -55,7 +53,6 @@ const required = [
   [board, 'className="canvas-copilot"', "right-side copilot"],
   [board, 'data-testid="copilot-transcript"', "live transcript surface"],
   [board, "voiceRouter.noteSpeechActivity()", "interim speech gate claim"],
-  [board, "processUndoGestureFrame", "undo gesture integration"],
   [
     board,
     "collectLandmarkNavigationHands(",
@@ -72,7 +69,7 @@ const required = [
     "raw-landmark Move/Place/Erase routing",
   ],
   [board, "selectSingleLandmarkPose(", "canonical landmark pose selection"],
-  [board, "estimatePalmPresentation", "landmark-defined Open Palm routing (undo + voice)"],
+  [board, "estimatePalmPresentation", "landmark-defined Open Palm voice routing"],
   [
     board,
     "canvasNavTrackerRef.current?.reset();",
@@ -81,7 +78,6 @@ const required = [
   [mediaPipeTracker, '"/vendor/mediapipe/models/hand_landmarker.task"', "hand model selection"],
   [router, "noteSpeechActivity(): void", "voice router speech claim"],
   [router, "utteranceGate", "late final-transcript ownership"],
-  [undoTracker, 'return "undo"', "undo gesture recognizer"],
   [palmVoiceTracker, 'return "activate"', "open-palm hold voice recognizer"],
   [mediaPipeTracker, "HandLandmarker.createFromOptions", "canonical HandLandmarker"],
   [mediaPipeTracker, "detectForVideo", "HandLandmarker video inference"],
@@ -130,6 +126,10 @@ for (const [forbidden, label] of [
   ["selectSingleCannedGesture", "canned gesture routing"],
   ["cannedGesture", "canned gesture data"],
   ["gesture_recognizer.task", "gesture-classifier model loading"],
+  ["UndoGestureTracker", "retired Undo hand-gesture tracker"],
+  ["processUndoGestureFrame", "retired Undo hand-gesture processing"],
+  ["updateUndoGesture", "retired Undo hand-gesture routing"],
+  ["emitUndoGestureFrame", "retired Undo hand-gesture test hook"],
 ]) {
   if (runtimeSourceCorpus.includes(forbidden)) {
     throw new Error(`The single-landmark-input contract was violated by ${label}.`);
@@ -164,8 +164,6 @@ for (const marker of [
   "shouldReserveLandmarkNavigation(",
   "snap: {",
   "snapGestureTrackerRef.current!.reset()",
-  "undo: {",
-  "undoGestureTrackerRef.current!.reset()",
   "voice: {",
   'closeVoiceGate("ptt")',
   "manipulation: {",
@@ -183,7 +181,6 @@ if (board.includes("arbitrateGestureFrame(")) {
 const priorityMarkers = [
   '"navigation"',
   '"snap"',
-  '"undo"',
   '"voice"',
   '"manipulation"',
 ];
@@ -195,7 +192,7 @@ for (const marker of priorityMarkers) {
   );
   if (markerIndex <= previousArbitrationIndex) {
     throw new Error(
-      "Gesture arbitration must remain Navigation -> Snap -> Undo -> Voice -> Manipulation.",
+      "Gesture arbitration must remain Navigation -> Snap -> Voice -> Manipulation.",
     );
   }
   previousArbitrationIndex = markerIndex;
@@ -206,7 +203,7 @@ if (handModelSha256 !== "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bc
 }
 
 console.log(
-  "Automated command contract verified: one HandLandmarker stream with Navigation -> Snap -> Undo -> Voice -> Manipulation arbitration.",
+  "Automated command contract verified: one HandLandmarker stream with Navigation -> Snap -> Voice -> Manipulation arbitration; camera Undo is absent.",
 );
 
 async function readSourceTree(directoryUrl) {

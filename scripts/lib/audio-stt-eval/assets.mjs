@@ -231,7 +231,7 @@ function validateExternalEvaluation(assetId, evaluation, surface) {
   }
   if (
     evaluation.processingPath === "semantic" &&
-    !["resolved", "clarification", "unsupported"].includes(
+    !["resolved", "clarification", "unsupported", "already_satisfied"].includes(
       evaluation.oracle.expectedSemanticStatus,
     )
   ) {

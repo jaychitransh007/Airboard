@@ -95,6 +95,12 @@ Undo.
 Physical markers and air writing are legacy, non-runtime inputs. The capability
 contract prevents them from silently becoming production owners.
 
+SemanticPlan 1.1 continues to require at least one action for `resolved`.
+Supported relationship requests that are already fully present use the
+HTTP/orchestration outcome `already_satisfied` with `plan: null`. Evaluators
+score that outcome against the same canonical board oracle and require zero
+events, unchanged selection, and no Undo entry.
+
 Capability coverage uses the fail-closed `capability-coverage.v2` contract.
 Corpus evidence names one exact production capability, its facet, an
 executable provenance class, and JSON Pointer assertions into the tested input
@@ -365,7 +371,7 @@ Release dataset policy requires a browser-owned recorded-video asset for every
 gesture participant. Human coverage can otherwise come only from a consented
 derived landmark trace that the evaluator actually replays. The current trace
 engine substantiates only low-level palm/grab acquisition, so derived traces
-may claim release repetitions only for `manipulation_grab`. Navigation, Undo,
+may claim release repetitions only for `manipulation_grab`. Navigation,
 visibility, voice gating, hold-to-edit, and neutral full-pipeline safety require
 browser-owned Y4M evidence. A manifest annotation, unsupported media type, or
 synthetic trace cannot replace an observed holdout replay.
@@ -396,7 +402,7 @@ are mounted and their manifest hashes match.
 | STT command-critical token recall | At least 97%; WER/CER remain diagnostic |
 | Audio downstream action | Routed actions must ground, atomically commit to the expected canonical graph/event delta, and pass Undo |
 | Gesture precision / recall | At least 95% / 90%; no critical slice below 85% |
-| Critical gesture false triggers | Zero for Undo, erase, visibility, and voice gating |
+| Critical gesture false triggers | Zero for retired gesture-sourced Undo, erase, visibility, and voice gating |
 | Gesture duplicates | Below 1%; acquisition/release within debounce plus two observed frames |
 | End-of-speech to action p95 | Under 1 s deterministic; under 2.5 s semantic |
 | Cost | Cost per successful semantic turn no more than 10% above baseline |

@@ -7,7 +7,7 @@ export function getConnectorRoutePoints(annotation: StrokeAnnotation): Annotatio
     return [];
   }
 
-  if (annotation.type !== "connector") {
+  if (annotation.type !== "connector" && annotation.type !== "arrow") {
     return [start, end];
   }
 
@@ -36,6 +36,9 @@ export function getConnectorRoutePoints(annotation: StrokeAnnotation): Annotatio
         end,
       ];
     }
+  }
+  if (annotation.type === "arrow") {
+    return [start, end];
   }
   if (Math.abs(dx) < 18 || Math.abs(dy) < 18) {
     return [start, end];

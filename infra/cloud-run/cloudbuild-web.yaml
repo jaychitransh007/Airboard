@@ -10,11 +10,17 @@ steps:
       - --build-arg=NEXT_PUBLIC_SUPABASE_ANON_KEY=${_SUPABASE_ANON_KEY}
       - --build-arg=NEXT_PUBLIC_CHROME_WEB_STORE_URL=${_CHROME_WEB_STORE_URL}
       - --build-arg=NEXT_PUBLIC_CHROME_EXTENSION_VERSION=${_CHROME_EXTENSION_VERSION}
+      - --build-arg=NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_ID=${_AIRBOARD_CHROME_EXTENSION_ID}
+      - --build-arg=NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_COMPATIBLE_VERSIONS=${_CHROME_EXTENSION_COMPATIBLE_VERSIONS}
       - .
 images:
   - ${_IMAGE}
 substitutions:
   _CHROME_WEB_STORE_URL: ""
   _CHROME_EXTENSION_VERSION: "0.8.0"
+  # Deliberately empty: canonical production builds fail until the reviewed
+  # Chrome Web Store item ID is supplied as a build substitution.
+  _AIRBOARD_CHROME_EXTENSION_ID: ""
+  _CHROME_EXTENSION_COMPATIBLE_VERSIONS: "0.8.0"
 options:
   logging: CLOUD_LOGGING_ONLY

@@ -305,7 +305,7 @@ function validateScenario(scenario) {
   }
   if (
     scenario.semanticAdapter !== undefined &&
-    !["resolved", "clarification", "unsupported"].includes(
+    !["resolved", "clarification", "unsupported", "already_satisfied"].includes(
       scenario.oracle.expectedSemanticStatus,
     )
   ) {

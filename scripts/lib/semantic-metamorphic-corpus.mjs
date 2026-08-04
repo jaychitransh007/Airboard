@@ -61,6 +61,10 @@ const REQUIRED_INVARIANTS = Object.freeze([
 ]);
 
 const VALID_STATUSES = new Set(SEMANTIC_PLAN_RESOLUTION_STATUSES);
+const VALID_EXPECTED_OUTCOMES = new Set([
+  ...SEMANTIC_PLAN_RESOLUTION_STATUSES,
+  "already_satisfied",
+]);
 const VALID_ISSUE_CODES = new Set(SEMANTIC_PLAN_ISSUE_CODES);
 const VALID_MISSING_SLOTS = new Set(SEMANTIC_PLAN_MISSING_SLOTS);
 const VALID_PARSER_ISSUES = new Set(
@@ -1153,12 +1157,12 @@ function validatePendingClarification(pending, path, errors) {
 }
 
 function validateExpected(expected, path, errors) {
-  if (!isRecord(expected) || !VALID_STATUSES.has(expected.status)) {
+  if (!isRecord(expected) || !VALID_EXPECTED_OUTCOMES.has(expected.status)) {
     errors.push(
       issue(
         "case.expected-status",
         `${path}/status`,
-        `Expected status must be one of ${[...VALID_STATUSES].join(", ")}`,
+        `Expected status must be one of ${[...VALID_EXPECTED_OUTCOMES].join(", ")}`,
       ),
     );
     return;
@@ -1190,6 +1194,7 @@ function validateExpected(expected, path, errors) {
   }
   if (
     expected.status !== "resolved" &&
+    expected.status !== "already_satisfied" &&
     (expected.issueCode === undefined || expected.issueCode === "none")
   ) {
     errors.push(

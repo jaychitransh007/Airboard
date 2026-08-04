@@ -9,7 +9,10 @@
 
 import {
   AIRBOARD_SEMANTIC_NODE_CAPABILITIES,
+  connectorEndpointMatchesBinding,
+  connectorGeometryMatchesBindings,
   nodeVisualDefaultSize,
+  pointOnNodeBoundary,
   type AnnotationNodeType,
   type AnnotationPoint,
   type BoardState,
@@ -37,6 +40,20 @@ export function boardContentChanged(a: BoardState, b: BoardState): boolean {
   return a.strokes !== b.strokes || a.clearedAt !== b.clearedAt;
 }
 
+/**
+ * Existing-line commands cannot safely fall through to a planner after pure
+ * grounding fails: the semantic contract has no reference to a loose line,
+ * and a destructive fallback could choose a different parallel connector.
+ */
+export function allowsSemanticFallbackAfterGroundingFailure(
+  operation: IntentCanvasOperation,
+): boolean {
+  return (
+    operation.kind !== "attach_connection" &&
+    operation.kind !== "delete_connection"
+  );
+}
+
 export type IntentResolutionContext = {
   /**
    * Board coordinates of the visible window's top-left. canvasWidth/Height
@@ -61,6 +78,8 @@ type IntentResolution =
       commands: DiagramCommand[];
       selectionAfter?: string[];
       previewStrokeId?: string | undefined;
+      /** Supported request whose desired state already exists; no event needed. */
+      alreadySatisfied?: boolean;
     }
   | { error: string };
 
@@ -79,8 +98,16 @@ type SemanticActionResolution =
       commands: DiagramCommand[];
       selectionAfter?: string[];
       handleAssignments?: Record<string, string[]>;
+      repairKinds?: Array<"data_dataset_alias">;
     }
-  | { error: string };
+  | {
+      error: string;
+      errorCode?:
+        | "grounding_missing_label"
+        | "grounding_ambiguous_label"
+        | "grounding_invalid_occurrence";
+      candidateCount?: number;
+    };
 
 export function resolveSemanticPlanAction(
   action: SemanticPlanAction,
@@ -122,44 +149,92 @@ export function resolveSemanticPlanAction(
       };
     }
     case "connect": {
-      const from = resolveOne(action.from);
+      const from = resolveSingleSemanticConnectReference(
+        action.from,
+        context,
+        planHandles,
+      );
       if ("error" in from) return from;
-      const to = resolveOne(action.to);
+      const to = resolveSingleSemanticConnectReference(
+        action.to,
+        context,
+        planHandles,
+      );
       if ("error" in to) return to;
       if (from.id === to.id) {
         return { error: "The source and target resolve to the same object." };
       }
+      const repairKinds = [...new Set(
+        [from.repairKind, to.repairKind].filter(
+          (value): value is "data_dataset_alias" => value !== undefined,
+        ),
+      )];
       const existing = findDirectedSemanticConnections(
         context.boardState,
         from.id,
         to.id,
+        { includeStale: true },
       );
-      if (
-        action.label === null
-          ? existing.length > 0
-          : existing.some(
-              (connection) =>
-                normalizeObjectLookup(connection.label ?? "") ===
-                normalizeObjectLookup(action.label ?? ""),
-            )
-      ) {
-        return { commands: [], selectionAfter: [from.id, to.id] };
+      const matchingExisting = action.label === null
+        ? existing
+        : existing.filter(
+            (connection) =>
+              normalizeObjectLookup(connection.label ?? "") ===
+              normalizeObjectLookup(action.label ?? ""),
+          );
+      if (matchingExisting.some((connection) => connection.geometryAttached)) {
+        return {
+          commands: [],
+          selectionAfter: [from.id, to.id],
+          ...(repairKinds.length > 0 ? { repairKinds } : {}),
+        };
+      }
+      if (matchingExisting.length === 1) {
+        return {
+          commands: [
+            {
+              type: "connection.attach",
+              connectorId: matchingExisting[0]!.id,
+              fromId: from.id,
+              toId: to.id,
+              ...(action.label !== null ? { label: action.label } : {}),
+            },
+          ],
+          selectionAfter: [from.id, to.id],
+          ...(repairKinds.length > 0 ? { repairKinds } : {}),
+        };
+      }
+      if (matchingExisting.length > 1) {
+        return {
+          error:
+            "More than one visually detached connector matches those endpoints. Select the intended line and try again.",
+        };
       }
       if (action.label !== null && existing.length === 1) {
         return {
           commands: [
-            {
-              type: "object.rename",
-              objectId: existing[0]!.id,
-              label: action.label,
-            },
+            existing[0]!.geometryAttached
+              ? {
+                  type: "object.rename",
+                  objectId: existing[0]!.id,
+                  label: action.label,
+                }
+              : {
+                  type: "connection.attach",
+                  connectorId: existing[0]!.id,
+                  fromId: from.id,
+                  toId: to.id,
+                  label: action.label,
+                },
           ],
           selectionAfter: [from.id, to.id],
+          ...(repairKinds.length > 0 ? { repairKinds } : {}),
         };
       }
       return {
         commands: [semanticConnectCommand(from.id, to.id, action.label, context.strokeColor)],
         selectionAfter: [from.id, to.id],
+        ...(repairKinds.length > 0 ? { repairKinds } : {}),
       };
     }
     case "reverse_connection": {
@@ -421,12 +496,14 @@ function semanticConnectCommand(
 type DirectedSemanticConnection = {
   id: string;
   label: string | null;
+  geometryAttached: boolean;
 };
 
 function findDirectedSemanticConnections(
   state: BoardState,
   fromId: string,
   toId: string,
+  options: { includeStale?: boolean } = {},
 ): DirectedSemanticConnection[] {
   return Object.values(state.strokes)
     .flatMap((stroke): DirectedSemanticConnection[] => {
@@ -440,7 +517,20 @@ function findDirectedSemanticConnections(
       ) {
         return [];
       }
-      return [{ id: stroke.id, label: annotation.label?.trim() || null }];
+      const geometryAttached = connectorGeometryMatchesBindings(
+        state,
+        annotation,
+        fromId,
+        toId,
+      );
+      if (!geometryAttached && !options.includeStale) {
+        return [];
+      }
+      return [{
+        id: stroke.id,
+        label: annotation.label?.trim() || null,
+        geometryAttached,
+      }];
     })
     .sort((left, right) => left.id.localeCompare(right.id));
 }
@@ -523,6 +613,107 @@ function resolveSingleSemanticReference(
     return { error: `That reference resolves to ${resolved.ids.length} objects; name one object or give its ordinal.` };
   }
   return { id: resolved.ids[0]! };
+}
+
+/**
+ * Additive connections may recover the narrow STT morphology
+ * data/dataset/datasets after exact grounding fails. Destructive and
+ * identity-changing actions keep using exact visible labels.
+ */
+function resolveSingleSemanticConnectReference(
+  reference: SemanticObjectReference,
+  context: SemanticIntentResolutionContext,
+  planHandles: ReadonlyMap<string, string[]>,
+):
+  | { id: string; repairKind?: "data_dataset_alias" }
+  | {
+      error: string;
+      errorCode?:
+        | "grounding_missing_label"
+        | "grounding_ambiguous_label"
+        | "grounding_invalid_occurrence";
+      candidateCount?: number;
+    } {
+  const exact = resolveSingleSemanticReference(reference, context, planHandles);
+  if (!("error" in exact) || reference.kind !== "visible_label") {
+    return exact;
+  }
+  const exactMatches = spatialSemanticNodes(context.boardState).filter(
+    (entry) =>
+      normalizeObjectLookup(entry.label) ===
+      normalizeObjectLookup(reference.label),
+  );
+  if (exactMatches.length > 0) {
+    if (reference.occurrence !== null) {
+      return {
+        error: exact.error,
+        errorCode: "grounding_invalid_occurrence",
+        candidateCount: exactMatches.length,
+      };
+    }
+    return {
+      error: exact.error,
+      errorCode: "grounding_ambiguous_label",
+      candidateCount: exactMatches.length,
+    };
+  }
+  if (reference.occurrence !== null && reference.occurrence !== 1) {
+    return {
+      error: `There is no occurrence ${reference.occurrence} of “${reference.label}”.`,
+      errorCode: "grounding_invalid_occurrence",
+    };
+  }
+  const matches = spatialSemanticNodes(context.boardState).filter((entry) =>
+    dataDatasetEquivalentReference(reference.label, entry.label),
+  );
+  if (matches.length === 1) {
+    return { id: matches[0]!.id, repairKind: "data_dataset_alias" };
+  }
+  if (matches.length > 1) {
+    return {
+      error: `“${reference.label}” could refer to ${matches.length} objects; use the exact visible label or specify its occurrence.`,
+      errorCode: "grounding_ambiguous_label",
+      candidateCount: matches.length,
+    };
+  }
+  return {
+    error: `I couldn’t match “${reference.label}” to an object on the current board. Use its exact visible label or select it and try again.`,
+    errorCode: "grounding_missing_label",
+    candidateCount: 0,
+  };
+}
+
+function dataDatasetEquivalentReference(spoken: string, visible: string): boolean {
+  const spokenTokens = normalizeObjectLookup(spoken).split(" ").filter(Boolean);
+  const visibleTokens = normalizeObjectLookup(visible).split(" ").filter(Boolean);
+  if (spokenTokens.length !== visibleTokens.length || spokenTokens.length < 2) {
+    return false;
+  }
+  let aliasDifference = false;
+  let anchored = false;
+  for (let index = 0; index < spokenTokens.length; index += 1) {
+    const spokenToken = spokenTokens[index]!;
+    const visibleToken = visibleTokens[index]!;
+    if (spokenToken === visibleToken) {
+      if (!isDataDatasetToken(spokenToken)) {
+        anchored = true;
+      }
+      continue;
+    }
+    if (
+      isDataDatasetToken(spokenToken) &&
+      isDataDatasetToken(visibleToken)
+    ) {
+      aliasDifference = true;
+      continue;
+    }
+    return false;
+  }
+  return aliasDifference && anchored;
+}
+
+function isDataDatasetToken(value: string): boolean {
+  return value === "data" || value === "dataset" || value === "datasets";
 }
 
 function resolveSemanticTargets(
@@ -1059,6 +1250,106 @@ export function resolveIntentOperation(
       };
     }
 
+    case "attach_connection": {
+      const deictic = resolveDeicticIds({
+        boardState: context.boardState,
+        selectionIds,
+        primarySelectionId,
+        hoverStrokeId: context.hoverStrokeId,
+      });
+      const from = resolveConnectionReference(
+        operation.from,
+        context.boardState,
+        deictic,
+      );
+      if ("error" in from) return from;
+      const to = resolveConnectionReference(
+        operation.to,
+        context.boardState,
+        deictic,
+      );
+      if ("error" in to) return to;
+      if (from.id === to.id) {
+        return { error: "The source and target must be different objects." };
+      }
+
+      const candidates = findAttachableConnections(
+        context.boardState,
+        from.id,
+        to.id,
+        operation.endpointOrder ?? "directed",
+      );
+      const selectedCandidates = candidates.filter((candidate) =>
+        selectionIds.includes(candidate.id),
+      );
+      const pointedCandidates = candidates.filter(
+        (candidate) => candidate.id === context.hoverStrokeId,
+      );
+      const lineReference = operation.lineReference ?? "unique_existing";
+      const chosen = lineReference === "selected"
+        ? selectedCandidates.length === 1
+          ? selectedCandidates[0]
+          : null
+        : lineReference === "pointer"
+          ? pointedCandidates.length === 1
+            ? pointedCandidates[0]
+            : null
+          : selectedCandidates.length === 1
+            ? selectedCandidates[0]
+            : selectedCandidates.length > 1
+              ? null
+              : candidates.length === 1
+                ? candidates[0]
+                : null;
+      if (!chosen) {
+        if (candidates.length === 0 && lineReference === "unique_existing") {
+          const exactHealthy = [
+            ...findDirectedSemanticConnections(
+              context.boardState,
+              from.id,
+              to.id,
+            ),
+            ...(operation.endpointOrder === "undirected"
+              ? findDirectedSemanticConnections(
+                  context.boardState,
+                  to.id,
+                  from.id,
+                )
+              : []),
+          ];
+          if (exactHealthy.length > 0) {
+            return {
+              commands: [],
+              selectionAfter: [from.id, to.id],
+              alreadySatisfied: true,
+            };
+          }
+        }
+        return {
+          error:
+            lineReference === "selected"
+              ? "The selected object is not one uniquely attachable disconnected line. Select the intended line and try again."
+              : lineReference === "pointer"
+                ? "The pointed object is not one uniquely attachable disconnected line. Point at the intended line and try again."
+                : candidates.length === 0
+              ? "No visually disconnected line can be safely attached to those two objects."
+              : "More than one disconnected line could match. Select the intended line and try again.",
+        };
+      }
+      return {
+        commands: [
+          {
+            type: "connection.attach",
+            connectorId: chosen.id,
+            fromId: chosen.fromId,
+            toId: chosen.toId,
+          },
+        ],
+        selectionAfter: [chosen.id],
+        previewStrokeId: chosen.id,
+      };
+    }
+
     case "delete_connection": {
       const deictic = resolveDeicticIds({
         boardState: context.boardState,
@@ -1077,6 +1368,12 @@ export function resolveIntentOperation(
       const connectionIds = findConnectionsBetween(context.boardState, from.id, to.id);
       if (connectionIds.length === 0) {
         return { error: "No connector between those two objects was found." };
+      }
+      if (connectionIds.length > 1 && operation.scope !== "all") {
+        return {
+          error:
+            "More than one attached connector joins those objects. Use a labelled semantic command or remove them one at a time.",
+        };
       }
       return {
         commands: [
@@ -1333,7 +1630,10 @@ export function resolveIntentOperation(
 }
 
 function resolveConnectionReference(
-  reference: Extract<IntentCanvasOperation, { kind: "connect" }> ["from"],
+  reference: Extract<
+    IntentCanvasOperation,
+    { kind: "connect" | "attach_connection" }
+  >["from"],
   state: BoardState,
   deictic: { thisId: string | null; thatId: string | null },
 ): { id: string } | { error: string } {
@@ -1399,6 +1699,103 @@ function resolveConnectionReference(
   return { id: matches[0]!.id };
 }
 
+type AttachableConnection = { id: string; fromId: string; toId: string };
+
+function findAttachableConnections(
+  state: BoardState,
+  firstId: string,
+  secondId: string,
+  endpointOrder: "directed" | "undirected",
+): AttachableConnection[] {
+  return Object.values(state.strokes)
+    .flatMap((stroke): AttachableConnection[] => {
+      const annotation = stroke.annotation;
+      if (
+        stroke.status !== "committed" ||
+        !annotation ||
+        (annotation.type !== "connector" && annotation.type !== "arrow") ||
+        !annotation.start ||
+        !annotation.end ||
+        connectorGeometryMatchesBindings(state, annotation)
+      ) {
+        return [];
+      }
+
+      const startHealthy = connectorEndpointMatchesBinding(
+        state,
+        annotation,
+        "start",
+      );
+      const endHealthy = connectorEndpointMatchesBinding(
+        state,
+        annotation,
+        "end",
+      );
+      const orientations = endpointOrder === "undirected"
+        ? [
+            { fromId: firstId, toId: secondId, listedOrder: 0 },
+            { fromId: secondId, toId: firstId, listedOrder: 1 },
+          ]
+        : [{ fromId: firstId, toId: secondId, listedOrder: 0 }];
+      const viable = orientations
+        .flatMap((orientation) => {
+          // A healthy binding is authoritative and must never be silently
+          // replaced. Missing/stale bindings are repairable only because this
+          // resolver is reached by an explicit disconnected-line command.
+          if (
+            (startHealthy &&
+              annotation.snappedStartStrokeId !== orientation.fromId) ||
+            (endHealthy &&
+              annotation.snappedEndStrokeId !== orientation.toId)
+          ) {
+            return [];
+          }
+          return [{
+            ...orientation,
+            preservedBindings: Number(startHealthy) + Number(endHealthy),
+            geometryDistance:
+              attachmentEndpointDistance(
+                state,
+                annotation.start!,
+                orientation.fromId,
+              ) +
+              attachmentEndpointDistance(
+                state,
+                annotation.end!,
+                orientation.toId,
+              ),
+          }];
+        })
+        .sort(
+          (left, right) =>
+            right.preservedBindings - left.preservedBindings ||
+            left.geometryDistance - right.geometryDistance ||
+            left.listedOrder - right.listedOrder,
+        );
+      const chosen = viable[0];
+      return chosen
+        ? [{ id: stroke.id, fromId: chosen.fromId, toId: chosen.toId }]
+        : [];
+    })
+    .sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function attachmentEndpointDistance(
+  state: BoardState,
+  point: { x: number; y: number },
+  nodeId: string,
+): number {
+  const node = state.strokes[nodeId];
+  const bounds = node?.annotation?.bounds;
+  if (!node || !bounds) return Number.POSITIVE_INFINITY;
+  const boundary = pointOnNodeBoundary(
+    bounds,
+    node.annotation?.nodeType,
+    point,
+  );
+  return Math.hypot(point.x - boundary.x, point.y - boundary.y);
+}
+
 /**
  * Voice color vocabulary → soft fill + strong stroke, chosen so labels stay
  * readable on every fill. Connectors/arrows only use the stroke half.
@@ -1459,13 +1856,20 @@ function findConnectionsBetween(
       continue;
     }
     const boundPair = [annotation.snappedStartStrokeId, annotation.snappedEndStrokeId];
+    const hasAnyBinding = Boolean(boundPair[0] || boundPair[1]);
     if (
       (boundPair[0] === firstId && boundPair[1] === secondId) ||
       (boundPair[0] === secondId && boundPair[1] === firstId)
     ) {
-      matches.push(stroke.id);
+      if (connectorGeometryMatchesBindings(boardState, annotation)) {
+        matches.push(stroke.id);
+      }
       continue;
     }
+    // Geometry fallback is only for legacy lines created before endpoint
+    // bindings existed. A partial or stale binding denotes a disconnected
+    // line and cannot be targeted by a destructive relation command.
+    if (hasAnyBinding) continue;
     if (annotation.start && annotation.end) {
       const startHit = endpointNearObject(boardState, annotation.start, firstId)
         ? firstId
@@ -1482,7 +1886,7 @@ function findConnectionsBetween(
       }
     }
   }
-  return matches;
+  return matches.sort((left, right) => left.localeCompare(right));
 }
 
 function endpointNearObject(
@@ -1722,7 +2126,9 @@ export function buildSemanticIntentContext(
   const selected = objects.filter((summary) => summary.selected).slice(0, 20);
   const edges: SemanticIntentContext["edges"] = [];
   const edgeOccurrences = new Map<string, number>();
-  for (const stroke of Object.values(boardState.strokes)) {
+  for (const stroke of Object.values(boardState.strokes).sort((left, right) =>
+    left.id.localeCompare(right.id)
+  )) {
     const annotation = stroke.annotation;
     if (
       stroke.status !== "committed" ||
@@ -1730,6 +2136,7 @@ export function buildSemanticIntentContext(
       (annotation.type !== "connector" && annotation.type !== "arrow") ||
       !annotation.snappedStartStrokeId ||
       !annotation.snappedEndStrokeId ||
+      !connectorGeometryMatchesBindings(boardState, annotation) ||
       edges.length >= 120
     ) {
       continue;

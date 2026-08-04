@@ -164,6 +164,9 @@ export function compareGrammarExpectation(
   compareValue("nodeType", command.nodeType, expected.nodeType, problems);
   compareValue("count", command.count, expected.count, problems);
   compareValue("direction", command.direction, expected.direction, problems);
+  compareValue("endpointOrder", command.endpointOrder, expected.endpointOrder, problems);
+  compareValue("lineReference", command.lineReference, expected.lineReference, problems);
+  compareValue("scope", command.scope, expected.scope, problems);
   compareValue(
     "placement.direction",
     command.placement?.direction,

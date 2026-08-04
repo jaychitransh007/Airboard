@@ -10,6 +10,7 @@ import {
 } from "./action-eval.mjs";
 import {
   evaluateGroundedSemanticPlan,
+  evaluateSemanticNoChange,
   validateGroundedSemanticOutcome,
 } from "../semantic-grounding-eval.mjs";
 
@@ -107,19 +108,29 @@ export async function scoreAudioSttEventsWithSemantic(
           context: scenario.context,
           pendingClarification: scenario.pendingClarification,
         });
+        const alreadySatisfied =
+          resolution.outcome === "already_satisfied" &&
+          resolution.plan === null;
         const expectedStatus =
           scenario.oracle.expectedSemanticStatus ??
           (scenario.oracle.expectedActions?.length > 0
             ? "resolved"
-            : resolution.plan.status);
-        const grounding = evaluateGroundedSemanticPlan(
-          resolution.plan,
-          scenario.context,
-        );
+            : alreadySatisfied
+              ? "already_satisfied"
+              : resolution.plan.status);
+        const grounding = alreadySatisfied
+          ? evaluateSemanticNoChange(scenario.context)
+          : evaluateGroundedSemanticPlan(
+              resolution.plan,
+              scenario.context,
+            );
         const semanticFailures = [];
-        if (resolution.plan.status !== expectedStatus) {
+        const actualStatus = alreadySatisfied
+          ? "already_satisfied"
+          : resolution.plan.status;
+        if (actualStatus !== expectedStatus) {
           semanticFailures.push(
-            `semantic status expected ${expectedStatus}, received ${resolution.plan.status}`,
+            `semantic status expected ${expectedStatus}, received ${actualStatus}`,
           );
         }
         semanticFailures.push(
@@ -129,20 +140,22 @@ export async function scoreAudioSttEventsWithSemantic(
             expectedStatus,
           ),
         );
-        const semanticActions = resolution.plan.actions.map(
-          ({ type }) => type,
-        );
+        const semanticActions = alreadySatisfied
+          ? []
+          : resolution.plan.actions.map(({ type }) => type);
         routing.actions = semanticActions;
         routing.parserOutcomes.push(
-          `semantic:${resolution.plan.status}/${resolution.plan.issueCode}`,
+          alreadySatisfied
+            ? "semantic:already_satisfied/none"
+            : `semantic:${resolution.plan.status}/${resolution.plan.issueCode}`,
         );
         boardOutcome = semanticBoardOutcome(
           grounding,
           semanticFailures,
         );
         semantic = {
-          status: resolution.plan.status,
-          issueCode: resolution.plan.issueCode,
+          status: actualStatus,
+          issueCode: alreadySatisfied ? "none" : resolution.plan.issueCode,
           actionTypes: semanticActions,
           provider: resolution.provider,
           model: resolution.model,

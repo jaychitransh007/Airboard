@@ -4,7 +4,7 @@ Intent-driven diagram canvas for meetings, with typed, voice, pointer, and hand-
 
 ## Current Product Slice
 
-The current prototype is **Intent Canvas**: users describe a diagram change and it is applied instantly — by voice, gesture, or typed command — with no confirmation step. A finalized voice turn executes automatically; the collapsible translucent Airo panel on the right shows the live transcript, current system action, recent board-tool activity, and an optional typed composer. Undo is the safety net: use the toolbar, `Cmd/Ctrl+Z`, say “Airo, undo”, or show one open palm and swipe left. To edit an existing element, grab it (or select it) and say what you want (e.g. "Airo, rename this to Payments"). Pointer and camera gestures are used for placement, selection, and precise object manipulation rather than mid-air freehand drawing.
+The current prototype is **Intent Canvas**: users describe a diagram change and it is applied instantly — by voice, gesture, or typed command — with no confirmation step. A finalized voice turn executes automatically; the collapsible translucent Airo panel on the right shows the live transcript, current system action, recent board-tool activity, and an optional typed composer. Undo is the safety net: use the toolbar, `Cmd/Ctrl+Z`, or say “Airo, undo”. To edit an existing element, grab it (or select it) and say what you want (e.g. "Airo, rename this to Payments"). Pointer and camera gestures are used for placement, selection, and precise object manipulation rather than mid-air freehand drawing.
 
 See [Intent Canvas Implementation Notes](Docs/Intent%20Canvas%20Implementation%20Notes.md) for the supported commands, interaction model, test path, and current browser/hardware limits.
 

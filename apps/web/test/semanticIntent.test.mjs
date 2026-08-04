@@ -197,8 +197,33 @@ test("posts voice turn, rich board context, and clarification continuity", async
   assert.equal(body.voiceTurnId, "voice-turn-123");
   assert.deepEqual(body.context, CONTEXT);
   assert.equal(body.pendingClarification.missingSlots[0], "branch_label");
+  assert.equal(result.outcome, "plan");
   assert.deepEqual(result.plan, CREATE_DECISION_PLAN);
   assert.deepEqual(result.metadata, METADATA);
+});
+
+test("accepts the strict already-satisfied orchestration result", async () => {
+  const result = await resolveSemanticIntent(
+    {
+      apiBaseUrl: "http://localhost:4000",
+      voiceTurnId: "voice-turn-already-satisfied",
+      transcript:
+        "Planner receives additional context from Historical Data and Golden Dataset",
+      parserIssue: "unknown_command",
+      context: CONTEXT,
+    },
+    async () =>
+      jsonResponse({
+        outcome: "already_satisfied",
+        plan: null,
+        provider: "airboard-deterministic",
+        model: "existing-board-fan-in-v1",
+        metadata: { ...METADATA, usage: null },
+      }),
+  );
+  assert.equal(result.outcome, "already_satisfied");
+  assert.equal(result.plan, null);
+  assert.equal(result.provider, "airboard-deterministic");
 });
 
 test("accepts typed branch and named rename plans", async () => {
@@ -268,6 +293,8 @@ test("rejects malformed plans and provider metadata", async () => {
     { plan: { ...CREATE_DECISION_PLAN, extra: true }, provider: "openai", model: "gpt-5.6-terra", metadata: METADATA },
     { plan: CREATE_DECISION_PLAN, provider: "openai", model: "gpt-5.6-terra", metadata: { ...METADATA, totalLatencyMs: -1 } },
     { plan: CREATE_DECISION_PLAN, provider: "openai", model: "gpt-5.6-terra", metadata: { ...METADATA, secret: "no" } },
+    { outcome: "already_satisfied", plan: CREATE_DECISION_PLAN, provider: "airboard-deterministic", model: "existing-board-fan-in-v1", metadata: METADATA },
+    { outcome: "already_satisfied", plan: null, provider: "airboard-deterministic", model: "existing-board-fan-in-v1", metadata: METADATA, extra: true },
   ];
   for (const payload of malformed) {
     await assert.rejects(

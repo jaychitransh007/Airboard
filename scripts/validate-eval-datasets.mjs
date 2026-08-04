@@ -148,6 +148,21 @@ function validateGesturePolicy(manifest, qualityGates, failures) {
       failures.push(`gesture requiredSlices.${key} must be non-empty`);
     }
   }
+  if (!Array.isArray(required.retiredGestures)) {
+    failures.push("gesture requiredSlices.retiredGestures must be an array");
+  } else {
+    if (!required.retiredGestures.includes("undo_swipe")) {
+      failures.push("gesture undo_swipe must remain explicitly retired");
+    }
+    for (const gesture of required.retiredGestures) {
+      if (required.shippedGestures?.includes(gesture)) {
+        failures.push(`retired gesture ${gesture} cannot also be shipped`);
+      }
+    }
+  }
+  if (!required.criticalFalseTriggerGestures?.includes("undo_swipe")) {
+    failures.push("retired undo_swipe must remain a critical false-trigger gate");
+  }
   const requiredQualitySlices =
     qualityGates?.releasePolicy?.sliceGates?.find(
       ({ metric }) => metric === "gesture.slices",
@@ -395,7 +410,7 @@ function validateReleaseCoverage(
     }
     if (
       asset.sttEvaluation?.processingPath === "semantic" &&
-      !["resolved", "clarification", "unsupported"].includes(
+      !["resolved", "clarification", "unsupported", "already_satisfied"].includes(
         asset.sttEvaluation?.oracle?.expectedSemanticStatus,
       )
     ) {
@@ -765,10 +780,10 @@ function validateBrowserReplayOracle(asset, failures) {
   }
   if (
     gesture === "undo_swipe" &&
-    !(replay.minimumBoardEventCount > 0)
+    (expectedCount !== 0 || replay.maximumBoardEventCount !== 0)
   ) {
     failures.push(
-      `undo browser asset ${asset.id} needs a non-zero board-event outcome`,
+      `retired undo-swipe asset ${asset.id} must expect zero actions and zero board events`,
     );
   }
   if (

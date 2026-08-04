@@ -4,8 +4,8 @@
  * The caller supplies the open-palm geometry score and palm anchor only
  * when exactly one hand is present. This tracker owns the temporal contract:
  * the pose must remain stable for a short hold, fires once, and cannot re-arm
- * until the pose has been released and the cooldown has elapsed. A still palm
- * means "talk"; the same palm swept left is Undo, owned by its own tracker.
+ * until the pose has been released and the cooldown has elapsed. Palm motion
+ * cancels the voice candidate and remains ordinary pointer movement.
  */
 
 export type PalmVoiceGestureTrackerConfig = {
@@ -26,9 +26,8 @@ export type PalmVoiceGestureTrackerConfig = {
 };
 
 export const defaultPalmVoiceGestureTrackerConfig: PalmVoiceGestureTrackerConfig = {
-  // Matches the open-palm Undo tracker's detection thresholds so a clearly
-  // presented palm reliably opens the mic; the 400 ms still-hold + stillness
-  // radius (not a higher score bar) is what keeps casual palms from arming.
+  // A clearly presented palm reliably opens the mic; the 400 ms still-hold +
+  // stillness radius (not a higher score bar) keeps casual palms from arming.
   engageScore: 0.68,
   releaseScore: 0.42,
   holdMs: 400,

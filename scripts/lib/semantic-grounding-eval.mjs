@@ -1,6 +1,8 @@
 import {
+  applyBoardEvent,
   applyDiagramCommand,
   applyDiagramUndo,
+  connectorGeometryMatchesBindings,
   createInitialBoardState,
 } from "../../packages/core/src/index.ts";
 import { commitCommandTurn } from "../../apps/web/src/features/board/commandTurnCoordinator.ts";
@@ -80,6 +82,34 @@ export function seedBoardFromSemanticContext(semanticContext) {
       },
       deterministicCommandContext(`seed-edge-${index + 1}`),
     ).state;
+    if (edge.seedGeometry?.start && edge.seedGeometry?.end) {
+      const connectorId = `seed-edge-${index + 1}`;
+      const current = state.strokes[connectorId];
+      const annotation = {
+        ...current.annotation,
+        start: { ...edge.seedGeometry.start },
+        end: { ...edge.seedGeometry.end },
+      };
+      if (edge.seedGeometry.snappedStart === false) {
+        delete annotation.snappedStartStrokeId;
+      }
+      if (edge.seedGeometry.snappedEnd === false) {
+        delete annotation.snappedEndStrokeId;
+      }
+      state = applyBoardEvent(state, {
+        id: `seed-edge-geometry-${index + 1}`,
+        boardSessionId: BOARD_ID,
+        actorParticipantId: PARTICIPANT_ID,
+        createdAt: FIXED_TIME,
+        type: "stroke.annotation_updated",
+        strokeId: connectorId,
+        annotation,
+        points: [
+          { ...annotation.start, t: 1, inputSource: "pointer" },
+          { ...annotation.end, t: 2, inputSource: "pointer" },
+        ],
+      });
+    }
   }
 
   const selectedIds = [];
@@ -103,6 +133,44 @@ export function seedBoardFromSemanticContext(semanticContext) {
         objectIds[index],
       ]),
     ),
+  };
+}
+
+/**
+ * Observe an orchestration-level supported no-op against the same canonical
+ * board oracle used for executable semantic plans.
+ */
+export function evaluateSemanticNoChange(semanticContext) {
+  const startedAt = performance.now();
+  const seeded = seedBoardFromSemanticContext(semanticContext);
+  const canonicalContext = createCanonicalizationContext({
+    includeDeleted: false,
+    ignoreFields: ["lastSequence"],
+  });
+  const boardState = canonicalizeBoardState(seeded.state, {
+    context: canonicalContext,
+  });
+  return {
+    status: "already_satisfied",
+    mutationApplied: false,
+    groundingError: null,
+    commands: [],
+    eventDelta: [],
+    initialBoardState: boardState,
+    finalBoardState: boardState,
+    selectionIds: canonicalizeNonBoardState(seeded.selectedIds, {
+      context: canonicalContext,
+    }),
+    effects: deriveBoardEffects(seeded.state, seeded.state),
+    undo: {
+      applicable: false,
+      roundTripPassed: true,
+      eventCount: 0,
+    },
+    timings: {
+      groundingMs: performance.now() - startedAt,
+      actionMs: 0,
+    },
   };
 }
 
@@ -200,6 +268,9 @@ export function evaluateGroundedSemanticPlan(plan, semanticContext) {
       )
     : null;
   let previewState = initialState;
+  const referenceSelectionIds = [...initialSelectionIds];
+  const referencePrimarySelectionId =
+    referenceSelectionIds[referenceSelectionIds.length - 1] ?? null;
   let workingSelectionIds = [...initialSelectionIds];
   let workingPrimarySelectionId =
     workingSelectionIds[workingSelectionIds.length - 1] ?? null;
@@ -224,8 +295,8 @@ export function evaluateGroundedSemanticPlan(plan, semanticContext) {
         canvasHeight,
         viewOrigin,
         autoCreateCenters,
-        selectionIds: workingSelectionIds,
-        primarySelectionId: workingPrimarySelectionId,
+        selectionIds: referenceSelectionIds,
+        primarySelectionId: referencePrimarySelectionId,
         hoverStrokeId,
         strokeColor: "#111111",
       },
@@ -624,6 +695,10 @@ function semanticEdges(state) {
       ),
       to: endpointSummary(
         nodes.get(stroke.annotation.snappedEndStrokeId),
+      ),
+      geometryAttached: connectorGeometryMatchesBindings(
+        state,
+        stroke.annotation,
       ),
     }))
     .sort((left, right) => String(left.id).localeCompare(String(right.id)));

@@ -5,7 +5,7 @@ import type { VoiceTraceData, VoiceTraceValue } from "./types";
 const SENSITIVE_KEY = /(?:authorization|api[_-]?key|(?:access|refresh|auth|bearer)[_-]?token|^token$|secret|password)/iu;
 const BEARER_OR_OPENAI_KEY = /(?:Bearer\s+|sk-)[A-Za-z0-9._-]+/giu;
 const CUSTOMER_CONTENT_KEY =
-  /^(?:transcript|previousTranscript|utterance|command|instruction|normalizedText|label|term|meetingTitle|boardText)$/iu;
+  /^(?:transcript|previousTranscript|utterance|command|instruction|normalizedText|label|term|meetingTitle|boardText|message|detail)$/iu;
 const CONTENT_REDACTION = "[CONTENT_REDACTED]";
 
 export function redactDiagnosticText(input: string, maxCharacters = 500): string {

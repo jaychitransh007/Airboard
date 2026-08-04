@@ -3,7 +3,9 @@ import test from "node:test";
 
 import {
   probeMeetCameraOverlay,
+  probeMeetCameraOverlayInWindow,
   probeMeetMediaBridge,
+  probeMeetMediaBridgeInWindow,
 } from "../src/features/meet/meetMediaBridge.ts";
 
 const HOST = { name: "host-window" };
@@ -135,6 +137,10 @@ test("startAudio resolves on the first chunk and delivers samples with their rat
     },
   });
   assert.deepEqual(chunks, [{ samples: [0.25, -0.5, 1], sampleRate: 48000 }]);
+  assert.deepEqual(
+    sentToHost.filter((message) => message.type === "audio-ack").map((message) => message.seq),
+    [1],
+  );
   session.stop();
   assert.equal(sentToHost.filter((m) => m.type === "stop-audio").length, 1);
 });
@@ -271,4 +277,60 @@ test("a host-side end after frames reports onEnded exactly once and stops delive
   emit(hostMessage("frame", { id: 9, bitmap: { fake: "late" } }));
   assert.deepEqual(endReasons, ["camera-ended"]);
   assert.equal(frames.length, 1);
+});
+
+test("browser wrappers route through the immediate extension relay instead of bypassing it", async () => {
+  const relayNonce = "ab".repeat(32);
+  const listeners = new Set();
+  const sentToParent = [];
+  const sentToTop = [];
+  const parentWindow = {
+    postMessage(message) {
+      sentToParent.push(message);
+      const response = {
+        bridge: "airboard-media-bridge",
+        v: 1,
+        type: message.type === "overlay-hello" ? "overlay-state" : "ready",
+        relayNonce,
+        armed: true,
+        engaged: true,
+      };
+      queueMicrotask(() => {
+        for (const listener of [...listeners]) {
+          listener({
+            data: response,
+            origin: "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+            source: parentWindow,
+          });
+        }
+      });
+    },
+  };
+  const topWindow = { postMessage: (message) => sentToTop.push(message) };
+  const fakeWindow = {
+    parent: parentWindow,
+    top: topWindow,
+    location: {
+      origin: "https://airboard.example",
+      hash: `#airboardRelayNonce=${relayNonce}`,
+    },
+    addEventListener(type, listener) {
+      if (type === "message") listeners.add(listener);
+    },
+    removeEventListener(type, listener) {
+      if (type === "message") listeners.delete(listener);
+    },
+  };
+  const previousWindow = globalThis.window;
+  globalThis.window = fakeWindow;
+  try {
+    assert.notEqual(await probeMeetMediaBridgeInWindow(), null);
+    assert.notEqual(await probeMeetCameraOverlayInWindow(() => {}), null);
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+  assert.deepEqual(sentToParent.map((message) => message.type), ["hello", "overlay-hello"]);
+  assert.ok(sentToParent.every((message) => message.relayNonce === relayNonce));
+  assert.equal(sentToTop.length, 0);
 });

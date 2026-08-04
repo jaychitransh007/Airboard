@@ -263,6 +263,13 @@ export function translateAnnotation(
       y: annotation.end.y + dy,
     };
   }
+  if (annotation.type === "connector" || annotation.type === "arrow") {
+    // Dragging the whole line is an explicit detach/reposition operation. Do
+    // not leave invisible snapped IDs behind after its geometry moves away.
+    delete updated.snappedStartStrokeId;
+    delete updated.snappedEndStrokeId;
+    delete updated.routeOffset;
+  }
   return updated;
 }
 
@@ -349,7 +356,7 @@ export function getBoundConnectorUpdates(input: {
     const connector = stroke.annotation;
     if (
       stroke.status !== "committed" ||
-      connector?.type !== "connector" ||
+      (connector?.type !== "connector" && connector?.type !== "arrow") ||
       !connector.start ||
       !connector.end
     ) {
@@ -446,7 +453,7 @@ export function updateLineEndpoint(input: {
     ...input.annotation,
   };
   const snapped =
-    input.annotation.type === "connector" &&
+    (input.annotation.type === "connector" || input.annotation.type === "arrow") &&
     input.boardState &&
     input.autoSnapConnectors !== false
       ? findNearestNode(input.boardState, input.point, NODE_SNAP_THRESHOLD_PX)
