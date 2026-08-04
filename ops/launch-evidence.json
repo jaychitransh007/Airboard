@@ -39,10 +39,10 @@
     },
     "automated-regression": {
       "description": "Type checks, unit tests, builds, voice evaluations and browser journeys pass on the release commit.",
-      "status": "pending",
+      "status": "verified",
       "owner": "Engineering",
-      "evidence": "",
-      "notes": "Run the complete verification matrix and record the commit and outputs."
+      "evidence": "Release candidate 14151b6 verified 2026-08-04: frozen pnpm install; 513/513 workspace tests; all 8 workspace typechecks and builds; docs check; PR evaluation suite including Meet bridge replay; Playwright 45 passed and 2 intentionally skipped; draft extension 0.8.0 package SHA-256 9347a8a433c502d321047592e72f2b78c3deb811d70c1a62dc80bfe1fc612a80.",
+      "notes": "The Chrome deployment compatibility check, Store release packaging, real two-client Meet acceptance, and rollback exercise remain separate pending gates and are not implied by this source-level verification."
     },
     "commercial-smoke": {
       "description": "The commercial customer journey passes against the release database.",
