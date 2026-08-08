@@ -1,4 +1,8 @@
-import type { BoardEvent } from "@airboard/core";
+import {
+  BOARD_SCENE_VERSION,
+  type BoardEvent,
+  type BoardSceneVersion,
+} from "@airboard/core";
 
 export type RealtimeClientStatus =
   | "idle"
@@ -27,6 +31,8 @@ export type RealtimeClientOptions = {
   participantId: string;
   /** Short-lived server-signed admission ticket; identifiers alone are never trusted. */
   realtimeTicket?: string;
+  /** Defaults to the current scene protocol and is required by v2 servers. */
+  sceneVersion?: BoardSceneVersion;
   reconnect?: boolean;
 };
 
@@ -94,6 +100,10 @@ export class AirboardRealtimeClient {
     this.rejectedByServer = false;
     this.setStatus(this.reconnectAttempt > 0 ? "reconnecting" : "connecting");
     const url = new URL(this.options.url);
+    url.searchParams.set(
+      "sceneVersion",
+      String(this.options.sceneVersion ?? BOARD_SCENE_VERSION),
+    );
     if (this.options.realtimeTicket) {
       url.searchParams.set("ticket", this.options.realtimeTicket);
     } else {

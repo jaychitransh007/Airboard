@@ -1,11 +1,16 @@
-import { AIRBOARD_API_URL } from "./config";
+import { AIRBOARD_API_URL } from "./config.ts";
 
 export class AirboardApiError extends Error {
+  readonly code: string;
+  readonly status: number;
+
   constructor(
-    readonly code: string,
-    readonly status: number,
+    code: string,
+    status: number,
   ) {
     super(code);
+    this.code = code;
+    this.status = status;
     this.name = "AirboardApiError";
   }
 }

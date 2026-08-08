@@ -26,6 +26,9 @@ type Hooks = {
   }): "activate" | "release" | null;
   resetVoiceRouting(): void;
   emitRemoteBoardEvent(event: Record<string, unknown>): void;
+  prepareLegacyIntentCommandForEval(
+    instruction: string,
+  ): "previewed" | "applied" | "no-op" | "rejected";
   getCanonicalBoardState(): {
     boardId: string;
     strokes: Record<string, {
@@ -77,6 +80,30 @@ function summary(page: import("@playwright/test").Page) {
   return page.evaluate(() =>
     (window as never as { __airboardTestHooks: Hooks }).__airboardTestHooks.getBoardSummary(),
   );
+}
+
+async function seedLegacyDiagram(
+  page: import("@playwright/test").Page,
+  commands: readonly string[],
+) {
+  for (const [index, command] of commands.entries()) {
+    const result = await page.evaluate(
+      (instruction) =>
+        (window as never as { __airboardTestHooks: Hooks })
+          .__airboardTestHooks.prepareLegacyIntentCommandForEval(instruction),
+      command,
+    );
+    expect(["previewed", "applied"]).toContain(result);
+    await expect.poll(async () => {
+      const state = await page.evaluate(() =>
+        (window as never as { __airboardTestHooks: Hooks })
+          .__airboardTestHooks.getCanonicalBoardState(),
+      );
+      return Object.values(state.strokes).filter(
+        (stroke) => stroke.status === "committed" && stroke.annotation,
+      ).length;
+    }).toBe(index + 1);
+  }
 }
 
 test.beforeEach(async ({ context }) => {
@@ -249,18 +276,13 @@ test("PTT repairs the production stale connector in place, undoes exactly, and r
   await page.goto("/?testStandalone=1");
   await hooks(page);
 
-  for (const command of [
-    "Airo, add a service named User here",
-    "Airo, add a service named Client right of selected",
-    "Airo, add a service named Planner right of selected",
-    "Airo, connect User to Client as makes a request",
-    "Airo, connect User to Planner as request goes to",
-  ]) {
-    await emit(page, command);
-    await expect(page.locator(".intent-feedback")).toContainText("Applied:", {
-      timeout: 15_000,
-    });
-  }
+  await seedLegacyDiagram(page, [
+    "add a service named User here",
+    "add a service named Client right of selected",
+    "add a service named Planner right of selected",
+    "connect User to Client as makes a request",
+    "connect User to Planner as request goes to",
+  ]);
   await expect.poll(async () => (await summary(page)).objectCount).toBe(5);
 
   const corrupted = await page.evaluate(() => {
@@ -423,17 +445,12 @@ test("ambiguous disconnected lines clarify without semantic fallback or mutation
   await page.goto("/?testStandalone=1");
   await hooks(page);
 
-  for (const command of [
-    "Airo, add a service named Client here",
-    "Airo, add a service named Planner right of selected",
-    "Airo, connect Client to Planner as primary",
-    "Airo, connect Client to Planner as secondary",
-  ]) {
-    await emit(page, command);
-    await expect(page.locator(".intent-feedback")).toContainText("Applied:", {
-      timeout: 15_000,
-    });
-  }
+  await seedLegacyDiagram(page, [
+    "add a service named Client here",
+    "add a service named Planner right of selected",
+    "connect Client to Planner as primary",
+    "connect Client to Planner as secondary",
+  ]);
 
   const before = await page.evaluate(() => {
     const testHooks = (window as never as { __airboardTestHooks: Hooks })

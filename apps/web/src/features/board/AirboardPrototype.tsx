@@ -6,14 +6,25 @@ import {
   applyDiagramCommand,
   applyDiagramUndo,
   applyBoardEvent,
+  createBoardSceneElement,
+  createDefaultTableData,
   createEraseAction,
   createEventEnvelope,
   createInitialBoardState,
+  createRichTextDocument,
   createStroke,
+  invertBoardElementPatches,
+  parseBoardSceneIntent,
+  richTextToPlainText,
+  shapeCatalogEntry,
   type AnnotationPoint,
   type AnnotationNodeType,
+  type BoardElementPatchOperation,
   type BoardEvent,
+  type BoardSceneElement,
+  type BoardSceneIntent,
   type BoardState,
+  type CodeLanguage,
   type CursorState,
   type DiagramCommand,
   type MeetingProvider,
@@ -115,7 +126,24 @@ import {
   isTrustedExtensionRelayMessage,
   UNPACKED_EXTENSION_RELAY_ALLOWED,
 } from "../meet/extensionRelayTrust.ts";
-import { CatalogGlyph } from "./catalogGlyphs";
+import { CreationToolbar } from "./CreationToolbar";
+import { SceneContextToolbar } from "./SceneContextToolbar";
+import { ScenePlaybackOverlay } from "./ScenePlaybackOverlay";
+import {
+  ALL_SHAPES,
+  CREATION_DRAG_MIME,
+  creationToolLabel,
+  legacyToolForCreationTool,
+  resolveCreationShortcut,
+  type CreationToolId,
+} from "./creationToolCatalog";
+import { centeredTransform, createSceneElementForTool } from "./sceneCreation.ts";
+import {
+  linkPreviewFields,
+  loadBoardAssetObjectUrl,
+  resolveBoardLink,
+  uploadBoardAsset,
+} from "./boardContentClient.ts";
 import { boardDeletionSnapshot, validateBoardTitle } from "./boardLifecycle";
 import { HoldToEditTracker } from "./holdToEditTracker";
 import { selectLandmarkManipulationSignal } from "./landmarkManipulationInput";
@@ -168,8 +196,10 @@ import {
 import {
   exportCanvasPng,
   findAnnotationObjectAtPoint,
+  findSceneElementAtPoint,
   findIntersectingStrokeIds,
   renderBoard,
+  sceneElementsForRender,
   type AnnotationRenderObject,
 } from "@airboard/drawing-engine";
 import {
@@ -326,6 +356,12 @@ type IntentPreparationOutcome = {
   stepCount: number;
 };
 
+type SceneIntentExecutionResult =
+  | "applied"
+  | "rejected"
+  | "deferred"
+  | "unrecognized";
+
 type VoiceCommandTraceContext = {
   voiceTurnId: string;
   transcript: string;
@@ -363,9 +399,42 @@ type UndoAction =
       undoEvents: BoardEvent[];
       selectionBefore: string[];
       originatingInteractionId?: string;
+    }
+  | {
+      type: "scene_created";
+      elementId: string;
+    }
+  | {
+      type: "scene_deleted";
+      elementId: string;
+    }
+  | {
+      type: "scene_created_batch" | "scene_deleted_batch";
+      elementIds: string[];
+      selectionBefore?: string[];
+      selectionAfter?: string[];
+    }
+  | {
+      type: "scene_patched";
+      elementId: string;
+      inversePatches: BoardElementPatchOperation[];
+    }
+  | {
+      type: "scene_batch";
+      entries: { elementId: string; inversePatches: BoardElementPatchOperation[] }[];
     };
 
 type UndoSource = "button" | "keyboard" | "voice" | "semantic";
+
+type SceneMoveSnapshot = {
+  pointerId: number;
+  inputSource: NonNullable<CursorState["inputSource"]>;
+  elementId: string;
+  start: AnnotationPoint;
+  element: BoardSceneElement;
+  relatedElements: BoardSceneElement[];
+  boundConnectors: Extract<BoardSceneElement, { kind: "connector" }>[];
+};
 
 type PendingIntent = {
   parsed: ParsedIntentCanvasCommand | null;
@@ -407,11 +476,13 @@ type ObjectInteraction =
   | {
       mode: "placing";
       tool: ObjectDockTool;
+      creationTool?: CreationToolId;
       start: AnnotationPoint;
     }
   | {
       mode: "catalog_carrying";
       tool: ObjectDockTool;
+      creationTool?: CreationToolId;
       point: AnnotationPoint;
       pickupScreenPoint: { x: number; y: number };
       catalogBounds: {
@@ -474,49 +545,6 @@ const OBJECT_DOCK: readonly { label: string; tool: ObjectDockTool }[] = [
   { label: "Eraser", tool: "eraser" },
 ];
 
-// The dock groups placement tools into three catalogs instead of a flat button
-// stack. Select and Eraser stay top-level: they are modes, not shapes.
-const OBJECT_CATALOG: readonly {
-  id: string;
-  label: string;
-  iconTool: ObjectDockTool;
-  tools: readonly { label: string; tool: ObjectDockTool }[];
-}[] = [
-  {
-    id: "flow",
-    label: "Flow",
-    iconTool: "connector",
-    tools: catalogTools([
-      "flow",
-      "decision",
-      "terminator",
-      "io",
-      "document",
-      "arrow",
-      "connector",
-    ]),
-  },
-  {
-    id: "system",
-    label: "System",
-    iconTool: "service",
-    tools: catalogTools(["user", "service", "api", "database", "queue"]),
-  },
-  {
-    id: "annotate",
-    label: "Annotate",
-    iconTool: "note",
-    tools: catalogTools(["note", "circle", "box", "highlight"]),
-  },
-];
-
-function catalogTools(tools: readonly ObjectDockTool[]): { label: string; tool: ObjectDockTool }[] {
-  return tools.flatMap((tool) => {
-    const entry = OBJECT_DOCK.find((item) => item.tool === tool);
-    return entry ? [entry] : [];
-  });
-}
-
 const CATALOG_DRAG_MIME = "application/x-airboard-tool";
 const CATALOG_DROP_EXIT_PX = 12;
 const CATALOG_DROP_MIN_TRAVEL_PX = 24;
@@ -529,6 +557,7 @@ type DockGestureOutcome =
   | {
       type: "activated";
       targetId: string;
+      creationTool?: CreationToolId;
       catalogBounds: {
         left: number;
         top: number;
@@ -767,6 +796,10 @@ export function AirboardPrototype({
   const cameraCaptureAvailable = !isMeetSurface || embeddedMediaCapture || meetMediaBridge !== null;
   const voiceCaptureAvailable = !isMeetSurface || embeddedMediaCapture || meetMediaBridge !== null;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const resolvedSceneImagesRef = useRef<Record<string, CanvasImageSource>>({});
+  const resolvedSceneImageUrlsRef = useRef<Map<string, string>>(new Map());
+  const resolvedSceneImageSourcesRef = useRef<Map<string, CanvasImageSource>>(new Map());
+  const focusedSectionHashRef = useRef<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const screenUnderlayVideoRef = useRef<HTMLVideoElement | null>(null);
   const screenUnderlayStreamRef = useRef<MediaStream | null>(null);
@@ -891,12 +924,21 @@ export function AirboardPrototype({
   const pointerStrokeIdRef = useRef<string | null>(null);
   const activePointerIdRef = useRef<number | null>(null);
   const pointerErasingRef = useRef(false);
+  const sceneDrawingRef = useRef<{
+    pointerId: number;
+    elementId: string;
+    drawingKind: "marker" | "highlighter" | "washi";
+    points: StrokePoint[];
+    straight: boolean;
+  } | null>(null);
+  const sceneMoveRef = useRef<SceneMoveSnapshot | null>(null);
   const touchpadPointsRef = useRef<StrokePoint[]>([]);
   const lastTouchpadPointRef = useRef<StrokePoint | null>(null);
   const gesturePathRef = useRef<StrokePoint[]>([]);
   const lastGesturePointerRef = useRef<{ x: number; y: number } | null>(null);
   const activeEraseAffectedStrokeIdsRef = useRef<Set<string>>(new Set());
   const undoStackRef = useRef<UndoAction[]>([]);
+  const sceneRedoStackRef = useRef<UndoAction[]>([]);
   const objectInteractionRef = useRef<ObjectInteraction | null>(null);
   const objectInteractionInitialStateRef = useRef<BoardState | null>(null);
   const cameraGrabActiveRef = useRef(false);
@@ -906,6 +948,11 @@ export function AirboardPrototype({
   const temporaryEraserActiveRef = useRef(false);
   const straightLineActiveRef = useRef(false);
   const panActiveRef = useRef(false);
+  const handPanRef = useRef<{
+    pointerId: number;
+    start: { x: number; y: number };
+    viewport: BoardViewport;
+  } | null>(null);
   const [cameraStatus, setCameraStatus] = useState<CameraStatus>("idle");
   const [inputPaused, setInputPaused] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -918,8 +965,30 @@ export function AirboardPrototype({
     confidence: number;
   } | null>(null);
   const [activeObjectTool, setActiveObjectTool] = useState<ObjectDockTool>("select");
+  const [activeCreationTool, setActiveCreationTool] = useState<CreationToolId>("move");
+  const activeCreationToolRef = useRef<CreationToolId>("move");
+  const [temporaryHandActive, setTemporaryHandActive] = useState(false);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [selectedAnnotationIds, setSelectedAnnotationIds] = useState<string[]>([]);
+  const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
+  const [selectedElementIds, setSelectedElementIds] = useState<string[]>([]);
+  const selectedElementIdsRef = useRef<string[]>([]);
+  const [hoverElementId, setHoverElementId] = useState<string | null>(null);
+  const [editingElementId, setEditingElementId] = useState<string | null>(null);
+  const [sceneRenderVersion, setSceneRenderVersion] = useState(0);
+  const [selectedStampEmoji, setSelectedStampEmoji] = useState("👍");
+  const pendingTableSizeRef = useRef({ rows: 3, columns: 3 });
+  const mediaInputRef = useRef<HTMLInputElement | null>(null);
+  const washiPatternInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingWashiElementIdRef = useRef<string | null>(null);
+  const stampHoldRef = useRef<{
+    pointerId: number;
+    elementId: string;
+    startedAt: number;
+    transform: BoardSceneElement["transform"];
+  } | null>(null);
+  const pendingMediaPointRef = useRef<AnnotationPoint | null>(null);
+  const pendingMediaReplaceIdRef = useRef<string | null>(null);
   const [hoverStrokeId, setHoverStrokeId] = useState<string | null>(null);
   const [ghostAnnotation, setGhostAnnotation] = useState<AnnotationRenderObject | null>(null);
   const [ghostAnnotations, setGhostAnnotations] = useState<AnnotationRenderObject[]>([]);
@@ -992,6 +1061,7 @@ export function AirboardPrototype({
   const [landmarkRecordingActive, setLandmarkRecordingActive] = useState(false);
   const [onboardingVisible, setOnboardingVisible] = useState(false);
   const [viewportScale, setViewportScale] = useState(1);
+  const [viewportRevision, setViewportRevision] = useState(0);
   const [canvasNavMode, setCanvasNavMode] = useState<"pan" | "zoom" | null>(null);
   const [dockGestureHover, setDockGestureHover] = useState<string | null>(null);
   const dockGestureHoverRef = useRef<string | null>(null);
@@ -1082,8 +1152,24 @@ export function AirboardPrototype({
     selectedAnnotationIdsRef.current = selectedAnnotationIds;
   }, [selectedAnnotationIds]);
   useEffect(() => {
+    selectedElementIdsRef.current = selectedElementIds;
+  }, [selectedElementIds]);
+  useEffect(() => {
     openCatalogIdRef.current = openCatalogId;
   }, [openCatalogId]);
+  useEffect(() => {
+    activeCreationToolRef.current = activeCreationTool;
+  }, [activeCreationTool]);
+  const selectedSceneElement = selectedElementId
+    ? boardRef.current.elements[selectedElementId] ?? null
+    : null;
+  const playbackViewport = useMemo(
+    () => ({ ...boardViewportRef.current }),
+    [viewportRevision],
+  );
+  // Scene events live in a mutable board ref; reading this state makes their
+  // contextual DOM controls update after patches without duplicating the board.
+  void sceneRenderVersion;
   useEffect(() => {
     try {
       window.localStorage.removeItem("airboard.project-glossary.v1");
@@ -1215,6 +1301,10 @@ export function AirboardPrototype({
       selectedStrokeId: broadcastSafe ? null : selectedAnnotationId,
       selectedStrokeIds: broadcastSafe ? [] : selectedAnnotationIds,
       hoverStrokeId: broadcastSafe ? null : hoverStrokeId,
+      selectedElementId: broadcastSafe ? null : selectedElementId,
+      selectedElementIds: broadcastSafe ? [] : selectedElementIds,
+      hoverElementId: broadcastSafe ? null : hoverElementId,
+      resolvedImages: resolvedSceneImagesRef.current,
       ghostAnnotation: broadcastSafe ? null : ghostAnnotation,
       ghostAnnotations: broadcastSafe ? [] : ghostAnnotations,
       alignmentGuides: broadcastSafe ? [] : alignmentGuides,
@@ -1235,11 +1325,117 @@ export function AirboardPrototype({
     ghostAnnotation,
     ghostAnnotations,
     hoverStrokeId,
+    hoverElementId,
     localContrastPlatesEnabled,
     screenUnderlayStatus,
     selectedAnnotationId,
     selectedAnnotationIds,
+    selectedElementId,
+    selectedElementIds,
   ]);
+
+  // Board media lives in a private bucket. Resolve authenticated blobs into
+  // canvas-safe image sources and retain them until their scene references go
+  // away so redraws and PNG export use the exact same pixels.
+  useEffect(() => {
+    const controller = new AbortController();
+    const desired = new Map<string, string[]>();
+    for (const element of Object.values(boardRef.current.elements)) {
+      if (element.status !== "active") continue;
+      if (element.kind === "media") {
+        const sourceUrl =
+          element.mediaKind === "video"
+            ? element.asset.posterUrl
+            : element.asset.thumbnailUrl ?? element.asset.url;
+        if (sourceUrl) {
+          desired.set(sourceUrl, [
+            element.asset.id,
+            element.asset.url,
+            ...(element.asset.thumbnailUrl ? [element.asset.thumbnailUrl] : []),
+            ...(element.asset.posterUrl ? [element.asset.posterUrl] : []),
+          ]);
+        }
+      } else if (element.kind === "stamp" && element.faceAsset) {
+        desired.set(element.faceAsset.thumbnailUrl ?? element.faceAsset.url, [
+          element.faceAsset.id,
+          element.faceAsset.url,
+          ...(element.faceAsset.thumbnailUrl ? [element.faceAsset.thumbnailUrl] : []),
+        ]);
+      } else if (element.kind === "drawing" && element.style.patternAsset) {
+        desired.set(element.style.patternAsset.url, [
+          element.style.patternAsset.id,
+          element.style.patternAsset.url,
+        ]);
+      }
+    }
+
+    for (const [sourceUrl, objectUrl] of resolvedSceneImageUrlsRef.current) {
+      if (desired.has(sourceUrl)) continue;
+      URL.revokeObjectURL(objectUrl);
+      resolvedSceneImageUrlsRef.current.delete(sourceUrl);
+      resolvedSceneImageSourcesRef.current.delete(sourceUrl);
+    }
+
+    const refreshResolvedImages = () => {
+      const resolved: Record<string, CanvasImageSource> = {};
+      for (const [sourceUrl, aliases] of desired) {
+        const image = resolvedSceneImageSourcesRef.current.get(sourceUrl);
+        if (!image) continue;
+        for (const alias of aliases) resolved[alias] = image;
+      }
+      resolvedSceneImagesRef.current = resolved;
+    };
+    refreshResolvedImages();
+
+    if (!effectiveAccessToken) {
+      for (const objectUrl of resolvedSceneImageUrlsRef.current.values()) {
+        URL.revokeObjectURL(objectUrl);
+      }
+      resolvedSceneImageUrlsRef.current.clear();
+      resolvedSceneImageSourcesRef.current.clear();
+      resolvedSceneImagesRef.current = {};
+      render();
+      return () => controller.abort();
+    }
+
+    for (const sourceUrl of desired.keys()) {
+      if (resolvedSceneImageSourcesRef.current.has(sourceUrl)) continue;
+      void loadBoardAssetObjectUrl({
+        asset: { url: sourceUrl },
+        accessToken: effectiveAccessToken,
+        signal: controller.signal,
+      }).then(async (objectUrl) => {
+        if (controller.signal.aborted) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+        try {
+          const image = await decodeCanvasImage(objectUrl, controller.signal);
+          if (controller.signal.aborted || !desired.has(sourceUrl)) {
+            URL.revokeObjectURL(objectUrl);
+            return;
+          }
+          resolvedSceneImageUrlsRef.current.set(sourceUrl, objectUrl);
+          resolvedSceneImageSourcesRef.current.set(sourceUrl, image);
+          refreshResolvedImages();
+          render();
+        } catch {
+          URL.revokeObjectURL(objectUrl);
+        }
+      }).catch(() => undefined);
+    }
+
+    return () => controller.abort();
+  }, [effectiveAccessToken, render, sceneRenderVersion]);
+
+  useEffect(() => () => {
+    for (const objectUrl of resolvedSceneImageUrlsRef.current.values()) {
+      URL.revokeObjectURL(objectUrl);
+    }
+    resolvedSceneImageUrlsRef.current.clear();
+    resolvedSceneImageSourcesRef.current.clear();
+    resolvedSceneImagesRef.current = {};
+  }, []);
 
   const updateStats = useCallback(() => {
     const state = boardRef.current;
@@ -1263,6 +1459,8 @@ export function AirboardPrototype({
       cursors: {},
     };
     const hash = JSON.stringify({
+      sceneVersion: snapshot.sceneVersion,
+      elements: snapshot.elements,
       strokes: snapshot.strokes,
       eraseActions: snapshot.eraseActions,
       clearedAt: snapshot.clearedAt,
@@ -1321,6 +1519,9 @@ export function AirboardPrototype({
   const applyLocalEvent = useCallback(
     (event: BoardEvent) => {
       boardRef.current = applyBoardEvent(boardRef.current, event);
+      if (event.type.startsWith("element.") || event.type.startsWith("stroke.") || event.type === "board.cleared") {
+        setSceneRenderVersion((version) => version + 1);
+      }
       appendBoundedBoardEvents(boardEventLogRef.current, [event]);
       if (event.type !== "cursor.moved" && !event.type.startsWith("participant.")) {
         refreshRealtimeSpeechKeyterms();
@@ -1345,6 +1546,9 @@ export function AirboardPrototype({
   const applyRemoteEvent = useCallback(
     (event: BoardEvent) => {
       boardRef.current = applyBoardEvent(boardRef.current, event);
+      if (event.type.startsWith("element.") || event.type.startsWith("stroke.") || event.type === "board.cleared") {
+        setSceneRenderVersion((version) => version + 1);
+      }
       appendBoundedBoardEvents(boardEventLogRef.current, [event]);
       if (event.type !== "cursor.moved" && !event.type.startsWith("participant.")) {
         refreshRealtimeSpeechKeyterms();
@@ -1366,6 +1570,1409 @@ export function AirboardPrototype({
   useEffect(() => {
     applyRemoteEventRef.current = applyRemoteEvent;
   }, [applyRemoteEvent]);
+
+  const selectSceneElements = useCallback((ids: string[], primary = ids.at(-1) ?? null) => {
+    const activeIds = ids.filter((id) => boardRef.current.elements[id]?.status === "active");
+    setSelectedElementIds(activeIds);
+    setSelectedElementId(primary && activeIds.includes(primary) ? primary : activeIds.at(-1) ?? null);
+    setSelectedAnnotationId(null);
+    setSelectedAnnotationIds([]);
+    setEditingAnnotationId(null);
+  }, []);
+
+  const patchSceneElement = useCallback(
+    (elementId: string, patches: BoardElementPatchOperation[]) => {
+      const element = boardRef.current.elements[elementId];
+      if (!element || patches.length === 0) return;
+      const unlockOnly = patches.every(
+        (patch) =>
+          patch.op === "field.set" &&
+          patch.path.length === 1 &&
+          ((patch.path[0] === "locked" && patch.value === false) ||
+            (patch.path[0] === "lockMode" && patch.value === "none")),
+      );
+      if (sceneElementLockedForMutation(boardRef.current, element) && !unlockOnly) {
+        setCommandFeedback("Unlock this element before changing it.");
+        return;
+      }
+      const inversePatches = invertBoardElementPatches(element, patches);
+      if (inversePatches.length > 0) {
+        undoStackRef.current.push({ type: "scene_patched", elementId, inversePatches });
+        sceneRedoStackRef.current = [];
+      }
+      applyLocalEvent({
+        ...createEventEnvelope({
+          boardSessionId: boardSessionIdRef.current,
+          actorParticipantId: PARTICIPANT_ID,
+        }),
+        type: "element.patched",
+        elementId,
+        patches,
+        baseRevision: element.revision,
+      });
+    },
+    [applyLocalEvent],
+  );
+
+  const patchSceneElements = useCallback(
+    (
+      changes: readonly { elementId: string; patches: BoardElementPatchOperation[] }[],
+      options: { recordHistory?: boolean } = {},
+    ) => {
+      const combined = new Map<string, BoardElementPatchOperation[]>();
+      for (const change of changes) {
+        if (change.patches.length === 0) continue;
+        combined.set(change.elementId, [
+          ...(combined.get(change.elementId) ?? []),
+          ...change.patches,
+        ]);
+      }
+      const entries = [...combined].flatMap(([elementId, patches]) => {
+        const element = boardRef.current.elements[elementId];
+        if (!element) return [];
+        return [{ elementId, patches, inversePatches: invertBoardElementPatches(element, patches) }];
+      });
+      if (entries.length === 0) return;
+      if (options.recordHistory !== false) {
+        const inverseEntries = entries.flatMap(({ elementId, inversePatches }) =>
+          inversePatches.length > 0 ? [{ elementId, inversePatches }] : [],
+        );
+        if (inverseEntries.length > 0) {
+          undoStackRef.current.push({ type: "scene_batch", entries: inverseEntries });
+          sceneRedoStackRef.current = [];
+        }
+      }
+      for (const { elementId, patches } of entries) {
+        const element = boardRef.current.elements[elementId];
+        if (!element) continue;
+        applyLocalEvent({
+          ...createEventEnvelope({
+            boardSessionId: boardSessionIdRef.current,
+            actorParticipantId: PARTICIPANT_ID,
+          }),
+          type: "element.patched",
+          elementId,
+          patches,
+          baseRevision: element.revision,
+        });
+      }
+    },
+    [applyLocalEvent],
+  );
+
+  const applySceneElementLifecycle = useCallback(
+    (elementId: string, type: "element.deleted" | "element.restored") => {
+      const element = boardRef.current.elements[elementId];
+      if (!element) return;
+      if (type === "element.deleted") {
+        if (element.kind === "section") {
+          patchSceneElements(
+            element.memberIds.flatMap((memberId) => {
+              const member = boardRef.current.elements[memberId];
+              return member?.status === "active" && member.sectionId === element.id
+                ? [{
+                    elementId: member.id,
+                    patches: [{ op: "field.unset" as const, path: ["sectionId"] }],
+                  }]
+                : [];
+            }),
+            { recordHistory: false },
+          );
+        } else if (element.sectionId) {
+          const section = boardRef.current.elements[element.sectionId];
+          if (section?.kind === "section" && section.status === "active") {
+            patchSceneElements([{
+              elementId: section.id,
+              patches: [{
+                op: "field.set",
+                path: ["memberIds"],
+                value: section.memberIds.filter((id) => id !== element.id),
+              }],
+            }], { recordHistory: false });
+          }
+        }
+      }
+      applyLocalEvent({
+        ...createEventEnvelope({
+          boardSessionId: boardSessionIdRef.current,
+          actorParticipantId: PARTICIPANT_ID,
+        }),
+        type,
+        elementId,
+      });
+      if (type === "element.restored") {
+        if (element.kind === "section") {
+          patchSceneElements(
+            element.memberIds.flatMap((memberId) => {
+              const member = boardRef.current.elements[memberId];
+              return member?.status === "active" && !member.sectionId
+                ? [{
+                    elementId: member.id,
+                    patches: [{
+                      op: "field.set" as const,
+                      path: ["sectionId"],
+                      value: element.id,
+                    }],
+                  }]
+                : [];
+            }),
+            { recordHistory: false },
+          );
+        } else if (element.sectionId) {
+          const section = boardRef.current.elements[element.sectionId];
+          if (section?.kind === "section" && section.status === "active") {
+            patchSceneElements([{
+              elementId: section.id,
+              patches: [{
+                op: "field.set",
+                path: ["memberIds"],
+                value: [...new Set([...section.memberIds, element.id])],
+              }],
+            }], { recordHistory: false });
+          }
+        }
+      }
+    },
+    [applyLocalEvent, patchSceneElements],
+  );
+
+  const deleteSceneElement = useCallback(
+    (elementId: string) => {
+      const element = boardRef.current.elements[elementId];
+      if (!element || element.status !== "active") return;
+      if (sceneElementLockedForMutation(boardRef.current, element)) {
+        setCommandFeedback("Unlock this element before deleting it.");
+        return;
+      }
+      undoStackRef.current.push({ type: "scene_deleted", elementId });
+      sceneRedoStackRef.current = [];
+      applySceneElementLifecycle(elementId, "element.deleted");
+      selectSceneElements(selectedElementIdsRef.current.filter((id) => id !== elementId));
+      if (editingElementId === elementId) setEditingElementId(null);
+    },
+    [applySceneElementLifecycle, editingElementId, selectSceneElements],
+  );
+
+  const deleteSceneElementsAsBatch = useCallback(
+    (elementIds: readonly string[]) => {
+      const activeIds = [...new Set(elementIds)].filter(
+        (id) => {
+          const element = boardRef.current.elements[id];
+          return Boolean(
+            element?.status === "active" &&
+            !sceneElementLockedForMutation(boardRef.current, element),
+          );
+        },
+      );
+      if (activeIds.length === 0) return [];
+      const selectionBefore = [...selectedElementIdsRef.current];
+      const selectionAfter = selectionBefore.filter((id) => !activeIds.includes(id));
+      undoStackRef.current.push({
+        type: "scene_deleted_batch",
+        elementIds: activeIds,
+        selectionBefore,
+        selectionAfter,
+      });
+      sceneRedoStackRef.current = [];
+      for (const elementId of activeIds) {
+        applySceneElementLifecycle(elementId, "element.deleted");
+      }
+      selectSceneElements(selectionAfter);
+      setEditingElementId((current) => current && activeIds.includes(current) ? null : current);
+      return activeIds;
+    },
+    [applySceneElementLifecycle, selectSceneElements],
+  );
+
+  const deleteSectionWithContents = useCallback(
+    (section: Extract<BoardSceneElement, { kind: "section" }>) => {
+      const elementIds = [
+        section.id,
+        ...sceneSectionMembers(boardRef.current, section).map(({ id }) => id),
+      ].filter((id, index, values) => values.indexOf(id) === index);
+      const activeIds = deleteSceneElementsAsBatch(elementIds);
+      if (activeIds.length === 0) return;
+      setCommandFeedback(`Deleted the section and ${Math.max(0, activeIds.length - 1)} contained element${activeIds.length === 2 ? "" : "s"}.`);
+    },
+    [deleteSceneElementsAsBatch],
+  );
+
+  const copySectionLink = useCallback(
+    (section: Extract<BoardSceneElement, { kind: "section" }>) => {
+      const url = new URL(window.location.href);
+      url.hash = `section=${encodeURIComponent(section.id)}`;
+      void navigator.clipboard.writeText(url.toString()).then(
+        () => setCommandFeedback("Section link copied."),
+        () => setCommandFeedback("Could not copy the section link."),
+      );
+    },
+    [],
+  );
+
+  const commitSceneElement = useCallback(
+    (draft: BoardSceneElement, options: { edit?: boolean; select?: boolean } = {}) => {
+      const zIndex = Object.values(boardRef.current.elements).reduce(
+        (maximum, element) => Math.max(maximum, element.zIndex),
+        0,
+      ) + 1;
+      let element = {
+        ...draft,
+        boardId: boardSessionIdRef.current,
+        zIndex,
+      } as BoardSceneElement;
+      const containingSection = element.kind === "section"
+        ? undefined
+        : Object.values(boardRef.current.elements)
+          .filter(
+            (candidate): candidate is Extract<BoardSceneElement, { kind: "section" }> =>
+              candidate.kind === "section" &&
+              candidate.status === "active" &&
+              candidate.visible &&
+              sceneElementFitsInside(element, candidate),
+          )
+          .sort((a, b) => b.zIndex - a.zIndex)[0];
+      if (containingSection) {
+        element = { ...element, sectionId: containingSection.id } as BoardSceneElement;
+      }
+      undoStackRef.current.push({ type: "scene_created", elementId: element.id });
+      sceneRedoStackRef.current = [];
+      applyLocalEvent({
+        ...createEventEnvelope({
+          boardSessionId: boardSessionIdRef.current,
+          actorParticipantId: PARTICIPANT_ID,
+        }),
+        type: "element.created",
+        element,
+      });
+      if (containingSection) {
+        patchSceneElements([{
+          elementId: containingSection.id,
+          patches: [{
+            op: "field.set",
+            path: ["memberIds"],
+            value: [...new Set([...containingSection.memberIds, element.id])],
+          }],
+        }], { recordHistory: false });
+      }
+      if (options.select !== false) selectSceneElements([element.id], element.id);
+      if (options.edit) setEditingElementId(element.id);
+      setActiveCreationTool("move");
+      activeCreationToolRef.current = "move";
+      setActiveObjectTool("select");
+      setCommandFeedback(`${sceneElementKindLabel(element.kind)} added.`);
+      return element;
+    },
+    [applyLocalEvent, patchSceneElements, selectSceneElements],
+  );
+
+  const commitSceneElementsAsBatch = useCallback(
+    (
+      drafts: readonly BoardSceneElement[],
+      options: { select?: boolean } = {},
+    ) => {
+      if (drafts.length === 0) return [];
+      const selectionBefore = [...selectedElementIdsRef.current];
+      const historyStart = undoStackRef.current.length;
+      const created = drafts.map((draft) => commitSceneElement(draft, { select: false }));
+      const elementIds = created.map(({ id }) => id);
+      const selectionAfter = options.select === false ? selectionBefore : elementIds;
+      undoStackRef.current.splice(historyStart);
+      undoStackRef.current.push({
+        type: "scene_created_batch",
+        elementIds,
+        selectionBefore,
+        selectionAfter,
+      });
+      sceneRedoStackRef.current = [];
+      const last = created.at(-1);
+      if (last && options.select !== false) selectSceneElements(elementIds, last.id);
+      return created;
+    },
+    [commitSceneElement, selectSceneElements],
+  );
+
+  const createSceneElementAtPoint = useCallback(
+    (
+      tool: CreationToolId,
+      point: AnnotationPoint,
+      options: { table?: { rows: number; columns: number }; label?: string; language?: CodeLanguage } = {},
+    ) => {
+      const attachmentTarget = tool === "stamp" || tool === "insert:face-stamp"
+        ? findSceneElementAtPoint(boardRef.current, point)
+        : null;
+      const element = createSceneElementForTool(tool, {
+        boardId: boardSessionIdRef.current,
+        ...(accountUserId ? { creatorId: accountUserId } : {}),
+        point,
+        stampEmoji: selectedStampEmoji,
+        ...(tool === "table" && !options.table ? { table: pendingTableSizeRef.current } : {}),
+        ...options,
+      });
+      if (!element) return null;
+      const created = commitSceneElement(element, {
+        edit: ["sticky", "shape", "text", "code_block", "mind_map_node"].includes(element.kind),
+      });
+      if (created.kind === "stamp" && attachmentTarget && attachmentTarget.id !== created.id) {
+        const cellId = attachmentTarget.kind === "table"
+          ? tableCellIdAtPoint(attachmentTarget, point)
+          : null;
+        patchSceneElements([{
+          elementId: created.id,
+          patches: [{
+            op: "attachment.changed",
+            attachment: cellId
+              ? { kind: "table_cell", tableId: attachmentTarget.id, cellId }
+              : { kind: "element", elementId: attachmentTarget.id, anchor: "auto" },
+          }],
+        }], { recordHistory: false });
+      }
+      return created;
+    },
+    [accountUserId, commitSceneElement, patchSceneElements, selectedStampEmoji],
+  );
+
+  const duplicateSceneElement = useCallback(
+    (elementId: string) => {
+      const source = boardRef.current.elements[elementId];
+      if (!source) return;
+      const now = new Date().toISOString();
+      const shifted = structuredClone(source);
+      shifted.id = crypto.randomUUID();
+      shifted.status = "active";
+      shifted.transform.x += 24;
+      shifted.transform.y += 24;
+      shifted.createdAt = now;
+      shifted.updatedAt = now;
+      shifted.revision = 1;
+      delete shifted.legacyStrokeId;
+      if (shifted.kind === "connector") {
+        shifted.start.point = { x: shifted.start.point.x + 24, y: shifted.start.point.y + 24 };
+        shifted.end.point = { x: shifted.end.point.x + 24, y: shifted.end.point.y + 24 };
+        shifted.controlPoints = shifted.controlPoints.map((point) => ({ x: point.x + 24, y: point.y + 24 }));
+      } else if (shifted.kind === "section") {
+        shifted.memberIds = [];
+      } else if (shifted.kind === "mind_map_node") {
+        shifted.relation = {
+          direction: shifted.relation.direction,
+          childIds: [],
+          connectorIds: [],
+        };
+      }
+      commitSceneElement(shifted);
+    },
+    [commitSceneElement],
+  );
+
+  const quickCreateSceneElement = useCallback(
+    (element: BoardSceneElement, direction: "left" | "right" | "up" | "down") => {
+      const source = boardRef.current.elements[element.id];
+      if (!source || (source.kind !== "sticky" && source.kind !== "shape")) return;
+      const gap = 72;
+      const offset = direction === "left"
+        ? { x: -(source.transform.width + gap), y: 0 }
+        : direction === "right"
+          ? { x: source.transform.width + gap, y: 0 }
+          : direction === "up"
+            ? { x: 0, y: -(source.transform.height + gap) }
+            : { x: 0, y: source.transform.height + gap };
+      const now = new Date().toISOString();
+      const duplicate = structuredClone(source);
+      duplicate.id = crypto.randomUUID();
+      duplicate.createdAt = now;
+      duplicate.updatedAt = now;
+      duplicate.revision = 1;
+      duplicate.transform.x += offset.x;
+      duplicate.transform.y += offset.y;
+      delete duplicate.legacyStrokeId;
+      const created = commitSceneElement(duplicate);
+      if (source.kind === "shape" && created.kind === "shape") {
+        const start = connectorAnchorPoint(source, "auto", elementCenter(created));
+        const end = connectorAnchorPoint(created, "auto", elementCenter(source));
+        commitSceneElement(createBoardSceneElement({
+          id: crypto.randomUUID(),
+          boardId: boardSessionIdRef.current,
+          kind: "connector",
+          pathKind: "bent",
+          transform: boundsBetween(start, end),
+          start: { point: start, binding: { elementId: source.id, anchor: "auto" }, decoration: "none" },
+          end: { point: end, binding: { elementId: created.id, anchor: "auto" }, decoration: "solid_arrow" },
+          ...(accountUserId ? { creatorId: accountUserId } : {}),
+        }), { select: false });
+        selectSceneElements([created.id], created.id);
+      }
+      setEditingElementId(created.id);
+    },
+    [accountUserId, commitSceneElement, selectSceneElements],
+  );
+
+  const connectMindMapTarget = useCallback(
+    (
+      parent: Extract<BoardSceneElement, { kind: "mind_map_node" }>,
+      target: BoardSceneElement,
+    ) => {
+      const parentCenter = elementCenter(parent);
+      const targetCenter = elementCenter(target);
+      const start = connectorAnchorPoint(parent, "auto", targetCenter);
+      const end = connectorAnchorPoint(target, "auto", parentCenter);
+      const connector = commitSceneElement(createBoardSceneElement({
+        id: crypto.randomUUID(),
+        boardId: boardSessionIdRef.current,
+        kind: "connector",
+        pathKind: "curved",
+        transform: boundsBetween(start, end),
+        start: { point: start, binding: { elementId: parent.id, anchor: "auto" }, decoration: "none" },
+        end: { point: end, binding: { elementId: target.id, anchor: "auto" }, decoration: "none" },
+        style: {
+          color: parent.style.lineColor,
+          opacity: 1,
+          thickness: "thin",
+          strokeStyle: "solid",
+          labelBackground: "none",
+        },
+        ...(accountUserId ? { creatorId: accountUserId } : {}),
+      }), { select: false });
+      const currentParent = boardRef.current.elements[parent.id];
+      const parentRelation = currentParent?.kind === "mind_map_node"
+        ? currentParent.relation
+        : parent.relation;
+      patchSceneElement(parent.id, [{
+        op: "mind_map.relation.changed",
+        relation: {
+          ...parentRelation,
+          childIds: [...new Set([...parentRelation.childIds, target.id])],
+          connectorIds: [...new Set([...parentRelation.connectorIds, connector.id])],
+        },
+      }]);
+      if (target.kind === "mind_map_node") {
+        patchSceneElement(target.id, [{
+          op: "mind_map.relation.changed",
+          relation: {
+            ...target.relation,
+            parentId: parent.id,
+            connectorIds: [...new Set([...target.relation.connectorIds, connector.id])],
+          },
+        }]);
+      } else {
+        patchSceneElement(target.id, [{
+          op: "attachment.changed",
+          attachment: { kind: "element", elementId: parent.id, anchor: "auto" },
+        }]);
+      }
+      return connector;
+    },
+    [accountUserId, commitSceneElement, patchSceneElement],
+  );
+
+  const addMindMapChild = useCallback(
+    (parent: Extract<BoardSceneElement, { kind: "mind_map_node" }>) => {
+      const offset = mindMapDirectionOffset(parent.relation.direction, parent.transform);
+      const child = commitSceneElement(createBoardSceneElement({
+        id: crypto.randomUUID(),
+        boardId: boardSessionIdRef.current,
+        kind: "mind_map_node",
+        transform: {
+          x: parent.transform.x + offset.x,
+          y: parent.transform.y + offset.y,
+          width: parent.transform.width,
+          height: parent.transform.height,
+          rotation: 0,
+        },
+        relation: { parentId: parent.id, childIds: [], direction: parent.relation.direction, connectorIds: [] },
+        style: { ...parent.style },
+        content: createRichTextDocument("New idea"),
+        ...(accountUserId ? { creatorId: accountUserId } : {}),
+      }));
+      connectMindMapTarget(parent, child);
+      selectSceneElements([child.id], child.id);
+      setEditingElementId(child.id);
+    },
+    [accountUserId, commitSceneElement, connectMindMapTarget, selectSceneElements],
+  );
+
+  const addMindMapSibling = useCallback(
+    (node: Extract<BoardSceneElement, { kind: "mind_map_node" }>) => {
+      const parent = node.relation.parentId
+        ? boardRef.current.elements[node.relation.parentId]
+        : null;
+      if (parent?.kind === "mind_map_node") {
+        const siblingCount = parent.relation.childIds.length;
+        const sibling = commitSceneElement(createBoardSceneElement({
+          id: crypto.randomUUID(),
+          boardId: boardSessionIdRef.current,
+          kind: "mind_map_node",
+          transform: {
+            ...node.transform,
+            x: node.transform.x + (node.relation.direction === "up" || node.relation.direction === "down" ? node.transform.width + 36 : 0),
+            y: node.transform.y + (node.relation.direction === "left" || node.relation.direction === "right" ? node.transform.height + 32 : 0),
+          },
+          relation: { parentId: parent.id, childIds: [], direction: node.relation.direction, connectorIds: [] },
+          style: { ...node.style },
+          content: createRichTextDocument(`Idea ${siblingCount + 1}`),
+          ...(accountUserId ? { creatorId: accountUserId } : {}),
+        }));
+        connectMindMapTarget(parent, sibling);
+        selectSceneElements([sibling.id], sibling.id);
+        setEditingElementId(sibling.id);
+        return;
+      }
+      addMindMapChild(node);
+    },
+    [accountUserId, addMindMapChild, commitSceneElement, connectMindMapTarget, selectSceneElements],
+  );
+
+  const attachMindMapSelection = useCallback(
+    (node: Extract<BoardSceneElement, { kind: "mind_map_node" }>) => {
+      const targets = selectedElementIdsRef.current
+        .filter((id) => id !== node.id)
+        .flatMap((id) => boardRef.current.elements[id] ? [boardRef.current.elements[id]!] : [])
+        .filter((element) => ["sticky", "shape", "text", "mind_map_node"].includes(element.kind));
+      if (targets.length === 0) {
+        setCommandFeedback("Select this node with a sticky, shape, text item, or mind-map node to attach it.");
+        return;
+      }
+      targets.forEach((target) => connectMindMapTarget(node, target));
+      selectSceneElements([node.id, ...targets.map(({ id }) => id)], node.id);
+      setCommandFeedback(`Attached ${targets.length} object${targets.length === 1 ? "" : "s"} to the mind map.`);
+    },
+    [connectMindMapTarget, selectSceneElements],
+  );
+
+  const requestMediaAtPoint = useCallback((point: AnnotationPoint) => {
+    pendingMediaReplaceIdRef.current = null;
+    pendingMediaPointRef.current = point;
+    mediaInputRef.current?.click();
+  }, []);
+
+  const requestMediaReplacement = useCallback((element: Extract<BoardSceneElement, { kind: "media" }>) => {
+    pendingMediaReplaceIdRef.current = element.id;
+    pendingMediaPointRef.current = elementCenter(element);
+    mediaInputRef.current?.click();
+  }, []);
+
+  const setMediaPlayback = useCallback(
+    (media: Extract<BoardSceneElement, { kind: "media" }>, playing: boolean) => {
+      const changes: { elementId: string; patches: BoardElementPatchOperation[] }[] = [{
+        elementId: media.id,
+        patches: [{ op: "field.set", path: ["playing"], value: playing }],
+      }];
+      if (playing) {
+        for (const candidate of Object.values(boardRef.current.elements)) {
+          if (
+            candidate.kind === "media" &&
+            candidate.id !== media.id &&
+            candidate.status === "active" &&
+            candidate.playing
+          ) {
+            changes.push({
+              elementId: candidate.id,
+              patches: [{ op: "field.set", path: ["playing"], value: false }],
+            });
+          }
+        }
+      }
+      patchSceneElements(changes);
+    },
+    [patchSceneElements],
+  );
+
+  const requestWashiPatternReplacement = useCallback(
+    (drawing: Extract<BoardSceneElement, { kind: "drawing" }>) => {
+      pendingWashiElementIdRef.current = drawing.id;
+      washiPatternInputRef.current?.click();
+    },
+    [],
+  );
+
+  const handleWashiPatternSelected = useCallback(
+    async (file: File | null) => {
+      const elementId = pendingWashiElementIdRef.current;
+      pendingWashiElementIdRef.current = null;
+      if (!file || !elementId) return;
+      if (!file.type.startsWith("image/")) {
+        setCommandFeedback("Washi patterns must be an image.");
+        return;
+      }
+      if (!effectiveAccessToken || !persistentBoardId) {
+        setCommandFeedback("Custom washi patterns require a saved, signed-in Airboard.");
+        return;
+      }
+      try {
+        const uploaded = await uploadBoardAsset({
+          boardId: persistentBoardId,
+          accessToken: effectiveAccessToken,
+          file,
+        });
+        const { mediaKind: _mediaKind, ...asset } = uploaded;
+        patchSceneElement(elementId, [{
+          op: "field.set",
+          path: ["style", "patternAsset"],
+          value: asset,
+        }]);
+        setCommandFeedback("Custom washi pattern applied.");
+      } catch (caught) {
+        setCommandFeedback(caught instanceof Error ? caught.message : "Could not upload that pattern.");
+      }
+    },
+    [effectiveAccessToken, patchSceneElement, persistentBoardId],
+  );
+
+  const insertLinkAtPoint = useCallback(
+    async (point: AnnotationPoint) => {
+      if (!effectiveAccessToken) {
+        setCommandFeedback("Sign in to add a protected link preview.");
+        return;
+      }
+      const requested = window.prompt("Paste an http(s) link");
+      if (!requested?.trim()) return;
+      setCommandFeedback("Resolving a safe link preview…");
+      try {
+        const preview = await resolveBoardLink({ url: requested.trim(), accessToken: effectiveAccessToken });
+        const id = crypto.randomUUID();
+        commitSceneElement(createBoardSceneElement({
+          id,
+          boardId: boardSessionIdRef.current,
+          kind: "link_preview",
+          transform: centeredTransform(point, { width: 340, height: 168 }),
+          ...linkPreviewFields(preview),
+          ...(accountUserId ? { creatorId: accountUserId } : {}),
+        }));
+      } catch (caught) {
+        setCommandFeedback(
+          caught instanceof Error ? `Could not add link: ${caught.message}` : "Could not add that link.",
+        );
+      }
+    },
+    [accountUserId, commitSceneElement, effectiveAccessToken],
+  );
+
+  const handleMediaFileSelected = useCallback(
+    async (file: File | null) => {
+      const point = pendingMediaPointRef.current;
+      const replacementId = pendingMediaReplaceIdRef.current;
+      pendingMediaPointRef.current = null;
+      pendingMediaReplaceIdRef.current = null;
+      if (!file || !point) return;
+      if (!effectiveAccessToken || !persistentBoardId) {
+        setCommandFeedback("Media uploads require a saved, signed-in Airboard.");
+        return;
+      }
+      setCommandFeedback(`Uploading ${file.name}…`);
+      try {
+        const uploaded = await uploadBoardAsset({
+          boardId: persistentBoardId,
+          accessToken: effectiveAccessToken,
+          file,
+        });
+        const { mediaKind, ...asset } = uploaded;
+        if (replacementId && boardRef.current.elements[replacementId]?.kind === "media") {
+          patchSceneElement(replacementId, [
+            { op: "field.set", path: ["mediaKind"], value: mediaKind },
+            { op: "field.set", path: ["asset"], value: asset },
+            { op: "field.set", path: ["altText"], value: file.name },
+            { op: "field.set", path: ["crop"], value: { x: 0, y: 0, width: 1, height: 1, zoom: 1 } },
+          ]);
+          setCommandFeedback(`${file.name} replaced the selected media.`);
+          return;
+        }
+        commitSceneElement(createBoardSceneElement({
+          id: crypto.randomUUID(),
+          boardId: boardSessionIdRef.current,
+          kind: "media",
+          transform: centeredTransform(point, { width: 320, height: 240 }),
+          mediaKind,
+          asset,
+          altText: file.name,
+          ...(accountUserId ? { creatorId: accountUserId } : {}),
+        }));
+      } catch (caught) {
+        setCommandFeedback(
+          caught instanceof Error ? `Media upload failed: ${caught.message}` : "Media upload failed.",
+        );
+      } finally {
+        if (mediaInputRef.current) mediaInputRef.current.value = "";
+      }
+    },
+    [
+      accountUserId,
+      commitSceneElement,
+      effectiveAccessToken,
+      patchSceneElement,
+      persistentBoardId,
+    ],
+  );
+
+  const beginSceneDrawing = useCallback(
+    (
+      pointerId: number,
+      point: StrokePoint,
+      drawingKind: "marker" | "highlighter" | "washi",
+      straight: boolean,
+    ) => {
+      const elementId = crypto.randomUUID();
+      const thickness = drawingKind === "marker" ? strokeThickness : drawingKind === "highlighter" ? 24 : 18;
+      const color = drawingKind === "marker" ? strokeColor : drawingKind === "highlighter" ? "#facc15" : "#a78bfa";
+      sceneDrawingRef.current = { pointerId, elementId, drawingKind, points: [point], straight };
+      boardRef.current = {
+        ...boardRef.current,
+        activeStrokes: {
+          ...boardRef.current.activeStrokes,
+          [elementId]: createStroke({
+            id: elementId,
+            boardId: boardSessionIdRef.current,
+            userId: accountUserId ?? PARTICIPANT_ID,
+            point,
+            color,
+            thickness,
+            createdAt: new Date().toISOString(),
+          }),
+        },
+      };
+      render();
+    },
+    [accountUserId, render, strokeColor, strokeThickness],
+  );
+
+  const appendSceneDrawingPoint = useCallback(
+    (pointerId: number, point: StrokePoint) => {
+      const active = sceneDrawingRef.current;
+      if (!active || active.pointerId !== pointerId) return false;
+      const previous = active.points.at(-1);
+      if (previous && Math.hypot(point.x - previous.x, point.y - previous.y) < 1.5) return true;
+      active.points.push(point);
+      const transient = boardRef.current.activeStrokes[active.elementId];
+      if (transient) {
+        boardRef.current = {
+          ...boardRef.current,
+          activeStrokes: {
+            ...boardRef.current.activeStrokes,
+            [active.elementId]: { ...transient, points: [...active.points], updatedAt: new Date().toISOString() },
+          },
+        };
+        render();
+      }
+      return true;
+    },
+    [render],
+  );
+
+  const commitSceneDrawing = useCallback(
+    (pointerId: number) => {
+      const active = sceneDrawingRef.current;
+      if (!active || active.pointerId !== pointerId) return false;
+      sceneDrawingRef.current = null;
+      const { [active.elementId]: _transient, ...activeStrokes } = boardRef.current.activeStrokes;
+      boardRef.current = { ...boardRef.current, activeStrokes };
+      const rawPoints = active.points;
+      if (rawPoints.length === 0) {
+        render();
+        return true;
+      }
+      const points = active.straight && rawPoints.length > 1
+        ? [rawPoints[0]!, rawPoints.at(-1)!]
+        : rawPoints;
+      const bounds = strokePointBounds(points, active.drawingKind === "highlighter" ? 24 : 8);
+      const touched = active.drawingKind === "highlighter"
+        ? points.map((point) => findSceneElementAtPoint(boardRef.current, point)).find(Boolean)
+        : null;
+      commitSceneElement(createBoardSceneElement({
+        id: active.elementId,
+        boardId: boardSessionIdRef.current,
+        kind: "drawing",
+        drawingKind: active.drawingKind,
+        points,
+        transform: { ...bounds, rotation: 0 },
+        style: {
+          color: active.drawingKind === "marker" ? strokeColor : active.drawingKind === "highlighter" ? "#facc15" : "#a78bfa",
+          thickness: active.drawingKind === "marker" ? strokeThickness : active.drawingKind === "highlighter" ? 24 : 18,
+          opacity: active.drawingKind === "highlighter" ? 0.35 : 1,
+          straight: active.straight,
+        },
+        ...(touched ? { attachment: { kind: "element", elementId: touched.id, anchor: "auto" } as const } : {}),
+        ...(accountUserId ? { creatorId: accountUserId } : {}),
+      }), { select: false });
+      return true;
+    },
+    [accountUserId, commitSceneElement, render, strokeColor, strokeThickness],
+  );
+
+  const eraseSceneDrawingsAt = useCallback(
+    (point: AnnotationPoint, radius = ERASER_RADIUS) => {
+      const hits = Object.values(boardRef.current.elements).filter(
+        (element) =>
+          element.kind === "drawing" &&
+          element.status === "active" &&
+          drawingElementIntersectsCircle(element, point, radius),
+      );
+      for (const element of hits) deleteSceneElement(element.id);
+      return hits.length > 0;
+    },
+    [deleteSceneElement],
+  );
+
+  const beginSceneMove = useCallback((
+    pointerId: number,
+    element: BoardSceneElement,
+    point: AnnotationPoint,
+    inputSource: NonNullable<CursorState["inputSource"]>,
+  ) => {
+    const parentSection = element.sectionId
+      ? boardRef.current.elements[element.sectionId]
+      : null;
+    if (
+      element.locked ||
+      (parentSection?.kind === "section" && parentSection.status === "active" && parentSection.lockMode === "all") ||
+      (element.kind === "section" && element.lockMode !== "none")
+    ) {
+      setCommandFeedback("This element is locked.");
+      return false;
+    }
+    const sectionMembers = element.kind === "section"
+      ? sceneSectionMembers(boardRef.current, element).map((member) => structuredClone(member))
+      : [];
+    const movingIds = new Set([element.id, ...sectionMembers.map(({ id }) => id)]);
+    const attachedElements = Object.values(boardRef.current.elements)
+      .filter((candidate) => {
+        if (candidate.status !== "active" || movingIds.has(candidate.id) || !candidate.attachment) return false;
+        return candidate.attachment.kind === "element"
+          ? movingIds.has(candidate.attachment.elementId)
+          : movingIds.has(candidate.attachment.tableId);
+      })
+      .map((candidate) => structuredClone(candidate));
+    const relatedElements = [...sectionMembers, ...attachedElements];
+    for (const related of attachedElements) movingIds.add(related.id);
+    const boundConnectors = Object.values(boardRef.current.elements).filter(
+      (candidate): candidate is Extract<BoardSceneElement, { kind: "connector" }> =>
+        candidate.kind === "connector" &&
+        candidate.status === "active" &&
+        !movingIds.has(candidate.id) &&
+        Boolean(
+          (candidate.start.binding && movingIds.has(candidate.start.binding.elementId)) ||
+          (candidate.end.binding && movingIds.has(candidate.end.binding.elementId)),
+        ),
+    ).map((connector) => structuredClone(connector));
+    sceneMoveRef.current = {
+      pointerId,
+      inputSource,
+      elementId: element.id,
+      start: point,
+      element: structuredClone(element),
+      relatedElements,
+      boundConnectors,
+    };
+    selectSceneElements([element.id], element.id);
+    return true;
+  }, [selectSceneElements]);
+
+  const previewSceneMove = useCallback((pointerId: number, point: AnnotationPoint) => {
+    const movement = sceneMoveRef.current;
+    if (!movement || movement.pointerId !== pointerId) return false;
+    const dx = point.x - movement.start.x;
+    const dy = point.y - movement.start.y;
+    const previewElements = buildSceneMovePreview(
+      movement,
+      dx,
+      dy,
+      boardRef.current.elements,
+    );
+    boardRef.current = {
+      ...boardRef.current,
+      elements: previewElements,
+    };
+    render();
+    return true;
+  }, [render]);
+
+  const commitSceneMove = useCallback((pointerId: number, point: AnnotationPoint) => {
+    const movement = sceneMoveRef.current;
+    if (!movement || movement.pointerId !== pointerId) return false;
+    sceneMoveRef.current = null;
+    const dx = point.x - movement.start.x;
+    const dy = point.y - movement.start.y;
+    const finalElements = buildSceneMovePreview(
+      movement,
+      dx,
+      dy,
+      boardRef.current.elements,
+    );
+    const restoredElements = { ...boardRef.current.elements };
+    for (const original of [movement.element, ...movement.relatedElements, ...movement.boundConnectors]) {
+      restoredElements[original.id] = original;
+    }
+    boardRef.current = {
+      ...boardRef.current,
+      elements: restoredElements,
+    };
+    const changes: { elementId: string; patches: BoardElementPatchOperation[] }[] = [
+      movement.element,
+      ...movement.relatedElements,
+    ].map((original) => ({
+      elementId: original.id,
+      patches: [
+        ...sceneElementMovePatches(original, dx, dy),
+        ...(original.id === movement.element.id
+          ? [{
+              op: "field.set" as const,
+              path: ["metadata", "lastInputSource"] as [string, string],
+              value: movement.inputSource,
+            }]
+          : []),
+      ],
+    }));
+    for (const original of movement.boundConnectors) {
+      const rebound = finalElements[original.id];
+      if (rebound?.kind !== "connector") continue;
+      changes.push({
+        elementId: original.id,
+        patches: connectorGeometryPatches(rebound),
+      });
+    }
+    if (movement.element.kind !== "section") {
+      const moved = finalElements[movement.element.id];
+      if (moved) appendSectionContainmentChanges(boardRef.current, movement.element, moved, changes);
+    }
+    patchSceneElements(changes);
+    return true;
+  }, [patchSceneElements]);
+
+  const executeSceneIntent = useCallback(
+    (intent: BoardSceneIntent): SceneIntentExecutionResult => {
+      if (intent.type === "invalid") {
+        setCommandFeedback(
+          intent.reason === "TABLE_CELL_LIMIT_EXCEEDED"
+            ? "Tables can contain at most 500 cells."
+            : "Use positive row and column counts.",
+        );
+        return "rejected";
+      }
+      const rect = canvasRef.current?.getBoundingClientRect();
+      const center = boardPointFromScreen(boardViewportRef.current, {
+        x: (rect?.width ?? 960) / 2,
+        y: (rect?.height ?? 640) / 2,
+      });
+      const targetIds = (target: Extract<BoardSceneIntent, { type: "rename" | "delete" | "move" | "resize" | "style" | "group" | "layout" }>["target"]) =>
+        resolveSceneIntentTargetIds(boardRef.current, target, selectedElementIdsRef.current);
+
+      if (intent.type === "create_connected") {
+        const targetMatches = resolveSceneIntentTargetIds(
+          boardRef.current,
+          intent.to,
+          selectedElementIdsRef.current,
+        );
+        if (targetMatches.length !== 1) {
+          setCommandFeedback(
+            targetMatches.length === 0
+              ? "I couldn't find the element to connect to."
+              : "More than one element matches that name; select one and try again.",
+          );
+          return "rejected";
+        }
+        const targetId = targetMatches[0];
+        const target = targetId ? boardRef.current.elements[targetId] : null;
+        const definition = ALL_SHAPES.find(({ kind }) => kind === intent.shapeKind);
+        if (!target || !definition) return "unrecognized";
+        const targetCenter = elementCenter(target);
+        const createPoint = {
+          x: targetCenter.x + target.transform.width / 2 + 180,
+          y: targetCenter.y,
+        };
+        const created = createSceneElementForTool(`shape:${definition.id}`, {
+          boardId: boardSessionIdRef.current,
+          ...(accountUserId ? { creatorId: accountUserId } : {}),
+          point: createPoint,
+          ...(intent.label ? { label: intent.label } : {}),
+        });
+        if (!created) return "unrecognized";
+        const createdCenter = elementCenter(created);
+        const start = connectorAnchorPoint(created, "auto", targetCenter);
+        const end = connectorAnchorPoint(target, "auto", createdCenter);
+        const connector = createBoardSceneElement({
+          id: crypto.randomUUID(),
+          boardId: boardSessionIdRef.current,
+          kind: "connector",
+          pathKind: intent.pathKind,
+          transform: boundsBetween(start, end),
+          start: {
+            point: start,
+            binding: { elementId: created.id, anchor: "auto" },
+            decoration: "none",
+          },
+          end: {
+            point: end,
+            binding: { elementId: target.id, anchor: "auto" },
+            decoration: "solid_arrow",
+          },
+          ...(accountUserId ? { creatorId: accountUserId } : {}),
+        });
+        commitSceneElementsAsBatch([created, connector]);
+        return "applied";
+      }
+
+      if (intent.type === "create") {
+        const selectedPlacementTarget = intent.placement
+          ? [...selectedElementIdsRef.current]
+            .reverse()
+            .map((id) => boardRef.current.elements[id])
+            .find((element): element is BoardSceneElement => Boolean(element?.status === "active"))
+          : null;
+        if (intent.placement && !selectedPlacementTarget) {
+          setCommandFeedback("Select an element before using relative placement.");
+          return "rejected";
+        }
+        const placementCenter = selectedPlacementTarget && intent.placement
+          ? sceneIntentPlacementPoint(selectedPlacementTarget, intent.placement.direction)
+          : center;
+        if (intent.kind === "media") {
+          setCommandFeedback("Choose an image, GIF, or video to add.");
+          requestMediaAtPoint(placementCenter);
+          return "deferred";
+        }
+        if (intent.kind === "link_preview") {
+          void insertLinkAtPoint(placementCenter);
+          return "deferred";
+        }
+        if (intent.kind === "section" && selectedElementIdsRef.current.length > 0) {
+          const members = selectedElementIdsRef.current.flatMap((id) =>
+            boardRef.current.elements[id] ? [boardRef.current.elements[id]!] : [],
+          );
+          if (members.some((member) => sceneElementLockedForMutation(boardRef.current, member))) {
+            setCommandFeedback("Unlock the selected elements before placing them in a section.");
+            return "rejected";
+          }
+          if (members.length > 0) {
+            const sectionBounds = sceneElementUnionBounds(members, 48);
+            const section = commitSceneElement(createBoardSceneElement({
+              id: crypto.randomUUID(),
+              boardId: boardSessionIdRef.current,
+              kind: "section",
+              transform: { ...sectionBounds, rotation: 0 },
+              memberIds: members.map(({ id }) => id),
+              title: createRichTextDocument(intent.label ?? "Section"),
+              ...(accountUserId ? { creatorId: accountUserId } : {}),
+            }));
+            patchSceneElements(members.map((member) => ({
+              elementId: member.id,
+              patches: [{ op: "field.set" as const, path: ["sectionId"], value: section.id }],
+            })), { recordHistory: false });
+            return "applied";
+          }
+        }
+        let tool: CreationToolId | null = null;
+        if (intent.kind === "shape" && intent.shapeKind) {
+          const definition = ALL_SHAPES.find(({ kind }) => kind === intent.shapeKind);
+          tool = definition ? `shape:${definition.id}` : null;
+        } else {
+          tool = ({
+            sticky: "sticky",
+            text: "text",
+            section: "section",
+            table: "table",
+            stamp: "stamp",
+            code_block: "insert:code-block",
+            mind_map_node: "insert:mind-map",
+          } as Partial<Record<BoardSceneElement["kind"], CreationToolId>>)[intent.kind] ?? null;
+          if (intent.kind === "stamp" && intent.stampKind === "face") {
+            tool = "insert:face-stamp";
+          }
+        }
+        if (!tool) return "unrecognized";
+        const created = createSceneElementAtPoint(tool, placementCenter, {
+          ...(intent.label ? { label: intent.label } : {}),
+          ...(intent.table ? { table: intent.table } : {}),
+          ...(intent.language ? { language: intent.language } : {}),
+        });
+        return created ? "applied" : "unrecognized";
+      }
+
+      if (intent.type === "connect") {
+        const fromIds = resolveSceneIntentTargetIds(
+          boardRef.current,
+          intent.from,
+          selectedElementIdsRef.current,
+        );
+        const toIds = resolveSceneIntentTargetIds(
+          boardRef.current,
+          intent.to,
+          selectedElementIdsRef.current,
+        );
+        if (
+          (intent.from.kind === "visible_label" && fromIds.length !== 1) ||
+          (intent.to.kind === "visible_label" && toIds.length !== 1)
+        ) {
+          setCommandFeedback("Use unique visible names, or select the two elements to connect.");
+          return "rejected";
+        }
+        const fromId = fromIds[0];
+        const sameSelection =
+          intent.from.kind === "selection" && intent.to.kind === "selection";
+        const toId = sameSelection
+          ? toIds.find((id) => id !== fromId)
+          : toIds.find((id) => id !== fromId) ?? toIds.at(-1);
+        const from = fromId ? boardRef.current.elements[fromId] : null;
+        const to = toId ? boardRef.current.elements[toId] : null;
+        if (!from || !to || from.id === to.id) {
+          setCommandFeedback("Select two different elements to connect.");
+          return "rejected";
+        }
+        const fromCenter = elementCenter(from);
+        const toCenter = elementCenter(to);
+        const start = connectorAnchorPoint(from, "auto", toCenter);
+        const end = connectorAnchorPoint(to, "auto", fromCenter);
+        commitSceneElementsAsBatch([createBoardSceneElement({
+          id: crypto.randomUUID(),
+          boardId: boardSessionIdRef.current,
+          kind: "connector",
+          pathKind: intent.pathKind,
+          transform: boundsBetween(start, end),
+          start: { point: start, binding: { elementId: from.id, anchor: "auto" }, decoration: "none" },
+          end: { point: end, binding: { elementId: to.id, anchor: "auto" }, decoration: "solid_arrow" },
+          label: createRichTextDocument(intent.label ?? ""),
+          ...(accountUserId ? { creatorId: accountUserId } : {}),
+        })]);
+        return "applied";
+      }
+
+      if (intent.type === "select_all") {
+        const ids = Object.values(boardRef.current.elements)
+          .filter((element) =>
+            element.status === "active" && element.visible && !element.legacyStrokeId,
+          )
+          .sort((left, right) => left.zIndex - right.zIndex)
+          .map(({ id }) => id);
+        selectSceneElements(ids);
+        return "applied";
+      }
+
+      const ids = targetIds(intent.target);
+      if (ids.length === 0) {
+        setCommandFeedback("I couldn't find a visible element matching that request.");
+        return "rejected";
+      }
+      if (intent.target.kind === "visible_label" && ids.length > 1) {
+        setCommandFeedback("More than one visible element matches that name; select one first.");
+        return "rejected";
+      }
+      if (intent.type === "delete") {
+        const deleted = deleteSceneElementsAsBatch(ids);
+        if (deleted.length === 0) {
+          setCommandFeedback("Unlock the requested element before deleting it.");
+          return "rejected";
+        }
+        return "applied";
+      }
+      if (intent.type === "rename") {
+        const changes = ids.flatMap((id) => {
+          const element = boardRef.current.elements[id];
+          return element && !sceneElementLockedForMutation(boardRef.current, element)
+            ? [{ elementId: id, patches: sceneElementRenamePatches(element, intent.label) }]
+            : [];
+        });
+        if (changes.length === 0) {
+          setCommandFeedback("Unlock the requested element before renaming it.");
+          return "rejected";
+        }
+        patchSceneElements(changes);
+        return "applied";
+      }
+      if (intent.type === "move") {
+        const elements = ids.flatMap((id) => {
+          const element = boardRef.current.elements[id];
+          return element && !sceneElementLockedForMutation(boardRef.current, element) ? [element] : [];
+        });
+        if (elements.length === 0) {
+          setCommandFeedback("Unlock the requested element before moving it.");
+          return "rejected";
+        }
+        patchSceneElements(buildUniformSceneMoveChanges(
+          boardRef.current,
+          elements,
+          intent.dx,
+          intent.dy,
+        ));
+        return "applied";
+      }
+      if (intent.type === "resize") {
+        const changes: { elementId: string; patches: BoardElementPatchOperation[] }[] = ids.flatMap((id) => {
+          const element = boardRef.current.elements[id];
+          if (!element || sceneElementLockedForMutation(boardRef.current, element)) return [];
+          const width = Math.max(1, element.transform.width * intent.scaleX);
+          const height = Math.max(1, element.transform.height * intent.scaleY);
+          return [{
+            elementId: id,
+            patches: [
+              { op: "field.set" as const, path: ["transform", "x"], value: element.transform.x - (width - element.transform.width) / 2 },
+              { op: "field.set" as const, path: ["transform", "y"], value: element.transform.y - (height - element.transform.height) / 2 },
+              { op: "field.set" as const, path: ["transform", "width"], value: width },
+              { op: "field.set" as const, path: ["transform", "height"], value: height },
+            ],
+          }];
+        });
+        if (changes.length === 0) {
+          setCommandFeedback("Unlock the requested element before resizing it.");
+          return "rejected";
+        }
+        patchSceneElements(changes);
+        return "applied";
+      }
+      if (intent.type === "style") {
+        const changes = ids.flatMap((id) => {
+          const element = boardRef.current.elements[id];
+          return element && !sceneElementLockedForMutation(boardRef.current, element)
+            ? [{ elementId: id, patches: sceneElementColorPatches(element, intent.color) }]
+            : [];
+        });
+        if (changes.length === 0) {
+          setCommandFeedback("Unlock the requested element before styling it.");
+          return "rejected";
+        }
+        patchSceneElements(changes);
+        return "applied";
+      }
+      if (intent.type === "group") {
+        const members = ids.flatMap((id) => boardRef.current.elements[id] ? [boardRef.current.elements[id]!] : []);
+        if (
+          members.length === 0 ||
+          members.some((member) => sceneElementLockedForMutation(boardRef.current, member))
+        ) {
+          setCommandFeedback("Unlock the selected elements before grouping them.");
+          return "rejected";
+        }
+        const bounds = sceneElementUnionBounds(members, 48);
+        const section = commitSceneElement(createBoardSceneElement({
+          id: crypto.randomUUID(),
+          boardId: boardSessionIdRef.current,
+          kind: "section",
+          transform: { ...bounds, rotation: 0 },
+          memberIds: ids,
+          title: createRichTextDocument(intent.label ?? "Section"),
+          ...(accountUserId ? { creatorId: accountUserId } : {}),
+        }));
+        patchSceneElements(ids.map((memberId) => ({
+          elementId: memberId,
+          patches: [{ op: "field.set" as const, path: ["sectionId"], value: section.id }],
+        })), { recordHistory: false });
+        return "applied";
+      }
+      if (intent.type === "layout") {
+        const elements = ids.flatMap((id) => {
+          const element = boardRef.current.elements[id];
+          return element && !sceneElementLockedForMutation(boardRef.current, element)
+            ? [element]
+            : [];
+        });
+        if (elements.length === 0) {
+          setCommandFeedback("Unlock the selected elements before laying them out.");
+          return "rejected";
+        }
+        const placements = layoutSceneElements(elements, intent.direction);
+        patchSceneElements([...placements].flatMap(([id, point]) => {
+          const element = boardRef.current.elements[id];
+          return element ? [{
+            elementId: id,
+            patches: sceneElementMovePatches(
+              element,
+              point.x - element.transform.x,
+              point.y - element.transform.y,
+            ),
+          }] : [];
+        }));
+        return "applied";
+      }
+      return "unrecognized";
+    },
+    [
+      accountUserId,
+      commitSceneElement,
+      commitSceneElementsAsBatch,
+      createSceneElementAtPoint,
+      deleteSceneElementsAsBatch,
+      insertLinkAtPoint,
+      patchSceneElements,
+      requestMediaAtPoint,
+      selectSceneElements,
+    ],
+  );
+
+  const prepareSceneFanIn = useCallback(
+    (instruction: string, voiceTurnId?: string): IntentPreparationOutcome | null => {
+      const resolution = resolveExistingBoardFanIn(
+        instruction,
+        buildSceneFanInContext(boardRef.current, selectedElementIdsRef.current),
+      );
+      if (resolution.status === "unrecognized") return null;
+      if (resolution.status === "already_satisfied") {
+        pendingSemanticClarificationRef.current = null;
+        setIntentCommandText("");
+        setSpeechRecognitionStatus("command-recognized");
+        setCommandFeedback("The requested connections are already present.");
+        appendCopilotActivity({
+          source: voiceTurnId ? "Voice" : "Airo",
+          title: "Board already up to date",
+          detail: "The requested connections are already present.",
+          tone: "success",
+        });
+        return {
+          result: "no-op",
+          preparedText: instruction,
+          source: "deterministic",
+          stepCount: 0,
+        };
+      }
+      const drafts = resolution.plan.actions.flatMap((action) => {
+        if (action.type !== "connect") return [];
+        const fromId = action.from.kind === "visible_label"
+          ? resolveSceneIntentTargetIds(
+              boardRef.current,
+              { kind: "visible_label", label: action.from.label },
+              selectedElementIdsRef.current,
+            )[0]
+          : undefined;
+        const toId = action.to.kind === "visible_label"
+          ? resolveSceneIntentTargetIds(
+              boardRef.current,
+              { kind: "visible_label", label: action.to.label },
+              selectedElementIdsRef.current,
+            )[0]
+          : undefined;
+        const from = fromId ? boardRef.current.elements[fromId] : null;
+        const to = toId ? boardRef.current.elements[toId] : null;
+        if (!from || !to || from.id === to.id) return [];
+        const fromCenter = elementCenter(from);
+        const toCenter = elementCenter(to);
+        const start = connectorAnchorPoint(from, "auto", toCenter);
+        const end = connectorAnchorPoint(to, "auto", fromCenter);
+        return [createBoardSceneElement({
+          id: crypto.randomUUID(),
+          boardId: boardSessionIdRef.current,
+          kind: "connector",
+          pathKind: "bent",
+          transform: boundsBetween(start, end),
+          start: { point: start, binding: { elementId: from.id, anchor: "auto" }, decoration: "none" },
+          end: { point: end, binding: { elementId: to.id, anchor: "auto" }, decoration: "solid_arrow" },
+          label: createRichTextDocument(action.label ?? ""),
+          ...(accountUserId ? { creatorId: accountUserId } : {}),
+        })];
+      });
+      if (drafts.length !== resolution.plan.actions.length || drafts.length === 0) return null;
+      pendingSemanticClarificationRef.current = null;
+      setIntentCommandText("");
+      setSpeechRecognitionStatus("command-recognized");
+      commitSceneElementsAsBatch(drafts, { select: false });
+      setCommandFeedback(`Applied: Connect ${drafts.length} relationship${drafts.length === 1 ? "" : "s"}.`);
+      appendCopilotActivity({
+        source: voiceTurnId ? "Voice" : "Airo",
+        title: "Board updated",
+        detail: `Connected ${drafts.length} relationship${drafts.length === 1 ? "" : "s"}.`,
+        tone: "success",
+      });
+      return {
+        result: "applied",
+        preparedText: instruction,
+        source: "deterministic",
+        stepCount: drafts.length,
+      };
+    },
+    [accountUserId, appendCopilotActivity, commitSceneElementsAsBatch],
+  );
 
   /** Screen (canvas CSS px) → board coordinates through the live viewport. */
   const toBoardPoint = useCallback(
@@ -1396,10 +3003,35 @@ export function AirboardPrototype({
       boardViewportRef.current = clamped;
       const rounded = Math.round(clamped.scale * 100) / 100;
       setViewportScale((value) => (value === rounded ? value : rounded));
+      setViewportRevision((revision) => revision + 1);
       render();
     },
     [currentViewportLimits, render],
   );
+
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (!hash || focusedSectionHashRef.current === hash) return;
+    const sectionId = new URLSearchParams(hash.slice(1)).get("section");
+    if (!sectionId) return;
+    const section = boardRef.current.elements[sectionId];
+    if (section?.kind !== "section" || section.status !== "active") return;
+    focusedSectionHashRef.current = hash;
+    selectSceneElements([section.id], section.id);
+    const limits = currentViewportLimits();
+    const scale = Math.min(
+      1.5,
+      Math.max(0.2, Math.min(
+        (limits.canvasWidth - 80) / Math.max(1, section.transform.width),
+        (limits.canvasHeight - 80) / Math.max(1, section.transform.height),
+      )),
+    );
+    applyViewport({
+      x: limits.canvasWidth / 2 - (section.transform.x + section.transform.width / 2) * scale,
+      y: limits.canvasHeight / 2 - (section.transform.y + section.transform.height / 2) * scale,
+      scale,
+    });
+  }, [applyViewport, currentViewportLimits, sceneRenderVersion, selectSceneElements]);
 
   // Meet surfaces cannot capture media themselves, but the bridge extension
   // on meet.google.com can stream the meeting's camera in. Probe for it once.
@@ -1904,6 +3536,10 @@ export function AirboardPrototype({
           undoStackRef.current = [];
           setSelectedAnnotationId(null);
           setSelectedAnnotationIds([]);
+          setSelectedElementId(null);
+          setSelectedElementIds([]);
+          setEditingElementId(null);
+          setSceneRenderVersion((version) => version + 1);
           refreshRealtimeSpeechKeyterms(result.initialState, []);
           render();
           updateStats();
@@ -2407,6 +4043,7 @@ export function AirboardPrototype({
         forcedStrokeId?: string;
         forcedHandle?: AnnotationResizeHandle;
         placementTool?: ObjectDockTool;
+        creationTool?: CreationToolId;
         catalogCarry?: {
           pickupScreenPoint: { x: number; y: number };
           catalogBounds: {
@@ -2422,12 +4059,20 @@ export function AirboardPrototype({
       objectInteractionInitialStateRef.current = null;
       const inputSource = options.inputSource ?? "pointer";
 
-      const placementTool = options.placementTool ?? activeObjectTool;
+      const creationTool = options.creationTool ?? (
+        !options.placementTool && isScenePlacementTool(activeCreationToolRef.current)
+          ? activeCreationToolRef.current
+          : null
+      );
+      const placementTool = options.placementTool ?? (
+        creationTool ? scenePlacementPreviewTool(creationTool) : activeObjectTool
+      );
       if (isPlacementTool(placementTool)) {
         objectInteractionRef.current = options.catalogCarry
           ? {
               mode: "catalog_carrying",
               tool: placementTool,
+              ...(creationTool ? { creationTool } : {}),
               point,
               pickupScreenPoint: options.catalogCarry.pickupScreenPoint,
               catalogBounds: options.catalogCarry.catalogBounds,
@@ -2436,6 +4081,7 @@ export function AirboardPrototype({
           : {
               mode: "placing",
               tool: placementTool,
+              ...(creationTool ? { creationTool } : {}),
               start: point,
             };
         updatePlacementGhost(placementTool, point, point);
@@ -2623,9 +4269,21 @@ export function AirboardPrototype({
 
       const interaction = objectInteractionRef.current;
       if (interaction?.mode === "placing") {
-        commitPlacementObject(interaction.tool, interaction.start, point);
+        if (interaction.creationTool) {
+          createSceneElementAtPoint(interaction.creationTool, point);
+          setGhostAnnotation(null);
+          setGhostAnnotations([]);
+        } else {
+          commitPlacementObject(interaction.tool, interaction.start, point);
+        }
       } else if (interaction?.mode === "catalog_carrying") {
-        commitPlacementObject(interaction.tool, point);
+        if (interaction.creationTool) {
+          createSceneElementAtPoint(interaction.creationTool, point);
+          setGhostAnnotation(null);
+          setGhostAnnotations([]);
+        } else {
+          commitPlacementObject(interaction.tool, point);
+        }
       } else if (interaction?.mode === "moving" || interaction?.mode === "resizing") {
         const initialState = objectInteractionInitialStateRef.current;
         const undoEvents = initialState
@@ -2647,10 +4305,20 @@ export function AirboardPrototype({
       setAlignmentGuides([]);
       setObjectGestureState("hover");
     },
-    [commitActiveEraseInteraction, commitPlacementObject, selectedAnnotationIds],
+    [
+      commitActiveEraseInteraction,
+      commitPlacementObject,
+      createSceneElementAtPoint,
+      selectedAnnotationIds,
+    ],
   );
 
   const cancelObjectInteraction = useCallback(() => {
+    const cancelledCreationTool =
+      (objectInteractionRef.current?.mode === "placing" ||
+        objectInteractionRef.current?.mode === "catalog_carrying")
+        ? objectInteractionRef.current.creationTool
+        : null;
     if (objectInteractionInitialStateRef.current) {
       boardRef.current = objectInteractionInitialStateRef.current;
       render();
@@ -2667,6 +4335,10 @@ export function AirboardPrototype({
     setGhostAnnotations([]);
     setAlignmentGuides([]);
     setActiveObjectTool("select");
+    if (cancelledCreationTool) {
+      setActiveCreationTool("move");
+      activeCreationToolRef.current = "move";
+    }
     setLastGestureIntent({ intent: "cancel", confidence: 0 });
   }, [render, updateStats]);
 
@@ -2748,14 +4420,18 @@ export function AirboardPrototype({
       const candidates: {
         id: string;
         element: HTMLButtonElement;
+        creationTool?: CreationToolId;
         bounds: { left: number; top: number; width: number; height: number };
         disabled: boolean;
       }[] = [];
-      for (const element of dock.querySelectorAll<HTMLButtonElement>("[data-dock-id]")) {
+      const creationSurface = dock.closest(".creation-surface") ?? dock;
+      for (const element of creationSurface.querySelectorAll<HTMLButtonElement>("[data-dock-id]")) {
         const rect = element.getBoundingClientRect();
+        const creationTool = element.dataset.creationTool as CreationToolId | undefined;
         candidates.push({
           id: element.dataset.dockId ?? "",
           element,
+          ...(creationTool ? { creationTool } : {}),
           disabled: element.disabled,
           bounds: {
             left: rect.left,
@@ -2810,22 +4486,20 @@ export function AirboardPrototype({
         }
         // Reuse the click behavior exactly — one code path for mouse and hand.
         activated.element.click();
-        const left = Math.min(...candidates.map((candidate) => candidate.bounds.left));
-        const top = Math.min(...candidates.map((candidate) => candidate.bounds.top));
-        const right = Math.max(
-          ...candidates.map((candidate) => candidate.bounds.left + candidate.bounds.width),
-        );
-        const bottom = Math.max(
-          ...candidates.map((candidate) => candidate.bounds.top + candidate.bounds.height),
-        );
+        const catalogRegion =
+          activated.element.closest<HTMLElement>(
+            ".creation-popover, .creation-shape-sidebar",
+          ) ?? dock;
+        const catalogRect = catalogRegion.getBoundingClientRect();
         return {
           type: "activated",
           targetId: activatedId,
+          ...(activated.creationTool ? { creationTool: activated.creationTool } : {}),
           catalogBounds: {
-            left: left - canvasRect.left,
-            top: top - canvasRect.top,
-            right: right - canvasRect.left,
-            bottom: bottom - canvasRect.top,
+            left: catalogRect.left - canvasRect.left,
+            top: catalogRect.top - canvasRect.top,
+            right: catalogRect.right - canvasRect.left,
+            bottom: catalogRect.bottom - canvasRect.top,
           },
         };
       }
@@ -3014,8 +4688,15 @@ export function AirboardPrototype({
               ? handleDockGesture(screenPoint, hybridOutput.pinchState)
             : null;
           if (dockOutcome) {
-            const placementTool =
-              dockOutcome.type === "activated"
+            const activatedCreationTool =
+              dockOutcome.type === "activated" ? dockOutcome.creationTool : undefined;
+            const sceneCreationTool =
+              activatedCreationTool && isScenePlacementTool(activatedCreationTool)
+                ? activatedCreationTool
+                : null;
+            const placementTool = sceneCreationTool
+              ? scenePlacementPreviewTool(sceneCreationTool)
+              : dockOutcome.type === "activated" && !activatedCreationTool
                 ? placementToolFromDockTarget(dockOutcome.targetId)
                 : null;
             if (
@@ -3036,13 +4717,14 @@ export function AirboardPrototype({
               beginObjectInteraction(point, {
                 inputSource: "air_gesture",
                 placementTool,
+                ...(sceneCreationTool ? { creationTool: sceneCreationTool } : {}),
                 catalogCarry: {
                   pickupScreenPoint: screenPoint,
                   catalogBounds: dockOutcome.catalogBounds,
                 },
               });
               setCommandFeedback(
-                `Holding ${objectToolLabel(placementTool)}. Drag it onto the diagram, then open your hand to place.`,
+                `Holding ${sceneCreationTool ? creationToolLabel(sceneCreationTool) : objectToolLabel(placementTool)}. Drag it onto the diagram, then open your hand to place.`,
               );
               setObjectGestureState("placing");
               return;
@@ -3141,23 +4823,27 @@ export function AirboardPrototype({
               }
             }
             if (hybridOutput.pinchState === "open") {
-              const placementTool = objectInteractionRef.current?.mode === "placing"
-                ? objectInteractionRef.current.tool
-                : objectInteractionRef.current?.mode === "catalog_carrying"
-                  ? objectInteractionRef.current.tool
-                : activeObjectTool;
+              const placementInteraction =
+                objectInteractionRef.current?.mode === "placing" ||
+                objectInteractionRef.current?.mode === "catalog_carrying"
+                  ? objectInteractionRef.current
+                  : null;
+              const placementTool = placementInteraction?.tool ?? activeObjectTool;
+              const placementLabel = placementInteraction?.creationTool
+                ? creationToolLabel(placementInteraction.creationTool)
+                : objectToolLabel(placementTool);
               if (
                 catalogCarry &&
                 (!catalogCarry.enteredCanvas || !catalogDropPointValid)
               ) {
                 cancelObjectInteraction();
                 setCommandFeedback(
-                  `${objectToolLabel(placementTool)} returned to the catalog. Drag it onto the diagram before releasing.`,
+                  `${placementLabel} returned to the catalog. Drag it onto the diagram before releasing.`,
                 );
               } else {
                 endObjectInteraction(point);
                 setCommandFeedback(
-                  `${objectToolLabel(placementTool)} placed. Close your hand over it to move it again.`,
+                  `${placementLabel} placed. Close your hand over it to move it again.`,
                 );
               }
               cameraPlacementActiveRef.current = false;
@@ -3171,8 +4857,13 @@ export function AirboardPrototype({
           }
 
           const armedPlacementTool = cameraPlacementArmedToolRef.current;
+          const armedCreationTool = isScenePlacementTool(activeCreationToolRef.current)
+            ? activeCreationToolRef.current
+            : null;
           const placementTool =
-            armedPlacementTool ?? (isPlacementTool(activeObjectTool) ? activeObjectTool : null);
+            armedCreationTool
+              ? scenePlacementPreviewTool(armedCreationTool)
+              : armedPlacementTool ?? (isPlacementTool(activeObjectTool) ? activeObjectTool : null);
           if (placementTool && pinchClosed && (pinchJustClosed || Boolean(armedPlacementTool))) {
             cameraPlacementArmedToolRef.current = null;
             cameraPlacementActiveRef.current = true;
@@ -3180,9 +4871,10 @@ export function AirboardPrototype({
             beginObjectInteraction(point, {
               inputSource: "air_gesture",
               placementTool,
+              ...(armedCreationTool ? { creationTool: armedCreationTool } : {}),
             });
             setCommandFeedback(
-              `Holding ${objectToolLabel(placementTool)}. Move your closed hand, then open it to place.`,
+              `Holding ${armedCreationTool ? creationToolLabel(armedCreationTool) : objectToolLabel(placementTool)}. Move your closed hand, then open it to place.`,
             );
             setObjectGestureState("placing");
             return;
@@ -3513,6 +5205,102 @@ export function AirboardPrototype({
         return;
       }
 
+      if (action.type === "scene_created") {
+        sceneRedoStackRef.current.push({ type: "scene_deleted", elementId: action.elementId });
+        applySceneElementLifecycle(action.elementId, "element.deleted");
+        selectSceneElements(selectedElementIdsRef.current.filter((id) => id !== action.elementId));
+        setCommandFeedback("Undid the last scene element.");
+        return;
+      }
+
+      if (action.type === "scene_deleted") {
+        sceneRedoStackRef.current.push({ type: "scene_created", elementId: action.elementId });
+        applySceneElementLifecycle(action.elementId, "element.restored");
+        selectSceneElements([action.elementId], action.elementId);
+        setCommandFeedback("Restored the deleted scene element.");
+        return;
+      }
+
+      if (action.type === "scene_created_batch" || action.type === "scene_deleted_batch") {
+        const deleting = action.type === "scene_created_batch";
+        sceneRedoStackRef.current.push({
+          type: deleting ? "scene_deleted_batch" : "scene_created_batch",
+          elementIds: action.elementIds,
+          ...(action.selectionBefore ? { selectionBefore: action.selectionBefore } : {}),
+          ...(action.selectionAfter ? { selectionAfter: action.selectionAfter } : {}),
+        });
+        const lifecycleIds = deleting
+          ? action.elementIds
+          : [...action.elementIds].reverse();
+        for (const elementId of lifecycleIds) {
+          applySceneElementLifecycle(
+            elementId,
+            deleting ? "element.deleted" : "element.restored",
+          );
+        }
+        selectSceneElements(
+          action.selectionBefore ?? (deleting ? [] : action.elementIds),
+        );
+        setCommandFeedback(deleting ? "Undid the grouped creation." : "Restored the section contents.");
+        return;
+      }
+
+      if (action.type === "scene_patched") {
+        const element = boardRef.current.elements[action.elementId];
+        if (element && action.inversePatches.length > 0) {
+          const redoPatches = invertBoardElementPatches(element, action.inversePatches);
+          if (redoPatches.length > 0) {
+            sceneRedoStackRef.current.push({
+              type: "scene_patched",
+              elementId: action.elementId,
+              inversePatches: redoPatches,
+            });
+          }
+          applyLocalEvent({
+            ...createEventEnvelope({
+              boardSessionId: boardSessionIdRef.current,
+              actorParticipantId: PARTICIPANT_ID,
+            }),
+            type: "element.patched",
+            elementId: action.elementId,
+            patches: action.inversePatches,
+            baseRevision: element.revision,
+          });
+          selectSceneElements([action.elementId], action.elementId);
+        }
+        setCommandFeedback("Undid the last element edit.");
+        return;
+      }
+
+      if (action.type === "scene_batch") {
+        const redoEntries = action.entries.flatMap(({ elementId, inversePatches }) => {
+          const element = boardRef.current.elements[elementId];
+          if (!element) return [];
+          const redoPatches = invertBoardElementPatches(element, inversePatches);
+          return redoPatches.length > 0 ? [{ elementId, inversePatches: redoPatches }] : [];
+        });
+        if (redoEntries.length > 0) {
+          sceneRedoStackRef.current.push({ type: "scene_batch", entries: redoEntries });
+        }
+        for (const { elementId, inversePatches } of [...action.entries].reverse()) {
+          const element = boardRef.current.elements[elementId];
+          if (!element || inversePatches.length === 0) continue;
+          applyLocalEvent({
+            ...createEventEnvelope({
+              boardSessionId: boardSessionIdRef.current,
+              actorParticipantId: PARTICIPANT_ID,
+            }),
+            type: "element.patched",
+            elementId,
+            patches: inversePatches,
+            baseRevision: element.revision,
+          });
+        }
+        selectSceneElements(action.entries.map(({ elementId }) => elementId));
+        setCommandFeedback("Undid the grouped element edit.");
+        return;
+      }
+
       if (action.type === "diagram") {
         const result = applyDiagramUndo(boardRef.current, {
           undoEvents: action.undoEvents,
@@ -3565,24 +5353,112 @@ export function AirboardPrototype({
         return;
       }
 
-      applyLocalEvent({
-        ...createEventEnvelope({
-          boardSessionId: boardSessionIdRef.current,
-          actorParticipantId: PARTICIPANT_ID,
-        }),
-        type: "stroke.restored",
-        strokeIds: action.strokeIds,
-      });
-      setCommandFeedback("Restored the erased objects.");
+      if (action.type === "erase") {
+        applyLocalEvent({
+          ...createEventEnvelope({
+            boardSessionId: boardSessionIdRef.current,
+            actorParticipantId: PARTICIPANT_ID,
+          }),
+          type: "stroke.restored",
+          strokeIds: action.strokeIds,
+        });
+        setCommandFeedback("Restored the erased objects.");
+      }
     },
     [
       applyLocalEvent,
+      applySceneElementLifecycle,
       refreshRealtimeSpeechKeyterms,
       render,
       reportVoiceTrace,
+      selectSceneElements,
       updateStats,
     ],
   );
+
+  const redoLastSceneAction = useCallback(() => {
+    const action = sceneRedoStackRef.current.pop();
+    if (!action || !action.type.startsWith("scene_")) {
+      setCommandFeedback("There is nothing to redo yet.");
+      return;
+    }
+    if (action.type === "scene_created") {
+      undoStackRef.current.push({ type: "scene_deleted", elementId: action.elementId });
+      applySceneElementLifecycle(action.elementId, "element.deleted");
+      selectSceneElements(selectedElementIdsRef.current.filter((id) => id !== action.elementId));
+    } else if (action.type === "scene_deleted") {
+      undoStackRef.current.push({ type: "scene_created", elementId: action.elementId });
+      applySceneElementLifecycle(action.elementId, "element.restored");
+      selectSceneElements([action.elementId], action.elementId);
+    } else if (action.type === "scene_created_batch" || action.type === "scene_deleted_batch") {
+      const deleting = action.type === "scene_created_batch";
+      undoStackRef.current.push({
+        type: deleting ? "scene_deleted_batch" : "scene_created_batch",
+        elementIds: action.elementIds,
+        ...(action.selectionBefore ? { selectionBefore: action.selectionBefore } : {}),
+        ...(action.selectionAfter ? { selectionAfter: action.selectionAfter } : {}),
+      });
+      const lifecycleIds = deleting
+        ? action.elementIds
+        : [...action.elementIds].reverse();
+      for (const elementId of lifecycleIds) {
+        applySceneElementLifecycle(
+          elementId,
+          deleting ? "element.deleted" : "element.restored",
+        );
+      }
+      selectSceneElements(
+        action.selectionAfter ?? (deleting ? [] : action.elementIds),
+      );
+    } else if (action.type === "scene_patched") {
+      const element = boardRef.current.elements[action.elementId];
+      if (element) {
+        const inversePatches = invertBoardElementPatches(element, action.inversePatches);
+        undoStackRef.current.push({
+          type: "scene_patched",
+          elementId: action.elementId,
+          inversePatches,
+        });
+        applyLocalEvent({
+          ...createEventEnvelope({
+            boardSessionId: boardSessionIdRef.current,
+            actorParticipantId: PARTICIPANT_ID,
+          }),
+          type: "element.patched",
+          elementId: action.elementId,
+          patches: action.inversePatches,
+          baseRevision: element.revision,
+        });
+        selectSceneElements([action.elementId], action.elementId);
+      }
+    } else if (action.type === "scene_batch") {
+      const inverseEntries = action.entries.flatMap(({ elementId, inversePatches }) => {
+        const element = boardRef.current.elements[elementId];
+        if (!element) return [];
+        const nextInverse = invertBoardElementPatches(element, inversePatches);
+        return nextInverse.length > 0 ? [{ elementId, inversePatches: nextInverse }] : [];
+      });
+      if (inverseEntries.length > 0) {
+        undoStackRef.current.push({ type: "scene_batch", entries: inverseEntries });
+      }
+      for (const { elementId, inversePatches } of action.entries) {
+        const element = boardRef.current.elements[elementId];
+        if (!element || inversePatches.length === 0) continue;
+        applyLocalEvent({
+          ...createEventEnvelope({
+            boardSessionId: boardSessionIdRef.current,
+            actorParticipantId: PARTICIPANT_ID,
+          }),
+          type: "element.patched",
+          elementId,
+          patches: inversePatches,
+          baseRevision: element.revision,
+        });
+      }
+      selectSceneElements(action.entries.map(({ elementId }) => elementId));
+    }
+    setCommandFeedback("Redid the last scene change.");
+  }, [applyLocalEvent, applySceneElementLifecycle, selectSceneElements]);
 
   const cancelPendingIntent = useCallback((message = "Cancelled the pending command.") => {
     semanticIntentRequestIdRef.current += 1;
@@ -4189,6 +6065,39 @@ export function AirboardPrototype({
           stepCount: visibilityIntent ? 1 : 0,
         };
       }
+      const sceneFanIn = prepareSceneFanIn(instruction, voiceTurnId);
+      if (sceneFanIn) return sceneFanIn;
+      const sceneIntent = parseBoardSceneIntent(instruction);
+      const sceneExecution = sceneIntent
+        ? executeSceneIntent(sceneIntent)
+        : "unrecognized";
+      if (sceneIntent && sceneExecution !== "unrecognized") {
+        pendingSemanticClarificationRef.current = null;
+        setIntentCommandText("");
+        setSpeechRecognitionStatus(
+          sceneExecution === "rejected" ? "command-rejected" : "command-recognized",
+        );
+        if (sceneExecution === "applied" && sceneIntent.type !== "invalid") {
+          setCommandFeedback(`Applied: ${sceneIntentFeedback(sceneIntent)}.`);
+          appendCopilotActivity({
+            source: voiceTurnId ? "Voice" : "Airo",
+            title: "Board updated",
+            detail: instruction,
+            tone: "success",
+          });
+        }
+        return {
+          result:
+            sceneExecution === "applied"
+              ? "applied"
+              : sceneExecution === "rejected"
+                ? "rejected"
+                : "no-op",
+          preparedText: instruction,
+          source: "deterministic",
+          stepCount: sceneExecution === "applied" ? 1 : 0,
+        };
+      }
       const desiredGraphCorrection = parseDesiredGraphCorrection(instruction);
       if (desiredGraphCorrection) {
         pendingSemanticClarificationRef.current = null;
@@ -4603,8 +6512,10 @@ export function AirboardPrototype({
     },
     [
       appendCopilotActivity,
+      executeSceneIntent,
       hoverStrokeId,
       prepareIntentCommand,
+      prepareSceneFanIn,
       prepareSemanticActionPlan,
       reportAttributedVoiceFollowUp,
     ],
@@ -5177,6 +7088,8 @@ export function AirboardPrototype({
       ) => processDetectedHandsForTest(hands, timestampMs, metadata),
       emitRemoteBoardEvent: (event: BoardEvent) =>
         applyRemoteEventRef.current(event),
+      prepareLegacyIntentCommandForEval: (instruction: string) =>
+        prepareIntentCommand(instruction),
       openPttGate: () => openVoiceGate({ mode: "ptt" }),
       emitPalmVoiceGestureFrame: (frame: PalmVoiceGestureFrame) =>
         processPalmVoiceGestureFrame(frame),
@@ -5240,7 +7153,9 @@ export function AirboardPrototype({
           activeTool: activeObjectTool,
           interactionMode: interaction?.mode ?? null,
           carriedTool:
-            interaction?.mode === "catalog_carrying" ? interaction.tool : null,
+            interaction?.mode === "catalog_carrying"
+              ? interaction.creationTool ?? interaction.tool
+              : null,
           enteredCanvas:
             interaction?.mode === "catalog_carrying"
               ? interaction.enteredCanvas
@@ -5257,22 +7172,33 @@ export function AirboardPrototype({
       setViewport: (viewport: BoardViewport) => {
         boardViewportRef.current = clampViewport(viewport, currentViewportLimits());
         setViewportScale(Math.round(boardViewportRef.current.scale * 100) / 100);
+        setViewportRevision((revision) => revision + 1);
         render();
       },
       getBoardSummary: () => {
         const committed = Object.values(boardRef.current.strokes).filter(
           (stroke) => stroke.status === "committed" && stroke.annotation,
         );
+        const sceneElements = Object.values(boardRef.current.elements)
+          .filter((element) => element.status === "active" && !element.legacyStrokeId)
+          .sort((left, right) => left.zIndex - right.zIndex);
         return {
-          objectCount: committed.length,
-          labels: committed.map((stroke) => stroke.annotation?.label ?? ""),
-          positions: committed.map((stroke) => {
-            const bounds = stroke.annotation?.bounds;
-            return bounds
-              ? { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }
-              : null;
-          }),
-          selectedCount: selectedAnnotationIdsRef.current.length,
+          objectCount: committed.length + sceneElements.length,
+          labels: [
+            ...committed.map((stroke) => stroke.annotation?.label ?? ""),
+            ...sceneElements.map(sceneElementReferenceLabel),
+          ],
+          positions: [
+            ...committed.map((stroke) => {
+              const bounds = stroke.annotation?.bounds;
+              return bounds
+                ? { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }
+                : null;
+            }),
+            ...sceneElements.map(elementCenter),
+          ],
+          selectedCount:
+            selectedAnnotationIdsRef.current.length + selectedElementIdsRef.current.length,
           boardSessionId: boardSessionIdRef.current,
           syncStatus: boardSyncStatusRef.current,
         };
@@ -5291,6 +7217,7 @@ export function AirboardPrototype({
     processDetectedHandsForTest,
     processPalmVoiceGestureFrame,
     processSnapGestureFrame,
+    prepareIntentCommand,
     render,
     routeFinalTranscript,
     setDiagramVisibility,
@@ -7118,14 +9045,23 @@ export function AirboardPrototype({
         event.key.toLowerCase() === "z"
       ) {
         event.preventDefault();
-        undoLastAction("keyboard");
+        if (event.shiftKey) redoLastSceneAction();
+        else undoLastAction("keyboard");
         return;
       }
 
-      if (inputMode === "touchpad" && shortcutsActiveRef.current && event.key.toLowerCase() === "e") {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "y") {
         event.preventDefault();
-        temporaryEraserActiveRef.current = true;
-        setTemporaryEraserActive(true);
+        redoLastSceneAction();
+        return;
+      }
+
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "d") {
+        const elementId = selectedElementIdsRef.current.at(-1);
+        if (elementId) {
+          event.preventDefault();
+          duplicateSceneElement(elementId);
+        }
         return;
       }
 
@@ -7134,44 +9070,35 @@ export function AirboardPrototype({
         return;
       }
 
-      if (inputMode === "touchpad" && shortcutsActiveRef.current && event.code === "Space") {
+      if (shortcutsActiveRef.current && event.code === "Space") {
         event.preventDefault();
         panActiveRef.current = true;
-        if (!pointerStrokeIdRef.current && !pointerErasingRef.current) {
+        setTemporaryHandActive(true);
+        if (
+          inputMode === "touchpad" &&
+          !pointerStrokeIdRef.current &&
+          !pointerErasingRef.current
+        ) {
           setTouchpadState("PANNING");
         }
         return;
       }
 
-      if (event.code === "Space") {
-        event.preventDefault();
-        setInputPaused((value) => !value);
-      }
-
-      if (inputMode === "gesture" && (event.key === "Delete" || event.key === "Backspace")) {
+      if (
+        inputMode === "gesture" &&
+        !event.shiftKey &&
+        (event.key === "Delete" || event.key === "Backspace")
+      ) {
+        if (selectedElementIdsRef.current.length > 0) {
+          event.preventDefault();
+          selectedElementIdsRef.current.forEach(deleteSceneElement);
+          return;
+        }
         if (selectedAnnotationIds.length === 0) {
           return;
         }
         event.preventDefault();
         prepareIntentCommand("delete selected");
-        return;
-      }
-
-      // Camera-off parity for hold-to-edit: holding V with a single selected
-      // object scopes the mic to it, exactly like grab-and-hold does by hand.
-      if (
-        voiceCaptureAvailable &&
-        inputMode === "gesture" &&
-        shortcutsActiveRef.current &&
-        event.key.toLowerCase() === "v" &&
-        !event.repeat
-      ) {
-        const selected = selectedAnnotationIdsRef.current;
-        if (selected.length === 1 && selected[0]) {
-          event.preventDefault();
-          scopedKeyActiveRef.current = true;
-          openVoiceGate({ mode: "scoped", strokeId: selected[0] });
-        }
         return;
       }
 
@@ -7182,16 +9109,31 @@ export function AirboardPrototype({
       // browser's native focus movement, so focus can always leave the canvas
       // (WCAG 2.1.2). Enter/exit follows the standard composite-widget pattern.
       if (shortcutsActiveRef.current && event.key === "Tab") {
-        const objectIds = getSelectableAnnotationIds(boardRef.current);
-        if (objectIds.length > 0) {
-          const current = selectedAnnotationIdsRef.current;
-          const currentId = current.length === 1 ? current[0] : null;
-          const currentIndex = currentId ? objectIds.indexOf(currentId) : -1;
+        const objects = [
+          ...getSelectableAnnotationIds(boardRef.current).map((id) => ({ source: "stroke" as const, id })),
+          ...sceneElementsForRender(boardRef.current)
+            .filter((element) => !element.legacyStrokeId)
+            .sort((a, b) => a.zIndex - b.zIndex)
+            .map((element) => ({ source: "element" as const, id: element.id })),
+        ];
+        if (objects.length > 0) {
+          const currentId = selectedElementIdsRef.current.length === 1
+            ? selectedElementIdsRef.current[0]
+            : selectedAnnotationIdsRef.current.length === 1
+              ? selectedAnnotationIdsRef.current[0]
+              : null;
+          const currentIndex = currentId ? objects.findIndex(({ id }) => id === currentId) : -1;
           const selectAt = (index: number) => {
-            const nextId = objectIds[index]!;
-            setSelectedAnnotationId(nextId);
-            setSelectedAnnotationIds([nextId]);
-            setEditingAnnotationId(null);
+            const next = objects[index]!;
+            if (next.source === "element") {
+              selectSceneElements([next.id], next.id);
+            } else {
+              setSelectedElementId(null);
+              setSelectedElementIds([]);
+              setSelectedAnnotationId(next.id);
+              setSelectedAnnotationIds([next.id]);
+              setEditingAnnotationId(null);
+            }
           };
           if (!event.shiftKey) {
             if (currentIndex === -1) {
@@ -7199,7 +9141,7 @@ export function AirboardPrototype({
               selectAt(0);
               return;
             }
-            if (currentIndex < objectIds.length - 1) {
+            if (currentIndex < objects.length - 1) {
               event.preventDefault();
               selectAt(currentIndex + 1);
               return;
@@ -7219,6 +9161,14 @@ export function AirboardPrototype({
       // Enter / F2 open the label editor for the single selected object, mirroring
       // double-click. The auto-focus effect then puts the cursor in the input.
       if (shortcutsActiveRef.current && (event.key === "Enter" || event.key === "F2")) {
+        const selectedSceneId = selectedElementIdsRef.current.length === 1
+          ? selectedElementIdsRef.current[0]
+          : null;
+        if (selectedSceneId) {
+          event.preventDefault();
+          setEditingElementId(selectedSceneId);
+          return;
+        }
         const current = selectedAnnotationIdsRef.current;
         if (current.length === 1) {
           const stroke = boardRef.current.strokes[current[0]!];
@@ -7242,9 +9192,22 @@ export function AirboardPrototype({
         });
         activeStrokeIdRef.current = null;
         pointerStrokeIdRef.current = null;
+        handPanRef.current = null;
+        setCanvasNavMode(null);
         gesturePathRef.current = [];
         setSelectedAnnotationId(null);
         setSelectedAnnotationIds([]);
+        setSelectedElementId(null);
+        setSelectedElementIds([]);
+        setHoverElementId(null);
+        setEditingElementId(null);
+        if (sceneDrawingRef.current) {
+          const transientId = sceneDrawingRef.current.elementId;
+          sceneDrawingRef.current = null;
+          const { [transientId]: _transient, ...activeStrokes } = boardRef.current.activeStrokes;
+          boardRef.current = { ...boardRef.current, activeStrokes };
+          render();
+        }
         setLabelDraft("");
         setEditingAnnotationId(null);
         if (inputMode === "gesture") {
@@ -7254,11 +9217,6 @@ export function AirboardPrototype({
     };
 
     const handleKeyUp = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() === "e") {
-        temporaryEraserActiveRef.current = false;
-        setTemporaryEraserActive(false);
-      }
-
       if (event.key.toLowerCase() === "v" && scopedKeyActiveRef.current) {
         scopedKeyActiveRef.current = false;
         closeVoiceGate("scoped");
@@ -7270,6 +9228,7 @@ export function AirboardPrototype({
 
       if (event.code === "Space") {
         panActiveRef.current = false;
+        setTemporaryHandActive(false);
         if (inputMode === "touchpad" && touchpadState === "PANNING") {
           setTouchpadState("HOVER");
         }
@@ -7277,6 +9236,10 @@ export function AirboardPrototype({
     };
 
     const handleBlur = () => {
+      handPanRef.current = null;
+      panActiveRef.current = false;
+      setTemporaryHandActive(false);
+      setCanvasNavMode(null);
       endActiveTouchpadInteraction("PAUSED");
       setTouchpadState("PAUSED");
     };
@@ -7294,10 +9257,15 @@ export function AirboardPrototype({
     cancelPendingIntent,
     closeVoiceGate,
     commitStroke,
+      deleteSceneElement,
+      duplicateSceneElement,
     endActiveTouchpadInteraction,
     inputMode,
     openVoiceGate,
     prepareIntentCommand,
+    redoLastSceneAction,
+    render,
+    selectSceneElements,
     selectedAnnotationIds,
     setDiagramVisibility,
     touchpadState,
@@ -7347,12 +9315,85 @@ export function AirboardPrototype({
 
       if (inputMode === "gesture") {
         event.preventDefault();
-        const point = toBoardPoint(getCanvasPoint(event));
+        const screenPoint = getCanvasPoint(event);
+        const point = toBoardPoint(screenPoint);
         const inputSource = strokeInputSourceForPointer(
           event.pointerType,
           inputMode,
         );
+        if (activeCreationToolRef.current === "hand" || panActiveRef.current) {
+          activePointerIdRef.current = event.pointerId;
+          event.currentTarget.setPointerCapture(event.pointerId);
+          handPanRef.current = {
+            pointerId: event.pointerId,
+            start: screenPoint,
+            viewport: { ...boardViewportRef.current },
+          };
+          setCanvasNavMode("pan");
+          moveCursorPoint({ point, mode: "panning", inputSource });
+          return;
+        }
+        const creationTool = activeCreationToolRef.current;
+        if (creationTool === "draw:eraser") {
+          activePointerIdRef.current = event.pointerId;
+          event.currentTarget.setPointerCapture(event.pointerId);
+          pointerErasingRef.current = true;
+          eraseSceneDrawingsAt(point);
+          moveCursorPoint({ point, mode: "erasing", inputSource });
+          return;
+        }
+        if (
+          creationTool === "draw:marker" ||
+          creationTool === "draw:highlighter" ||
+          creationTool === "draw:washi"
+        ) {
+          activePointerIdRef.current = event.pointerId;
+          event.currentTarget.setPointerCapture(event.pointerId);
+          beginSceneDrawing(
+            event.pointerId,
+            { ...makePoint(point.x, point.y), inputSource },
+            creationTool.slice("draw:".length) as "marker" | "highlighter" | "washi",
+            event.shiftKey,
+          );
+          return;
+        }
+        if (creationTool === "insert:media") {
+          requestMediaAtPoint(point);
+          return;
+        }
+        if (creationTool === "insert:link") {
+          void insertLinkAtPoint(point);
+          return;
+        }
+        if (creationTool === "stamp" || creationTool === "insert:face-stamp") {
+          const created = createSceneElementAtPoint(creationTool, point);
+          if (created?.kind === "stamp") {
+            activePointerIdRef.current = event.pointerId;
+            event.currentTarget.setPointerCapture(event.pointerId);
+            stampHoldRef.current = {
+              pointerId: event.pointerId,
+              elementId: created.id,
+              startedAt: performance.now(),
+              transform: { ...created.transform },
+            };
+          }
+          return;
+        }
+        if (isScenePlacementTool(creationTool)) {
+          createSceneElementAtPoint(creationTool, point);
+          return;
+        }
+        const sceneHit = findSceneElementAtPoint(boardRef.current, point);
+        const v2SceneHit = sceneHit?.legacyStrokeId ? null : sceneHit;
         if (event.shiftKey) {
+          if (v2SceneHit) {
+            const next = selectedElementIdsRef.current.includes(v2SceneHit.id)
+              ? selectedElementIdsRef.current.filter((id) => id !== v2SceneHit.id)
+              : [...selectedElementIdsRef.current, v2SceneHit.id];
+            selectSceneElements(next, v2SceneHit.id);
+            setHoverElementId(v2SceneHit.id);
+            return;
+          }
           const hitStroke = findAnnotationObjectAtPoint(boardRef.current, point);
           if (hitStroke) {
             toggleAnnotationObject(hitStroke.id);
@@ -7372,6 +9413,12 @@ export function AirboardPrototype({
           moveCursorPoint({ point, mode: "erasing", inputSource });
           return;
         }
+        if (v2SceneHit && beginSceneMove(event.pointerId, v2SceneHit, point, inputSource)) {
+          setHoverElementId(v2SceneHit.id);
+          moveCursorPoint({ point, mode: "writing", inputSource });
+          return;
+        }
+        if (!v2SceneHit) selectSceneElements([]);
         beginObjectInteraction(point, { inputSource });
         moveCursorPoint({ point, mode: "writing", inputSource });
         return;
@@ -7432,12 +9479,20 @@ export function AirboardPrototype({
     },
     [
       eraseAt,
+      beginSceneDrawing,
+      beginSceneMove,
       beginObjectInteraction,
+      createSceneElementAtPoint,
+      eraseSceneDrawingsAt,
       inputMode,
       inputPaused,
+      insertLinkAtPoint,
       makePoint,
       moveCursorPoint,
+      patchSceneElements,
+      requestMediaAtPoint,
       selectAnnotationObject,
+      selectSceneElements,
       startStroke,
       touchpadConfig,
       touchpadTool,
@@ -7511,12 +9566,48 @@ export function AirboardPrototype({
           return;
         }
 
-        const canvasPoint = toBoardPoint(getCanvasPoint(event));
+        const screenPoint = getCanvasPoint(event);
+        const canvasPoint = toBoardPoint(screenPoint);
         const inputSource = strokeInputSourceForPointer(
           event.pointerType,
           inputMode,
         );
         event.preventDefault();
+        if (activePointerIdRef.current === null) {
+          const hovered = findSceneElementAtPoint(boardRef.current, canvasPoint);
+          setHoverElementId(hovered?.legacyStrokeId ? null : hovered?.id ?? null);
+        }
+        const handPan = handPanRef.current;
+        if (handPan && handPan.pointerId === event.pointerId) {
+          applyViewport(
+            panViewport(
+              handPan.viewport,
+              screenPoint.x - handPan.start.x,
+              screenPoint.y - handPan.start.y,
+              currentViewportLimits(),
+            ),
+          );
+          moveCursorPoint({ point: canvasPoint, mode: "panning", inputSource });
+          return;
+        }
+        if (pointerErasingRef.current && activeCreationToolRef.current === "draw:eraser") {
+          eraseSceneDrawingsAt(canvasPoint);
+          moveCursorPoint({ point: canvasPoint, mode: "erasing", inputSource });
+          return;
+        }
+        if (
+          appendSceneDrawingPoint(event.pointerId, {
+            ...makePoint(canvasPoint.x, canvasPoint.y),
+            inputSource,
+          })
+        ) {
+          moveCursorPoint({ point: canvasPoint, mode: "writing", inputSource });
+          return;
+        }
+        if (previewSceneMove(event.pointerId, canvasPoint)) {
+          moveCursorPoint({ point: canvasPoint, mode: "writing", inputSource });
+          return;
+        }
         moveObjectInteraction(canvasPoint, { inputSource });
         moveCursorPoint({
           point: canvasPoint,
@@ -7541,12 +9632,17 @@ export function AirboardPrototype({
     },
     [
       appendStrokePoint,
+      appendSceneDrawingPoint,
+      applyViewport,
+      currentViewportLimits,
       eraseAt,
+      eraseSceneDrawingsAt,
       inputMode,
       inputPaused,
       makePoint,
       moveObjectInteraction,
       moveCursorPoint,
+      previewSceneMove,
       touchpadConfig,
       touchpadTool,
     ],
@@ -7566,7 +9662,49 @@ export function AirboardPrototype({
 
       if (inputMode === "gesture") {
         event.preventDefault();
-        endObjectInteraction(toBoardPoint(getCanvasPoint(event)));
+        if (handPanRef.current?.pointerId === event.pointerId) {
+          handPanRef.current = null;
+          activePointerIdRef.current = null;
+          setCanvasNavMode(null);
+          return;
+        }
+        const boardPoint = toBoardPoint(getCanvasPoint(event));
+        const stampHold = stampHoldRef.current;
+        if (stampHold?.pointerId === event.pointerId) {
+          stampHoldRef.current = null;
+          const heldMs = Math.max(0, performance.now() - stampHold.startedAt);
+          const scale = Math.min(3, 1 + Math.max(0, heldMs - 180) / 650);
+          if (scale > 1.02) {
+            const width = stampHold.transform.width * scale;
+            const height = stampHold.transform.height * scale;
+            patchSceneElements([{
+              elementId: stampHold.elementId,
+              patches: [
+                { op: "field.set", path: ["transform", "x"], value: stampHold.transform.x - (width - stampHold.transform.width) / 2 },
+                { op: "field.set", path: ["transform", "y"], value: stampHold.transform.y - (height - stampHold.transform.height) / 2 },
+                { op: "field.set", path: ["transform", "width"], value: width },
+                { op: "field.set", path: ["transform", "height"], value: height },
+              ],
+            }], { recordHistory: false });
+          }
+          activePointerIdRef.current = null;
+          return;
+        }
+        if (commitSceneDrawing(event.pointerId)) {
+          pointerStrokeIdRef.current = null;
+          activePointerIdRef.current = null;
+          return;
+        }
+        if (pointerErasingRef.current && activeCreationToolRef.current === "draw:eraser") {
+          pointerErasingRef.current = false;
+          activePointerIdRef.current = null;
+          return;
+        }
+        if (commitSceneMove(event.pointerId, boardPoint)) {
+          activePointerIdRef.current = null;
+          return;
+        }
+        endObjectInteraction(boardPoint);
         pointerStrokeIdRef.current = null;
         activePointerIdRef.current = null;
         return;
@@ -7576,7 +9714,15 @@ export function AirboardPrototype({
       pointerStrokeIdRef.current = null;
       pointerErasingRef.current = false;
     },
-    [commitStroke, endActiveTouchpadInteraction, endObjectInteraction, inputMode],
+    [
+      commitSceneDrawing,
+      commitSceneMove,
+      commitStroke,
+      endActiveTouchpadInteraction,
+      endObjectInteraction,
+      inputMode,
+      patchSceneElements,
+    ],
   );
 
   const handleCanvasDoubleClick = useCallback(
@@ -7590,6 +9736,13 @@ export function AirboardPrototype({
         x: event.clientX - rect.left,
         y: event.clientY - rect.top,
       });
+      const sceneElement = findSceneElementAtPoint(boardRef.current, point);
+      if (sceneElement && !sceneElement.legacyStrokeId) {
+        event.preventDefault();
+        selectSceneElements([sceneElement.id], sceneElement.id);
+        setEditingElementId(sceneElement.id);
+        return;
+      }
       const hitStroke = findAnnotationObjectAtPoint(boardRef.current, point);
       if (!hitStroke?.annotation || !annotationNeedsLabel(hitStroke.annotation)) {
         return;
@@ -7601,7 +9754,7 @@ export function AirboardPrototype({
       setLabelDraft(hitStroke.annotation.label ?? "");
       setEditingAnnotationId(hitStroke.id);
     },
-    [inputMode],
+    [inputMode, selectSceneElements],
   );
 
   const handlePointerLeave = useCallback(
@@ -7696,12 +9849,74 @@ export function AirboardPrototype({
     [cancelObjectInteraction, updatePlacementGhost],
   );
 
+  const activateCreationTool = useCallback(
+    (tool: CreationToolId) => {
+      if (isScenePlacementTool(tool)) {
+        activateObjectTool(scenePlacementPreviewTool(tool));
+        setActiveCreationTool(tool);
+        activeCreationToolRef.current = tool;
+        return;
+      }
+      if (tool === "draw:eraser") {
+        activateObjectTool("eraser");
+        setActiveCreationTool(tool);
+        activeCreationToolRef.current = tool;
+        return;
+      }
+
+      activateObjectTool("select");
+      setActiveCreationTool(tool);
+      activeCreationToolRef.current = tool;
+      setCommandFeedback(
+        `${creationToolLabel(tool)} ready. Click the board to place it, or drag it from the shape library.`,
+      );
+    },
+    [activateObjectTool],
+  );
+
+  useEffect(() => {
+    const legacyTool = legacyToolForCreationTool(activeCreationTool);
+    if (
+      activeObjectTool === "select" &&
+      isScenePlacementTool(activeCreationTool) &&
+      legacyTool &&
+      legacyTool !== "select" &&
+      activeCreationTool !== "hand"
+    ) {
+      setActiveCreationTool("move");
+    }
+  }, [activeCreationTool, activeObjectTool]);
+
+  useEffect(() => {
+    const handleCreationShortcut = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        !shortcutsActiveRef.current ||
+        event.repeat ||
+        target?.tagName === "INPUT" ||
+        target?.tagName === "SELECT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.isContentEditable
+      ) {
+        return;
+      }
+      const tool = resolveCreationShortcut(event);
+      if (!tool) return;
+      event.preventDefault();
+      setOpenCatalogId(null);
+      activateCreationTool(tool);
+    };
+    window.addEventListener("keydown", handleCreationShortcut);
+    return () => window.removeEventListener("keydown", handleCreationShortcut);
+  }, [activateCreationTool]);
+
   // Catalog drag-and-drop: dropping a shape thumbnail commits a default-size
   // object at the drop point, reusing the placement pipeline (snap included).
   const handleCatalogDrop = useCallback(
     (event: ReactDragEvent<HTMLCanvasElement>) => {
+      const creationTool = event.dataTransfer.getData(CREATION_DRAG_MIME) as CreationToolId;
       const tool = event.dataTransfer.getData(CATALOG_DRAG_MIME) as ObjectDockTool;
-      if (!tool || !isPlacementTool(tool)) {
+      if ((!tool || !isPlacementTool(tool)) && !creationTool) {
         return;
       }
       event.preventDefault();
@@ -7710,15 +9925,40 @@ export function AirboardPrototype({
         return;
       }
       setOpenCatalogId(null);
+      const boardPoint = toBoardPoint({
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      });
+      if (creationTool) {
+        if (creationTool === "insert:media") {
+          requestMediaAtPoint(boardPoint);
+          return;
+        }
+        if (creationTool === "insert:link") {
+          void insertLinkAtPoint(boardPoint);
+          return;
+        }
+        const created = createSceneElementAtPoint(creationTool, boardPoint);
+        if (created) return;
+        activateCreationTool(creationTool);
+        setCommandFeedback(
+          `${creationToolLabel(creationTool)} armed at the drop point. Click to place it.`,
+        );
+        return;
+      }
       commitPlacementObject(
         tool,
-        toBoardPoint({
-          x: event.clientX - rect.left,
-          y: event.clientY - rect.top,
-        }),
+        boardPoint,
       );
     },
-    [commitPlacementObject, toBoardPoint],
+    [
+      activateCreationTool,
+      commitPlacementObject,
+      createSceneElementAtPoint,
+      insertLinkAtPoint,
+      requestMediaAtPoint,
+      toBoardPoint,
+    ],
   );
 
   const markerStatus = getMarkerStatus(gestureResult);
@@ -8113,6 +10353,17 @@ export function AirboardPrototype({
                     <button
                       type="button"
                       role="menuitem"
+                      onClick={() => {
+                        redoLastSceneAction();
+                        setMoreMenuOpen(false);
+                      }}
+                    >
+                      <span aria-hidden="true">↷</span>
+                      Redo
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
                       data-testid="diagram-visibility-menu-action"
                       onClick={() => {
                         setDiagramVisibility(!diagramVisibleRef.current, "menu");
@@ -8215,6 +10466,7 @@ export function AirboardPrototype({
                 </button>
               ) : null}
               <button type="button" onClick={() => undoLastAction("button")}>Undo</button>
+              <button type="button" onClick={redoLastSceneAction}>Redo</button>
               <button type="button" onClick={() => setInputPaused((value) => !value)}>
                 {inputPaused ? "Resume" : "Pause"}
               </button>
@@ -8485,6 +10737,7 @@ export function AirboardPrototype({
                   {speechArmed ? "Stop Airo" : "Start Airo"}
                 </button>
                 <button type="button" onClick={() => undoLastAction("button")}>Undo</button>
+                <button type="button" onClick={redoLastSceneAction}>Redo</button>
                 <label className="desktop-overlay-scrim-control" htmlFor="desktop-scrim-opacity">
                   <span>Dark overlay</span>
                   <input
@@ -8540,115 +10793,74 @@ export function AirboardPrototype({
               </small>
             </div>
           ) : null}
+          {!broadcastSafe ? (
+            <SceneContextToolbar
+              selected={selectedSceneElement}
+              onPatch={(patches) => {
+                if (selectedElementId) patchSceneElement(selectedElementId, patches);
+              }}
+              onDelete={() => {
+                if (selectedElementId) deleteSceneElement(selectedElementId);
+              }}
+              onDuplicate={() => {
+                if (selectedElementId) duplicateSceneElement(selectedElementId);
+              }}
+              onCopySectionLink={copySectionLink}
+              onDeleteSectionWithContents={deleteSectionWithContents}
+              onMediaReplace={requestMediaReplacement}
+              onMediaPlaybackChange={setMediaPlayback}
+              onWashiPatternReplace={requestWashiPatternReplacement}
+              onQuickCreate={quickCreateSceneElement}
+              onMindMapAddChild={addMindMapChild}
+              onMindMapAddSibling={addMindMapSibling}
+              onMindMapAttachSelection={attachMindMapSelection}
+            />
+          ) : null}
           {inputMode === "gesture" ? (
-            <div ref={dockRef} className="object-dock catalog-dock" role="toolbar" aria-label="Shape catalog">
-              <button
-                data-dock-id="select"
-                className={`catalog-dock-button ${
-                  dockButtonClass(activeObjectTool === "select", dockGestureHover === "select") ?? ""
-                }`}
-                type="button"
-                aria-pressed={activeObjectTool === "select"}
-                aria-label="Select"
-                data-tooltip="Select"
-                title="Select"
-                onClick={() => {
-                  setOpenCatalogId(null);
-                  activateObjectTool("select");
+            <>
+              <CreationToolbar
+                dockRef={dockRef}
+                activeTool={temporaryHandActive ? "hand" : activeCreationTool}
+                openPanel={openCatalogId}
+                gestureHover={dockGestureHover}
+                onOpenPanelChange={setOpenCatalogId}
+                onToolSelect={activateCreationTool}
+                onStampSelect={(emoji) => {
+                  setSelectedStampEmoji(emoji);
+                  setCommandFeedback(`${emoji} stamp ready. Click the board to place it.`);
                 }}
-              >
-                <CatalogGlyph tool="select" />
-                <span className="sr-only">Select</span>
-              </button>
-              <span className="catalog-dock-divider" aria-hidden="true" />
-              {OBJECT_CATALOG.map((category) => {
-                const isOpen = openCatalogId === category.id;
-                const holdsActiveTool = category.tools.some(
-                  (item) => item.tool === activeObjectTool,
-                );
-                const categoryIconTool = holdsActiveTool ? activeObjectTool : category.iconTool;
-                return (
-                  <div key={category.id} className="catalog-category" data-catalog-id={category.id}>
-                    <button
-                      data-dock-id={`category:${category.id}`}
-                      className={`catalog-dock-button catalog-category-trigger ${
-                        dockButtonClass(
-                          isOpen || holdsActiveTool,
-                          dockGestureHover === `category:${category.id}`,
-                        ) ?? ""
-                      }`}
-                      type="button"
-                      aria-expanded={isOpen}
-                      aria-haspopup="menu"
-                      aria-label={category.label}
-                      data-tooltip={`${category.label} elements`}
-                      title={`${category.label} elements`}
-                      onClick={() =>
-                        setOpenCatalogId((current) =>
-                          current === category.id ? null : category.id,
-                        )
-                      }
-                    >
-                      <CatalogGlyph tool={categoryIconTool} />
-                      <span className="sr-only">{category.label} elements</span>
-                      <span aria-hidden="true" className="catalog-menu-indicator">+</span>
-                    </button>
-                    {isOpen ? (
-                      <div className="catalog-flyout" role="menu" aria-label={`${category.label} shapes`}>
-                        {category.tools.map((item) => (
-                          <button
-                            key={item.tool}
-                            data-dock-id={`tool:${item.tool}`}
-                            role="menuitem"
-                            className={`catalog-tile ${
-                              dockButtonClass(
-                                activeObjectTool === item.tool,
-                                dockGestureHover === `tool:${item.tool}`,
-                              ) ?? ""
-                            }`}
-                            type="button"
-                            aria-label={item.label}
-                            data-tooltip={item.label}
-                            title={`${item.label} — click or pinch to arm placement, or drag onto the board`}
-                            draggable
-                            onDragStart={(event) => {
-                              event.dataTransfer.setData(CATALOG_DRAG_MIME, item.tool);
-                              event.dataTransfer.effectAllowed = "copy";
-                            }}
-                            onClick={() => {
-                              activateObjectTool(item.tool);
-                              setOpenCatalogId(null);
-                            }}
-                          >
-                            <CatalogGlyph tool={item.tool} />
-                            <span className="sr-only">{item.label}</span>
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-              <span className="catalog-dock-divider" aria-hidden="true" />
-              <button
-                data-dock-id="eraser"
-                className={`catalog-dock-button ${
-                  dockButtonClass(activeObjectTool === "eraser", dockGestureHover === "eraser") ?? ""
-                }`}
-                type="button"
-                aria-pressed={activeObjectTool === "eraser"}
-                aria-label="Eraser"
-                data-tooltip="Eraser"
-                title="Eraser"
-                onClick={() => {
+                onTableSizeSelect={(rows, columns) => {
+                  pendingTableSizeRef.current = { rows, columns };
+                  activateCreationTool("table");
                   setOpenCatalogId(null);
-                  activateObjectTool("eraser");
+                  setCommandFeedback(`${rows} × ${columns} table ready. Click the board to place it.`);
                 }}
-              >
-                <CatalogGlyph tool="eraser" />
-                <span className="sr-only">Eraser</span>
-              </button>
-            </div>
+              />
+              <input
+                ref={mediaInputRef}
+                className="sr-only"
+                type="file"
+                tabIndex={-1}
+                aria-hidden="true"
+                accept=".png,.jpg,.jpeg,.heic,.heif,.tif,.tiff,.webp,.gif,.mp4,.mov,.webm,image/png,image/jpeg,image/heic,image/heif,image/tiff,image/webp,image/gif,video/mp4,video/quicktime,video/webm"
+                onChange={(event) => {
+                  void handleMediaFileSelected(event.currentTarget.files?.[0] ?? null);
+                  event.currentTarget.value = "";
+                }}
+              />
+              <input
+                ref={washiPatternInputRef}
+                className="sr-only"
+                type="file"
+                tabIndex={-1}
+                aria-hidden="true"
+                accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif"
+                onChange={(event) => {
+                  void handleWashiPatternSelected(event.currentTarget.files?.[0] ?? null);
+                  event.currentTarget.value = "";
+                }}
+              />
+            </>
           ) : null}
           {voiceCaptureAvailable && voiceGate && !broadcastSafe ? (
             <div
@@ -8735,11 +10947,14 @@ export function AirboardPrototype({
             aria-label="Airboard diagram canvas. Press Tab or Shift+Tab to cycle through objects and Enter or F2 to edit the selected object's label. Type commands such as add, move, or delete in the Intent Canvas field to create and change objects."
             className={`board-canvas ${inputMode === "touchpad" ? "touchpad-mode" : ""} ${
               inputMode === "gesture" ? "gesture-mode" : ""
-            }`}
+            } ${activeCreationTool === "hand" || temporaryHandActive ? "hand-mode" : ""}`}
             tabIndex={0}
             onContextMenu={(event) => event.preventDefault()}
             onDragOver={(event) => {
-              if (event.dataTransfer.types.includes(CATALOG_DRAG_MIME)) {
+              if (
+                event.dataTransfer.types.includes(CATALOG_DRAG_MIME) ||
+                event.dataTransfer.types.includes(CREATION_DRAG_MIME)
+              ) {
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "copy";
               }
@@ -8771,6 +10986,15 @@ export function AirboardPrototype({
             }}
             onWheel={handleWheel}
           />
+          {!broadcastSafe ? (
+            <div className="scene-playback-layer">
+              <ScenePlaybackOverlay
+                selected={selectedSceneElement}
+                {...(effectiveAccessToken ? { accessToken: effectiveAccessToken } : {})}
+                viewport={playbackViewport}
+              />
+            </div>
+          ) : null}
           {debugVisible && !broadcastSafe && gestureResult?.rawCursorPoint ? (
             <span
               className="debug-point raw"
@@ -9358,6 +11582,7 @@ export function AirboardPrototype({
                   canvasNavTrackerRef.current?.reset();
                   gestureActionEvidenceTrackerRef.current?.reset();
                   setViewportScale(1);
+                  setViewportRevision((revision) => revision + 1);
                   setCanvasNavMode(null);
                   setInputMode(nextMode);
                   render();
@@ -9932,6 +12157,768 @@ function objectToolLabel(tool: ObjectDockTool): string {
   return OBJECT_DOCK.find((item) => item.tool === tool)?.label ?? "Object";
 }
 
+function isScenePlacementTool(tool: CreationToolId): boolean {
+  return (
+    tool === "sticky" ||
+    tool.startsWith("shape:") ||
+    tool.startsWith("connector:") ||
+    tool === "text" ||
+    tool === "section" ||
+    tool === "table" ||
+    tool === "stamp" ||
+    tool === "insert:face-stamp" ||
+    tool === "insert:code-block" ||
+    tool === "insert:mind-map"
+  );
+}
+
+function scenePlacementPreviewTool(tool: CreationToolId): ObjectDockTool {
+  const legacyTool = legacyToolForCreationTool(tool) as ObjectDockTool | null;
+  if (legacyTool && isPlacementTool(legacyTool)) return legacyTool;
+  if (tool === "connector:straight") return "arrow";
+  if (tool.startsWith("connector:")) return "connector";
+  if (tool === "stamp" || tool === "insert:face-stamp") return "circle";
+  return "box";
+}
+
+function sceneElementKindLabel(kind: BoardSceneElement["kind"]): string {
+  return {
+    drawing: "Drawing",
+    sticky: "Sticky note",
+    shape: "Shape",
+    connector: "Connector",
+    text: "Text",
+    section: "Section",
+    table: "Table",
+    stamp: "Stamp",
+    media: "Media",
+    link_preview: "Link preview",
+    code_block: "Code block",
+    mind_map_node: "Mind map",
+  }[kind];
+}
+
+function strokePointBounds(
+  points: readonly Pick<StrokePoint, "x" | "y">[],
+  padding = 0,
+): { x: number; y: number; width: number; height: number } {
+  const xs = points.map(({ x }) => x);
+  const ys = points.map(({ y }) => y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  return {
+    x: minX - padding,
+    y: minY - padding,
+    width: Math.max(1, maxX - minX + padding * 2),
+    height: Math.max(1, maxY - minY + padding * 2),
+  };
+}
+
+function drawingElementIntersectsCircle(
+  element: Extract<BoardSceneElement, { kind: "drawing" }>,
+  center: AnnotationPoint,
+  radius: number,
+): boolean {
+  const hitRadius = radius + element.style.thickness / 2;
+  if (element.points.length === 1) {
+    const point = element.points[0]!;
+    return Math.hypot(point.x - center.x, point.y - center.y) <= hitRadius;
+  }
+  for (let index = 1; index < element.points.length; index += 1) {
+    const start = element.points[index - 1];
+    const end = element.points[index];
+    if (start && end && pointToSegmentDistance(center, start, end) <= hitRadius) return true;
+  }
+  return false;
+}
+
+function pointToSegmentDistance(
+  point: AnnotationPoint,
+  start: AnnotationPoint,
+  end: AnnotationPoint,
+): number {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  if (dx === 0 && dy === 0) return Math.hypot(point.x - start.x, point.y - start.y);
+  const amount = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / (dx * dx + dy * dy)));
+  return Math.hypot(point.x - (start.x + amount * dx), point.y - (start.y + amount * dy));
+}
+
+function decodeCanvasImage(source: string, signal: AbortSignal): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.decoding = "async";
+    const abort = () => {
+      image.src = "";
+      reject(new DOMException("Image loading aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    image.onload = () => {
+      signal.removeEventListener("abort", abort);
+      resolve(image);
+    };
+    image.onerror = () => {
+      signal.removeEventListener("abort", abort);
+      reject(new Error("BOARD_ASSET_IMAGE_DECODE_FAILED"));
+    };
+    image.src = source;
+  });
+}
+
+function translateSceneElement(
+  source: BoardSceneElement,
+  dx: number,
+  dy: number,
+): BoardSceneElement {
+  const element = structuredClone(source);
+  element.transform.x += dx;
+  element.transform.y += dy;
+  if (element.kind === "connector") {
+    element.start.point.x += dx;
+    element.start.point.y += dy;
+    element.end.point.x += dx;
+    element.end.point.y += dy;
+    element.controlPoints = element.controlPoints.map((point) => ({ x: point.x + dx, y: point.y + dy }));
+  }
+  if (element.kind === "drawing") {
+    element.points = element.points.map((point) => ({ ...point, x: point.x + dx, y: point.y + dy }));
+  }
+  return element;
+}
+
+function sceneSectionMembers(
+  state: BoardState,
+  section: Extract<BoardSceneElement, { kind: "section" }>,
+): BoardSceneElement[] {
+  const memberIds = new Set<string>();
+  const pendingSections = [section.id];
+  const visitedSections = new Set<string>();
+  while (pendingSections.length > 0) {
+    const sectionId = pendingSections.shift()!;
+    if (visitedSections.has(sectionId)) continue;
+    visitedSections.add(sectionId);
+    const current = state.elements[sectionId];
+    if (current?.kind === "section") {
+      for (const memberId of current.memberIds) memberIds.add(memberId);
+    }
+    for (const element of Object.values(state.elements)) {
+      if (element.sectionId === sectionId) memberIds.add(element.id);
+    }
+    for (const memberId of memberIds) {
+      if (state.elements[memberId]?.kind === "section" && !visitedSections.has(memberId)) {
+        pendingSections.push(memberId);
+      }
+    }
+  }
+  memberIds.delete(section.id);
+  return [...memberIds].flatMap((id) => {
+    const element = state.elements[id];
+    return element?.status === "active" ? [element] : [];
+  });
+}
+
+function buildSceneMovePreview(
+  movement: SceneMoveSnapshot,
+  dx: number,
+  dy: number,
+  baseElements: Readonly<Record<string, BoardSceneElement>>,
+): Record<string, BoardSceneElement> {
+  const elements = { ...baseElements };
+  for (const original of [movement.element, ...movement.relatedElements, ...movement.boundConnectors]) {
+    elements[original.id] = structuredClone(original);
+  }
+  for (const original of [movement.element, ...movement.relatedElements]) {
+    elements[original.id] = translateSceneElement(original, dx, dy);
+  }
+  for (const connector of movement.boundConnectors) {
+    elements[connector.id] = rebindSceneConnector(connector, elements);
+  }
+  return elements;
+}
+
+function buildUniformSceneMoveChanges(
+  state: BoardState,
+  roots: readonly BoardSceneElement[],
+  dx: number,
+  dy: number,
+): { elementId: string; patches: BoardElementPatchOperation[] }[] {
+  const moving = new Map<string, BoardSceneElement>();
+  const enqueue = (element: BoardSceneElement) => {
+    if (element.status === "active" && !moving.has(element.id)) moving.set(element.id, element);
+  };
+  roots.forEach(enqueue);
+  for (const root of roots) {
+    if (root.kind === "section") sceneSectionMembers(state, root).forEach(enqueue);
+  }
+  let discovered = true;
+  while (discovered) {
+    discovered = false;
+    for (const candidate of Object.values(state.elements)) {
+      if (candidate.status !== "active" || moving.has(candidate.id) || !candidate.attachment) continue;
+      const follows = candidate.attachment.kind === "element"
+        ? moving.has(candidate.attachment.elementId)
+        : moving.has(candidate.attachment.tableId);
+      if (follows) {
+        enqueue(candidate);
+        discovered = true;
+      }
+    }
+  }
+  const previewElements = { ...state.elements };
+  for (const element of moving.values()) {
+    previewElements[element.id] = translateSceneElement(element, dx, dy);
+  }
+  const boundConnectors = Object.values(state.elements).filter(
+    (candidate): candidate is Extract<BoardSceneElement, { kind: "connector" }> =>
+      candidate.kind === "connector" &&
+      candidate.status === "active" &&
+      !moving.has(candidate.id) &&
+      Boolean(
+        (candidate.start.binding && moving.has(candidate.start.binding.elementId)) ||
+        (candidate.end.binding && moving.has(candidate.end.binding.elementId)),
+      ),
+  );
+  for (const connector of boundConnectors) {
+    previewElements[connector.id] = rebindSceneConnector(connector, previewElements);
+  }
+  const changes = [...moving.values()].map((element) => ({
+    elementId: element.id,
+    patches: sceneElementMovePatches(element, dx, dy),
+  }));
+  for (const connector of boundConnectors) {
+    const rebound = previewElements[connector.id];
+    if (rebound?.kind === "connector") {
+      changes.push({ elementId: connector.id, patches: connectorGeometryPatches(rebound) });
+    }
+  }
+  for (const root of roots) {
+    if (root.kind === "section") continue;
+    const moved = previewElements[root.id];
+    if (moved) appendSectionContainmentChanges(state, root, moved, changes);
+  }
+  return changes;
+}
+
+function rebindSceneConnector(
+  source: Extract<BoardSceneElement, { kind: "connector" }>,
+  elements: Readonly<Record<string, BoardSceneElement>>,
+): Extract<BoardSceneElement, { kind: "connector" }> {
+  const connector = structuredClone(source);
+  if (connector.start.binding) {
+    const target = elements[connector.start.binding.elementId];
+    if (target?.status === "active") {
+      const previous = connector.start.point;
+      const next = connectorAnchorPoint(target, connector.start.binding.anchor, connector.end.point);
+      connector.start.point = next;
+      if (connector.controlPoints[0]) {
+        connector.controlPoints[0] = {
+          x: connector.controlPoints[0].x + next.x - previous.x,
+          y: connector.controlPoints[0].y + next.y - previous.y,
+        };
+      }
+    }
+  }
+  if (connector.end.binding) {
+    const target = elements[connector.end.binding.elementId];
+    if (target?.status === "active") {
+      const previous = connector.end.point;
+      const next = connectorAnchorPoint(target, connector.end.binding.anchor, connector.start.point);
+      connector.end.point = next;
+      const lastIndex = connector.controlPoints.length - 1;
+      if (lastIndex >= 0 && connector.controlPoints[lastIndex]) {
+        connector.controlPoints[lastIndex] = {
+          x: connector.controlPoints[lastIndex]!.x + next.x - previous.x,
+          y: connector.controlPoints[lastIndex]!.y + next.y - previous.y,
+        };
+      }
+    }
+  }
+  const points = [connector.start.point, ...connector.controlPoints, connector.end.point];
+  const bounds = strokePointBounds(points);
+  connector.transform = { ...bounds, rotation: 0 };
+  return connector;
+}
+
+function connectorAnchorPoint(
+  element: BoardSceneElement,
+  anchor: "top" | "right" | "bottom" | "left" | "center" | "auto" | undefined,
+  toward: AnnotationPoint,
+): AnnotationPoint {
+  const center = elementCenter(element);
+  const { x, y, width, height } = element.transform;
+  if (anchor === "top") return { x: center.x, y };
+  if (anchor === "right") return { x: x + width, y: center.y };
+  if (anchor === "bottom") return { x: center.x, y: y + height };
+  if (anchor === "left") return { x, y: center.y };
+  if (anchor === "center") return center;
+  const dx = toward.x - center.x;
+  const dy = toward.y - center.y;
+  if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return center;
+  const halfWidth = Math.max(0.5, width / 2);
+  const halfHeight = Math.max(0.5, height / 2);
+  const scale = 1 / Math.max(Math.abs(dx) / halfWidth, Math.abs(dy) / halfHeight);
+  return { x: center.x + dx * scale, y: center.y + dy * scale };
+}
+
+function connectorGeometryPatches(
+  connector: Extract<BoardSceneElement, { kind: "connector" }>,
+): BoardElementPatchOperation[] {
+  return [
+    { op: "field.set", path: ["transform"], value: connector.transform },
+    { op: "field.set", path: ["start", "point"], value: connector.start.point },
+    { op: "field.set", path: ["end", "point"], value: connector.end.point },
+    { op: "field.set", path: ["controlPoints"], value: connector.controlPoints },
+  ];
+}
+
+function appendSectionContainmentChanges(
+  state: BoardState,
+  original: BoardSceneElement,
+  moved: BoardSceneElement,
+  changes: { elementId: string; patches: BoardElementPatchOperation[] }[],
+): void {
+  const nextSection = Object.values(state.elements)
+    .filter(
+      (candidate): candidate is Extract<BoardSceneElement, { kind: "section" }> =>
+        candidate.kind === "section" &&
+        candidate.status === "active" &&
+        candidate.visible &&
+        candidate.id !== moved.id &&
+        sceneElementFitsInside(moved, candidate),
+    )
+    .sort((a, b) => b.zIndex - a.zIndex)[0];
+  const previousSection = original.sectionId
+    ? state.elements[original.sectionId]
+    : null;
+  const previousSectionId = previousSection?.kind === "section" ? previousSection.id : undefined;
+  if (previousSectionId === nextSection?.id) return;
+
+  const movedChange = changes.find(({ elementId }) => elementId === moved.id);
+  const membershipPatch: BoardElementPatchOperation = nextSection
+    ? { op: "field.set", path: ["sectionId"], value: nextSection.id }
+    : { op: "field.unset", path: ["sectionId"] };
+  if (movedChange) movedChange.patches.push(membershipPatch);
+  else changes.push({ elementId: moved.id, patches: [membershipPatch] });
+
+  if (previousSection?.kind === "section") {
+    changes.push({
+      elementId: previousSection.id,
+      patches: [{
+        op: "field.set",
+        path: ["memberIds"],
+        value: previousSection.memberIds.filter((id) => id !== moved.id),
+      }],
+    });
+  }
+  if (nextSection) {
+    changes.push({
+      elementId: nextSection.id,
+      patches: [{
+        op: "field.set",
+        path: ["memberIds"],
+        value: [...new Set([...nextSection.memberIds, moved.id])],
+      }],
+    });
+  }
+}
+
+function sceneElementFitsInside(
+  element: BoardSceneElement,
+  section: Extract<BoardSceneElement, { kind: "section" }>,
+): boolean {
+  const outer = section.transform;
+  const inner = element.transform;
+  return (
+    inner.x >= outer.x &&
+    inner.y >= outer.y &&
+    inner.x + inner.width <= outer.x + outer.width &&
+    inner.y + inner.height <= outer.y + outer.height
+  );
+}
+
+function tableCellIdAtPoint(
+  table: Extract<BoardSceneElement, { kind: "table" }>,
+  point: AnnotationPoint,
+): string | null {
+  const relativeX = (point.x - table.transform.x) / Math.max(1, table.transform.width);
+  const relativeY = (point.y - table.transform.y) / Math.max(1, table.transform.height);
+  if (relativeX < 0 || relativeX > 1 || relativeY < 0 || relativeY > 1) return null;
+  const totalWidth = table.columns.reduce((sum, column) => sum + Math.max(1, column.width), 0);
+  const totalHeight = table.rows.reduce((sum, row) => sum + Math.max(1, row.height), 0);
+  const targetX = relativeX * totalWidth;
+  const targetY = relativeY * totalHeight;
+  let width = 0;
+  const column = table.columns.find((candidate) => {
+    width += Math.max(1, candidate.width);
+    return targetX <= width;
+  });
+  let height = 0;
+  const row = table.rows.find((candidate) => {
+    height += Math.max(1, candidate.height);
+    return targetY <= height;
+  });
+  if (!row || !column) return null;
+  return Object.values(table.cells).find(
+    (cell) => cell.rowId === row.id && cell.columnId === column.id,
+  )?.id ?? null;
+}
+
+function resolveSceneIntentTargetIds(
+  state: BoardState,
+  target: { kind: "selection" } | { kind: "visible_label"; label: string },
+  selectionIds: readonly string[],
+): string[] {
+  if (target.kind === "selection") {
+    return selectionIds.filter((id) => state.elements[id]?.status === "active");
+  }
+  const requested = normalizeSceneReference(target.label);
+  return Object.values(state.elements)
+    .filter((element) =>
+      element.status === "active" &&
+      sceneElementVisibleForIntent(state, element) &&
+      !element.legacyStrokeId &&
+      sceneElementReferenceLabels(element).some(
+        (label) => normalizeSceneReference(label) === requested,
+      ),
+    )
+    .sort((a, b) => b.zIndex - a.zIndex)
+    .map(({ id }) => id);
+}
+
+function sceneElementVisibleForIntent(
+  state: BoardState,
+  element: BoardSceneElement,
+): boolean {
+  if (!element.visible) return false;
+  const parent = element.sectionId ? state.elements[element.sectionId] : null;
+  return !(
+    parent?.kind === "section" &&
+    parent.status === "active" &&
+    (!parent.visible || parent.collapsed)
+  );
+}
+
+function sceneElementReferenceLabels(element: BoardSceneElement): string[] {
+  const plain = sceneElementPlainLabel(element).trim();
+  if (element.kind === "shape") {
+    const catalog = shapeCatalogEntry(element.shapeKind);
+    return [plain, catalog.name, catalog.kind, ...catalog.aliases].filter(Boolean);
+  }
+  return [plain || sceneElementKindLabel(element.kind)];
+}
+
+function sceneElementLockedForMutation(
+  state: BoardState,
+  element: BoardSceneElement,
+): boolean {
+  if (element.locked) return true;
+  if (element.kind === "section" && element.lockMode !== "none") return true;
+  const parent = element.sectionId ? state.elements[element.sectionId] : null;
+  return Boolean(
+    parent?.kind === "section" &&
+    parent.status === "active" &&
+    parent.lockMode === "all",
+  );
+}
+
+function sceneElementReferenceLabel(element: BoardSceneElement): string {
+  return sceneElementReferenceLabels(element)[0] || sceneElementKindLabel(element.kind);
+}
+
+function normalizeSceneReference(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toLocaleLowerCase("en-US")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/^(?:(?:the|a|an|another)\s+)+/, "")
+    .replace(/\b(?:dataset|datasets)\b/g, "data")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildSceneFanInContext(state: BoardState, selectionIds: readonly string[]) {
+  const selectedSet = new Set(selectionIds);
+  const elements = Object.values(state.elements)
+    .filter((element) =>
+      element.status === "active" &&
+      sceneElementVisibleForIntent(state, element) &&
+      !element.legacyStrokeId &&
+      element.kind !== "connector" &&
+      element.kind !== "drawing",
+    )
+    .sort((left, right) => left.zIndex - right.zIndex);
+  const ordinals = new Map<string, number>();
+  const objects = elements.map((element) => {
+    const nodeType = element.kind === "shape" ? element.shapeKind : element.kind;
+    const ordinal = (ordinals.get(nodeType) ?? 0) + 1;
+    ordinals.set(nodeType, ordinal);
+    return {
+      label: sceneElementReferenceLabel(element),
+      nodeType,
+      ordinal,
+    };
+  });
+  const labelsById = new Map(elements.map((element) => [element.id, sceneElementReferenceLabel(element)]));
+  const edges = Object.values(state.elements).flatMap((element) => {
+    if (
+      element.kind !== "connector" ||
+      element.status !== "active" ||
+      !sceneElementVisibleForIntent(state, element) ||
+      element.legacyStrokeId ||
+      !element.start.binding ||
+      !element.end.binding
+    ) return [];
+    const from = labelsById.get(element.start.binding.elementId);
+    const to = labelsById.get(element.end.binding.elementId);
+    if (!from || !to) return [];
+    const label = richTextToPlainText(element.label).trim();
+    return [{ from: { label: from }, to: { label: to }, ...(label ? { label } : {}) }];
+  });
+  const selected = elements
+    .filter((element) => selectedSet.has(element.id))
+    .map((element) => {
+      const object = objects[elements.indexOf(element)];
+      return object!;
+    });
+  return {
+    selectionCount: selected.length,
+    selected,
+    objects,
+    edges,
+  };
+}
+
+function sceneIntentPlacementPoint(
+  target: BoardSceneElement,
+  direction: "left" | "right" | "up" | "down",
+): AnnotationPoint {
+  const center = elementCenter(target);
+  const horizontal = target.transform.width / 2 + 180;
+  const vertical = target.transform.height / 2 + 130;
+  return {
+    x: center.x + (direction === "left" ? -horizontal : direction === "right" ? horizontal : 0),
+    y: center.y + (direction === "up" ? -vertical : direction === "down" ? vertical : 0),
+  };
+}
+
+function sceneIntentFeedback(intent: Exclude<BoardSceneIntent, { type: "invalid" }>): string {
+  switch (intent.type) {
+    case "create": return `Add ${intent.kind.replaceAll("_", " ")}`;
+    case "create_connected": return "Add and connect shape";
+    case "connect": return "Connect board elements";
+    case "rename": return "Rename board element";
+    case "delete": return "Delete board element";
+    case "move": return "Move board element";
+    case "resize": return "Resize selected object";
+    case "style": return "Color selected object";
+    case "select_all": return "Select every object";
+    case "group": return "Create section around selection";
+    case "layout": return "Lay out board elements";
+  }
+}
+
+function sceneElementPlainLabel(element: BoardSceneElement): string {
+  switch (element.kind) {
+    case "sticky":
+    case "shape":
+    case "text":
+    case "mind_map_node":
+      return richTextToPlainText(element.content);
+    case "connector":
+      return richTextToPlainText(element.label);
+    case "section":
+      return richTextToPlainText(element.title);
+    case "table":
+      return Object.values(element.cells).map((cell) => richTextToPlainText(cell.content)).find(Boolean) ?? "Table";
+    case "stamp":
+      return element.label ?? element.emoji;
+    case "media":
+      return element.altText || element.asset.fileName || "Media";
+    case "link_preview":
+      return element.title ?? element.url;
+    case "code_block":
+      return element.code.split("\n", 1)[0] ?? "Code block";
+    case "drawing":
+      return element.drawingKind;
+  }
+}
+
+function sceneElementRenamePatches(
+  element: BoardSceneElement,
+  label: string,
+): BoardElementPatchOperation[] {
+  switch (element.kind) {
+    case "sticky":
+    case "shape":
+    case "text":
+    case "mind_map_node":
+      return [{ op: "field.set", path: ["content"], value: createRichTextDocument(label) }];
+    case "connector":
+      return [{ op: "field.set", path: ["label"], value: createRichTextDocument(label) }];
+    case "section":
+      return [{ op: "field.set", path: ["title"], value: createRichTextDocument(label) }];
+    case "table": {
+      const cell = Object.values(element.cells)[0];
+      return cell
+        ? [{ op: "table.cell.patched", cellId: cell.id, patch: { content: createRichTextDocument(label) } }]
+        : [];
+    }
+    case "stamp":
+      return [{ op: "field.set", path: ["label"], value: label }];
+    case "media":
+      return [{ op: "field.set", path: ["altText"], value: label }];
+    case "link_preview":
+      return [{ op: "field.set", path: ["title"], value: label }];
+    case "code_block":
+      return [{ op: "field.set", path: ["code"], value: label }];
+    case "drawing":
+      return [{ op: "field.set", path: ["metadata", "label"], value: label }];
+  }
+}
+
+function sceneElementMovePatches(
+  element: BoardSceneElement,
+  dx: number,
+  dy: number,
+): BoardElementPatchOperation[] {
+  const moved = translateSceneElement(element, dx, dy);
+  const patches: BoardElementPatchOperation[] = [
+    { op: "field.set", path: ["transform", "x"], value: moved.transform.x },
+    { op: "field.set", path: ["transform", "y"], value: moved.transform.y },
+  ];
+  if (moved.kind === "connector") {
+    patches.push(
+      { op: "field.set", path: ["start", "point"], value: moved.start.point },
+      { op: "field.set", path: ["end", "point"], value: moved.end.point },
+      { op: "field.set", path: ["controlPoints"], value: moved.controlPoints },
+    );
+  }
+  if (moved.kind === "drawing") {
+    patches.push({ op: "field.set", path: ["points"], value: moved.points });
+  }
+  return patches;
+}
+
+function sceneElementColorPatches(
+  element: BoardSceneElement,
+  color: string,
+): BoardElementPatchOperation[] {
+  switch (element.kind) {
+    case "drawing":
+    case "connector":
+      return [{ op: "field.set", path: ["style", "color"], value: color }];
+    case "sticky":
+      return [{ op: "field.set", path: ["color"], value: color }];
+    case "shape":
+    case "section":
+      return [{ op: "field.set", path: ["style", "fill"], value: color }];
+    case "text":
+      return [{ op: "field.set", path: ["style", "color"], value: color }];
+    case "mind_map_node":
+      return [{ op: "field.set", path: ["style", "fill"], value: color }];
+    case "table":
+      return Object.values(element.cells).map((cell) => ({
+        op: "table.cell.patched" as const,
+        cellId: cell.id,
+        patch: { style: { ...cell.style, fill: color } },
+      }));
+    default:
+      return [{ op: "field.set", path: ["metadata", "accentColor"], value: color }];
+  }
+}
+
+function elementCenter(element: BoardSceneElement): AnnotationPoint {
+  if (element.kind === "connector") {
+    return {
+      x: (element.start.point.x + element.end.point.x) / 2,
+      y: (element.start.point.y + element.end.point.y) / 2,
+    };
+  }
+  return {
+    x: element.transform.x + element.transform.width / 2,
+    y: element.transform.y + element.transform.height / 2,
+  };
+}
+
+function boundsBetween(
+  start: AnnotationPoint,
+  end: AnnotationPoint,
+): BoardSceneElement["transform"] {
+  return {
+    x: Math.min(start.x, end.x),
+    y: Math.min(start.y, end.y),
+    width: Math.max(1, Math.abs(end.x - start.x)),
+    height: Math.max(1, Math.abs(end.y - start.y)),
+    rotation: 0,
+  };
+}
+
+function sceneElementUnionBounds(
+  elements: readonly BoardSceneElement[],
+  padding = 0,
+): { x: number; y: number; width: number; height: number } {
+  const left = Math.min(...elements.map((element) => element.transform.x));
+  const top = Math.min(...elements.map((element) => element.transform.y));
+  const right = Math.max(...elements.map((element) => element.transform.x + element.transform.width));
+  const bottom = Math.max(...elements.map((element) => element.transform.y + element.transform.height));
+  return {
+    x: left - padding,
+    y: top - padding,
+    width: right - left + padding * 2,
+    height: bottom - top + padding * 2,
+  };
+}
+
+function layoutSceneElements(
+  elements: readonly BoardSceneElement[],
+  direction: Extract<BoardSceneIntent, { type: "layout" }>["direction"],
+): Map<string, AnnotationPoint> {
+  const ordered = [...elements].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+  const originX = Math.min(...ordered.map((element) => element.transform.x));
+  const originY = Math.min(...ordered.map((element) => element.transform.y));
+  const gap = 48;
+  const positions = new Map<string, AnnotationPoint>();
+  const columns = direction === "grid" ? Math.max(1, Math.ceil(Math.sqrt(ordered.length))) : ordered.length;
+  let horizontalCursor = originX;
+  let verticalCursor = originY;
+  ordered.forEach((element, index) => {
+    if (direction === "grid") {
+      const column = index % columns;
+      const row = Math.floor(index / columns);
+      const maxWidth = Math.max(...ordered.map((candidate) => candidate.transform.width));
+      const maxHeight = Math.max(...ordered.map((candidate) => candidate.transform.height));
+      positions.set(element.id, { x: originX + column * (maxWidth + gap), y: originY + row * (maxHeight + gap) });
+      return;
+    }
+    if (direction === "left_to_right" || direction === "right_to_left") {
+      positions.set(element.id, { x: horizontalCursor, y: originY });
+      horizontalCursor += element.transform.width + gap;
+    } else {
+      positions.set(element.id, { x: originX, y: verticalCursor });
+      verticalCursor += element.transform.height + gap;
+    }
+  });
+  if (direction === "right_to_left" || direction === "bottom_to_top") {
+    const values = [...positions.values()].reverse();
+    ordered.forEach((element, index) => positions.set(element.id, values[index]!));
+  }
+  return positions;
+}
+
+function mindMapDirectionOffset(
+  direction: Extract<BoardSceneElement, { kind: "mind_map_node" }>["relation"]["direction"],
+  transform: BoardSceneElement["transform"],
+): AnnotationPoint {
+  const horizontal = transform.width + 120;
+  const vertical = transform.height + 96;
+  if (direction === "left") return { x: -horizontal, y: 0 };
+  if (direction === "up") return { x: 0, y: -vertical };
+  if (direction === "down") return { x: 0, y: vertical };
+  return { x: horizontal, y: 0 };
+}
+
 function truncateSpeechTranscript(transcript: string, maxLength = 64): string {
   const normalized = transcript.trim();
   if (normalized.length <= maxLength) {
@@ -10103,13 +13090,6 @@ function getAnnotationHandleAtPoint(
   }
 
   return null;
-}
-
-function dockButtonClass(selected: boolean, gestureHover: boolean): string | undefined {
-  const classes = [selected ? "selected" : null, gestureHover ? "gesture-hover" : null].filter(
-    Boolean,
-  );
-  return classes.length > 0 ? classes.join(" ") : undefined;
 }
 
 // Committed diagram objects in a stable order, for keyboard Tab cycling.

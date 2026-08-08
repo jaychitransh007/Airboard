@@ -24,7 +24,7 @@ const resolved = (actions) => ({
 });
 
 test("capability registry is a versioned source for palette, aliases, and transcription terms", () => {
-  assert.equal(AIRBOARD_SEMANTIC_CAPABILITY_REGISTRY.version, "1.2");
+  assert.equal(AIRBOARD_SEMANTIC_CAPABILITY_REGISTRY.version, "2.0");
   assert.equal(
     AIRBOARD_SEMANTIC_CAPABILITY_REGISTRY.version,
     AIRBOARD_SEMANTIC_CAPABILITY_REGISTRY_VERSION,

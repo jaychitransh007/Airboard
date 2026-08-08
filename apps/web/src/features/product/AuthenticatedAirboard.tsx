@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { BoardState } from "@airboard/core";
+import { BOARD_SCENE_VERSION, type BoardState } from "@airboard/core";
 import { AirboardPrototype } from "../board/AirboardPrototype";
 import { airboardApi } from "../../platform/api";
 import { useAirboardAuth } from "../../platform/auth";
@@ -134,6 +134,8 @@ function normalizeBoardState(value: unknown, boardId: string): BoardState {
   const candidate = value && typeof value === "object" ? value as Partial<BoardState> : {};
   return {
     boardId,
+    sceneVersion: BOARD_SCENE_VERSION,
+    elements: isRecord(candidate.elements) ? candidate.elements as BoardState["elements"] : {},
     strokes: isRecord(candidate.strokes) ? candidate.strokes as BoardState["strokes"] : {},
     activeStrokes: {},
     eraseActions: isRecord(candidate.eraseActions) ? candidate.eraseActions as BoardState["eraseActions"] : {},

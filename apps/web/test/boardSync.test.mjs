@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createInitialBoardState, applyBoardEvent, createEventEnvelope } from "@airboard/core";
+import {
+  createInitialBoardState,
+  applyBoardEvent,
+  createBoardSceneElement,
+  createEventEnvelope,
+} from "@airboard/core";
 import {
   buildBoardWebSocketUrl,
   snapshotBoardEvents,
@@ -247,17 +252,25 @@ test("snapshotBoardEvents seeds committed objects re-addressed to the session", 
     strokeId: "s1",
     points: [{ x: 0, y: 0, t: 0 }],
   });
+  state = applyBoardEvent(state, {
+    ...createEventEnvelope({ boardSessionId: "local-board", actorParticipantId: "p" }),
+    type: "element.created",
+    element: createBoardSceneElement({ id: "sticky", boardId: "local-board", kind: "sticky" }),
+  });
 
   const events = snapshotBoardEvents(state, {
     boardSessionId: "server-session",
     actorParticipantId: "owner-p",
   });
-  assert.equal(events.length, 2);
+  assert.equal(events.length, 3);
   assert.equal(events[0].type, "stroke.started");
   assert.equal(events[0].stroke.boardId, "server-session");
   assert.equal(events[0].boardSessionId, "server-session");
   assert.equal(events[1].type, "stroke.committed");
   assert.equal(events[1].strokeId, "s1");
+  assert.equal(events[2].type, "element.created");
+  assert.equal(events[2].element.id, "sticky");
+  assert.equal(events[2].element.boardId, "server-session");
 });
 
 test("buildBoardWebSocketUrl maps http(s) to ws(s)", () => {

@@ -1,6 +1,7 @@
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import {
+  BOARD_SCENE_VERSION,
   authorizeBoardEvent,
   canJoinBoard,
   shouldLockForOwnerAbsence,
@@ -25,56 +26,16 @@ import { registerControlPlaneRoutes } from "./controlPlaneRoutes";
 import { bearerToken, issueSignedToken, verifySignedToken } from "./signedTokens";
 import { AIRBOARD_CORS_METHODS } from "./cors";
 import { redactSensitiveRequestUrl } from "./requestLogging";
+import {
+  invalidBoardEventReason,
+  isSupportedSceneVersion,
+} from "./boardEventValidation";
 
 type RoomClient = {
   participantId: string;
   socket: WebSocket;
   role: ParticipantRole | null;
 };
-
-// The 16 board event types the reducer understands. Events off the wire are
-// validated against this set before persistence so an unknown/forward-compat or
-// hostile type is never stored (and the reducer's default branch is a backstop).
-const BOARD_EVENT_TYPES: ReadonlySet<string> = new Set([
-  "stroke.started",
-  "stroke.point_added",
-  "stroke.committed",
-  "stroke.label_updated",
-  "stroke.annotation_updated",
-  "erase.committed",
-  "stroke.deleted",
-  "stroke.restored",
-  "undo.requested",
-  "redo.requested",
-  "board.cleared",
-  "cursor.moved",
-  "participant.joined",
-  "participant.left",
-  "owner.presence_changed",
-  "permission.changed",
-]);
-
-/**
- * Reject events the reducer cannot safely apply. Returns null when valid, or a
- * short reason code. Only the fields that can crash the reducer are checked;
- * deeper schema validation is left to the reducer's own guards.
- */
-function invalidBoardEventReason(event: unknown): string | null {
-  if (!event || typeof event !== "object") {
-    return "MALFORMED_EVENT";
-  }
-  const type = (event as { type?: unknown }).type;
-  if (typeof type !== "string" || !BOARD_EVENT_TYPES.has(type)) {
-    return "UNKNOWN_EVENT_TYPE";
-  }
-  if (type === "stroke.point_added") {
-    const point = (event as { point?: { t?: unknown } }).point;
-    if (!point || typeof point !== "object" || !Number.isFinite((point as { t?: unknown }).t)) {
-      return "INVALID_POINT_TIMESTAMP";
-    }
-  }
-  return null;
-}
 
 // Per-connection cache so session-status changes (lock / end / owner-disconnect)
 // are picked up within ~1s while high-frequency events (cursor moves) don't force
@@ -267,6 +228,7 @@ export async function buildServer(config: ApiConfig) {
       });
       return {
         ...result,
+        sceneVersion: BOARD_SCENE_VERSION,
         realtimeTicket: issueSignedToken(config.sessionSigningSecret, {
           purpose: "realtime",
           sub: account.profileId,
@@ -305,6 +267,7 @@ export async function buildServer(config: ApiConfig) {
       });
       return {
         ...result,
+        sceneVersion: BOARD_SCENE_VERSION,
         realtimeTicket: issueSignedToken(config.sessionSigningSecret, {
           purpose: "realtime",
           sub: result.participant.id,
@@ -352,6 +315,7 @@ export async function buildServer(config: ApiConfig) {
     }
     try {
       return {
+        sceneVersion: BOARD_SCENE_VERSION,
         session: await store.getSession(request.params.sessionId),
         state: await store.getState(request.params.sessionId),
       };
@@ -362,6 +326,15 @@ export async function buildServer(config: ApiConfig) {
 
   server.get("/ws", { websocket: true }, (socket, request) => {
     const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
+    if (!isSupportedSceneVersion(url.searchParams.get("sceneVersion"))) {
+      try {
+        socket.send(JSON.stringify({ type: "error", reason: "UPGRADE_REQUIRED" }));
+      } catch {
+        // best effort before the policy close
+      }
+      socket.close(1008, "UPGRADE_REQUIRED");
+      return;
+    }
     const ticketValue = url.searchParams.get("ticket");
     const ticket = ticketValue
       ? verifySignedToken(config.sessionSigningSecret, ticketValue, "realtime")
@@ -476,6 +449,18 @@ export async function buildServer(config: ApiConfig) {
       const room = rooms.get(boardSessionId) ?? new Set<RoomClient>();
       room.add(client);
       rooms.set(boardSessionId, room);
+      try {
+        socket.send(
+          JSON.stringify({
+            type: "board.initialized",
+            sceneVersion: BOARD_SCENE_VERSION,
+          }),
+        );
+      } catch {
+        room.delete(client);
+        socket.close(1011, "INITIALIZATION_FAILED");
+        return;
+      }
       // An owner reconnecting cancels a pending absence lock.
       if (client.role === "owner") {
         cancelOwnerAbsenceLock();
@@ -565,7 +550,11 @@ export async function buildServer(config: ApiConfig) {
         try {
           events = await store.appendEvents(
             boardSessionId,
-            incoming.map((event) => ({ ...event, actorParticipantId: participantId })),
+            incoming.map((event) => ({
+              ...event,
+              boardSessionId,
+              actorParticipantId: participantId,
+            })),
           );
         } catch (error) {
           server.log.error({ err: error, boardSessionId }, "board event append failed");

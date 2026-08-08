@@ -118,6 +118,19 @@ test("recipient narrative adds both dataset inputs atomically and repairs the ob
                   };
                 }
               >;
+              elements: Record<
+                string,
+                {
+                  id: string;
+                  kind: string;
+                  status: string;
+                  legacyStrokeId?: string;
+                  content?: { blocks: Array<{ runs: Array<{ text: string }> }> };
+                  label?: { blocks: Array<{ runs: Array<{ text: string }> }> };
+                  start?: { binding?: { elementId: string } };
+                  end?: { binding?: { elementId: string } };
+                }
+              >;
             };
           };
         }
@@ -133,7 +146,7 @@ test("recipient narrative adds both dataset inputs atomically and repairs the ob
           )
           .map(([id, stroke]) => [id, stroke.annotation?.label ?? ""]),
       );
-      return Object.values(state.strokes)
+      const legacyEdges = Object.values(state.strokes)
         .filter(
           (stroke) =>
             stroke.status === "committed" &&
@@ -144,7 +157,33 @@ test("recipient narrative adds both dataset inputs atomically and repairs the ob
           from: labels[stroke.annotation?.snappedStartStrokeId ?? ""],
           to: labels[stroke.annotation?.snappedEndStrokeId ?? ""],
           label: stroke.annotation?.label,
-        }))
+        }));
+      const plain = (document?: {
+        blocks: Array<{ runs: Array<{ text: string }> }>;
+      }) => document?.blocks
+        .map((block) => block.runs.map((run) => run.text).join(""))
+        .join("\n") ?? "";
+      const scene = Object.values(state.elements).filter(
+        (element) => element.status === "active" && !element.legacyStrokeId,
+      );
+      const sceneLabels = Object.fromEntries(
+        scene
+          .filter((element) => element.kind !== "connector")
+          .map((element) => [element.id, plain(element.content)]),
+      );
+      const sceneEdges = scene
+        .filter(
+          (element) =>
+            element.kind === "connector" &&
+            element.start?.binding &&
+            element.end?.binding,
+        )
+        .map((element) => ({
+          from: sceneLabels[element.start!.binding!.elementId],
+          to: sceneLabels[element.end!.binding!.elementId],
+          label: plain(element.label) || undefined,
+        }));
+      return [...legacyEdges, ...sceneEdges]
         .sort((left, right) => String(left.from).localeCompare(String(right.from)));
     });
 
@@ -226,16 +265,93 @@ test("recipient narrative adds both dataset inputs atomically and repairs the ob
         __airboardTestHooks: {
           getCanonicalBoardState(): {
             strokes: Record<string, { status: string; annotation?: { label?: string } }>;
+            elements: Record<
+              string,
+              {
+                status: string;
+                legacyStrokeId?: string;
+                content?: { blocks: Array<{ runs: Array<{ text: string }> }> };
+              }
+            >;
           };
         };
       }
     ).__airboardTestHooks.getCanonicalBoardState(),
   );
-  expect(
-    Object.values(finalState.strokes).some(
+  const legacySchemaData = Object.values(finalState.strokes).some(
       (stroke) =>
         stroke.status === "committed" &&
         stroke.annotation?.label === "Schema Data",
-    ),
-  ).toBe(false);
+    );
+  const sceneSchemaData = Object.values(finalState.elements).some(
+    (element) =>
+      element.status === "active" &&
+      !element.legacyStrokeId &&
+      element.content?.blocks
+        .flatMap((block) => block.runs)
+        .map((run) => run.text)
+        .join("") === "Schema Data",
+  );
+  expect(legacySchemaData || sceneSchemaData).toBe(false);
+});
+
+test("section membership round-trips with scene undo and redo", async ({ page }) => {
+  await page.goto("/?testStandalone=1");
+  await page.getByRole("button", { name: "Got it — let me try" }).click();
+  const input = page.getByTestId("intent-command-input");
+  const apply = async (command: string) => {
+    await input.fill(command);
+    await page.getByTestId("intent-primary-action").click();
+    await expect(page.locator(".intent-feedback")).toContainText("Applied:");
+  };
+  await apply("add a service named API");
+  await apply("add a database named Store right of selected");
+  await apply("select everything");
+  await apply("create a section around selected named Backend");
+
+  const membership = () => page.evaluate(() => {
+    const state = (
+      window as never as {
+        __airboardTestHooks: {
+          getCanonicalBoardState(): {
+            elements: Record<
+              string,
+              {
+                id: string;
+                kind: string;
+                status: string;
+                legacyStrokeId?: string;
+                sectionId?: string;
+                memberIds?: string[];
+              }
+            >;
+          };
+        };
+      }
+    ).__airboardTestHooks.getCanonicalBoardState();
+    const elements = Object.values(state.elements).filter((element) => !element.legacyStrokeId);
+    const section = elements.find((element) => element.kind === "section");
+    const members = elements.filter((element) => element.kind === "shape");
+    return {
+      sectionStatus: section?.status,
+      sectionId: section?.id,
+      memberIds: section?.memberIds ?? [],
+      memberSectionIds: members.map((member) => member.sectionId ?? null),
+    };
+  });
+
+  const created = await membership();
+  expect(created.sectionStatus).toBe("active");
+  expect(created.memberIds).toHaveLength(2);
+  expect(created.memberSectionIds).toEqual([created.sectionId, created.sectionId]);
+
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+z" : "Control+z");
+  await expect.poll(async () => (await membership()).sectionStatus).toBe("deleted");
+  expect((await membership()).memberSectionIds).toEqual([null, null]);
+
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+Shift+z" : "Control+Shift+z");
+  await expect.poll(async () => (await membership()).sectionStatus).toBe("active");
+  const restored = await membership();
+  expect(restored.memberIds).toHaveLength(2);
+  expect(restored.memberSectionIds).toEqual([restored.sectionId, restored.sectionId]);
 });

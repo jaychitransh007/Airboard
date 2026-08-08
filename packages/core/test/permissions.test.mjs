@@ -82,6 +82,22 @@ test("editors can draw when participant drawing is allowed", () => {
   assert.equal(decision.allowed, true);
 });
 
+test("scene element lifecycle events use the same editor/viewer content permissions", () => {
+  const editor = authorizeBoardEvent({
+    session: makeSession(),
+    participant: makeParticipant({ role: "editor" }),
+    event: { type: "element.created" },
+  });
+  const viewer = authorizeBoardEvent({
+    session: makeSession(),
+    participant: makeParticipant({ role: "viewer" }),
+    event: { type: "element.patched" },
+  });
+  assert.equal(editor.allowed, true);
+  assert.equal(viewer.allowed, false);
+  assert.equal(viewer.reason, "NOT_ALLOWED_TO_DRAW");
+});
+
 test("editors cannot draw when the owner disabled participant drawing", () => {
   const decision = authorizeBoardEvent({
     session: makeSession({ allowParticipantDrawing: false }),

@@ -25,6 +25,7 @@ import {
   failClosedChromeExtensionPolicy,
 } from "./chromeExtensionPolicy";
 import { bearerToken, issueSignedToken, verifySignedToken } from "./signedTokens";
+import { registerBoardContentRoutes } from "./boardContentRoutes";
 
 const TRIAL_DURATION_MS = 72 * 60 * 60 * 1_000;
 const PROFILE_ROLES: AccountRole[] = ["owner", "admin", "billing", "member", "viewer"];
@@ -488,6 +489,7 @@ export function registerControlPlaneRoutes(
   });
 
   registerIntegrationRoutes(server, config, auth);
+  registerBoardContentRoutes(server, auth);
   registerOrganizationRoutes(server, config, auth);
   registerPrivacyAndTelemetryRoutes(server, auth);
   registerBillingRoutes(server, config, auth);

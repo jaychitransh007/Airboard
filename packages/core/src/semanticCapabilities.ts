@@ -1,6 +1,7 @@
-import type { AnnotationNodeType } from "./types.ts";
+import type { AnnotationNodeType, BoardElementKind, ShapeKind } from "./types.ts";
+import { BOARD_SHAPE_CATALOG } from "./shapeCatalog.ts";
 
-export const AIRBOARD_SEMANTIC_CAPABILITY_REGISTRY_VERSION = "1.2" as const;
+export const AIRBOARD_SEMANTIC_CAPABILITY_REGISTRY_VERSION = "2.0" as const;
 
 export type AirboardNodeVisualKind =
   | "process"
@@ -229,6 +230,62 @@ export const AIRBOARD_SEMANTIC_ACTION_CAPABILITIES = [
   { actionType: "cancel", title: "Cancel", terms: ["cancel", "never mind", "nevermind"] },
 ] as const satisfies readonly AirboardSemanticActionCapability[];
 
+export type AirboardSceneAction =
+  | "create"
+  | "rename"
+  | "style"
+  | "move"
+  | "connect"
+  | "group"
+  | "delete"
+  | "layout";
+
+export type AirboardSceneElementCapability = {
+  kind: BoardElementKind;
+  title: string;
+  terms: readonly string[];
+  actions: readonly AirboardSceneAction[];
+};
+
+const ALL_SCENE_ACTIONS = [
+  "create", "rename", "style", "move", "connect", "group", "delete", "layout",
+] as const satisfies readonly AirboardSceneAction[];
+
+/**
+ * The v2 registry covers every committed scene discriminator. This sits beside
+ * the legacy semantic-node registry so deployed voice commands remain stable
+ * while Airo and the creation pane adopt the richer scene model.
+ */
+export const AIRBOARD_SCENE_ELEMENT_CAPABILITIES = [
+  { kind: "drawing", title: "Drawing", terms: ["drawing", "marker", "highlighter", "washi tape"], actions: ALL_SCENE_ACTIONS },
+  { kind: "sticky", title: "Sticky note", terms: ["sticky", "sticky note", "note"], actions: ALL_SCENE_ACTIONS },
+  { kind: "shape", title: "Shape", terms: ["shape", "diagram shape"], actions: ALL_SCENE_ACTIONS },
+  { kind: "connector", title: "Connector", terms: ["connector", "line", "arrow"], actions: ALL_SCENE_ACTIONS },
+  { kind: "text", title: "Text", terms: ["text", "text box", "label"], actions: ALL_SCENE_ACTIONS },
+  { kind: "section", title: "Section", terms: ["section", "frame", "container"], actions: ALL_SCENE_ACTIONS },
+  { kind: "table", title: "Table", terms: ["table", "grid", "spreadsheet"], actions: ALL_SCENE_ACTIONS },
+  { kind: "stamp", title: "Stamp", terms: ["stamp", "emoji", "face stamp"], actions: ALL_SCENE_ACTIONS },
+  { kind: "media", title: "Media", terms: ["media", "image", "photo", "gif", "video"], actions: ALL_SCENE_ACTIONS },
+  { kind: "link_preview", title: "Link preview", terms: ["link", "link preview", "embed"], actions: ALL_SCENE_ACTIONS },
+  { kind: "code_block", title: "Code block", terms: ["code", "code block", "snippet"], actions: ALL_SCENE_ACTIONS },
+  { kind: "mind_map_node", title: "Mind-map node", terms: ["mind map", "mind-map", "mind map node"], actions: ALL_SCENE_ACTIONS },
+] as const satisfies readonly AirboardSceneElementCapability[];
+
+export type AirboardSemanticShapeCapability = {
+  shapeKind: ShapeKind;
+  title: string;
+  terms: readonly string[];
+  category: "basic" | "flowchart" | "advanced" | "airboard";
+};
+
+/** All 56 FigJam catalog entries plus the four Airboard-only presets. */
+export const AIRBOARD_SEMANTIC_SHAPE_CAPABILITIES = BOARD_SHAPE_CATALOG.map((entry) => ({
+  shapeKind: entry.kind as ShapeKind,
+  title: entry.name,
+  terms: [entry.name, entry.kind, ...entry.aliases],
+  category: entry.category,
+})) satisfies readonly AirboardSemanticShapeCapability[];
+
 /**
  * Versioned registry consumed across UI, speech, planning, and execution.
  * Project-specific labels remain board context rather than global aliases.
@@ -236,6 +293,8 @@ export const AIRBOARD_SEMANTIC_ACTION_CAPABILITIES = [
 export const AIRBOARD_SEMANTIC_CAPABILITY_REGISTRY = {
   version: AIRBOARD_SEMANTIC_CAPABILITY_REGISTRY_VERSION,
   nodes: AIRBOARD_SEMANTIC_NODE_CAPABILITIES,
+  sceneElements: AIRBOARD_SCENE_ELEMENT_CAPABILITIES,
+  shapes: AIRBOARD_SEMANTIC_SHAPE_CAPABILITIES,
   actions: AIRBOARD_SEMANTIC_ACTION_CAPABILITIES,
 } as const;
 
@@ -249,6 +308,8 @@ function uniqueNormalizedTerms(terms: readonly string[]): readonly string[] {
  */
 export const AIRBOARD_SEMANTIC_TRANSCRIPTION_KEYTERMS = uniqueNormalizedTerms([
   ...AIRBOARD_SEMANTIC_NODE_CAPABILITIES.flatMap(({ terms }) => terms),
+  ...AIRBOARD_SCENE_ELEMENT_CAPABILITIES.flatMap(({ terms }) => terms),
+  ...AIRBOARD_SEMANTIC_SHAPE_CAPABILITIES.flatMap(({ terms }) => terms),
   ...AIRBOARD_SEMANTIC_ACTION_CAPABILITIES.flatMap(({ terms }) => terms),
 ]);
 
@@ -268,6 +329,8 @@ export const AIRBOARD_SEMANTIC_OPERATION_CAPABILITIES = [
   "align or distribute multiple objects",
   "lay out multiple objects as a flow or grid",
   "group objects",
+  "create and edit shapes, stickies, text, sections, tables, stamps, media, links, code blocks, and mind maps",
+  "style any scene element without replacing unrelated fields",
   "select objects",
   "undo",
   "cancel",
@@ -286,6 +349,11 @@ export const AIRBOARD_SEMANTIC_CANONICAL_FORMS = [
   "align selected <left|right|top|bottom|horizontally|vertically>",
   "distribute selected <horizontally|vertically>",
   "layout selected <left to right|right to left|top to bottom|bottom to top|grid>",
+  "add a <rows> by <columns> table",
+  "create a section around selected",
+  "make a mind map [named <label>]",
+  "add a code block [in <language>]",
+  "add a <basic|flowchart|advanced|Airboard shape name>",
   "undo",
   "cancel",
 ] as const;

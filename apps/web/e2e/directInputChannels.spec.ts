@@ -1,6 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
 
 type CanonicalBoard = {
+  elements: Record<
+    string,
+    {
+      status: string;
+      legacyStrokeId?: string;
+      metadata?: { lastInputSource?: string };
+    }
+  >;
   strokes: Record<
     string,
     {
@@ -40,7 +48,12 @@ async function inputSources(page: Page): Promise<string[]> {
         __airboardTestHooks: { getCanonicalBoardState(): CanonicalBoard };
       }
     ).__airboardTestHooks.getCanonicalBoardState();
-    return Object.values(board.strokes)
+    const sceneSources = Object.values(board.elements)
+      .filter(
+        ({ status, legacyStrokeId }) => status === "active" && !legacyStrokeId,
+      )
+      .map(({ metadata }) => metadata?.lastInputSource ?? "");
+    const strokeSources = Object.values(board.strokes)
       .filter(({ status }) => status === "committed")
       .map(
         (stroke) =>
@@ -48,6 +61,8 @@ async function inputSources(page: Page): Promise<string[]> {
           stroke.points?.find(({ inputSource }) => inputSource)?.inputSource ??
           "",
       )
+      .filter(Boolean);
+    return [...sceneSources, ...strokeSources]
       .filter(Boolean)
       .sort();
   });
@@ -151,6 +166,9 @@ test("pointer, touchpad, and stylus streams ground to attributed final state", a
 
   await page.getByRole("button", { name: "Open board settings" }).click();
   await page.locator("#input-mode").selectOption("touchpad");
+  await expect(
+    page.getByText("Touchpad Writing - most reliable. Press and drag to draw."),
+  ).toBeVisible();
   await page.mouse.move(box!.x + 120, box!.y + 140);
   await page.mouse.down();
   await page.mouse.move(box!.x + 210, box!.y + 190, { steps: 6 });
