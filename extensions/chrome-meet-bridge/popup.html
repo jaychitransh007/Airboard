@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Airboard</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <span class="mark" aria-hidden="true"></span>
+      <div><strong>Airboard</strong><small>Meet camera overlay</small></div>
+      <span id="state-dot" class="dot" title="Airboard status"></span>
+    </header>
+    <main>
+      <section id="connect-panel" hidden>
+        <p class="kicker">One-time setup</p>
+        <h1>Put ideas on your video.</h1>
+        <p>Connect this Chrome profile to Airboard. Your audience will see the neon composite in your ordinary Meet camera tile—never a second canvas.</p>
+        <button id="connect" class="primary">Connect Airboard</button>
+      </section>
+
+      <section id="consent-panel" hidden>
+        <p class="kicker">Your live inputs</p>
+        <h1>Confirm before capture.</h1>
+        <p>When Airboard is enabled in Meet, camera frames support gesture alignment and the outgoing overlay; microphone audio supports Airo commands. Raw media is processed live and is not stored by Airboard.</p>
+        <label class="consent"><input id="confirm-check" type="checkbox" /> <span>I understand and want to enable Airboard camera, microphone and voice processing.</span></label>
+        <button id="confirm" class="primary" disabled>Enable Airboard</button>
+      </section>
+
+      <section id="ready-panel" hidden>
+        <div class="status-card">
+          <span class="status-orbit" aria-hidden="true"></span>
+          <div><small id="ready-kicker">Setup progress</small><strong id="ready-title">Airboard is preparing</strong><span id="ready-detail">Checking your outgoing camera…</span></div>
+        </div>
+
+        <ol id="readiness" class="readiness" aria-label="Google Meet readiness">
+          <li data-check="linked"><span>1</span><div><strong>Account connected</strong><small>Scoped installation identity</small></div></li>
+          <li data-check="consented"><span>2</span><div><strong>Media confirmed</strong><small>One-time explicit consent</small></div></li>
+          <li data-check="meetingDetected"><span>3</span><div><strong>Meet detected</strong><small>Open a meeting-code tab</small></div></li>
+          <li data-check="engineMounted"><span>4</span><div><strong>Private engine</strong><small>No audience-facing canvas</small></div></li>
+          <li data-check="engaged"><span>5</span><div><strong>Camera engaged</strong><small>Composite track attached</small></div></li>
+          <li data-check="verified"><span>6</span><div><strong>Outgoing verified</strong><small>Encoded frames and bytes sent</small></div></li>
+        </ol>
+
+        <div class="toggles">
+          <label><span><strong>Meeting overlay</strong><small>Neon diagram on outgoing camera</small></span><input data-setting="overlayEnabled" type="checkbox" /></label>
+          <label><span><strong>Airboard camera</strong><small>Gestures and outgoing composite</small></span><input data-setting="videoEnabled" type="checkbox" /></label>
+          <label><span><strong>Airo microphone</strong><small>Voice commands only</small></span><input data-setting="audioEnabled" type="checkbox" /></label>
+        </div>
+        <p id="verification" class="verification"></p>
+        <button id="open-meet" class="primary subtle">Open Google Meet</button>
+      </section>
+      <p id="error" class="error" role="alert" hidden></p>
+    </main>
+    <footer><button id="settings">Airboard settings</button><button id="refresh">Refresh status</button></footer>
+    <script src="popup.js"></script>
+  </body>
+</html>

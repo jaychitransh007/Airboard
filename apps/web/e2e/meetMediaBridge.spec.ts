@@ -77,6 +77,12 @@ test("camera overlay pumps neon frames to the compositor and disarms on toggle-o
       timeout: 10_000,
     })
     .toBeGreaterThan(3);
+  await expect(page.getByTestId("camera-overlay-live")).toContainText(
+    "Verified in this Meet client",
+  );
+  const verification = page.getByTestId("camera-overlay-verification");
+  await expect(verification).toContainText("0.8.0-test");
+  await expect(verification).toContainText("attached");
 
   await overlayToggle.uncheck();
   await expect
@@ -91,4 +97,90 @@ test("the side panel explains the bridge instead of the companion window", async
     timeout: 10_000,
   });
   await expect(page.getByTestId("companion-media-link")).toHaveCount(0);
+});
+
+test("the extension engine is control-free and starts the camera overlay automatically", async ({
+  page,
+}) => {
+  await page.goto("/meet/test-harness?bridge=emulate&headless=1");
+
+  const engine = page.locator("main.airboard-shell.meet-overlay-engine");
+  await expect(engine).toBeVisible({ timeout: 10_000 });
+  await expect(engine.locator(".topbar")).toBeHidden();
+  await expect(engine.locator(".sidebar")).toBeHidden();
+  await expect(engine.locator(".catalog-dock")).toBeHidden();
+  await expect(engine.getByRole("button")).toHaveCount(0);
+  await expect(page.locator("section.board-area.lightboard")).toBeVisible();
+
+  await expect
+    .poll(() => page.evaluate(() => (window as { __overlayArmed?: boolean }).__overlayArmed))
+    .toBe(true);
+  await expect
+    .poll(() => page.evaluate(() => (window as { __overlayFrames?: number }).__overlayFrames ?? 0), {
+      timeout: 10_000,
+    })
+    .toBeGreaterThan(3);
+  await expect
+    .poll(
+      () =>
+        page
+          .locator("video.camera-preview")
+          .evaluate((element) => (element as HTMLVideoElement).videoWidth),
+      { timeout: 30_000 },
+    )
+    .toBeGreaterThan(0);
+});
+
+test("hidden diagram restores raw Meet camera and resumes the compositor without recapturing", async ({
+  page,
+}) => {
+  await page.goto("/meet/test-harness?bridge=emulate&headless=1");
+  await page.waitForFunction(() => "__airboardTestHooks" in window);
+  await expect
+    .poll(() => page.evaluate(() => (window as { __overlayFrames?: number }).__overlayFrames ?? 0), {
+      timeout: 10_000,
+    })
+    .toBeGreaterThan(3);
+
+  await page.evaluate(() =>
+    (
+      window as unknown as {
+        __airboardTestHooks: { setDiagramVisible(visible: boolean): void };
+      }
+    ).__airboardTestHooks.setDiagramVisible(false),
+  );
+  await expect
+    .poll(() => page.evaluate(() => (window as { __overlayArmed?: boolean }).__overlayArmed))
+    .toBe(false);
+  const hiddenFrameCount = await page.evaluate(
+    () => (window as { __overlayFrames?: number }).__overlayFrames ?? 0,
+  );
+  await page.waitForTimeout(250);
+  expect(
+    await page.evaluate(() => (window as { __overlayFrames?: number }).__overlayFrames ?? 0),
+  ).toBe(hiddenFrameCount);
+  await expect
+    .poll(() =>
+      page
+        .locator("video.camera-preview")
+        .evaluate((element) =>
+          ((element as HTMLVideoElement).srcObject as MediaStream | null)
+            ?.getVideoTracks()[0]?.readyState,
+        ),
+    )
+    .toBe("live");
+
+  await page.evaluate(() =>
+    (
+      window as unknown as {
+        __airboardTestHooks: { setDiagramVisible(visible: boolean): void };
+      }
+    ).__airboardTestHooks.setDiagramVisible(true),
+  );
+  await expect
+    .poll(() => page.evaluate(() => (window as { __overlayArmed?: boolean }).__overlayArmed))
+    .toBe(true);
+  await expect
+    .poll(() => page.evaluate(() => (window as { __overlayFrames?: number }).__overlayFrames ?? 0))
+    .toBeGreaterThan(hiddenFrameCount);
 });

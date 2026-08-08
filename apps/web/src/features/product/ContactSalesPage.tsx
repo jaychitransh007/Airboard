@@ -1,0 +1,12 @@
+"use client";
+
+import { useState } from "react";
+import { airboardApi } from "../../platform/api";
+import { MarketingPage } from "./PublicShell";
+
+export function ContactSalesPage() {
+  const [form, setForm] = useState({ name: "", email: "", company: "", companySizeBand: "11-50", useCase: "", website: "" });
+  const [message, setMessage] = useState<string | null>(null); const [busy, setBusy] = useState(false);
+  const submit = async (event: React.FormEvent) => { event.preventDefault(); setBusy(true); setMessage(null); try { await airboardApi("/leads", { method: "POST", body: JSON.stringify({ ...form, source: "contact_sales" }) }); setMessage("Thanks—your evaluation request has been recorded. The Airboard team will follow up by email."); setForm({ ...form, useCase: "" }); } catch (caught) { setMessage(caught instanceof Error ? caught.message : "REQUEST_FAILED"); } finally { setBusy(false); } };
+  return <MarketingPage eyebrow="Talk to Airboard" title="Design an evaluation around a real outcome." summary="Enterprise evaluations use a managed proof of concept with deployment, security and success criteria agreed up front."><form className="auth-card" onSubmit={submit}><label>Name<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label><label>Work email<input type="email" required value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label><label>Company<input required value={form.company} onChange={(event) => setForm({ ...form, company: event.target.value })} /></label><label>Company size<select value={form.companySizeBand} onChange={(event) => setForm({ ...form, companySizeBand: event.target.value })}><option>1-10</option><option>11-50</option><option>51-200</option><option>201-1000</option><option>1000+</option></select></label><label>Primary platform and outcome<textarea required rows={5} value={form.useCase} onChange={(event) => setForm({ ...form, useCase: event.target.value })} placeholder="Meeting platform, presenter count, operating systems, compliance needs and the outcome you want to improve." /></label><label className="form-honeypot" aria-hidden="true">Website<input tabIndex={-1} autoComplete="off" value={form.website} onChange={(event) => setForm({ ...form, website: event.target.value })} /></label><button className="button button-primary" disabled={busy}>{busy ? "Sending…" : "Request evaluation"}</button>{message ? <p className="form-message">{message}</p> : null}</form></MarketingPage>;
+}

@@ -30,6 +30,8 @@ export type HybridGestureControllerConfig = {
   hoverDeadZonePx: number;
   /** Relative drag gain after a target has been latched. Values below 1 add precision. */
   dragGain: number;
+  /** Exponential smoothing applied to the hand while dragging. */
+  dragSmoothingTimeMs: number;
   dragDeadZonePx: number;
   maxDragStepPx: number;
   areaCursorRadiusPx: number;
@@ -52,6 +54,7 @@ export type HybridGestureControllerOptions = {
   hoverSmoothingTimeMs?: number;
   hoverDeadZonePx?: number;
   dragGain?: number;
+  dragSmoothingTimeMs?: number;
   dragDeadZonePx?: number;
   maxDragStepPx?: number;
   areaCursorRadiusPx?: number;
@@ -154,6 +157,7 @@ const defaultControlZone: NormalizedControlZone = {
 
 type ActiveGrab = {
   targetId: string;
+  filteredControlPoint: Vector2D;
   lastControlPoint: Vector2D;
   totalDelta: Vector2D;
 };
@@ -258,13 +262,24 @@ export class HybridGestureController {
       if (recovered) {
         // A short camera dropout freezes the object and rebases relative motion,
         // avoiding a jump when tracking resumes.
+        this.activeGrab.filteredControlPoint = controlPoint;
         this.activeGrab.lastControlPoint = controlPoint;
       } else if (!this.lastPinch.released) {
-        const delta = this.relativeDragDelta(this.activeGrab.lastControlPoint, controlPoint);
+        const filteredControlPoint = smoothPoint(
+          this.activeGrab.filteredControlPoint,
+          controlPoint,
+          deltaTimeMs,
+          this.config.dragSmoothingTimeMs,
+        );
+        this.activeGrab.filteredControlPoint = filteredControlPoint;
+        const delta = this.relativeDragDelta(
+          this.activeGrab.lastControlPoint,
+          filteredControlPoint,
+        );
         if (delta.x !== 0 || delta.y !== 0) {
           // Only rebase after meaningful movement. Sub-dead-zone movements then
           // accumulate instead of making deliberate slow drags impossible.
-          this.activeGrab.lastControlPoint = controlPoint;
+          this.activeGrab.lastControlPoint = filteredControlPoint;
           const previousCursor = this.cursor ?? this.coarseCursor;
           this.cursor = clampPointToCanvas(addPoints(previousCursor, delta), this.config);
           const appliedDelta = subtractPoints(this.cursor, previousCursor);
@@ -319,6 +334,7 @@ export class HybridGestureController {
         const anchor = targetCenter(match.target.bounds);
         this.activeGrab = {
           targetId: match.target.id,
+          filteredControlPoint: controlPoint,
           lastControlPoint: controlPoint,
           totalDelta: { x: 0, y: 0 },
         };
@@ -459,6 +475,7 @@ function resolveConfig(options: HybridGestureControllerOptions): HybridGestureCo
     hoverSmoothingTimeMs: options.hoverSmoothingTimeMs ?? 45,
     hoverDeadZonePx: options.hoverDeadZonePx ?? 1.5,
     dragGain: options.dragGain ?? 0.35,
+    dragSmoothingTimeMs: options.dragSmoothingTimeMs ?? 0,
     dragDeadZonePx: options.dragDeadZonePx ?? 1,
     maxDragStepPx: options.maxDragStepPx ?? 64,
     areaCursorRadiusPx: options.areaCursorRadiusPx ?? 28,
@@ -489,6 +506,7 @@ function validateControllerConfig(config: HybridGestureControllerConfig): void {
     config.dragGain,
     config.hoverSmoothingTimeMs,
     config.hoverDeadZonePx,
+    config.dragSmoothingTimeMs,
     config.dragDeadZonePx,
     config.areaCursorRadiusPx,
     config.stickyReleaseRadiusPx,
@@ -502,6 +520,7 @@ function validateControllerConfig(config: HybridGestureControllerConfig): void {
     config.dragGain < 0 ||
     config.hoverSmoothingTimeMs < 0 ||
     config.hoverDeadZonePx < 0 ||
+    config.dragSmoothingTimeMs < 0 ||
     config.dragDeadZonePx < 0 ||
     config.areaCursorRadiusPx < 0 ||
     config.stickyReleaseRadiusPx < config.areaCursorRadiusPx ||
@@ -540,6 +559,22 @@ function smoothHoverCursor(
     return copyPoint(previous);
   }
   const alpha = 1 - Math.exp(-deltaTimeMs / config.hoverSmoothingTimeMs);
+  return {
+    x: previous.x + (target.x - previous.x) * alpha,
+    y: previous.y + (target.y - previous.y) * alpha,
+  };
+}
+
+function smoothPoint(
+  previous: Vector2D,
+  target: Vector2D,
+  deltaTimeMs: number,
+  smoothingTimeMs: number,
+): Vector2D {
+  if (smoothingTimeMs === 0 || deltaTimeMs <= 0) {
+    return copyPoint(target);
+  }
+  const alpha = 1 - Math.exp(-deltaTimeMs / smoothingTimeMs);
   return {
     x: previous.x + (target.x - previous.x) * alpha,
     y: previous.y + (target.y - previous.y) * alpha,

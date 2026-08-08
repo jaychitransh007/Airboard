@@ -75,6 +75,14 @@ export function apiTokenAllowed(
   return typeof query?.token === "string" && query.token === configuredToken;
 }
 
+/** True only for an explicitly configured shared server token. */
+export function configuredApiTokenAllowed(
+  request: Parameters<typeof apiTokenAllowed>[0],
+  configuredToken: string | undefined,
+): boolean {
+  return Boolean(configuredToken && apiTokenAllowed(request, configuredToken));
+}
+
 /** Best-effort caller identity for rate limiting. */
 export function clientKey(request: {
   ip?: string;

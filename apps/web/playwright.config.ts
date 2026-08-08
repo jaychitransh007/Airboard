@@ -11,12 +11,24 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   use: {
     baseURL: "http://127.0.0.1:3100",
+    storageState: {
+      cookies: [],
+      origins: [
+        {
+          origin: "http://127.0.0.1:3100",
+          localStorage: [{ name: "airboard.cookie-choice.v1", value: "necessary" }],
+        },
+      ],
+    },
   },
   webServer: [
     {
       // Dedicated API instance for E2E: real sessions + board sync, in-memory
       // store, no provider keys needed for the flows under test.
-      command: "pnpm --filter @airboard/api dev",
+      // The API does not need file watching during a deterministic E2E run.
+      // Avoiding `node --watch` also prevents macOS's per-process file watcher
+      // limit from turning a valid browser suite into an EMFILE startup error.
+      command: "pnpm --filter @airboard/api build && pnpm --filter @airboard/api start",
       url: "http://127.0.0.1:4600/health",
       reuseExistingServer: false,
       timeout: 120_000,
@@ -24,6 +36,10 @@ export default defineConfig({
         PORT: "4600",
         HOST: "127.0.0.1",
         AIRBOARD_ALLOWED_ORIGINS: "http://127.0.0.1:3100,http://localhost:3100",
+        // A parallel browser suite legitimately creates more sessions than
+        // the customer-facing abuse limit. Keep the runtime limit intact and
+        // raise it only inside this isolated loopback test process.
+        AIRBOARD_RATE_LIMIT_SESSION_START_PER_MINUTE: "10000",
       },
     },
     {

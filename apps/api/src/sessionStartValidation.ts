@@ -13,11 +13,14 @@ const SUPPORTED_PROVIDERS: ReadonlySet<string> = new Set<MeetingProvider>([
 // store: no whitespace or control characters, hard length cap.
 const PROVIDER_MEETING_ID_PATTERN = /^[A-Za-z0-9._/-]{1,200}$/;
 const TITLE_MAX_LENGTH = 200;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type SessionStartInput = {
   provider: MeetingProvider;
   providerMeetingId?: string;
   title?: string;
+  workspaceId?: string;
+  boardId?: string;
   allowParticipantDrawing: boolean;
 };
 
@@ -31,6 +34,8 @@ export type SessionStartValidation =
         | "INVALID_PROVIDER_MEETING_ID"
         | "PROVIDER_MEETING_ID_REQUIRES_PROVIDER"
         | "INVALID_TITLE"
+        | "INVALID_WORKSPACE_ID"
+        | "INVALID_BOARD_ID"
         | "INVALID_ALLOW_PARTICIPANT_DRAWING";
     };
 
@@ -69,6 +74,15 @@ export function validateSessionStartBody(body: unknown): SessionStartValidation 
     }
   }
 
+  if (record.workspaceId !== undefined &&
+      (typeof record.workspaceId !== "string" || !UUID_PATTERN.test(record.workspaceId))) {
+    return { ok: false, error: "INVALID_WORKSPACE_ID" };
+  }
+  if (record.boardId !== undefined &&
+      (typeof record.boardId !== "string" || !UUID_PATTERN.test(record.boardId))) {
+    return { ok: false, error: "INVALID_BOARD_ID" };
+  }
+
   if (
     record.allowParticipantDrawing !== undefined &&
     typeof record.allowParticipantDrawing !== "boolean"
@@ -86,6 +100,8 @@ export function validateSessionStartBody(body: unknown): SessionStartValidation 
         ? { providerMeetingId: record.providerMeetingId }
         : {}),
       ...(record.title !== undefined ? { title: record.title } : {}),
+      ...(record.workspaceId !== undefined ? { workspaceId: record.workspaceId } : {}),
+      ...(record.boardId !== undefined ? { boardId: record.boardId } : {}),
     },
   };
 }

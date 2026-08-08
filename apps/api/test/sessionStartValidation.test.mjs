@@ -91,3 +91,20 @@ test("non-object bodies and non-boolean drawing flags are rejected", () => {
     error: "INVALID_ALLOW_PARTICIPANT_DRAWING",
   });
 });
+
+test("durable board and workspace identifiers are accepted only as UUIDs", () => {
+  const workspaceId = "b9b4488f-2770-46b1-bdf1-a63007cfcc16";
+  const boardId = "4e56b913-8220-4711-93a6-238c03598637";
+  assert.deepEqual(validateSessionStartBody({ workspaceId, boardId }), {
+    ok: true,
+    value: { provider: "standalone", workspaceId, boardId, allowParticipantDrawing: true },
+  });
+  assert.deepEqual(validateSessionStartBody({ workspaceId: "local-workspace" }), {
+    ok: false,
+    error: "INVALID_WORKSPACE_ID",
+  });
+  assert.deepEqual(validateSessionStartBody({ boardId: "../../another-board" }), {
+    ok: false,
+    error: "INVALID_BOARD_ID",
+  });
+});

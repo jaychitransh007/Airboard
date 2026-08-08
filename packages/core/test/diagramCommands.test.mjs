@@ -57,9 +57,9 @@ test("creates annotation-compatible nodes and snapped connectors through BoardEv
   assert.equal(first.state.strokes.api.annotation.type, "flow_node");
   assert.equal(first.state.strokes.api.annotation.source, "voice");
   assert.deepEqual(first.state.strokes.api.annotation.bounds, {
-    x: 20,
+    x: 24,
     y: 60,
-    width: 160,
+    width: 152,
     height: 80,
   });
 
@@ -67,9 +67,217 @@ test("creates annotation-compatible nodes and snapped connectors through BoardEv
   assert.equal(connector.annotation.type, "connector");
   assert.equal(connector.annotation.snappedStartStrokeId, "api");
   assert.equal(connector.annotation.snappedEndStrokeId, "database");
-  assert.deepEqual(connector.annotation.start, { x: 180, y: 100 });
-  assert.deepEqual(connector.annotation.end, { x: 320, y: 100 });
+  assert.deepEqual(connector.annotation.start, { x: 176, y: 100 });
+  assert.deepEqual(connector.annotation.end, { x: 324, y: 100 });
   assert.equal(connector.points.length, 2);
+});
+
+test("reverses a connector in place as one undoable annotation update", () => {
+  let state = createInitialBoardState("board-1");
+  state = createNode(state, "user-one", { x: 100, y: 100 }, "User One").state;
+  state = createNode(state, "user-two", { x: 400, y: 100 }, "User Two").state;
+  state = applyDiagramCommand(
+    state,
+    {
+      type: "nodes.connect",
+      connectorId: "calls",
+      fromId: "user-one",
+      toId: "user-two",
+      label: "calls",
+    },
+    context(),
+  ).state;
+  const before = structuredClone(state.strokes.calls.annotation);
+
+  const reversed = applyDiagramCommand(
+    state,
+    {
+      type: "connection.reverse",
+      connectorId: "calls",
+      label: "calls",
+    },
+    context("2026-07-11T00:00:01.000Z"),
+  );
+
+  assert.deepEqual(reversed.events.map((event) => event.type), [
+    "stroke.annotation_updated",
+  ]);
+  assert.equal(reversed.state.strokes.calls.id, "calls", "connector identity is preserved");
+  assert.equal(
+    reversed.state.strokes.calls.annotation.snappedStartStrokeId,
+    "user-two",
+  );
+  assert.equal(
+    reversed.state.strokes.calls.annotation.snappedEndStrokeId,
+    "user-one",
+  );
+
+  const undone = applyDiagramUndo(
+    reversed.state,
+    reversed,
+    context("2026-07-11T00:00:02.000Z"),
+  );
+  assert.deepEqual(undone.state.strokes.calls.annotation, before);
+});
+
+test("attaches stale connector geometry atomically while preserving identity and style", () => {
+  let state = createInitialBoardState("board-1");
+  state = createNode(state, "client", { x: 100, y: 100 }, "Client").state;
+  state = createNode(state, "planner", { x: 400, y: 100 }, "Planner").state;
+  state = applyDiagramCommand(state, {
+    type: "nodes.connect", connectorId: "request", fromId: "client", toId: "planner",
+    label: "request goes to", style: { strokeColor: "#22d3ee", thickness: 5, opacity: 0.7 },
+  }, context()).state;
+  const original = structuredClone(state.strokes.request);
+  state = {
+    ...state,
+    strokes: {
+      ...state.strokes,
+      request: {
+        ...state.strokes.request,
+        points: [{ x: 250, y: 240, t: 1 }, { x: 324, y: 100, t: 2 }],
+        annotation: {
+          ...state.strokes.request.annotation,
+          start: { x: 250, y: 240 },
+          end: { x: 324, y: 100 },
+        },
+      },
+    },
+  };
+  const before = structuredClone(state.strokes.request);
+  const attached = applyDiagramCommand(state, {
+    type: "connection.attach", connectorId: "request", fromId: "client", toId: "planner",
+  }, context("2026-08-01T00:00:01.000Z"));
+  assert.deepEqual(attached.events.map((event) => event.type), ["stroke.annotation_updated"]);
+  assert.equal(attached.state.strokes.request.id, "request");
+  assert.equal(attached.state.strokes.request.annotation.label, "request goes to");
+  assert.equal(attached.state.strokes.request.color, original.color);
+  assert.equal(attached.state.strokes.request.thickness, 5);
+  assert.equal(attached.state.strokes.request.annotation.opacity, 0.7);
+  assert.deepEqual(attached.state.strokes.request.annotation.start, { x: 176, y: 100 });
+  assert.deepEqual(attached.state.strokes.request.annotation.end, { x: 324, y: 100 });
+  const undone = applyDiagramUndo(attached.state, attached);
+  assert.deepEqual(undone.state.strokes.request.annotation, before.annotation);
+  assert.deepEqual(undone.state.strokes.request.points, before.points);
+});
+
+test("reciprocal connectors receive distinct deterministic route lanes", () => {
+  let state = createInitialBoardState("board-1");
+  state = createNode(state, "user", { x: 100, y: 100 }, "User").state;
+  state = createNode(state, "auth", { x: 400, y: 100 }, "Authentication").state;
+  state = applyDiagramCommand(
+    state,
+    {
+      type: "nodes.connect",
+      connectorId: "request",
+      fromId: "user",
+      toId: "auth",
+      label: "requests",
+    },
+    context(),
+  ).state;
+  state = applyDiagramCommand(
+    state,
+    {
+      type: "nodes.connect",
+      connectorId: "authenticates",
+      fromId: "auth",
+      toId: "user",
+      label: "authenticates",
+    },
+    context(),
+  ).state;
+
+  assert.equal(state.strokes.request.annotation.routeOffset, undefined);
+  assert.equal(state.strokes.authenticates.annotation.routeOffset, 72);
+});
+
+test("connectors and arrows share deterministic route lanes without overlap", () => {
+  let state = createInitialBoardState("board-1");
+  state = createNode(state, "client", { x: 100, y: 100 }, "Client").state;
+  state = createNode(state, "planner", { x: 400, y: 100 }, "Planner").state;
+  state = applyDiagramCommand(state, {
+    type: "nodes.connect", connectorId: "first", fromId: "client", toId: "planner",
+  }, context()).state;
+  state = {
+    ...state,
+    strokes: {
+      ...state.strokes,
+      first: {
+        ...state.strokes.first,
+        annotation: { ...state.strokes.first.annotation, type: "arrow" },
+      },
+    },
+  };
+
+  const second = applyDiagramCommand(state, {
+    type: "nodes.connect", connectorId: "second", fromId: "client", toId: "planner",
+  }, context("2026-08-01T00:00:01.000Z"));
+  assert.equal(second.state.strokes.first.annotation.routeOffset, undefined);
+  assert.equal(second.state.strokes.second.annotation.routeOffset, 72);
+
+  state = {
+    ...second.state,
+    strokes: {
+      ...second.state.strokes,
+      second: {
+        ...second.state.strokes.second,
+        annotation: { ...second.state.strokes.second.annotation, type: "arrow" },
+      },
+    },
+  };
+  const third = applyDiagramCommand(state, {
+    type: "nodes.connect", connectorId: "third", fromId: "client", toId: "planner",
+  }, context("2026-08-01T00:00:02.000Z"));
+  assert.equal(third.state.strokes.third.annotation.routeOffset, -72);
+  assert.notEqual(
+    third.state.strokes.third.annotation.routeOffset,
+    third.state.strokes.second.annotation.routeOffset,
+  );
+
+  const undone = applyDiagramUndo(
+    third.state,
+    third,
+    context("2026-08-01T00:00:03.000Z"),
+  );
+  assert.equal(undone.state.strokes.third.status, "deleted");
+  assert.equal(undone.state.strokes.first.status, "committed");
+  assert.equal(undone.state.strokes.second.status, "committed");
+});
+
+test("node deletion cascades attached arrows and Undo restores both", () => {
+  let state = createInitialBoardState("board-1");
+  state = createNode(state, "client", { x: 100, y: 100 }, "Client").state;
+  state = createNode(state, "planner", { x: 400, y: 100 }, "Planner").state;
+  state = applyDiagramCommand(state, {
+    type: "nodes.connect", connectorId: "arrow", fromId: "client", toId: "planner",
+  }, context()).state;
+  state = {
+    ...state,
+    strokes: {
+      ...state.strokes,
+      arrow: {
+        ...state.strokes.arrow,
+        annotation: { ...state.strokes.arrow.annotation, type: "arrow" },
+      },
+    },
+  };
+
+  const deleted = applyDiagramCommand(state, {
+    type: "objects.delete", objectIds: ["client"], cascadeConnectors: true,
+  }, context("2026-08-01T00:00:01.000Z"));
+  assert.equal(deleted.state.strokes.client.status, "deleted");
+  assert.equal(deleted.state.strokes.arrow.status, "deleted");
+  assert.equal(deleted.state.strokes.planner.status, "committed");
+
+  const undone = applyDiagramUndo(
+    deleted.state,
+    deleted,
+    context("2026-08-01T00:00:02.000Z"),
+  );
+  assert.equal(undone.state.strokes.client.status, "committed");
+  assert.equal(undone.state.strokes.arrow.status, "committed");
+  assert.equal(undone.state.strokes.arrow.annotation.type, "arrow");
 });
 
 test("creates semantic circles as true ellipse annotations", () => {
@@ -123,7 +331,7 @@ test("moving a node keeps attached connectors bound and compensating events undo
     context("2026-07-11T00:00:01.000Z"),
   );
 
-  assert.equal(moved.state.strokes.one.annotation.bounds.x, 80);
+  assert.equal(moved.state.strokes.one.annotation.bounds.x, 84);
   assert.equal(moved.state.strokes.one.annotation.bounds.y, 100);
   assert.notDeepEqual(moved.state.strokes.edge.annotation.start, beforeConnector.start);
   assert.equal(moved.state.strokes.edge.annotation.snappedStartStrokeId, "one");
@@ -137,6 +345,42 @@ test("moving a node keeps attached connectors bound and compensating events undo
   assert.deepEqual(undone.state.strokes.one.annotation, beforeNode);
   assert.deepEqual(undone.state.strokes.edge.annotation, beforeConnector);
   assert.ok(undone.events.every((event) => event.createdAt === "2026-07-11T00:00:02.000Z"));
+});
+
+test("moving a connector alone detaches its bindings so former nodes cannot pull it back", () => {
+  let state = createInitialBoardState("board-1");
+  state = createNode(state, "one", { x: 100, y: 100 }).state;
+  state = createNode(state, "two", { x: 400, y: 100 }).state;
+  state = applyDiagramCommand(state, {
+    type: "nodes.connect", connectorId: "edge", fromId: "one", toId: "two",
+  }, context()).state;
+
+  const detached = applyDiagramCommand(state, {
+    type: "objects.move", objectIds: ["edge"], delta: { x: 0, y: 120 },
+  }, context("2026-08-01T00:00:01.000Z"));
+  assert.equal(detached.state.strokes.edge.annotation.snappedStartStrokeId, undefined);
+  assert.equal(detached.state.strokes.edge.annotation.snappedEndStrokeId, undefined);
+  const detachedAnnotation = structuredClone(detached.state.strokes.edge.annotation);
+  const detachedPoints = structuredClone(detached.state.strokes.edge.points);
+
+  const movedFormerNode = applyDiagramCommand(detached.state, {
+    type: "objects.move", objectIds: ["one"], delta: { x: 80, y: 0 },
+  }, context("2026-08-01T00:00:02.000Z"));
+  assert.deepEqual(movedFormerNode.state.strokes.edge.annotation, detachedAnnotation);
+  assert.deepEqual(movedFormerNode.state.strokes.edge.points, detachedPoints);
+
+  const undoneNode = applyDiagramUndo(
+    movedFormerNode.state,
+    movedFormerNode,
+    context("2026-08-01T00:00:03.000Z"),
+  );
+  const undoneLine = applyDiagramUndo(
+    undoneNode.state,
+    detached,
+    context("2026-08-01T00:00:04.000Z"),
+  );
+  assert.deepEqual(undoneLine.state.strokes.edge.annotation, state.strokes.edge.annotation);
+  assert.deepEqual(undoneLine.state.strokes.edge.points, state.strokes.edge.points);
 });
 
 test("objects.move skips missing selection ids instead of aborting the whole move", () => {

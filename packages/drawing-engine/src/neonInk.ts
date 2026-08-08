@@ -19,19 +19,59 @@ const NEON_LIGHTNESS = 0.66;
 const NEUTRAL_CORE = "#f1f5f9";
 
 const cache = new Map<string, string>();
-const CACHE_LIMIT = 256;
+const CACHE_LIMIT = 512;
 
 export function adaptInkForDarkBoard(color: string): string {
-  const cached = cache.get(color);
+  return cachedAdapt("ink:", color, adapt);
+}
+
+/**
+ * Shape-body fills get the opposite treatment from inks: the light paper
+ * fills of the classic theme become dark translucent glass so bright label
+ * text and neon outlines stay readable. Hue is kept for tinted fills
+ * (sticky-note amber stays warm); dark or transparent fills pass through.
+ */
+export function adaptFillForDarkBoard(color: string): string {
+  return cachedAdapt("fill:", color, adaptFill);
+}
+
+function cachedAdapt(
+  prefix: string,
+  color: string,
+  transform: (color: string) => string,
+): string {
+  const key = prefix + color;
+  const cached = cache.get(key);
   if (cached !== undefined) {
     return cached;
   }
-  const adapted = adapt(color);
+  const adapted = transform(color);
   if (cache.size >= CACHE_LIMIT) {
     cache.clear();
   }
-  cache.set(color, adapted);
+  cache.set(key, adapted);
   return adapted;
+}
+
+const GLASS_LIGHTNESS = 16;
+const GLASS_ALPHA = 0.58;
+
+function adaptFill(color: string): string {
+  const parsed = parseColor(color);
+  if (!parsed) {
+    return color;
+  }
+  if (parsed.l < LIGHT_ENOUGH) {
+    return color;
+  }
+  const alpha = round(Math.min(parsed.a, GLASS_ALPHA));
+  const colorfulness = parsed.s * (1 - Math.abs(2 * parsed.l - 1));
+  if (colorfulness <= NEUTRAL_COLORFULNESS) {
+    return `rgba(10, 14, 22, ${alpha})`;
+  }
+  const h = Math.round(parsed.h);
+  const s = Math.round(Math.min(1, parsed.s) * 100);
+  return `hsla(${h}, ${s}%, ${GLASS_LIGHTNESS}%, ${alpha})`;
 }
 
 function adapt(color: string): string {

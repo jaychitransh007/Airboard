@@ -1,0 +1,261 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://airboard.dev/evals/schema/interaction-eval-result.v1.schema.json",
+  "title": "InteractionEvalResult",
+  "description": "The normalized result of one InteractionEvalCase execution.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "caseId",
+    "status",
+    "durationMs",
+    "capabilities",
+    "checks",
+    "evidenceProvenance"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "interaction-eval-result.v1"
+    },
+    "caseId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "title": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "passed",
+        "failed",
+        "error",
+        "skipped"
+      ]
+    },
+    "durationMs": {
+      "type": "number",
+      "minimum": 0
+    },
+    "capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/check"
+      }
+    },
+    "evidenceProvenance": {
+      "$ref": "#/$defs/evidenceProvenance"
+    },
+    "observed": {
+      "type": "object"
+    },
+    "stageOutcomes": {
+      "type": "object"
+    },
+    "stageTimings": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0
+      }
+    },
+    "semanticPlan": {
+      "type": "object"
+    },
+    "groundedCommands": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "eventDelta": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "finalBoardState": {
+      "type": "object"
+    },
+    "undoRoundTrip": {
+      "type": "object"
+    },
+    "versions": {
+      "type": "object"
+    },
+    "usage": {
+      "type": "object"
+    },
+    "cost": {
+      "type": "object"
+    },
+    "device": {
+      "type": "object"
+    },
+    "surface": {
+      "type": "string"
+    },
+    "failureTaxonomy": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
+    "error": {
+      "$ref": "#/$defs/error"
+    },
+    "metadata": {
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "evidenceProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "class",
+        "releaseEligible",
+        "timedInput",
+        "timedInputCount",
+        "routeObservation",
+        "outcomeObservation",
+        "components"
+      ],
+      "properties": {
+        "class": {
+          "enum": [
+            "production-route",
+            "production-reducer",
+            "recorded-provider-fixture",
+            "harness-fixture",
+            "executor-error",
+            "unspecified"
+          ]
+        },
+        "releaseEligible": {
+          "type": "boolean"
+        },
+        "timedInput": {
+          "type": "boolean"
+        },
+        "timedInputCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "routeObservation": {
+          "enum": [
+            "production",
+            "production_reducer",
+            "recorded_fixture",
+            "fixture_inferred",
+            "unobserved"
+          ]
+        },
+        "outcomeObservation": {
+          "enum": [
+            "production",
+            "production_reducer",
+            "recorded_fixture",
+            "unobserved"
+          ]
+        },
+        "components": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "difference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "message"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "expected": {},
+        "actual": {}
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "message"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "failed",
+            "skipped"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "differences": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/difference"
+          }
+        },
+        "details": {}
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "message"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "stack": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

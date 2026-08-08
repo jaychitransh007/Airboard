@@ -1,14 +1,23 @@
 import type { TranscriptionRuntimeConfig } from "./transcription/types";
 import type { SemanticIntentRuntimeConfig } from "./semanticIntent/types";
+import { normalizeChromeExtensionPackageId } from "./chromeInstallationIdentity.ts";
+import { parseChromeExtensionCompatibleVersions } from "./chromeExtensionCompatibility.ts";
 
 const DEEPGRAM_FLUX_MODELS = new Set(["flux-general-en", "flux-general-multi"]);
 
 export type ApiConfig = {
   host: string;
   port: number;
+  appUrl: string;
   ownerGraceSeconds: number;
   localEntitlements: boolean;
+  chromeExtensionEnabled: boolean;
+  /** Exact reviewed Chrome Web Store package ID; required when enabled in production. */
+  chromeExtensionId?: string;
+  /** Finite overlap window accepted while Chrome rolls a reviewed update out. */
+  chromeExtensionCompatibleVersions: string[];
   allowedOrigins: string[];
+  sessionSigningSecret: string;
   /** Optional shared token guarding provider-spending endpoints. */
   apiToken?: string;
   rateLimits: {
@@ -18,20 +27,76 @@ export type ApiConfig = {
   };
   supabaseUrl?: string;
   supabaseServiceRoleKey?: string;
+  stripe: {
+    enabled: boolean;
+    secretKey?: string;
+    webhookSecret?: string;
+    personalPriceId?: string;
+    teamPriceId?: string;
+  };
+  email: {
+    resendApiKey?: string;
+    from: string;
+  };
+  cronSecret?: string;
   transcription: TranscriptionRuntimeConfig;
   semanticIntent: SemanticIntentRuntimeConfig;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
+  const isProduction = env.NODE_ENV === "production";
+  const appUrl = env.AIRBOARD_APP_URL?.trim() || "http://localhost:3000";
+  const allowedOrigins = (env.AIRBOARD_ALLOWED_ORIGINS ?? "http://localhost:3000")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  const chromeExtensionEnabled = isProduction
+    ? env.AIRBOARD_CHROME_EXTENSION_ENABLED === "true"
+    : env.AIRBOARD_CHROME_EXTENSION_ENABLED !== "false";
+  const configuredChromeExtensionId = env.AIRBOARD_CHROME_EXTENSION_ID?.trim();
+  const chromeExtensionId = normalizeChromeExtensionPackageId(configuredChromeExtensionId);
+  const chromeExtensionCompatibleVersions = parseChromeExtensionCompatibleVersions(
+    env.AIRBOARD_CHROME_EXTENSION_COMPATIBLE_VERSIONS,
+  );
+  if (configuredChromeExtensionId && !chromeExtensionId) {
+    throw new Error("AIRBOARD_CHROME_EXTENSION_ID must be a 32-character Chrome extension ID.");
+  }
+  if (isProduction && chromeExtensionEnabled && !chromeExtensionId) {
+    throw new Error(
+      "AIRBOARD_CHROME_EXTENSION_ID is required when the Chrome extension is enabled in production.",
+    );
+  }
+  if (isProduction && chromeExtensionEnabled) {
+    let appOrigin: string;
+    try {
+      appOrigin = new URL(appUrl).origin;
+    } catch {
+      throw new Error(
+        "AIRBOARD_APP_URL must be a valid origin when the Chrome extension is enabled in production.",
+      );
+    }
+    if (allowedOrigins.includes("*") || !allowedOrigins.includes(appOrigin)) {
+      throw new Error(
+        "AIRBOARD_ALLOWED_ORIGINS must explicitly include the AIRBOARD_APP_URL origin without a wildcard when the Chrome extension is enabled in production.",
+      );
+    }
+  }
+  const sessionSigningSecret =
+    env.AIRBOARD_SESSION_SIGNING_SECRET?.trim() || "airboard-local-development-signing-key";
+  if (isProduction && sessionSigningSecret === "airboard-local-development-signing-key") {
+    throw new Error("AIRBOARD_SESSION_SIGNING_SECRET is required in production.");
+  }
   return {
     host: env.HOST ?? "127.0.0.1",
     port: Number(env.PORT ?? 4000),
+    appUrl,
     ownerGraceSeconds: Number(env.AIRBOARD_OWNER_GRACE_SECONDS ?? 180),
-    localEntitlements: env.AIRBOARD_LOCAL_ENTITLEMENTS !== "false",
-    allowedOrigins: (env.AIRBOARD_ALLOWED_ORIGINS ?? "http://localhost:3000")
-      .split(",")
-      .map((origin) => origin.trim())
-      .filter(Boolean),
+    localEntitlements: !isProduction && env.AIRBOARD_LOCAL_ENTITLEMENTS !== "false",
+    chromeExtensionEnabled,
+    ...(chromeExtensionId ? { chromeExtensionId } : {}),
+    chromeExtensionCompatibleVersions,
+    sessionSigningSecret,
+    allowedOrigins,
     ...(env.AIRBOARD_API_TOKEN?.trim() ? { apiToken: env.AIRBOARD_API_TOKEN.trim() } : {}),
     rateLimits: {
       intentPerMinute: parseNumber(
@@ -60,6 +125,24 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ...(env.SUPABASE_SERVICE_ROLE_KEY
       ? { supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY }
       : {}),
+    stripe: {
+      enabled: env.AIRBOARD_BILLING_ENABLED === "true",
+      ...(env.STRIPE_SECRET_KEY?.trim() ? { secretKey: env.STRIPE_SECRET_KEY.trim() } : {}),
+      ...(env.STRIPE_WEBHOOK_SECRET?.trim()
+        ? { webhookSecret: env.STRIPE_WEBHOOK_SECRET.trim() }
+        : {}),
+      ...(env.STRIPE_PERSONAL_PRICE_ID?.trim()
+        ? { personalPriceId: env.STRIPE_PERSONAL_PRICE_ID.trim() }
+        : {}),
+      ...(env.STRIPE_TEAM_PRICE_ID?.trim()
+        ? { teamPriceId: env.STRIPE_TEAM_PRICE_ID.trim() }
+        : {}),
+    },
+    email: {
+      from: env.AIRBOARD_EMAIL_FROM?.trim() || "Airboard <hello@airboard.app>",
+      ...(env.RESEND_API_KEY?.trim() ? { resendApiKey: env.RESEND_API_KEY.trim() } : {}),
+    },
+    ...(env.AIRBOARD_CRON_SECRET?.trim() ? { cronSecret: env.AIRBOARD_CRON_SECRET.trim() } : {}),
     transcription: loadTranscriptionConfig(env),
     semanticIntent: loadSemanticIntentConfig(env),
   };

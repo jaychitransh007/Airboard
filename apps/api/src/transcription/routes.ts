@@ -1,15 +1,20 @@
 import type { FastifyInstance } from "fastify";
 import WebSocket, { type RawData } from "ws";
 import type { ApiConfig } from "../config";
-import { apiTokenAllowed } from "../security";
 import { createTranscriptionProvider } from "./factory";
-import { parseTranscriptionControlMessage, resolveTranscriptionStart } from "./protocol";
+import {
+  parseTranscriptionControlMessage,
+  resolveTranscriptionConfigure,
+  resolveTranscriptionStart,
+} from "./protocol";
 import { publicTranscriptionConfig } from "./publicConfig";
 import type {
   RealtimeTranscriptionSession,
   TranscriptionProviderEvent,
   TranscriptionServerMessage,
 } from "./types";
+import type { AuthService } from "../auth";
+import { configuredApiTokenAllowed } from "../security";
 
 const MAX_PCM16_FRAME_BYTES = 256 * 1024;
 const MAX_STARTUP_BUFFER_BYTES = 384 * 1024;
@@ -20,7 +25,7 @@ type ActiveTranscription = {
   stopReason: "completed" | "aborted" | "provider_closed";
 };
 
-export function registerTranscriptionRoutes(server: FastifyInstance, config: ApiConfig): void {
+export function registerTranscriptionRoutes(server: FastifyInstance, config: ApiConfig, auth?: AuthService): void {
   const provider = createTranscriptionProvider(config.transcription);
   let concurrentStreams = 0;
 
@@ -31,10 +36,10 @@ export function registerTranscriptionRoutes(server: FastifyInstance, config: Api
       socket.close(1008, "Origin is not allowed");
       return;
     }
-    if (!apiTokenAllowed(request, config.apiToken)) {
-      socket.close(1008, "API token required");
-      return;
-    }
+    const authorize = async () => {
+      if (configuredApiTokenAllowed(request, config.apiToken) || config.localEntitlements) return true;
+      return Boolean(auth && (await auth.authenticate(request, { allowInstallation: true })));
+    };
 
     const clientSocket = socket as unknown as WebSocket;
     let active: ActiveTranscription | null = null;
@@ -127,7 +132,49 @@ export function registerTranscriptionRoutes(server: FastifyInstance, config: Api
     const start = async (rawMessage: string) => {
       const parsed = parseTranscriptionControlMessage(rawMessage);
       if (!parsed.ok) {
-        sendError(clientSocket, parsed.error.code, parsed.error.message, true);
+        sendError(
+          clientSocket,
+          parsed.error.code,
+          parsed.error.message,
+          !isConfigureControlMessage(rawMessage),
+        );
+        return;
+      }
+
+      if (parsed.value.type === "transcription.configure") {
+        if (!active) {
+          sendError(
+            clientSocket,
+            "TRANSCRIPTION_NOT_READY",
+            "Wait for transcription.ready before updating keyterms.",
+            false,
+          );
+          return;
+        }
+        const resolved = resolveTranscriptionConfigure(
+          parsed.value,
+          config.transcription,
+        );
+        if (!resolved.ok) {
+          sendError(clientSocket, resolved.error.code, resolved.error.message, false);
+          return;
+        }
+        try {
+          active.session.updateKeyterms(resolved.value);
+          send(clientSocket, {
+            type: "transcription.configured",
+            keytermCount: resolved.value.length,
+          });
+        } catch (error) {
+          sendError(
+            clientSocket,
+            "TRANSCRIPTION_CONFIGURE_FAILED",
+            error instanceof Error
+              ? error.message
+              : "The transcription vocabulary could not be updated.",
+            false,
+          );
+        }
         return;
       }
 
@@ -315,12 +362,29 @@ export function registerTranscriptionRoutes(server: FastifyInstance, config: Api
       );
     };
 
-    clientSocket.on("message", (rawMessage: RawData, isBinary: boolean) => {
+    let authorized = false;
+    const pendingMessages: Array<{ rawMessage: RawData; isBinary: boolean }> = [];
+    const receive = (rawMessage: RawData, isBinary: boolean) => {
       if (isBinary) {
         receiveAudio(rawMessage);
         return;
       }
       void start(rawMessage.toString());
+    };
+    clientSocket.on("message", (rawMessage: RawData, isBinary: boolean) => {
+      if (!authorized) {
+        if (pendingMessages.length < 4) pendingMessages.push({ rawMessage, isBinary });
+        return;
+      }
+      receive(rawMessage, isBinary);
+    });
+    void authorize().then((allowed) => {
+      if (!allowed) {
+        socket.close(1008, "Airboard authentication required");
+        return;
+      }
+      authorized = true;
+      for (const pending of pendingMessages.splice(0)) receive(pending.rawMessage, pending.isBinary);
     });
 
     clientSocket.on("close", () => {
@@ -334,6 +398,18 @@ export function registerTranscriptionRoutes(server: FastifyInstance, config: Api
       releaseStreamSlot();
     });
   });
+}
+
+function isConfigureControlMessage(input: string): boolean {
+  try {
+    const value = JSON.parse(input) as { type?: unknown };
+    return (
+      value?.type === "transcription.configure" ||
+      value?.type === "configure"
+    );
+  } catch {
+    return false;
+  }
 }
 
 function sendError(

@@ -90,11 +90,35 @@ export class SupabaseSessionStore implements SessionStore {
     session: BoardSession;
     ownerParticipant: Participant;
   }> {
-    const profile = await this.getProfileByLocalKey(input.ownerUserId);
+    const profile = await this.getProfileByIdentity(input.ownerUserId);
     const entitlement = await this.getActiveEntitlement(profile.id);
 
     if (!canStartBoard(entitlement)) {
       throw new Error("OWNER_ENTITLEMENT_REQUIRED");
+    }
+
+    if (input.organizationId && (input.boardId || input.workspaceId)) {
+      const workspaceId = input.workspaceId ?? null;
+      if (input.boardId) {
+        const { data: board } = await this.client
+          .from("boards")
+          .select("id,workspace_id")
+          .eq("id", input.boardId)
+          .eq("organization_id", input.organizationId)
+          .is("deleted_at", null)
+          .maybeSingle();
+        if (!board || (workspaceId && board.workspace_id !== workspaceId)) {
+          throw new Error("BOARD_ACCESS_DENIED");
+        }
+      } else if (workspaceId) {
+        const { data: workspace } = await this.client
+          .from("workspaces")
+          .select("id")
+          .eq("id", workspaceId)
+          .eq("organization_id", input.organizationId)
+          .maybeSingle();
+        if (!workspace) throw new Error("WORKSPACE_ACCESS_DENIED");
+      }
     }
 
     const now = new Date();
@@ -105,6 +129,9 @@ export class SupabaseSessionStore implements SessionStore {
       allow_participant_drawing: input.allowParticipantDrawing,
       owner_last_seen_at: now.toISOString(),
       expires_at: new Date(now.getTime() + 6 * 60 * 60 * 1000).toISOString(),
+      ...(input.organizationId ? { organization_id: input.organizationId } : {}),
+      ...(input.workspaceId ? { workspace_id: input.workspaceId } : {}),
+      ...(input.boardId ? { board_id: input.boardId } : {}),
       ...(input.providerMeetingId ? { provider_meeting_id: input.providerMeetingId } : {}),
       ...(input.title ? { title: input.title } : { title: "Airboard" }),
     };
@@ -309,17 +336,33 @@ export class SupabaseSessionStore implements SessionStore {
     return mapSession(data as BoardSessionRow);
   }
 
-  private async getProfileByLocalKey(localUserKey: string): Promise<ProfileRow> {
+  private async getProfileByIdentity(identity: string): Promise<ProfileRow> {
+    // PostgreSQL's uuid type accepts the full hexadecimal UUID shape. Local
+    // seed identities intentionally use a nil-style UUID, so restricting this
+    // lookup to RFC version/variant bits incorrectly treats that profile id as
+    // a local_user_key.
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identity);
+    if (isUuid) {
+      const { data, error } = await this.client
+        .from("profiles")
+        .select("*")
+        .eq("id", identity)
+        .maybeSingle();
+      if (error) {
+        throw new Error("OWNER_PROFILE_LOOKUP_FAILED");
+      }
+      if (data) {
+        return data as ProfileRow;
+      }
+    }
     const { data, error } = await this.client
       .from("profiles")
       .select("*")
-      .eq("local_user_key", localUserKey)
-      .single();
-
+      .eq("local_user_key", identity)
+      .maybeSingle();
     if (error || !data) {
       throw new Error("OWNER_PROFILE_NOT_FOUND");
     }
-
     return data as ProfileRow;
   }
 

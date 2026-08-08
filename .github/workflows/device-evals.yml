@@ -1,0 +1,110 @@
+name: Real-device evaluation
+
+on:
+  schedule:
+    # Weekly protected-station run (Tuesday 03:30 UTC). The station must
+    # refresh its receiver-side Meet attestation before this window.
+    - cron: "30 3 * * 2"
+  release:
+    # A prerelease is the pre-production release gate; both protected stations
+    # must pass before the release can be promoted.
+    types:
+      - prereleased
+  workflow_dispatch:
+    inputs:
+      confirm_device_capture:
+        description: I confirm the assigned runner is an approved real-device/Meet test station
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  # A camera/microphone station must never run two capture sessions at once.
+  group: real-device-meet-evals
+  cancel-in-progress: false
+
+jobs:
+  device:
+    name: ${{ matrix.platform }} camera, microphone, and Meet evaluation
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - macos
+          - windows
+    runs-on:
+      - self-hosted
+      - real-device
+      - meet
+      - ${{ matrix.platform }}
+    timeout-minutes: 120
+    environment: device-evals
+    env:
+      AIRBOARD_EVAL_RUN_ID: device-gha-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Confirm approved device capture
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.confirm_device_capture != true }}
+        run: |
+          echo "::error::Re-run with confirm_device_capture enabled."
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          clean: true
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        timeout-minutes: 20
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages and applications
+        timeout-minutes: 25
+        run: pnpm -r build
+
+      - name: Install device browser
+        timeout-minutes: 15
+        run: pnpm --filter @airboard/web exec playwright install chromium
+
+      - name: Run eval:device
+        timeout-minutes: 75
+        env:
+          AIRBOARD_EVAL_REAL_CAMERA: "1"
+          AIRBOARD_EVAL_REAL_MICROPHONE: "1"
+          AIRBOARD_EVAL_MEET_BRIDGE: "1"
+          AIRBOARD_EVAL_DEVICE_ID: ${{ matrix.platform == 'macos' && secrets.AIRBOARD_EVAL_MACOS_DEVICE_ID || secrets.AIRBOARD_EVAL_WINDOWS_DEVICE_ID }}
+          AIRBOARD_EVAL_EXPECTED_CAMERA_LABEL_PATTERN: ${{ matrix.platform == 'macos' && secrets.AIRBOARD_EVAL_MACOS_CAMERA_LABEL_PATTERN || secrets.AIRBOARD_EVAL_WINDOWS_CAMERA_LABEL_PATTERN }}
+          AIRBOARD_EVAL_EXPECTED_MICROPHONE_LABEL_PATTERN: ${{ matrix.platform == 'macos' && secrets.AIRBOARD_EVAL_MACOS_MICROPHONE_LABEL_PATTERN || secrets.AIRBOARD_EVAL_WINDOWS_MICROPHONE_LABEL_PATTERN }}
+          AIRBOARD_EVAL_MEET_ATTESTATION_PATH: ${{ matrix.platform == 'macos' && secrets.AIRBOARD_EVAL_MACOS_MEET_ATTESTATION_PATH || secrets.AIRBOARD_EVAL_WINDOWS_MEET_ATTESTATION_PATH }}
+        run: pnpm eval:device
+
+      # Never upload Playwright traces, screenshots, recordings, or mounted
+      # source media from the persistent device runner.
+      - name: Upload privacy-safe device reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: device-eval-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/evals/**/*.json
+            artifacts/evals/**/*.xml
+            artifacts/evals/**/*.md
+            artifacts/evals/**/*.html
+          if-no-files-found: warn
+          retention-days: 7
+          include-hidden-files: false
+
+      - name: Remove generated data from the device runner
+        if: ${{ always() }}
+        run: |
+          node -e "const fs = require('node:fs'); for (const path of ['artifacts/evals', 'test-results', 'playwright-report', 'apps/web/test-results', 'apps/web/playwright-report']) fs.rmSync(path, { recursive: true, force: true })"

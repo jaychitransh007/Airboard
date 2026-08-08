@@ -22,6 +22,9 @@
       "@airboard/core": [
         "packages/core/src/index.ts"
       ],
+      "@airboard/core/existing-board-fan-in": [
+        "packages/core/src/existingBoardFanIn.ts"
+      ],
       "@airboard/core/semantic-capabilities": [
         "packages/core/src/semanticCapabilities.ts"
       ],

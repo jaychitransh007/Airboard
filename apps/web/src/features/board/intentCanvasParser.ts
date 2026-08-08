@@ -69,11 +69,22 @@ export type IntentCanvasOperation =
       to: IntentCanvasConnectionReference;
       label?: string;
     }
+  | {
+      /** Bind one uniquely identifiable loose line without creating a duplicate. */
+      kind: "attach_connection";
+      from: IntentCanvasConnectionReference;
+      to: IntentCanvasConnectionReference;
+      /** `from … to …` is directed; `with/to/between X and Y` preserves the line's existing orientation. */
+      endpointOrder: "directed" | "undirected";
+      /** How the user identified the pre-existing line itself. */
+      lineReference: "selected" | "pointer" | "unique_existing";
+    }
   | { kind: "rename_object"; target: IntentCanvasConnectionReference; label: string }
   | {
       kind: "delete_connection";
       from: IntentCanvasConnectionReference;
       to: IntentCanvasConnectionReference;
+      scope: "one" | "all";
     }
   | {
       kind: "resize_selection";
@@ -208,6 +219,16 @@ const COUNT_WORDS: Readonly<Record<string, number>> = {
   eight: 8,
   nine: 9,
   ten: 10,
+  eleven: 11,
+  twelve: 12,
+  thirteen: 13,
+  fourteen: 14,
+  fifteen: 15,
+  sixteen: 16,
+  seventeen: 17,
+  eighteen: 18,
+  nineteen: 19,
+  twenty: 20,
 };
 
 const SELECTION_WORDS = String.raw`(?:the\s+)?(?:selection|selected(?:\s+(?:object|objects|node|nodes|item|items))?)`;
@@ -228,9 +249,13 @@ export function parseIntentCanvasCommand(
   const activationPolicy = options.activationPolicy ?? "wake_word_required";
   const wakePhrases = sanitizeWakePhrases(options.wakePhrases);
   const cleanedInput = cleanText(input);
-  const wake = consumeWakePhrase(cleanedInput, wakePhrases);
+  // Courtesy may precede the wake phrase ("please, Airboard, add …") as well
+  // as the command itself. Peel it before addressing and once more after the
+  // wake phrase so both spoken forms share the same grammar.
+  const addressedInput = stripCourtesy(cleanedInput);
+  const wake = consumeWakePhrase(addressedInput, wakePhrases);
   const activation = buildActivation(activationPolicy, wake?.phrase);
-  const commandText = stripCourtesy(wake ? wake.remainder : cleanedInput);
+  const commandText = stripCourtesy(wake ? wake.remainder : addressedInput);
   const normalizedText = normalizeIntentCanvasText(commandText);
   const base = { rawText, normalizedText, activation };
 
@@ -246,6 +271,27 @@ export function parseIntentCanvasCommand(
       "Add a service here",
       "Move the selected object left",
     ]);
+  }
+
+  // This is deliberately parsed before the generic compound-command guard:
+  // "the disconnected line to Client and Planner" contains an `and`, but it
+  // names the two endpoints of one atomic repair rather than two mutations.
+  const attachment = parseAttachConnectionCommand(commandText);
+  if (attachment) {
+    return "command" in attachment
+      ? parsed(
+          base,
+          attachment.command,
+          attachment.confidence,
+          attachment.message,
+        )
+      : reject(
+          base,
+          "clarification",
+          attachment.code,
+          attachment.message,
+          attachment.examples,
+        );
   }
 
   if (hasCompoundMutation(normalizedText)) {
@@ -319,6 +365,61 @@ export function parseIntentCanvasCommand(
   );
 }
 
+function parseAttachConnectionCommand(
+  text: string,
+): ParseSuccess | ParseFailure | null {
+  const cleaned = cleanText(text).replace(/[.!?]+$/u, "").trim();
+  const prefix =
+    /^(?:connect|attach|reconnect|link|join|snap)\s+(?:(?:the|an?)\s+)?(?:(existing|selected|this)\s+)?(?:disconnected|detached|dangling|loose|free|unconnected)\s+(?:line|connector|connection|arrow|edge|link)\s+/iu;
+  const prefixMatch = prefix.exec(cleaned);
+  if (!prefixMatch) return null;
+  const remainder = cleaned.slice(prefixMatch[0].length);
+  const qualifier = prefixMatch[1]?.toLocaleLowerCase("en-US");
+  const lineReference = qualifier === "selected"
+    ? "selected"
+    : qualifier === "this"
+      ? "pointer"
+      : "unique_existing";
+  const directed = /^(?:from\s+)?(.+?)\s+to\s+(.+)$/iu.exec(remainder);
+  const undirected = directed
+    ? null
+    : /^(?:to|with|between)\s+(.+?)\s+and\s+(.+)$/iu.exec(remainder);
+  const match = directed ?? undirected;
+  const from = match?.[1] ? parseConnectionReference(match[1]) : null;
+  const to = match?.[2] ? parseConnectionReference(match[2]) : null;
+  if (!from || !to) {
+    return {
+      code: "missing_connection_endpoint",
+      message:
+        "Name both objects for the disconnected line, for example “attach the disconnected line from Client to Planner.”",
+      examples: [
+        "Attach the disconnected line from Client to Planner",
+        "Connect the loose connector with Client and Planner",
+      ],
+    };
+  }
+  if (connectionReferenceKey(from) === connectionReferenceKey(to)) {
+    return {
+      code: "same_connection_endpoint",
+      message: "The disconnected line needs two distinct endpoint objects.",
+      examples: ["Attach the disconnected line from Client to Planner"],
+    };
+  }
+  return {
+    command: {
+      kind: "attach_connection",
+      from,
+      to,
+      endpointOrder: directed ? "directed" : "undirected",
+      lineReference,
+    },
+    confidence: confidence(0.99, "exact_pattern"),
+    message: directed
+      ? `Attach the existing line from ${describeConnectionReference(from)} to ${describeConnectionReference(to)}.`
+      : `Attach the existing line to ${describeConnectionReference(from)} and ${describeConnectionReference(to)} while preserving its direction.`,
+  };
+}
+
 type ParseSuccess = {
   command: IntentCanvasOperation;
   confidence: IntentCanvasConfidence;
@@ -333,7 +434,7 @@ type ParseFailure = {
 
 function parseMetaCommand(text: string): ParseSuccess | null {
   const normalized = normalizeIntentCanvasText(text);
-  if (/^(?:undo|undo\s+(?:that|it|the\s+last\s+(?:action|change))|go\s+back)$/.test(normalized)) {
+  if (/^(?:undo|undo\s+(?:that|it|(?:the\s+)?last\s+(?:action|change))|go\s+back)$/.test(normalized)) {
     return {
       command: { kind: "undo" },
       confidence: confidence(1, "exact_pattern"),
@@ -380,6 +481,18 @@ const SIZE_ADJECTIVES: Readonly<
 
 /** "delete/remove the connection|line|arrow between X and Y", "disconnect X from Y". */
 function parseDeleteConnectionCommand(text: string): ParseSuccess | ParseFailure | null {
+  if (
+    /^disconnect\b/i.test(text) &&
+    (/\b(?:call|meeting|conference|zoom|meet)\b/i.test(text) ||
+      /\b(?:my|your|their|our)\s+end\b/i.test(text) ||
+      /\band\s+(?:rejoin|join|dial|call)\b/i.test(text))
+  ) {
+    // "Disconnect the call from my end and rejoin" is common meeting
+    // administration, not a destructive board edit. It must not become a
+    // named-reference delete merely because a board happens to contain
+    // tempting labels such as "Call" and "My End".
+    return null;
+  }
   const between =
     /^(?:delete|remove)\s+(?:the\s+|every\s+|all\s+)?(?:connection|connections|connector|connectors|line|lines|arrow|arrows|link|links|edge|edges)\s+between\s+(.+?)\s+and\s+(.+)$/i.exec(
       text,
@@ -405,10 +518,14 @@ function parseDeleteConnectionCommand(text: string): ParseSuccess | ParseFailure
       examples: ["Delete the connection between API and Database"],
     };
   }
+  const scope =
+    between && /^(?:delete|remove)\s+(?:every|all)\s+/iu.test(text)
+      ? "all"
+      : "one";
   return {
-    command: { kind: "delete_connection", from, to },
+    command: { kind: "delete_connection", from, to, scope },
     confidence: confidence(0.97, "exact_pattern"),
-    message: `Delete the connection between ${describeConnectionReference(from)} and ${describeConnectionReference(to)}.`,
+    message: `Delete ${scope === "all" ? "all connections" : "the connection"} between ${describeConnectionReference(from)} and ${describeConnectionReference(to)}.`,
   };
 }
 
@@ -606,6 +723,20 @@ function parseCreateCommand(text: string): ParseSuccess | ParseFailure | null {
   // Never guess a label from it — ask instead. Explicit "named/called" labels
   // are unaffected.
   const cleanedInferredLabel = cleanLabel(inferredLabel);
+  // Named/unsupported placement phrases need board-aware grounding. Treating
+  // them as an inferred label would execute a semantically wrong create.
+  if (
+    !explicitLabel &&
+    /^(?:(?:to\s+the\s+)?(?:left|right)\s+of|(?:above|below|over|under|next\s+to|beside)\b)/i.test(
+      cleanedInferredLabel,
+    )
+  ) {
+    return {
+      code: "missing_label",
+      message: "That placement needs a uniquely grounded board object.",
+      examples: ["Add a circle left of this", "Add a circle named Billing here"],
+    };
+  }
   if (
     !explicitLabel &&
     (/^(?:that|which|because|so|if|when|to|about|regarding|saying|says|on|of|for|with|from|in|at|by|into|onto|your|my|our|their|his|her|its|some|any|more)\b/i.test(
@@ -665,6 +796,16 @@ function parseConnectCommand(text: string): ParseSuccess | ParseFailure | null {
       examples: ["Connect Decision to User One as yes and to User Two as no"],
     };
   }
+  if (
+    /\band\b[\s\S]+\bto\b/i.test(labelSplit.endpoints) ||
+    (labelSplit.endpoints.match(/\bto\b/gi)?.length ?? 0) > 1
+  ) {
+    return {
+      code: "compound_command",
+      message: "Those endpoint names are ambiguous. I’ll ground the intended connection from board context.",
+      examples: ["Connect Drag and Drop to Server", "Connect Send to Queue to Worker"],
+    };
+  }
 
   const match = /^(.+?)\s+(to|with|and)\s+(.+)$/i.exec(labelSplit.endpoints);
   if (!match?.[1] || !match[3]) {
@@ -721,6 +862,13 @@ function parseSelectionCommand(text: string): ParseSuccess | ParseFailure | null
     text,
   );
   if (namedRename?.[1] && namedRename[2] && !new RegExp(`^${SELECTION_WORDS}$`, "i").test(namedRename[1])) {
+    if ((text.match(/\s+to\s+/gi)?.length ?? 0) > 1) {
+      return selectionFailure(
+        "missing_label",
+        "That rename has more than one possible target/label boundary. Which object should be renamed?",
+        ["Rename Send to Publish", "Rename selected to Queue to Publish"],
+      );
+    }
     const target = parseConnectionReference(namedRename[1]);
     const label = cleanLabel(namedRename[2]);
     if (!target || !label) {
@@ -894,7 +1042,7 @@ function parsePlacement(subject: string): PlacementParse {
       }),
     },
     {
-      regex: /\s+(left|right|above|below|over|under)$/i,
+      regex: /\s+(left|right|up|down|above|below|over|under)$/i,
       build: (match) => ({
         direction: normalizeDirection(match[1] ?? "left"),
         relativeTo: { kind: "focus" },
@@ -936,7 +1084,7 @@ function extractExplicitLabel(subject: string): { subject: string; label: string
 }
 
 function extractCount(subject: string): { count: number; subject: string } {
-  const match = /^(a|an|the|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(.+)$/i.exec(subject);
+  const match = /^(a|an|the|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d+)\s+(.+)$/i.exec(subject);
   if (!match?.[1] || !match[2]) {
     return { count: 1, subject };
   }
@@ -1011,8 +1159,8 @@ function parseConnectionReference(value: string): IntentCanvasConnectionReferenc
   if (!normalized) {
     return null;
   }
-  if (normalized === "this" || normalized === "that") {
-    return { kind: "deictic", pronoun: normalized };
+  if (normalized === "this" || normalized === "this one" || normalized === "that") {
+    return { kind: "deictic", pronoun: normalized === "this one" ? "this" : normalized };
   }
   return {
     kind: "named",
@@ -1172,7 +1320,7 @@ function removeSpan(value: string, index: number, length: number): string {
 // may end in a comma/pause punctuation, and layers stack, so strip
 // iteratively until the text stabilizes.
 const COURTESY_PREFIX_PATTERN =
-  /^(?:(?:uh|um|erm|ah|hmm|well|yeah|yep|so|like|now|okay|ok|alright|right)(?:[,.;:\s]+|$)|please(?:\s+|$)|(?:can|could|would)\s+you\s+)/i;
+  /^(?:(?:uh|um|erm|ah|hmm|well|yeah|yep|so|like|now|okay|ok|alright|right)(?:[,.;:\s]+|$)|please(?:[,.;:\s]+|$)|(?:can|could|would)\s+you(?:[,.;:\s]+|$))/i;
 
 function stripCourtesy(value: string): string {
   let text = value.trim();
@@ -1183,7 +1331,7 @@ function stripCourtesy(value: string): string {
     }
     text = next;
   }
-  return text.replace(/\s+please$/i, "").trim();
+  return text.replace(/(?:\s+|,\s*)please$/i, "").trim();
 }
 
 function cleanText(input: string): string {

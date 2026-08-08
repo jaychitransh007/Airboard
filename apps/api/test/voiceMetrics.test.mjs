@@ -104,6 +104,79 @@ test("no attempts → successRate is null, not a fake 100%", () => {
   assert.equal(metrics.successRate, null);
 });
 
+test("content-free gesture interactions do not inflate voice metrics", () => {
+  const metrics = computeVoiceMetrics([
+    turn("gesture-1", [
+      ["gesture_perception_health", { status: "ok", handsDetected: 1 }, 0],
+      ["gesture_arbitration_owner", { owner: "manipulation" }, 10],
+      ["gesture_action", { gesture: "move_commit", applied: true }, 20],
+    ]),
+    turn("voice-1", [
+      ["stt_final", {}, 0],
+      ["turn_completed", { outcome: "applied" }, 10],
+    ]),
+  ]);
+
+  assert.equal(metrics.turns, 1);
+  assert.equal(metrics.completedTurns, 1);
+  assert.deepEqual(metrics.outcomes, { applied: 1 });
+});
+
+test("late undo, retry, and correction signals are attributed without counting corrected applies as success", () => {
+  const metrics = computeVoiceMetrics([
+    turn("voice-applied-then-undone", [
+      ["stt_final", {}, 0],
+      ["action_applied", { actionCount: 1 }, 100],
+      ["turn_completed", { outcome: "applied" }, 110],
+      [
+        "action_undone",
+        {
+          attributionKind: "undo",
+          source: "keyboard",
+          delayMs: 2_000,
+          followUpInteractionId: "keyboard-undo-1",
+        },
+        2_100,
+      ],
+    ]),
+    turn("voice-applied-then-corrected", [
+      ["stt_final", {}, 0],
+      ["action_applied", { actionCount: 1 }, 100],
+      ["turn_completed", { outcome: "applied" }, 110],
+      [
+        "correction",
+        {
+          attributionKind: "correction",
+          delayMs: 1_000,
+          followUpInteractionId: "voice-correction-1",
+        },
+        1_100,
+      ],
+    ]),
+    turn("voice-rejected-then-retried", [
+      ["stt_final", {}, 0],
+      ["turn_completed", { outcome: "rejected" }, 100],
+      [
+        "retry",
+        {
+          attributionKind: "retry",
+          delayMs: 900,
+          followUpInteractionId: "voice-retry-1",
+        },
+        1_000,
+      ],
+    ]),
+  ]);
+
+  assert.deepEqual(metrics.outcomes, {
+    applied_then_undone: 1,
+    applied_then_corrected: 1,
+    rejected: 1,
+  });
+  assert.deepEqual(metrics.followUps, { undo: 1, correction: 1, retry: 1 });
+  assert.equal(metrics.successRate, 0);
+});
+
 test("GET /voice/metrics aggregates the live buffer and is origin-gated", async () => {
   const server = Fastify();
   const buffer = new VoiceTraceBuffer();

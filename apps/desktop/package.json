@@ -1,0 +1,17 @@
+{
+  "name": "@airboard/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/main.mjs",
+  "scripts": {
+    "dev": "electron src/main.mjs",
+    "smoke": "electron src/main.mjs --smoke-test",
+    "build": "node --check src/main.mjs && node --check src/preload.cjs && node --check src/overlayWindow.mjs",
+    "typecheck": "node --check src/main.mjs && node --check src/preload.cjs && node --check src/overlayWindow.mjs",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "electron": "43.1.1"
+  }
+}

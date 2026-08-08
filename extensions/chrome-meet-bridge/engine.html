@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Airboard overlay engine</title>
+    <style>
+      html,
+      body,
+      iframe {
+        width: 1280px;
+        height: 720px;
+        margin: 0;
+        border: 0;
+        overflow: hidden;
+        background: transparent;
+      }
+    </style>
+  </head>
+  <body>
+    <iframe
+      id="airboard-engine-frame"
+      data-engine-src="https://airboard-pilot-web-634900453473.asia-south1.run.app/meet/overlay-engine"
+      title="Airboard camera overlay renderer"
+      allow="autoplay"
+    ></iframe>
+    <script src="engine-relay.js"></script>
+  </body>
+</html>

@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createInitialBoardState, applyBoardEvent, createEventEnvelope } from "@airboard/core";
+import {
+  createInitialBoardState,
+  applyBoardEvent,
+  createBoardSceneElement,
+  createEventEnvelope,
+} from "@airboard/core";
 import {
   buildBoardWebSocketUrl,
   snapshotBoardEvents,
@@ -60,7 +65,7 @@ function fakeFetchRouter(routes) {
 
 const noTimers = { setTimer: () => 0, clearTimer: () => {} };
 
-test("create path: owner header, standalone provider, ws to the session", async () => {
+test("create path: bearer auth, standalone provider, ws to the session", async () => {
   const clients = [];
   const { fetchImpl, calls } = fakeFetchRouter([
     {
@@ -68,11 +73,13 @@ test("create path: owner header, standalone provider, ws to the session", async 
       body: {
         session: { id: "session-9" },
         ownerParticipant: { id: "owner-p", role: "owner" },
+        realtimeTicket: "realtime-9",
+        joinToken: "join-9",
       },
     },
   ]);
   const result = await startBoardSync(
-    { apiBaseUrl: "http://127.0.0.1:4600", ownerUserId: "user-1", title: "Test board" },
+    { apiBaseUrl: "http://127.0.0.1:4600", ownerUserId: "user-1", accessToken: "account-9", title: "Test board" },
     { onRemoteEvent: () => {} },
     {
       fetchImpl,
@@ -87,9 +94,11 @@ test("create path: owner header, standalone provider, ws to the session", async 
   assert.equal(result.outcome, "created");
   assert.equal(result.initialState, null);
   assert.equal(result.handle.boardSessionId, "session-9");
-  assert.equal(calls[0].init.headers["x-airboard-user-id"], "user-1");
+  assert.equal(calls[0].init.headers.Authorization, "Bearer account-9");
+  assert.equal(calls[0].init.headers["x-airboard-user-id"], undefined);
   assert.equal(JSON.parse(calls[0].init.body).provider, "standalone");
   assert.equal(clients[0].options.url, "ws://127.0.0.1:4600/ws");
+  assert.equal(clients[0].options.realtimeTicket, "realtime-9");
   assert.equal(clients[0].connected, true);
 });
 
@@ -243,17 +252,25 @@ test("snapshotBoardEvents seeds committed objects re-addressed to the session", 
     strokeId: "s1",
     points: [{ x: 0, y: 0, t: 0 }],
   });
+  state = applyBoardEvent(state, {
+    ...createEventEnvelope({ boardSessionId: "local-board", actorParticipantId: "p" }),
+    type: "element.created",
+    element: createBoardSceneElement({ id: "sticky", boardId: "local-board", kind: "sticky" }),
+  });
 
   const events = snapshotBoardEvents(state, {
     boardSessionId: "server-session",
     actorParticipantId: "owner-p",
   });
-  assert.equal(events.length, 2);
+  assert.equal(events.length, 3);
   assert.equal(events[0].type, "stroke.started");
   assert.equal(events[0].stroke.boardId, "server-session");
   assert.equal(events[0].boardSessionId, "server-session");
   assert.equal(events[1].type, "stroke.committed");
   assert.equal(events[1].strokeId, "s1");
+  assert.equal(events[2].type, "element.created");
+  assert.equal(events[2].element.id, "sticky");
+  assert.equal(events[2].element.boardId, "server-session");
 });
 
 test("buildBoardWebSocketUrl maps http(s) to ws(s)", () => {

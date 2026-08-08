@@ -1,20 +1,54 @@
 # Airboard Platform Support Matrix
 
 > **Task:** PF-001  
-> **Status:** Baseline defined; real-client validation pending  
-> **Last updated:** 2026-07-16  
+> **Status:** Current channel inventory; external publication and real-client validation gates remain
+> **Last updated:** 2026-07-30
 > **Owner:** Product and platform engineering  
-> **Decision scope:** Public-beta promises for standalone web, Google Meet, Microsoft Teams, and Zoom
+> **Decision scope:** Current availability for standalone web, Google Meet, Microsoft Teams, and Zoom
 
 ## Decision
 
-Airboard has no generally available platform commitment yet. The proposed release order is:
+Airboard has no generally available platform commitment yet. The current channel order is:
 
-1. Standalone desktop web plus Google Meet desktop web for public beta.
-2. Microsoft Teams desktop and Zoom desktop for controlled design-partner pilots.
-3. Mobile and other web clients only after they pass the same real-client, security, onboarding, and reliability gates.
+1. Standalone desktop web is the shipped controlled-pilot surface.
+2. Google Meet is a private-preview Chrome extension that composites Airboard into the presenter's outgoing camera.
+3. The native desktop overlay remains a development preview.
+4. Microsoft Teams, Zoom, mobile, and other web clients are not currently available.
 
-This is a testable candidate matrix, not a claim that the listed clients already work. `PF-002`, `PF-003`, and `PF-004` must replace candidate statuses with real-client evidence before `PF-006` approves the public promise.
+This matrix is not a claim of general availability. Publisher-console review, install distribution, receiver-side verification, security, onboarding, and reliability gates still control promotion.
+
+## Current Google Meet architecture
+
+The active Meet channel is `extensions/chrome-meet-bridge` version 0.8.0. It is
+a Chrome extension, not a Google Workspace Marketplace Meet add-on. After
+affirmative camera, microphone, and voice-processing confirmation, a private
+1280×720 engine composites Airboard's transparent diagram plane into an
+already-running Meet camera sender.
+
+There is no dedicated Airboard side panel, main-stage canvas, screen share, or
+second audience surface in the current Meet design. Preflight requires the
+private engine, consent, compositor, sender attachment, encoded-frame, and
+outbound-byte checks; a second participant must still verify the received
+camera tile. The Web Store URL is not configured, so this remains a
+private-preview channel and must not be advertised as publicly installable.
+
+The older Meet add-on feasibility entries retained later in this document are
+historical evidence only. They do not override this current channel definition.
+
+## Current release support matrix
+
+| Channel | Current availability | Eligible client | Current product surface | Promotion boundary |
+| --- | --- | --- | --- | --- |
+| Standalone web | Controlled pilot | Desktop Chromium browsers on the pilot matrix | Persistent full-page Airboard workspace with pointer, typed commands, gesture, Airo, and screen presentation subject to device permission and provider configuration | General availability requires the standalone launch gate and its browser/device evidence |
+| Google Meet | Private preview | Chrome desktop on standard Meet meeting-code URLs | Version 0.8.0 Chrome extension; private engine composited into the presenter's outgoing camera | Public installation requires reviewed Web Store distribution and receiver-side Meet evidence |
+| Native desktop overlay | Development preview | Local Electron development builds | Transparent, always-on-top click-through overlay | Public distribution requires signed/notarized installers, updates, OS validation, and rollback |
+| Microsoft Teams and Zoom | Not supported | None | No usable product integration | Each provider needs a separate implementation, identity, client, store, privacy, and operations gate |
+
+## Historical provider-feasibility record
+
+The remaining matrices preserve the add-on-era investigation completed through
+16 July 2026. Use them as provider research and test history, not as the current
+availability or architecture promise.
 
 ## Status legend
 
@@ -184,3 +218,4 @@ These references establish provider capability, not Airboard compatibility. Rech
 | 2026-07-16 | PF-002 | State-audit correction: refreshed the stale repository-evidence entries (official SDK runtime is integrated and media requests are standalone-only, not "adapter stub"/"media on every surface") and reclassified participant starting-state join from NB to I. |
 | 2026-07-16 | PF-002 | Cross-platform media policy superseded the Meet-sole-media-owner rule: Meet camera/microphone reclassified from Blocked/E to I (delegation-dependent embedded capture plus companion-window fallback, both implemented, real-client verification pending); Teams/Zoom input-mode cells updated to the same policy. |
 | 2026-07-16 | PF-002 | Real client confirmed Meet delegates no media permission to add-on iframes; recorded the Meet Media Bridge extension as the in-Meet gesture path (implemented, emulated-bridge e2e passing, real-meeting verification pending). |
+| 2026-07-30 | RGB-034 | Added the current release matrix and made the Chrome camera-overlay extension authoritative; retained earlier Meet add-on work only as labeled historical feasibility evidence. |

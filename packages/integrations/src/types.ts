@@ -9,6 +9,8 @@ import type {
 export type AdapterConfig = {
   apiBaseUrl: string;
   provider: MeetingProvider;
+  /** Verified account token used by provider adapters to create sessions. */
+  accessToken?: string;
 };
 
 export type MeetingUser = {
@@ -36,7 +38,7 @@ export interface MeetingAdapter {
   getCurrentUser(): Promise<MeetingUser>;
   getParticipants(): Promise<MeetingParticipant[]>;
   startBoardSession(input: StartBoardSessionInput): Promise<BoardSession>;
-  joinBoardSession(sessionId: string): Promise<BoardSession>;
+  joinBoardSession(sessionId: string, joinToken?: string): Promise<BoardSession>;
   inviteParticipants(sessionId: string): Promise<void>;
   onParticipantJoined(callback: (participant: Participant) => void): void;
   onParticipantLeft(callback: (participant: Participant) => void): void;

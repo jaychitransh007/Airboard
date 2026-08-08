@@ -25,6 +25,7 @@ export type RealtimeTranscriptionConfig = {
   provider: string | null;
   defaultModel: string | null;
   allowedModels: string[];
+  dynamicKeyterms: boolean;
 };
 
 export type RealtimeSpeechMetadata = {
@@ -72,11 +73,15 @@ export type RealtimeSpeechOptions = {
   apiBaseUrl?: string;
   /** Explicit WebSocket URL. Takes precedence over apiBaseUrl. */
   url?: string;
+  /** Verified user token, carried only in the WebSocket upgrade query. */
+  accessToken?: string;
   language?: string;
   /** Provider model identifier selected for this session. */
   model?: string | undefined;
   /** Domain vocabulary used by providers that support key-term biasing. */
   keyterms?: string[];
+  /** Advertised by the gateway before the client sends mid-stream updates. */
+  dynamicKeyterms?: boolean;
   sampleRate?: number;
   audioBufferSize?: number;
   /** Audio frames are dropped above this socket backlog to keep latency bounded. */
@@ -86,6 +91,7 @@ export type RealtimeSpeechOptions = {
 
 export type RealtimeSpeechSession = {
   start(): void;
+  updateKeyterms(keyterms: readonly string[]): void;
   stop(): void;
   abort(): void;
   isListening(): boolean;
@@ -139,6 +145,10 @@ export type RealtimeAudioSourceLike = {
   disconnect(): void;
 };
 
+export type RealtimePcmInputSession = {
+  stop(): void;
+};
+
 export type RealtimeAudioContextLike = {
   readonly sampleRate: number;
   readonly destination: unknown;
@@ -158,6 +168,16 @@ export type RealtimeAudioContextLike = {
 
 export type RealtimeSpeechDependencies = {
   createWebSocket?: (url: string) => RealtimeWebSocketLike;
+  /**
+   * Direct mono PCM source for hosts that already expose decoded microphone
+   * samples (for example the Meet extension bridge). This bypasses
+   * AudioContext entirely, so default-on capture is not blocked by iframe
+   * autoplay/user-activation policy.
+   */
+  startPcmInput?: (handlers: {
+    onChunk: (samples: Float32Array, sampleRate: number) => void;
+    onEnded: (reason: string) => void;
+  }) => Promise<RealtimePcmInputSession>;
   getUserMedia?: (constraints: MediaStreamConstraints) => Promise<MediaStream>;
   createAudioContext?: () => RealtimeAudioContextLike;
   createAudioWorkletNode?: (
@@ -183,6 +203,7 @@ type ServerMessage = {
   message?: string;
   code?: string;
   fatal?: boolean;
+  keytermCount?: number;
 };
 
 const WEB_SOCKET_CONNECTING = 0;
@@ -197,6 +218,8 @@ const DROPPED_FRAME_WARNING_THRESHOLD = 8;
 // keyterms per session and reject the whole Configure message if more are sent.
 // The shared Airboard vocabulary exceeds this, so bound it at the protocol edge.
 const MAX_REALTIME_KEYTERMS = 100;
+const MAX_REALTIME_KEYTERM_LENGTH = 100;
+const MAX_REALTIME_KEYTERM_CHARACTERS = 1_000;
 
 export function supportsRealtimeSpeech(): boolean {
   if (typeof window === "undefined") {
@@ -212,6 +235,7 @@ export function supportsRealtimeSpeech(): boolean {
 export function buildRealtimeTranscriptionWebSocketUrl(
   apiBaseUrl?: string,
   path = DEFAULT_REALTIME_TRANSCRIPTION_PATH,
+  accessToken?: string,
 ): string {
   const fallbackOrigin = typeof window === "undefined" ? "http://localhost:4000" : window.location.origin;
   const baseUrl = new URL(apiBaseUrl || fallbackOrigin);
@@ -221,9 +245,8 @@ export function buildRealtimeTranscriptionWebSocketUrl(
   baseUrl.hash = "";
   // Browsers cannot set headers on WebSocket upgrades; the shared API token
   // (when configured) travels as a query parameter instead.
-  const apiToken = process.env.NEXT_PUBLIC_AIRBOARD_API_TOKEN?.trim();
-  if (apiToken) {
-    baseUrl.searchParams.set("token", apiToken);
+  if (accessToken) {
+    baseUrl.searchParams.set("access_token", accessToken);
   }
   return baseUrl.toString();
 }
@@ -245,6 +268,7 @@ export async function fetchRealtimeTranscriptionConfig(
     allowedModels: Array.isArray(payload.allowedModels)
       ? payload.allowedModels.filter((model): model is string => typeof model === "string")
       : [],
+    dynamicKeyterms: payload.dynamicKeyterms === true,
   };
 }
 
@@ -259,6 +283,7 @@ export function createRealtimeSpeechSession(
   dependencies: RealtimeSpeechDependencies = {},
 ): RealtimeSpeechSession | null {
   const createWebSocket = dependencies.createWebSocket ?? defaultCreateWebSocket();
+  const startPcmInput = dependencies.startPcmInput;
   const getUserMedia = dependencies.getUserMedia ?? defaultGetUserMedia();
   const createAudioContext = dependencies.createAudioContext ?? defaultCreateAudioContext();
   const createAudioWorkletNode =
@@ -267,11 +292,15 @@ export function createRealtimeSpeechSession(
     dependencies.createAudioWorkletModuleUrl ?? defaultCreateAudioWorkletModuleUrl();
   const revokeAudioWorkletModuleUrl =
     dependencies.revokeAudioWorkletModuleUrl ?? defaultRevokeAudioWorkletModuleUrl();
-  if (!createWebSocket || !getUserMedia || !createAudioContext) {
+  if (!createWebSocket || (!startPcmInput && (!getUserMedia || !createAudioContext))) {
     return null;
   }
 
-  const url = options.url ?? buildRealtimeTranscriptionWebSocketUrl(options.apiBaseUrl);
+  const url = options.url ?? buildRealtimeTranscriptionWebSocketUrl(
+    options.apiBaseUrl,
+    DEFAULT_REALTIME_TRANSCRIPTION_PATH,
+    options.accessToken,
+  );
   const requestedModel = cleanOptionalString(options.model);
   const targetSampleRate = positiveInteger(
     options.sampleRate,
@@ -288,6 +317,7 @@ export function createRealtimeSpeechSession(
 
   let socket: RealtimeWebSocketLike | null = null;
   let stream: MediaStream | null = null;
+  let pcmInputSession: RealtimePcmInputSession | null = null;
   let audioContext: RealtimeAudioContextLike | null = null;
   let source: RealtimeAudioSourceLike | null = null;
   let processor: RealtimeAudioProcessorLike | null = null;
@@ -302,6 +332,8 @@ export function createRealtimeSpeechSession(
   let audioCaptureStarting = false;
   let consecutiveDroppedFrames = 0;
   let dropWarningActive = false;
+  let currentKeyterms = boundedKeyterms(options.keyterms ?? []);
+  let lastSentKeytermFingerprint: string | null = null;
 
   const setListening = (nextListening: boolean) => {
     if (listening === nextListening) {
@@ -320,6 +352,8 @@ export function createRealtimeSpeechSession(
 
   const releaseAudio = () => {
     setListening(false);
+    pcmInputSession?.stop();
+    pcmInputSession = null;
     if (processor) {
       processor.onaudioprocess = null;
       try {
@@ -397,11 +431,36 @@ export function createRealtimeSpeechSession(
         sampleRate: targetSampleRate,
         ...(cleanOptionalString(options.language) ? { language: options.language!.trim() } : {}),
         ...(requestedModel ? { model: requestedModel } : {}),
-        ...(options.keyterms?.length
-          ? { keyterms: boundedKeyterms(options.keyterms) }
+        ...(currentKeyterms.length
+          ? { keyterms: currentKeyterms }
           : {}),
       }),
     );
+    lastSentKeytermFingerprint = keytermFingerprint(currentKeyterms);
+  };
+
+  const sendKeytermUpdate = () => {
+    if (
+      options.dynamicKeyterms !== true ||
+      !metadata ||
+      !socket ||
+      socket.readyState !== WEB_SOCKET_OPEN ||
+      state === "stopping" ||
+      state === "ended"
+    ) {
+      return;
+    }
+    const fingerprint = keytermFingerprint(currentKeyterms);
+    if (fingerprint === lastSentKeytermFingerprint) {
+      return;
+    }
+    socket.send(
+      JSON.stringify({
+        type: "transcription.configure",
+        keyterms: currentKeyterms,
+      }),
+    );
+    lastSentKeytermFingerprint = fingerprint;
   };
 
   const sendPcmFrame = (inputFrame: Float32Array) => {
@@ -467,6 +526,15 @@ export function createRealtimeSpeechSession(
     }
     audioCaptureStarting = true;
     try {
+      if (startPcmInput) {
+        if (!pcmInputSession) {
+          fail("Meet microphone capture was not prepared before transcription started.", "MICROPHONE_UNAVAILABLE");
+          return;
+        }
+        state = "active";
+        setListening(true);
+        return;
+      }
       if (!audioContext || !stream) {
         fail("Microphone capture was not prepared before transcription started.", "MICROPHONE_UNAVAILABLE");
         return;
@@ -569,6 +637,9 @@ export function createRealtimeSpeechSession(
           sampleRate: message.sampleRate,
         };
         callbacks.onReady?.(metadata);
+        // A label can be created or renamed while the provider connection is
+        // opening. Apply the latest complete vocabulary before audio capture.
+        sendKeytermUpdate();
         void connectAudioCapture();
         return;
       }
@@ -596,6 +667,15 @@ export function createRealtimeSpeechSession(
           ...(cleanOptionalString(message.provider) ? { provider: message.provider!.trim() } : {}),
           ...(cleanOptionalString(message.model) ? { model: message.model!.trim() } : {}),
           ...(cleanOptionalString(message.message) ? { message: message.message!.trim() } : {}),
+        });
+        return;
+      case "transcription.configured":
+        callbacks.onProviderStatus?.({
+          status: "configured",
+          message:
+            typeof message.keytermCount === "number"
+              ? `${message.keytermCount} transcription keyterms active`
+              : "Transcription keyterms updated",
         });
         return;
       case "transcription.error": {
@@ -645,13 +725,37 @@ export function createRealtimeSpeechSession(
 
   const prepareSession = async () => {
     try {
+      if (startPcmInput) {
+        const nextPcmInputSession = await startPcmInput({
+          onChunk: (samples, sampleRate) => {
+            if (sampleRate <= 0 || state === "ended" || state === "stopping") {
+              return;
+            }
+            inputSampleRate = sampleRate;
+            ingestAudio(samples);
+          },
+          onEnded: (reason) => {
+            if (state === "ended" || state === "stopping") {
+              return;
+            }
+            fail(`The Meet microphone bridge stopped: ${reason}.`, "MICROPHONE_UNAVAILABLE");
+          },
+        });
+        if (state !== "starting") {
+          nextPcmInputSession.stop();
+          return;
+        }
+        pcmInputSession = nextPcmInputSession;
+        openSocket();
+        return;
+      }
       // Construct/resume the context synchronously from the caller's click so
       // browsers preserve user activation. Do not start a paid provider stream
       // until microphone permission succeeds.
-      audioContext = createAudioContext();
+      audioContext = createAudioContext!();
       const resumePromise =
         audioContext.state === "suspended" ? audioContext.resume?.() : undefined;
-      const nextStream = await getUserMedia({
+      const nextStream = await getUserMedia!({
         audio: {
           channelCount: 1,
           echoCancellation: true,
@@ -682,6 +786,17 @@ export function createRealtimeSpeechSession(
       }
       state = "starting";
       void prepareSession();
+    },
+    updateKeyterms(keyterms) {
+      const nextKeyterms = boundedKeyterms(keyterms);
+      if (
+        keytermFingerprint(nextKeyterms) ===
+        keytermFingerprint(currentKeyterms)
+      ) {
+        return;
+      }
+      currentKeyterms = nextKeyterms;
+      sendKeytermUpdate();
     },
     stop() {
       if (state === "idle") {
@@ -854,18 +969,32 @@ function cleanOptionalString(value: unknown): string | null {
 export function boundedKeyterms(keyterms: readonly string[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
+  let totalCharacters = 0;
   for (const raw of keyterms) {
     const term = raw.trim();
-    if (!term || seen.has(term)) {
+    const lookup = term.toLocaleLowerCase("en-US");
+    if (
+      !term ||
+      term.length > MAX_REALTIME_KEYTERM_LENGTH ||
+      seen.has(lookup) ||
+      totalCharacters + term.length > MAX_REALTIME_KEYTERM_CHARACTERS
+    ) {
       continue;
     }
-    seen.add(term);
+    seen.add(lookup);
     result.push(term);
+    totalCharacters += term.length;
     if (result.length >= MAX_REALTIME_KEYTERMS) {
       break;
     }
   }
   return result;
+}
+
+function keytermFingerprint(keyterms: readonly string[]): string {
+  return keyterms
+    .map((term) => term.toLocaleLowerCase("en-US"))
+    .join("\u0000");
 }
 
 function describeRealtimeSpeechError(error: unknown): string {

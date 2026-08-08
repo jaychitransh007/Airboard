@@ -107,6 +107,11 @@ export type CanvasMapping = {
   canvasHeight: number;
   mirrorInput: boolean;
   sensitivity: number;
+  /** Source video dimensions. When present, fitMode is applied before mapping. */
+  sourceWidth?: number;
+  sourceHeight?: number;
+  /** Matches the CSS fit used by the visible camera layer. */
+  fitMode?: "stretch" | "cover" | "contain";
 };
 
 export type SmoothedPoint = CursorPoint & {

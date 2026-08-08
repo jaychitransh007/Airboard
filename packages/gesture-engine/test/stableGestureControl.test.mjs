@@ -161,6 +161,75 @@ test("hybrid controller coarsely acquires then latches one target for relative d
   assert.equal(output.grabbedTargetId, null);
 });
 
+test("drag smoothing damps noisy hand steps without preventing deliberate motion", () => {
+  const controller = new HybridGestureController({
+    canvasWidth: 1_000,
+    canvasHeight: 500,
+    controlZone: { x: 0, y: 0, width: 1, height: 1 },
+    mirrorX: false,
+    hoverSmoothingTimeMs: 0,
+    dragGain: 1,
+    dragSmoothingTimeMs: 64,
+    dragDeadZonePx: 0,
+    maxDragStepPx: 200,
+    areaCursorRadiusPx: 20,
+    stickyReleaseRadiusPx: 40,
+    pinch: {
+      engageThreshold: 0.7,
+      releaseThreshold: 0.4,
+      engageDebounceMs: 0,
+      releaseDebounceMs: 0,
+    },
+  });
+  const target = {
+    id: "node",
+    bounds: { x: 450, y: 200, width: 100, height: 100 },
+  };
+
+  controller.update({
+    handPoint: { x: 0.5, y: 0.5 },
+    trackingConfidence: 1,
+    pinchStrength: 0,
+    timestampMs: 0,
+    targets: [target],
+  });
+  let output = controller.update({
+    handPoint: { x: 0.5, y: 0.5 },
+    trackingConfidence: 1,
+    pinchStrength: 1,
+    timestampMs: 10,
+    targets: [target],
+  });
+  assert.equal(output.action?.type, "grab_started");
+
+  output = controller.update({
+    handPoint: { x: 0.6, y: 0.5 },
+    trackingConfidence: 1,
+    pinchStrength: 1,
+    timestampMs: 26,
+    targets: [target],
+  });
+  assert.equal(output.action?.type, "drag_moved");
+  assert.ok(
+    output.action.delta.x > 20 && output.action.delta.x < 25,
+    `expected a damped first step, received ${output.action.delta.x}`,
+  );
+  assert.equal(output.action.delta.y, 0);
+
+  output = controller.update({
+    handPoint: { x: 0.6, y: 0.5 },
+    trackingConfidence: 1,
+    pinchStrength: 1,
+    timestampMs: 282,
+    targets: [target],
+  });
+  assert.equal(output.action?.type, "drag_moved");
+  assert.ok(
+    (output.action.totalDelta.x ?? 0) > 97,
+    `deliberate motion must converge, received ${output.action.totalDelta.x}`,
+  );
+});
+
 test("a hand kept closed grabs once the cursor reaches a target", () => {
   const controller = new HybridGestureController({
     canvasWidth: 1000,

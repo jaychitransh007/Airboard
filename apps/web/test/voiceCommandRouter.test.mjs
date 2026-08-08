@@ -51,6 +51,35 @@ test("an open push-to-talk gate outranks the wake router — exactly one decisio
   assert.equal(decisions[0].command, "add a queue here");
 });
 
+test("Airboard entity mentions do not split a gated semantic narrative", () => {
+  const { router } = makeRouter();
+  const narrative =
+    "User makes a request to Airboard, and, uh, then the authentication service gets fired, and, uh, then user lands to the Airboard page. So create a flow diagram for this.";
+
+  const ambient = router.handleFinalTranscript(narrative);
+  assert.equal(ambient.wakeDetected, false);
+  assert.deepEqual(ambient.decisions, []);
+
+  router.openGate({ mode: "ptt" });
+  const gated = router.handleFinalTranscript(narrative);
+  assert.equal(gated.wakeDetected, false);
+  assert.equal(gated.decisions.length, 1);
+  assert.equal(gated.decisions[0].channel, "gated-ptt");
+  assert.equal(gated.decisions[0].command, narrative);
+});
+
+test("a leading wake routes one narrative while preserving inner Airboard mentions", () => {
+  const { router } = makeRouter();
+  const narrative =
+    "User makes a request to Airboard, and, uh, then the authentication service gets fired, and, uh, then user lands to the Airboard page. So create a flow diagram for this.";
+  const routed = router.handleFinalTranscript(`Airo, ${narrative}`);
+
+  assert.equal(routed.wakeDetected, true);
+  assert.equal(routed.decisions.length, 1);
+  assert.equal(routed.decisions[0].channel, "wake");
+  assert.equal(routed.decisions[0].command, narrative);
+});
+
 test("an open gate routes multiple utterances until it closes", () => {
   const { router, tick } = makeRouter();
   router.openGate({ mode: "ptt" });
@@ -79,6 +108,29 @@ test("a closed gate past its grace window routes nothing and expires", () => {
   const { decisions } = router.handleFinalTranscript("add a database here");
   assert.equal(decisions.length, 0);
   assert.equal(router.snapshot, null);
+});
+
+test("speech that begins inside a gate still executes when its final transcript arrives late", () => {
+  const { router, tick } = makeRouter();
+  router.openGate({ mode: "ptt" });
+  router.noteSpeechActivity();
+  router.closeGate("ptt");
+  tick(5_000); // provider finalization is later than the normal 1600ms gate grace
+  const { decisions } = router.handleFinalTranscript("add a database here");
+  assert.equal(decisions.length, 1);
+  assert.equal(decisions[0].channel, "gated-ptt");
+  assert.equal(decisions[0].command, "add a database here");
+  assert.equal(router.snapshot, null, "the captured utterance consumes the gate exactly once");
+});
+
+test("an abandoned captured utterance expires instead of routing later room speech", () => {
+  const { router, tick } = makeRouter();
+  router.openGate({ mode: "ptt" });
+  router.noteSpeechActivity();
+  router.closeGate("ptt");
+  tick(16_000);
+  const { decisions } = router.handleFinalTranscript("add a database here");
+  assert.equal(decisions.length, 0);
 });
 
 test("scoped gates normalize the utterance and carry the stroke id", () => {
