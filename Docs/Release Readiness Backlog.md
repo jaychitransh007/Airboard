@@ -245,3 +245,16 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - The Playwright e2e specs could not run: browsers are not installed on this Mac.
   - **Deployed:** `airboard-pilot-web-launch-39e0e38` at 100%, after a no-traffic tagged smoke. `launch-676fa97` stays Ready for rollback.
   - **Verified live:** on a test board, the five-command sequence built User → API → Database, labeled and connected, and saved. The board was then undone back to blank.
+- **2026-11-04** — Sign-in email screens and branded templates (`2768485`):
+  - **Finding:** Supabase's built-in mailer only emails the project's team ("Email address not authorized") and sends at most 2 an hour. Neither the repo nor the API configures an email provider, so strangers cannot sign up until production has custom SMTP. The production SMTP setting was not readable from this session.
+  - **Shipped:**
+    - A "Check your inbox" panel (address, same-browser note, spam hint, Resend after 60s, change email).
+    - Plain messages for mailer failures (a refused address points to pilot support; rate limits give the wait).
+    - Clearer copy for links opened in another browser.
+    - Branded magic-link and confirmation templates in `supabase/templates`.
+    - SMTP steps in the Commercial Platform Runbook.
+  - **Checks:**
+    - Local: the real confirmation email rendered with the new template, the inbox panel and countdown worked, and the rate-limit message read "Please wait 34 seconds…".
+    - 346 web tests pass.
+  - **Deployed:** `airboard-pilot-web-launch-2768485` at 100% after a tagged smoke. The tagged host showed the new callback copy, and the signed-in app still loads. `launch-39e0e38` stays Ready for rollback.
+  - **Still open:** custom SMTP on the user's own domain via Resend, plus the branded templates in the Supabase dashboard (account and password steps are the user's).
