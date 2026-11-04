@@ -318,3 +318,15 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - **API:** `/internal/lifecycle/run` now returns 500 `LIFECYCLE_STEP_FAILED`, with the summary and a failure count, when any step reports failures. Previously partial failures, such as a storage error during a board purge, returned 200 and could not alert. All 114 API tests pass.
   - **Deployed:** `airboard-pilot-api-launch-e0545e8` at 100% after a tagged smoke (a clean lifecycle run returned 200). The scheduler's run against it returned 200 at 19:20 UTC. The user's 5 boards load. Rollback: API `launch-7be667a`.
   - **Gate:** `lifecycle-schedule` stays pending only until the test alert email is confirmed.
+- **2026-11-05** — Failed-run alert fixed and proven:
+  - **Problem:** the first alert (a log-match `conditionMatchedLog` policy) never fired. Its filter matched both test failures, but a temporary Pub/Sub channel received nothing, so the user got no email. The Monitoring notification service agent had also never been created.
+  - **Fix:**
+    - Created the service agent (serviceusage `generateServiceIdentity`).
+    - Replaced the policy with log-based metric `airboard_lifecycle_failed_runs`, which counts scheduler executions logged at ERROR for jobs containing `airboard-lifecycle`.
+    - New metric alert "Airboard lifecycle run failed" fires when the count is above 0 per 60s and notifies `hellosigmascience@gmail.com`.
+  - **Proof:**
+    - A temporary wrong-bearer job failed at 19:38:26Z and the metric counted it.
+    - The policy opened an incident at 19:42:17Z, seen on the temporary Pub/Sub channel, and closed it automatically.
+    - The user confirmed the alert email arrived.
+    - The test job, Pub/Sub channel, topic and subscription were removed; only `airboard-lifecycle-hourly` remains.
+  - **Gate:** `lifecycle-schedule` is now verified (launch check 6/23).

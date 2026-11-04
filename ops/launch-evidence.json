@@ -60,10 +60,10 @@
     },
     "lifecycle-schedule": {
       "description": "The authenticated lifecycle endpoint is scheduled, monitored and has a failed-run alert.",
-      "status": "pending",
+      "status": "verified",
       "owner": "Engineering",
-      "evidence": "",
-      "notes": "2026-11-05: Cloud Scheduler job airboard-lifecycle-hourly (asia-south1, 0 * * * * UTC) POSTs /internal/lifecycle/run with the airboard-cron-secret bearer; first manual run and the scheduler's own run returned 200. Alert policy 'Airboard lifecycle run failed' (log match on a scheduler AttemptFinished entry at ERROR or HTTP >= 400 for job ids starting airboard-lifecycle; at most one email per 5 minutes) notifies the email channel hellosigmascience@gmail.com. A temporary job with a wrong bearer produced the matching entry (ERROR, UNAUTHENTICATED, 401) at 2026-11-04T19:07:31Z, then was deleted. API launch-e0545e8 (live 2026-11-05) returns 500 LIFECYCLE_STEP_FAILED when any lifecycle step reports failures, so partial failures alert too; the scheduler's run against it returned 200 at 2026-11-04T19:20:10Z. Remaining: confirm the alert email from the 19:07 test arrived at hellosigmascience@gmail.com."
+      "evidence": "Docs/Release Readiness Backlog.md \u2014 2026-11-05 lifecycle schedule and failed-run alert: hourly Cloud Scheduler job, metric alert 'Airboard lifecycle run failed', and an alerted test failure whose email the user confirmed.",
+      "notes": "2026-11-05: Cloud Scheduler job airboard-lifecycle-hourly (asia-south1, 0 * * * * UTC) POSTs /internal/lifecycle/run with the airboard-cron-secret bearer; manual and scheduler runs return 200. Since API launch-e0545e8, any failed lifecycle step returns 500 LIFECYCLE_STEP_FAILED. Alerting: log-based metric airboard_lifecycle_failed_runs counts scheduler attempts that finish at ERROR; the metric alert 'Airboard lifecycle run failed' (count > 0 per 60s) notifies hellosigmascience@gmail.com. The first alert, a log-match policy, never fired and was replaced (the Monitoring notification service agent also had to be created). Proof: a temporary wrong-bearer job failed at 19:38:26Z, the metric counted it, and the policy opened an incident at 19:42:17Z, seen on a temporary Pub/Sub channel then removed with the test job. The user confirmed the 19:42 UTC alert email arrived at hellosigmascience@gmail.com."
     },
     "legal-approval": {
       "description": "Counsel approves the legal entity details, privacy notice, terms, DPA and deletion obligations.",
