@@ -9,8 +9,22 @@ import {
   FIGJAM_SHAPE_CATALOG,
   FLOWCHART_SHAPE_CATALOG,
   canonicalShapeKind,
+  defaultCommandShapeLabel,
   shapeCatalogEntry,
 } from "../src/shapeCatalog.ts";
+
+test("command-created shapes get readable default names", () => {
+  assert.equal(defaultCommandShapeLabel("api", "api"), "API");
+  assert.equal(defaultCommandShapeLabel("user", "person"), "Person");
+  assert.equal(defaultCommandShapeLabel("queue", "event bus"), "Event Bus");
+  assert.equal(defaultCommandShapeLabel("database", "db"), "Database");
+  assert.equal(defaultCommandShapeLabel("terminator", "end"), "End");
+  assert.equal(defaultCommandShapeLabel("terminator", "start"), "Start");
+  assert.equal(defaultCommandShapeLabel("diamond", "decision"), "Decision");
+  assert.equal(defaultCommandShapeLabel("diamond", "diamond"), null);
+  assert.equal(defaultCommandShapeLabel("ellipse", "circle"), null);
+  assert.equal(defaultCommandShapeLabel("cylinder", "cylinder"), null);
+});
 
 test("catalog preserves the documented 14/16/26 FigJam grouping and Airboard extras", () => {
   assert.equal(BASIC_SHAPE_CATALOG.length, 14);

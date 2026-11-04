@@ -26,6 +26,8 @@ test("parses deterministic v2 creation intents", () => {
     type: "create",
     kind: "shape",
     shapeKind: "process",
+    label: "Process",
+    generatedLabel: true,
     placement: { direction: "up", target: "selection" },
   });
   assert.deepEqual(
@@ -33,6 +35,8 @@ test("parses deterministic v2 creation intents", () => {
     {
       type: "create_connected",
       shapeKind: "database",
+      label: "Database",
+      generatedLabel: true,
       to: { kind: "visible_label", label: "service" },
       pathKind: "bent",
     },
@@ -103,4 +107,77 @@ test("parses selected-element lifecycle and styling commands", () => {
     parseBoardSceneIntent("Connect existing disconnected line to Client and Planner."),
     null,
   );
+});
+
+test("places new elements beside a named element instead of folding the phrase into the label", () => {
+  assert.deepEqual(parseBoardSceneIntent("add an API to the right of the user"), {
+    type: "create",
+    kind: "shape",
+    shapeKind: "api",
+    label: "API",
+    generatedLabel: true,
+    placement: { direction: "right", target: "visible_label", label: "user" },
+  });
+  assert.deepEqual(parseBoardSceneIntent("add a service called Checkout to the left of Orders"), {
+    type: "create",
+    kind: "shape",
+    shapeKind: "service",
+    label: "Checkout",
+    placement: { direction: "left", target: "visible_label", label: "Orders" },
+  });
+  assert.deepEqual(parseBoardSceneIntent("Airo, add a database below the API.").placement, {
+    direction: "down",
+    target: "visible_label",
+    label: "API",
+  });
+  assert.deepEqual(parseBoardSceneIntent("add a queue next to Checkout").placement, {
+    direction: "right",
+    target: "visible_label",
+    label: "Checkout",
+  });
+  assert.deepEqual(parseBoardSceneIntent("add a message queue on the left side of API").placement, {
+    direction: "left",
+    target: "visible_label",
+    label: "API",
+  });
+  assert.deepEqual(parseBoardSceneIntent("add a sticky note above it"), {
+    type: "create",
+    kind: "sticky",
+    placement: { direction: "up", target: "selection" },
+  });
+  assert.deepEqual(parseBoardSceneIntent("add a 4 by 5 table below API"), {
+    type: "create",
+    kind: "table",
+    table: { rows: 4, columns: 5 },
+    placement: { direction: "down", target: "visible_label", label: "API" },
+  });
+});
+
+test("the last placement phrase wins so labels can contain placement words", () => {
+  const intent = parseBoardSceneIntent("add a box called Look below the fold next to API");
+  assert.equal(intent.label, "Look below the fold");
+  assert.deepEqual(intent.placement, { direction: "right", target: "visible_label", label: "API" });
+  // A long tail reads as part of a label, not a reference to one element.
+  assert.equal(
+    parseBoardSceneIntent("add a sticky note called Ship below the line we agreed on in the last planning meeting").placement,
+    undefined,
+  );
+  // Placement phrases belong to creation only.
+  assert.equal(parseBoardSceneIntent("connect user to API").type, "connect");
+});
+
+test("names system shapes created by command and leaves plain geometry unlabeled", () => {
+  assert.equal(parseBoardSceneIntent("add a user").label, "User");
+  assert.equal(parseBoardSceneIntent("add a user").generatedLabel, true);
+  assert.equal(parseBoardSceneIntent("add a db").label, "Database");
+  assert.equal(parseBoardSceneIntent("add a gateway").label, "Gateway");
+  assert.equal(parseBoardSceneIntent("add a decision").label, "Decision");
+  assert.equal(parseBoardSceneIntent("add a circle").label, undefined);
+  assert.equal(parseBoardSceneIntent("add a diamond").label, undefined);
+  assert.deepEqual(parseBoardSceneIntent("add a user named Alice"), {
+    type: "create",
+    kind: "shape",
+    shapeKind: "user",
+    label: "Alice",
+  });
 });

@@ -24,6 +24,7 @@ import {
   type BoardSceneElement,
   type BoardSceneIntent,
   type BoardState,
+  type SceneIntentPlacementDirection,
   type CodeLanguage,
   type CursorState,
   type DiagramCommand,
@@ -1960,20 +1961,30 @@ export function AirboardPrototype({
     (
       tool: CreationToolId,
       point: AnnotationPoint,
-      options: { table?: { rows: number; columns: number }; label?: string; language?: CodeLanguage } = {},
+      options: {
+        table?: { rows: number; columns: number };
+        label?: string;
+        language?: CodeLanguage;
+        /** Shift away from existing elements, trying this direction first. */
+        avoidOverlap?: SceneIntentPlacementDirection;
+      } = {},
     ) => {
+      const { avoidOverlap, ...creationOptions } = options;
       const attachmentTarget = tool === "stamp" || tool === "insert:face-stamp"
         ? findSceneElementAtPoint(boardRef.current, point)
         : null;
-      const element = createSceneElementForTool(tool, {
+      const drafted = createSceneElementForTool(tool, {
         boardId: boardSessionIdRef.current,
         ...(accountUserId ? { creatorId: accountUserId } : {}),
         point,
         stampEmoji: selectedStampEmoji,
-        ...(tool === "table" && !options.table ? { table: pendingTableSizeRef.current } : {}),
-        ...options,
+        ...(tool === "table" && !creationOptions.table ? { table: pendingTableSizeRef.current } : {}),
+        ...creationOptions,
       });
-      if (!element) return null;
+      if (!drafted) return null;
+      const element = avoidOverlap && OPEN_SPOT_KINDS.has(drafted.kind)
+        ? { ...drafted, transform: openSceneTransform(boardRef.current, drafted.transform, avoidOverlap) }
+        : drafted;
       const created = commitSceneElement(element, {
         edit: ["sticky", "shape", "text", "code_block", "mind_map_node"].includes(element.kind),
       });
@@ -2640,13 +2651,20 @@ export function AirboardPrototype({
           x: targetCenter.x + target.transform.width / 2 + 180,
           y: targetCenter.y,
         };
-        const created = createSceneElementForTool(`shape:${definition.id}`, {
+        const label = intent.label && intent.generatedLabel
+          ? uniqueGeneratedSceneLabel(boardRef.current, intent.label)
+          : intent.label;
+        const drafted = createSceneElementForTool(`shape:${definition.id}`, {
           boardId: boardSessionIdRef.current,
           ...(accountUserId ? { creatorId: accountUserId } : {}),
           point: createPoint,
-          ...(intent.label ? { label: intent.label } : {}),
+          ...(label ? { label } : {}),
         });
-        if (!created) return "unrecognized";
+        if (!drafted) return "unrecognized";
+        const created = {
+          ...drafted,
+          transform: openSceneTransform(boardRef.current, drafted.transform, "right"),
+        };
         const createdCenter = elementCenter(created);
         const start = connectorAnchorPoint(created, "auto", targetCenter);
         const end = connectorAnchorPoint(target, "auto", createdCenter);
@@ -2673,18 +2691,29 @@ export function AirboardPrototype({
       }
 
       if (intent.type === "create") {
-        const selectedPlacementTarget = intent.placement
-          ? [...selectedElementIdsRef.current]
-            .reverse()
-            .map((id) => boardRef.current.elements[id])
-            .find((element): element is BoardSceneElement => Boolean(element?.status === "active"))
-          : null;
-        if (intent.placement && !selectedPlacementTarget) {
-          setCommandFeedback("Select an element before using relative placement.");
+        const placement = intent.placement;
+        const placementAnchorIds = !placement
+          ? []
+          : placement.target === "selection"
+            ? [...selectedElementIdsRef.current].reverse()
+            : resolveSceneIntentTargetIds(
+              boardRef.current,
+              { kind: "visible_label", label: placement.label },
+              selectedElementIdsRef.current,
+            );
+        const placementAnchor = placementAnchorIds
+          .map((id) => boardRef.current.elements[id])
+          .find((element): element is BoardSceneElement => Boolean(element?.status === "active"));
+        if (placement && !placementAnchor) {
+          setCommandFeedback(
+            placement.target === "selection"
+              ? "Select an element before using relative placement."
+              : `I couldn't find “${placement.label}” on the board, so nothing was added.`,
+          );
           return "rejected";
         }
-        const placementCenter = selectedPlacementTarget && intent.placement
-          ? sceneIntentPlacementPoint(selectedPlacementTarget, intent.placement.direction)
+        const placementCenter = placementAnchor && placement
+          ? sceneIntentPlacementPoint(placementAnchor, placement.direction)
           : center;
         if (intent.kind === "media") {
           setCommandFeedback("Choose an image, GIF, or video to add.");
@@ -2740,8 +2769,12 @@ export function AirboardPrototype({
           }
         }
         if (!tool) return "unrecognized";
+        const label = intent.label && intent.generatedLabel
+          ? uniqueGeneratedSceneLabel(boardRef.current, intent.label)
+          : intent.label;
         const created = createSceneElementAtPoint(tool, placementCenter, {
-          ...(intent.label ? { label: intent.label } : {}),
+          avoidOverlap: placement?.direction ?? "right",
+          ...(label ? { label } : {}),
           ...(intent.table ? { table: intent.table } : {}),
           ...(intent.language ? { language: intent.language } : {}),
         });
@@ -12691,7 +12724,7 @@ function resolveSceneIntentTargetIds(
     return selectionIds.filter((id) => state.elements[id]?.status === "active");
   }
   const requested = normalizeSceneReference(target.label);
-  return Object.values(state.elements)
+  const matches = Object.values(state.elements)
     .filter((element) =>
       element.status === "active" &&
       sceneElementVisibleForIntent(state, element) &&
@@ -12700,8 +12733,13 @@ function resolveSceneIntentTargetIds(
         (label) => normalizeSceneReference(label) === requested,
       ),
     )
-    .sort((a, b) => b.zIndex - a.zIndex)
-    .map(({ id }) => id);
+    .sort((a, b) => b.zIndex - a.zIndex);
+  // Shape-type names match every shape of that type; a shape whose own label
+  // is the requested name ("User" beside "User 2") is the one meant.
+  const labelled = matches.length > 1
+    ? matches.filter((element) => normalizeSceneReference(sceneElementPlainLabel(element)) === requested)
+    : [];
+  return (labelled.length > 0 ? labelled : matches).map(({ id }) => id);
 }
 
 function sceneElementVisibleForIntent(
@@ -12805,6 +12843,87 @@ function buildSceneFanInContext(state: BoardState, selectionIds: readonly string
     objects,
     edges,
   };
+}
+
+const OPEN_SPOT_KINDS: ReadonlySet<BoardSceneElement["kind"]> = new Set([
+  "shape",
+  "sticky",
+  "text",
+  "table",
+  "code_block",
+  "mind_map_node",
+]);
+
+const OPEN_SPOT_DIRECTIONS: Readonly<Record<SceneIntentPlacementDirection, readonly [number, number]>> = {
+  right: [1, 0],
+  left: [-1, 0],
+  down: [0, 1],
+  up: [0, -1],
+};
+
+/**
+ * Moves a command-created element to the nearest open spot so a run of typed
+ * or spoken additions builds a readable diagram instead of a stack. Searches
+ * rings of element-sized steps around the requested spot, preferring the
+ * requested direction, then the axis-aligned neighbours.
+ */
+function openSceneTransform(
+  state: BoardState,
+  transform: BoardSceneElement["transform"],
+  prefer: SceneIntentPlacementDirection,
+): BoardSceneElement["transform"] {
+  const gapX = 48;
+  const gapY = 40;
+  const occupied = Object.values(state.elements)
+    .filter((element) =>
+      element.status === "active" &&
+      element.kind !== "connector" &&
+      element.kind !== "section" &&
+      sceneElementVisibleForIntent(state, element),
+    )
+    .map(({ transform: bounds }) => bounds);
+  const overlaps = (x: number, y: number) => occupied.some((bounds) =>
+    x < bounds.x + bounds.width + gapX &&
+    x + transform.width + gapX > bounds.x &&
+    y < bounds.y + bounds.height + gapY &&
+    y + transform.height + gapY > bounds.y,
+  );
+  if (!overlaps(transform.x, transform.y)) return transform;
+  const [preferX, preferY] = OPEN_SPOT_DIRECTIONS[prefer];
+  const stepX = transform.width + gapX;
+  const stepY = transform.height + gapY;
+  for (let ring = 1; ring <= 8; ring += 1) {
+    const offsets: [number, number][] = [];
+    for (let column = -ring; column <= ring; column += 1) {
+      for (let row = -ring; row <= ring; row += 1) {
+        if (Math.max(Math.abs(column), Math.abs(row)) === ring) offsets.push([column, row]);
+      }
+    }
+    offsets.sort(([ax, ay], [bx, by]) =>
+      (bx * preferX + by * preferY) - (ax * preferX + ay * preferY) ||
+      (Math.abs(ax) + Math.abs(ay)) - (Math.abs(bx) + Math.abs(by)),
+    );
+    for (const [column, row] of offsets) {
+      const x = transform.x + column * stepX;
+      const y = transform.y + row * stepY;
+      if (!overlaps(x, y)) return { ...transform, x, y };
+    }
+  }
+  return transform;
+}
+
+/** Numbers a generated name ("User 2") already on the board so each element stays addressable by name. */
+function uniqueGeneratedSceneLabel(state: BoardState, label: string): string {
+  const taken = new Set(
+    Object.values(state.elements)
+      .filter((element) => element.status === "active")
+      .map((element) => normalizeSceneReference(sceneElementPlainLabel(element))),
+  );
+  if (!taken.has(normalizeSceneReference(label))) return label;
+  for (let suffix = 2; ; suffix += 1) {
+    const candidate = `${label} ${suffix}`;
+    if (!taken.has(normalizeSceneReference(candidate))) return candidate;
+  }
 }
 
 function sceneIntentPlacementPoint(

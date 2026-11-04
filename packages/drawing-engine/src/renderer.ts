@@ -29,6 +29,8 @@ import { isCatalogShapeKind, nodeVisualKind } from "@airboard/core";
 import { getConnectorRoutePoints, getRouteMidpoint } from "./connectorGeometry.ts";
 import { adaptFillForDarkBoard, adaptInkForDarkBoard } from "./neonInk.ts";
 import {
+  catalogShapeHasIconGlyph,
+  catalogShapeLabelBand,
   drawCatalogShape,
   traceCatalogShapeOutline,
 } from "./shapeGeometry.ts";
@@ -1241,6 +1243,8 @@ export function drawShapeElement(
 ): void {
   context.save();
   context.globalAlpha *= alpha;
+  const text = richTextPlainText(element.content);
+  const labelBand = Boolean(text) && catalogShapeHasIconGlyph(element.shapeKind);
   drawCatalogShape(context, element.shapeKind, element.transform, {
     fill: themedFill(element.style.fill),
     stroke: themedInk(element.style.stroke),
@@ -1248,13 +1252,14 @@ export function drawShapeElement(
     strokeOpacity: element.style.strokeOpacity,
     strokeWidth: element.style.strokeWidth,
     strokeStyle: element.style.strokeStyle,
+    labelBand,
   });
 
-  const text = richTextPlainText(element.content);
   if (text) {
     const bounds = element.transform;
     const centerX = bounds.x + bounds.width / 2;
     const centerY = bounds.y + bounds.height / 2;
+    const band = labelBand ? catalogShapeLabelBand(bounds) : null;
     context.translate(centerX, centerY);
     context.rotate(((bounds.rotation ?? 0) * Math.PI) / 180);
     context.translate(-centerX, -centerY);
@@ -1264,7 +1269,7 @@ export function drawShapeElement(
       context,
       text,
       centerX,
-      centerY,
+      band ? band.y + band.height / 2 : centerY,
       Math.max(12, bounds.width - Math.min(32, bounds.width * 0.2)),
       element.style.textAlign ?? "center",
     );

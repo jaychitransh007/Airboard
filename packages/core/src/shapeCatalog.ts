@@ -250,6 +250,29 @@ export function shapeCatalogEntry(
   throw new Error(`Missing board shape catalog entry: ${kind}`);
 }
 
+/**
+ * Names a shape created by a typed or spoken command so it reads on the board
+ * and can be referred to later ("connect user to API"). Icon-style system and
+ * flow shapes take the person's own noun ("gateway", "message queue") or the
+ * catalog name; plain geometry stays unlabeled unless the noun says what it
+ * means ("decision").
+ */
+export function defaultCommandShapeLabel(kind: CatalogShapeKind, spokenTerm?: string): string | null {
+  const term = normalizeShapeTerm(spokenTerm ?? "");
+  if (kind === "terminator") return term === "end" ? "End" : "Start";
+  if (kind === "diamond") return term === "decision" ? "Decision" : null;
+  const entry = BOARD_SHAPE_CATALOG.find(
+    (candidate) => candidate.kind === kind &&
+      (candidate.category === "advanced" || candidate.category === "airboard"),
+  );
+  if (!entry) return null;
+  // Short aliases such as "db" read better as the catalog name.
+  if (!term || term.length <= 3 || term === normalizeShapeTerm(entry.name) || term === normalizeShapeTerm(entry.kind)) {
+    return entry.name;
+  }
+  return term.replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+}
+
 function normalizeShapeTerm(value: string): string {
   return value.trim().toLowerCase().replace(/[_/]+/g, " ").replace(/[-\s]+/g, " ");
 }

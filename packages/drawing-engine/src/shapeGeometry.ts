@@ -17,7 +17,47 @@ export type CatalogShapePaint = {
   strokeOpacity?: number;
   strokeWidth?: number;
   strokeStyle?: "solid" | "dashed" | "dotted";
+  /** Keep an icon glyph above the label band so the shape's label stays readable. */
+  labelBand?: boolean;
 };
+
+const ICON_GLYPH_SHAPE_KINDS: ReadonlySet<CatalogShapeKind> = new Set<CatalogShapeKind>([
+  "api",
+  "activity",
+  "archive",
+  "authentication",
+  "chat",
+  "computer",
+  "desktop",
+  "email",
+  "frontend",
+  "instant",
+  "location",
+  "mobile",
+  "package",
+  "payment",
+  "security",
+  "send",
+  "server",
+  "service",
+  "settings",
+  "storage",
+  "terminal",
+  "user",
+  "wallet",
+  "web",
+]);
+
+/** Shapes that draw an icon in their middle, where a centred label would collide with it. */
+export function catalogShapeHasIconGlyph(kind: CatalogShapeKind): boolean {
+  return ICON_GLYPH_SHAPE_KINDS.has(kind);
+}
+
+/** The strip along the bottom of an icon shape where its label is drawn. */
+export function catalogShapeLabelBand(bounds: AnnotationBounds): AnnotationBounds {
+  const height = Math.min(30, Math.max(18, bounds.height * 0.3));
+  return { x: bounds.x, y: bounds.y + bounds.height - height - 4, width: bounds.width, height };
+}
 
 export type CatalogShapeOutlineKind =
   | "rectangle"
@@ -425,32 +465,12 @@ function drawShapeDetails(
       drawQueueArrow(context, bounds);
       break;
     case "api":
-      drawApiGlyph(context, iconBox(bounds));
+      drawApiGlyph(context, iconBox(bounds, paint.labelBand));
       break;
-    case "activity":
-    case "archive":
-    case "authentication":
-    case "chat":
-    case "computer":
-    case "desktop":
-    case "email":
-    case "frontend":
-    case "instant":
-    case "location":
-    case "mobile":
-    case "package":
-    case "payment":
-    case "security":
-    case "send":
-    case "server":
-    case "service":
-    case "settings":
-    case "storage":
-    case "terminal":
-    case "user":
-    case "wallet":
-    case "web":
-      drawAdvancedGlyph(context, kind, iconBox(bounds));
+    default:
+      if (ICON_GLYPH_SHAPE_KINDS.has(kind)) {
+        drawAdvancedGlyph(context, kind, iconBox(bounds, paint.labelBand));
+      }
       break;
   }
   context.globalAlpha = alpha;
@@ -832,14 +852,17 @@ function drawGear(context: CanvasRenderingContext2D, bounds: AnnotationBounds): 
   context.stroke();
 }
 
-function iconBox(bounds: AnnotationBounds): AnnotationBounds {
-  const paddingX = Math.min(28, bounds.width * 0.2);
-  const paddingY = Math.min(22, bounds.height * 0.2);
+function iconBox(bounds: AnnotationBounds, labelBand = false): AnnotationBounds {
+  const area = labelBand
+    ? { ...bounds, height: Math.max(8, bounds.height - catalogShapeLabelBand(bounds).height - 4) }
+    : bounds;
+  const paddingX = Math.min(28, area.width * 0.2);
+  const paddingY = Math.min(22, area.height * 0.2);
   return {
-    x: bounds.x + paddingX,
-    y: bounds.y + paddingY,
-    width: Math.max(8, bounds.width - paddingX * 2),
-    height: Math.max(8, bounds.height - paddingY * 2),
+    x: area.x + paddingX,
+    y: area.y + paddingY,
+    width: Math.max(8, area.width - paddingX * 2),
+    height: Math.max(8, area.height - paddingY * 2),
   };
 }
 

@@ -1,4 +1,4 @@
-import { canonicalShapeKind, BOARD_SHAPE_CATALOG } from "./shapeCatalog.ts";
+import { canonicalShapeKind, BOARD_SHAPE_CATALOG, defaultCommandShapeLabel } from "./shapeCatalog.ts";
 import type {
   BoardElementKind,
   CodeLanguage,
@@ -10,21 +10,30 @@ export type SceneIntentTarget =
   | { kind: "selection" }
   | { kind: "visible_label"; label: string };
 
+export type SceneIntentPlacementDirection = "left" | "right" | "up" | "down";
+
+export type SceneIntentPlacement =
+  | { direction: SceneIntentPlacementDirection; target: "selection" }
+  | { direction: SceneIntentPlacementDirection; target: "visible_label"; label: string };
+
 export type BoardSceneIntent =
   | {
       type: "create";
       kind: Exclude<BoardElementKind, "connector" | "drawing">;
       label?: string;
+      /** The label is a catalog default, not a name the person gave. */
+      generatedLabel?: true;
       shapeKind?: ShapeKind;
       table?: { rows: number; columns: number };
       language?: CodeLanguage;
       stampKind?: "emoji" | "face";
-      placement?: { direction: "left" | "right" | "up" | "down"; target: "selection" };
+      placement?: SceneIntentPlacement;
     }
   | {
       type: "create_connected";
       shapeKind: ShapeKind;
       label?: string;
+      generatedLabel?: true;
       to: SceneIntentTarget;
       pathKind: ConnectorPathKind;
     }
@@ -98,13 +107,14 @@ export function parseBoardSceneIntent(rawInput: string): BoardSceneIntent | null
     .trim()
     .replace(/[.!?]+$/, "");
   const placementMatch = /\s+(left|right|above|below|up|down)\s+(?:of\s+)?selected$/i.exec(sourceWithPlacement);
-  const placement = placementMatch
+  const namedPlacement = placementMatch ? null : parseNamedPlacement(sourceWithPlacement);
+  const placement: SceneIntentPlacement | undefined = placementMatch
     ? {
         direction: normalizePlacementDirection(placementMatch[1]!),
         target: "selection" as const,
       }
-    : undefined;
-  const source = sourceWithPlacement
+    : namedPlacement?.placement;
+  const source = (namedPlacement ? sourceWithPlacement.slice(0, namedPlacement.index) : sourceWithPlacement)
     .replace(/\s+here$/i, "")
     .replace(/\s+(?:left|right|above|below|up|down)\s+(?:of\s+)?selected$/i, "")
     .trim();
@@ -131,7 +141,10 @@ export function parseBoardSceneIntent(rawInput: string): BoardSceneIntent | null
         shapeKind: shapeKind as ShapeKind,
         to: parseTarget(connectedCreate[3] ?? "selected"),
         pathKind: "bent",
-        ...(cleanLabel(connectedCreate[2]) ? { label: cleanLabel(connectedCreate[2])! } : {}),
+        ...shapeLabelFields(
+          cleanLabel(connectedCreate[2]),
+          defaultCommandShapeLabel(shapeKind, connectedCreate[1]),
+        ),
       };
     }
   }
@@ -210,7 +223,10 @@ export function parseBoardSceneIntent(rawInput: string): BoardSceneIntent | null
         type: "create",
         kind: "shape",
         shapeKind,
-        ...(namedLabel ? { label: namedLabel } : {}),
+        ...shapeLabelFields(
+          namedLabel,
+          defaultCommandShapeLabel(shapeKind, exact ? phrase : contained?.term),
+        ),
         ...(placement ? { placement } : {}),
       };
     }
@@ -338,6 +354,65 @@ function stripDisfluencies(value: string): string {
   return value
     .replace(/\b(?:uh+|um+)\b\s*,?/gi, " ")
     .replace(/\s+/g, " ");
+}
+
+const SELECTION_REFERENCES = ["selected", "selection", "this", "that", "it"];
+
+// Each pattern's greedy prefix makes it match the last placement phrase, so a
+// label such as "Look below the fold" survives "… next to API".
+const NAMED_PLACEMENT_PATTERNS: readonly {
+  pattern: RegExp;
+  direction: (term: string) => SceneIntentPlacementDirection;
+}[] = [
+  {
+    pattern: /^(.*)\s+(left|right)(?:\s+side)?\s+of\s+(.+)$/i,
+    direction: (term) => (term.toLowerCase() === "left" ? "left" : "right"),
+  },
+  {
+    pattern: /^(.*)\s+(above|below|under|underneath|beneath)\s+(.+)$/i,
+    direction: (term) => (term.toLowerCase() === "above" ? "up" : "down"),
+  },
+  {
+    pattern: /^(.*)\s+(next\s+to|beside|alongside)\s+(.+)$/i,
+    direction: () => "right",
+  },
+];
+
+/**
+ * Reads "add X to the right of Y", "… below Y" and "… next to Y" so a new
+ * element lands beside an existing one instead of on top of whatever sits at
+ * the centre of the view. Only creation commands take a placement phrase.
+ */
+function parseNamedPlacement(
+  source: string,
+): { placement: SceneIntentPlacement; index: number } | null {
+  if (!new RegExp(`^${CREATE}\\b`, "i").test(source)) return null;
+  let best: { placement: SceneIntentPlacement; index: number } | null = null;
+  for (const { pattern, direction } of NAMED_PLACEMENT_PATTERNS) {
+    const match = pattern.exec(source);
+    if (!match) continue;
+    // "to the right of" and "on the left of": the greedy prefix keeps "to the".
+    const index = match[1]!.replace(/\s+(?:to|on)\s+the$/i, "").length;
+    const target = cleanLabel(match[3]?.replace(/^(?:(?:the|a|an)\s+)+/i, ""));
+    // A long tail is more likely part of a label than a reference to one element.
+    if (!target || target.length > 60 || target.split(/\s+/).length > 6) continue;
+    if (best && best.index >= index) continue;
+    best = {
+      index,
+      placement: SELECTION_REFERENCES.includes(normalize(target))
+        ? { direction: direction(match[2]!), target: "selection" }
+        : { direction: direction(match[2]!), target: "visible_label", label: target },
+    };
+  }
+  return best;
+}
+
+function shapeLabelFields(
+  named: string | null,
+  fallback: string | null,
+): { label?: string; generatedLabel?: true } {
+  if (named) return { label: named };
+  return fallback ? { label: fallback, generatedLabel: true } : {};
 }
 
 function normalizePlacementDirection(
