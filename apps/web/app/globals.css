@@ -5861,8 +5861,42 @@ button.screen-underlay-active {
   transform: translateX(-50%);
 }
 
+/* Centre the toast in the canvas the Airo panel and the settings inspector
+   leave visible, so neither covers its Undo button. Each inset mirrors that
+   panel's width plus its offset from the right edge. */
 .canvas-workspace .undo-toast {
+  --undo-toast-inset: 0px;
   bottom: 146px;
+  left: calc((100% - var(--undo-toast-inset)) / 2);
+  max-width: min(520px, calc(100% - var(--undo-toast-inset) - 32px));
+}
+
+@media (min-width: 701px) {
+  .canvas-workspace.copilot-open .undo-toast {
+    --undo-toast-inset: calc(min(360px, 100% - 164px) + 18px);
+  }
+
+  .canvas-workspace.settings-open .undo-toast {
+    --undo-toast-inset: 368px;
+  }
+
+  .canvas-workspace.settings-open.copilot-open .undo-toast {
+    --undo-toast-inset: calc(min(330px, 100% - 534px) + 370px);
+  }
+}
+
+@media (min-width: 701px) and (max-width: 980px) {
+  .canvas-workspace.copilot-open .undo-toast {
+    --undo-toast-inset: calc(min(326px, 100% - 154px) + 18px);
+  }
+}
+
+@media (max-width: 700px) {
+  /* The panels fill the canvas here, so the toast keeps no inset and sits on
+     top of the Airo panel instead of beside it. */
+  .canvas-workspace.copilot-open .undo-toast {
+    z-index: 13;
+  }
 }
 
 .undo-toast-detail {
