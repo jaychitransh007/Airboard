@@ -29,7 +29,14 @@ export function registerVoiceTraceRoutes(
     if (!(await diagnosticAccessAllowed(request, config, auth, context))) {
       return reply.code(401).send({ error: "AUTH_REQUIRED" });
     }
-    if (!traceLimiter.allow(clientKey(request))) {
+    if (
+      !traceLimiter.allow(
+        clientKey(request, {
+          profileId: context?.profileId,
+          trustedProxyHops: config.trustedProxyHops,
+        }),
+      )
+    ) {
       return reply.code(429).send({ error: "RATE_LIMITED" });
     }
     const parsed = parseVoiceTraceAppend(request.body);

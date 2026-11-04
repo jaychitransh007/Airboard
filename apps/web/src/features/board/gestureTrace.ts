@@ -41,7 +41,7 @@ export function createGestureTraceReporter(
 
   return (event) => {
     options.observe(event);
-    const signature = stableSignature(event.data);
+    const signature = stableSignature(withoutVolatileFields(event.data));
     const previousSignature = lastSignature.get(event.stage);
     const previousAt = lastPostedAt.get(event.stage) ?? Number.NEGATIVE_INFINITY;
     const alwaysPost =
@@ -60,6 +60,19 @@ export function createGestureTraceReporter(
       ...event.data,
     });
   };
+}
+
+/**
+ * Per-frame measurements change on every detection; letting them into the
+ * signature turned perception health into a ~30 Hz POST stream. They still
+ * ride along whenever a state change or the sample interval posts.
+ */
+const VOLATILE_SIGNATURE_FIELDS = new Set(["inferenceMs"]);
+
+function withoutVolatileFields(data: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(data).filter(([key]) => !VOLATILE_SIGNATURE_FIELDS.has(key)),
+  );
 }
 
 function stableSignature(data: Record<string, unknown>): string {

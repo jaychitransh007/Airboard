@@ -15,8 +15,11 @@ import {
 } from "./boardAssetLifecycle";
 import { resolveBoardLinkPreview } from "./boardLinkPreview";
 
-const ASSET_BUCKET = "board-assets";
+export const ASSET_BUCKET = "board-assets";
 const STALE_ASSET_CLEANUP_LIMIT = 25;
+const ASSET_ERASURE_PAGE_SIZE = 500;
+const ASSET_ERASURE_BOARD_CHUNK = 100;
+const STORAGE_REMOVE_CHUNK = 100;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -381,6 +384,70 @@ async function cleanupStaleBoardAssets(
   if (deleteError) {
     request.log.warn({ err: deleteError }, "stale board asset row cleanup failed");
   }
+}
+
+/**
+ * Erases the bucket objects behind every board_assets row of the given
+ * organization (optionally narrowed to some boards). Rows cascade when their
+ * board or organization is deleted but storage objects do not, so purge and
+ * account/workspace deletion must call this before deleting rows. Missing
+ * objects are not errors, which makes a retry after partial failure safe.
+ * Throws BOARD_ASSET_STORAGE_DELETE_FAILED (or _LOOKUP_FAILED); callers must
+ * then keep the rows so the next lifecycle run retries. Returns the number of
+ * object paths submitted for removal.
+ */
+export async function removeBoardAssetObjects(
+  client: SupabaseClient,
+  scope: { organizationId: string; boardIds?: string[] },
+): Promise<number> {
+  const boardChunks = scope.boardIds
+    ? chunk(scope.boardIds, ASSET_ERASURE_BOARD_CHUNK)
+    : [null];
+  let removed = 0;
+  for (const boardIds of boardChunks) {
+    // Keyset pagination: PostgREST caps unbounded selects at its max-rows.
+    let after: string | null = null;
+    for (;;) {
+      let query = client
+        .from("board_assets")
+        .select("id,storage_path")
+        .eq("organization_id", scope.organizationId);
+      if (boardIds) query = query.in("board_id", boardIds);
+      if (after) query = query.gt("id", after);
+      const { data, error } = await query
+        .order("id", { ascending: true })
+        .limit(ASSET_ERASURE_PAGE_SIZE);
+      if (error) {
+        throw new BoardAssetLifecycleError("BOARD_ASSET_STORAGE_LOOKUP_FAILED", 503);
+      }
+      const rows = (data ?? []) as Array<{ id?: unknown; storage_path?: unknown }>;
+      const paths = rows
+        .map((row) => typeof row.storage_path === "string" ? row.storage_path : null)
+        .filter((path): path is string => Boolean(path));
+      for (const batch of chunk(paths, STORAGE_REMOVE_CHUNK)) {
+        const { error: storageError } = await client.storage.from(ASSET_BUCKET).remove(batch);
+        // Storage answers success for absent objects; a 404 here means the
+        // bucket itself is gone, so there is nothing left to erase either.
+        if (storageError && storageErrorStatus(storageError) !== 404) {
+          throw new BoardAssetLifecycleError("BOARD_ASSET_STORAGE_DELETE_FAILED", 503);
+        }
+        removed += batch.length;
+      }
+      if (rows.length < ASSET_ERASURE_PAGE_SIZE) break;
+      const last = rows[rows.length - 1]?.id;
+      if (typeof last !== "string") break;
+      after = last;
+    }
+  }
+  return removed;
+}
+
+function chunk<T>(values: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
 }
 
 async function loadStoredObjectPrefix(

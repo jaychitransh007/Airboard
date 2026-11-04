@@ -5834,3 +5834,73 @@ button.screen-underlay-active {
     padding-inline: 20px;
   }
 }
+.board-save-warning { display: grid; gap: 10px; }
+.board-save-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.board-save-actions button { min-height: 32px; padding: 6px 12px; border: 1px solid rgba(253, 230, 138, .5); border-radius: 8px; background: rgba(253, 230, 138, .12); color: #fde68a; font: inherit; font-weight: 600; cursor: pointer; }
+.board-save-actions button:hover, .board-save-actions button:focus-visible { background: rgba(253, 230, 138, .24); }
+.product-loading-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 6px; }
+.product-loading small { color: var(--product-muted); font-size: 12px; opacity: .8; }
+
+.undo-toast {
+  position: absolute;
+  z-index: 9;
+  bottom: 74px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(520px, calc(100% - 48px));
+  padding: 8px 8px 8px 16px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 999px;
+  background: #111827;
+  color: #f9fafb;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.28);
+  transform: translateX(-50%);
+}
+
+.canvas-workspace .undo-toast {
+  bottom: 146px;
+}
+
+.undo-toast-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.undo-toast button {
+  flex: none;
+  min-height: 30px;
+  padding: 4px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: #a5b4fc;
+  color: #111827;
+  font: inherit;
+  cursor: pointer;
+}
+
+.undo-toast button:hover,
+.undo-toast button:focus-visible {
+  background: #c7d2fe;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .undo-toast {
+    animation: undo-toast-in 160ms ease-out;
+  }
+}
+
+@keyframes undo-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}

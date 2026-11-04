@@ -25,9 +25,12 @@ import {
   failClosedChromeExtensionPolicy,
 } from "./chromeExtensionPolicy";
 import { bearerToken, issueSignedToken, verifySignedToken } from "./signedTokens";
-import { registerBoardContentRoutes } from "./boardContentRoutes";
+import { registerBoardContentRoutes, removeBoardAssetObjects } from "./boardContentRoutes";
+import { BoardAssetLifecycleError } from "./boardAssetLifecycle";
 
 const TRIAL_DURATION_MS = 72 * 60 * 60 * 1_000;
+const PURGE_BOARD_BATCH = 100;
+const MAX_PURGE_BATCHES_PER_ORGANIZATION = 20;
 const PROFILE_ROLES: AccountRole[] = ["owner", "admin", "billing", "member", "viewer"];
 const ADMIN_ROLES: AccountRole[] = ["owner", "admin"];
 const BILLING_ROLES: AccountRole[] = ["owner", "admin", "billing"];
@@ -422,13 +425,54 @@ export function registerControlPlaneRoutes(
         update.visibility = body.visibility;
       }
       if (typeof body.archived === "boolean") update.archived_at = body.archived ? new Date().toISOString() : null;
+      let version: number | null = null;
       if (body.state && typeof body.state === "object") {
         const stateText = JSON.stringify(body.state);
         if (stateText.length > 2_000_000) return reply.code(413).send({ error: "BOARD_STATE_TOO_LARGE" });
-        const version = Number.isInteger(body.version) ? Number(body.version) : null;
+        version = Number.isInteger(body.version) ? Number(body.version) : null;
         if (!version || version < 1) return reply.code(400).send({ error: "BOARD_VERSION_REQUIRED" });
         update.latest_state = body.state;
         update.latest_version = version;
+      }
+      let boardUpdate = auth.client
+        .from("boards")
+        .update(update)
+        .eq("id", request.params.boardId)
+        .eq("organization_id", context.organizationId)
+        .is("deleted_at", null);
+      // State saves are compare-and-swap: the client sends its last known
+      // latest_version + 1 and the write lands only if nobody else saved in
+      // between, so two tabs or devices cannot silently overwrite each other.
+      if (version !== null) boardUpdate = boardUpdate.eq("latest_version", version - 1);
+      const { data, error } = await boardUpdate
+        .select("id,title,latest_version,visibility,updated_at")
+        .maybeSingle();
+      if (!data) {
+        const { data: current, error: currentError } = await auth.client
+          .from("boards")
+          .select("latest_version")
+          .eq("id", request.params.boardId)
+          .eq("organization_id", context.organizationId)
+          .is("deleted_at", null)
+          .maybeSingle();
+        if (currentError || (error && current)) {
+          request.log.error({ err: error ?? currentError }, "board save failed");
+          return reply.code(500).send({ error: "BOARD_SAVE_FAILED" });
+        }
+        if (!current) return reply.code(404).send({ error: "BOARD_NOT_FOUND" });
+        if (version !== null && current.latest_version !== version - 1) {
+          return reply.code(409).send({
+            error: "BOARD_VERSION_CONFLICT",
+            latestVersion: current.latest_version,
+          });
+        }
+        return reply.code(500).send({ error: "BOARD_SAVE_FAILED" });
+      }
+      if (version !== null) {
+        // History is written only after the swap succeeded, so a rejected
+        // write never creates a version. The swap makes this request the sole
+        // owner of `version`; overwrite any orphan row left at that number by
+        // the earlier write-history-first save path.
         const { error: versionError } = await auth.client.from("board_versions").upsert(
           {
             board_id: request.params.boardId,
@@ -436,19 +480,18 @@ export function registerControlPlaneRoutes(
             state: body.state,
             created_by: context.profileId,
           },
-          { onConflict: "board_id,version", ignoreDuplicates: true },
+          { onConflict: "board_id,version" },
         );
-        if (versionError) return reply.code(409).send({ error: "BOARD_VERSION_CONFLICT" });
+        if (versionError) {
+          request.log.error({ err: versionError }, "board version history write failed");
+          // The board itself was saved at `version`; tell the client so it
+          // does not retry into a self-inflicted conflict.
+          return reply.code(500).send({
+            error: "BOARD_VERSION_HISTORY_FAILED",
+            latestVersion: version,
+          });
+        }
       }
-      const { data, error } = await auth.client
-        .from("boards")
-        .update(update)
-        .eq("id", request.params.boardId)
-        .eq("organization_id", context.organizationId)
-        .is("deleted_at", null)
-        .select("id,title,latest_version,visibility,updated_at")
-        .maybeSingle();
-      if (error || !data) return reply.code(404).send({ error: "BOARD_NOT_FOUND" });
       if (title) {
         await writeAudit(auth, context, request, "board.renamed", "board", data.id);
       }
@@ -1878,12 +1921,13 @@ function registerEnterpriseRoutes(server: FastifyInstance, auth: AuthService) {
 }
 
 async function processDataRequests(auth: AuthService) {
-  if (!auth.client) return { completed: 0, failed: 0 };
+  if (!auth.client) return { completed: 0, failed: 0, storageFailures: 0 };
   const now = new Date().toISOString();
   const { data: requests } = await auth.client.from("data_requests").select("*")
     .eq("status", "queued").lte("execute_after", now).order("requested_at", { ascending: true }).limit(10);
   let completed = 0;
   let failed = 0;
+  let storageFailures = 0;
   for (const item of requests ?? []) {
     await auth.client.from("data_requests").update({ status: "processing", updated_at: now }).eq("id", item.id).eq("status", "queued");
     try {
@@ -1919,10 +1963,21 @@ async function processDataRequests(auth: AuthService) {
         };
         await auth.client.from("data_requests").update({ status: "completed", result, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", item.id);
       } else if (item.request_type === "delete_workspace") {
+        // Uploaded binaries first: board_assets rows cascade with the
+        // organization, the bucket objects do not.
+        await removeBoardAssetObjects(auth.client, { organizationId: item.organization_id });
         await auth.client.from("support_requests").delete().eq("organization_id", item.organization_id);
         await auth.client.from("organizations").delete().eq("id", item.organization_id);
       } else {
         const { data: profile } = await auth.client.from("profiles").select("auth_user_id,email").eq("id", item.profile_id).maybeSingle();
+        const { count } = await auth.client.from("organization_memberships").select("id", { count: "exact", head: true }).eq("organization_id", item.organization_id).eq("status", "active");
+        const { data: organization } = await auth.client.from("organizations").select("kind").eq("id", item.organization_id).maybeSingle();
+        const deletesOrganization = organization?.kind === "personal" && (count ?? 0) <= 1;
+        // Erase the personal workspace's uploads before anything
+        // irreversible (the auth user) so a storage failure retries cleanly.
+        if (deletesOrganization) {
+          await removeBoardAssetObjects(auth.client, { organizationId: item.organization_id });
+        }
         await Promise.all([
           auth.client.from("support_requests").delete().eq("profile_id", item.profile_id),
           auth.client.from("product_events").delete().eq("profile_id", item.profile_id),
@@ -1949,15 +2004,24 @@ async function processDataRequests(auth: AuthService) {
           const { error } = await auth.client.auth.admin.deleteUser(profile.auth_user_id);
           if (error) throw new Error("AUTH_USER_DELETE_FAILED");
         }
-        const { count } = await auth.client.from("organization_memberships").select("id", { count: "exact", head: true }).eq("organization_id", item.organization_id).eq("status", "active");
-        const { data: organization } = await auth.client.from("organizations").select("kind").eq("id", item.organization_id).maybeSingle();
-        if (organization?.kind === "personal" && (count ?? 0) <= 1) {
+        if (deletesOrganization) {
           await auth.client.from("organizations").delete().eq("id", item.organization_id);
         }
         await auth.client.from("profiles").delete().eq("id", item.profile_id);
       }
       completed += 1;
     } catch (error) {
+      if (error instanceof BoardAssetLifecycleError) {
+        // Nothing was deleted yet; requeue so the next lifecycle run retries
+        // instead of leaving orphaned binaries behind a "failed" request.
+        await auth.client.from("data_requests").update({
+          status: "queued",
+          error_code: error.code,
+          updated_at: new Date().toISOString(),
+        }).eq("id", item.id);
+        storageFailures += 1;
+        continue;
+      }
       await auth.client.from("data_requests").update({
         status: "failed",
         error_code: error instanceof Error ? error.message.slice(0, 80) : "PROCESSING_FAILED",
@@ -1967,7 +2031,7 @@ async function processDataRequests(auth: AuthService) {
       failed += 1;
     }
   }
-  return { completed, failed };
+  return { completed, failed, storageFailures };
 }
 
 async function requireScim(auth: AuthService, request: FastifyRequest, reply: FastifyReply) {
@@ -2055,21 +2119,12 @@ async function requireActiveEntitlement(
   context: AuthContext,
   reply: FastifyReply,
 ): Promise<JsonRecord | null> {
-  if (!auth.client) return { status: "active" };
-  const { data, error } = await auth.client
-    .from("entitlements")
-    .select("id,plan,status,valid_until")
-    .eq("organization_id", context.organizationId)
-    .in("status", ["active", "trialing", "grace"])
-    .gt("valid_until", new Date().toISOString())
-    .order("valid_until", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error || !data) {
+  const entitlement = await auth.activeEntitlement(context.organizationId);
+  if (!entitlement) {
     reply.code(402).send({ error: "ACTIVE_ENTITLEMENT_REQUIRED" });
     return null;
   }
-  return data;
+  return entitlement;
 }
 
 async function requireInstallation(
@@ -2335,29 +2390,65 @@ async function expireOperationalData(auth: AuthService) {
 }
 
 async function purgeExpiredDeletedBoards(auth: AuthService) {
-  if (!auth.client) return { attempted: false, organizations: 0, purged: 0, failures: 0 };
-  const { data: policies, error } = await auth.client
+  const empty = { organizations: 0, purged: 0, failures: 0, assetObjects: 0, storageFailures: 0 };
+  if (!auth.client) return { attempted: false, ...empty };
+  const client = auth.client;
+  const { data: policies, error } = await client
     .from("organization_policies")
     .select("organization_id,content_retention_days");
   if (error) {
-    return { attempted: true, organizations: 0, purged: 0, failures: 1 };
+    return { attempted: true, ...empty, failures: 1 };
   }
   let purged = 0;
   let failures = 0;
+  let assetObjects = 0;
+  let storageFailures = 0;
   for (const policy of policies ?? []) {
     const retentionDays = Math.min(3650, Math.max(1, Number(policy.content_retention_days ?? 30)));
     const cutoff = new Date(Date.now() - retentionDays * 86_400_000).toISOString();
-    const { data, error: deleteError } = await auth.client
-      .from("boards")
-      .delete()
-      .eq("organization_id", policy.organization_id)
-      .not("deleted_at", "is", null)
-      .lt("deleted_at", cutoff)
-      .select("id");
-    if (deleteError) {
-      failures += 1;
-    } else {
+    for (let batch = 0; batch < MAX_PURGE_BATCHES_PER_ORGANIZATION; batch += 1) {
+      const { data: expired, error: lookupError } = await client
+        .from("boards")
+        .select("id")
+        .eq("organization_id", policy.organization_id)
+        .not("deleted_at", "is", null)
+        .lt("deleted_at", cutoff)
+        .order("id", { ascending: true })
+        .limit(PURGE_BOARD_BATCH);
+      if (lookupError) {
+        failures += 1;
+        break;
+      }
+      const boardIds = (expired ?? [])
+        .map((row) => (typeof row.id === "string" ? row.id : null))
+        .filter((id): id is string => Boolean(id));
+      if (boardIds.length === 0) break;
+      // Erase uploaded binaries before the rows that reference them; on
+      // failure keep the boards so the next lifecycle run retries the batch.
+      try {
+        assetObjects += await removeBoardAssetObjects(client, {
+          organizationId: policy.organization_id,
+          boardIds,
+        });
+      } catch {
+        storageFailures += 1;
+        failures += 1;
+        break;
+      }
+      const { data, error: deleteError } = await client
+        .from("boards")
+        .delete()
+        .eq("organization_id", policy.organization_id)
+        .in("id", boardIds)
+        .not("deleted_at", "is", null)
+        .lt("deleted_at", cutoff)
+        .select("id");
+      if (deleteError) {
+        failures += 1;
+        break;
+      }
       purged += data?.length ?? 0;
+      if (boardIds.length < PURGE_BOARD_BATCH) break;
     }
   }
   return {
@@ -2365,6 +2456,8 @@ async function purgeExpiredDeletedBoards(auth: AuthService) {
     organizations: policies?.length ?? 0,
     purged,
     failures,
+    assetObjects,
+    storageFailures,
   };
 }
 

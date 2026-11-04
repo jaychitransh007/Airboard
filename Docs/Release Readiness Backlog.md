@@ -131,3 +131,24 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
 ## Change log
 
 - **2026-07-29** — Backlog created from the 2026-07-28 audit (RGB-001…RGB-037). All items `Backlog`; no implementation committed.
+- **2026-11-04** — MLP launch review and stop-ship fixes (uncommitted on `codex/production-readiness`):
+  - **Done:** RGB-002. Added route, board, root and 404 error boundaries: `apps/web/app/error.tsx`, `app/app/boards/error.tsx`, `global-error.tsx` and `not-found.tsx`.
+  - **Partial:**
+    - RGB-019: added a per-profile stream cap (`AIRBOARD_TRANSCRIPTION_MAX_STREAMS_PER_PROFILE`), but limits are still per process.
+    - RGB-024: `/sessions/start` now authenticates first, then rate-limits by profile.
+  - **New, fixed:**
+    - Voice and LLM routes now require an org entitlement.
+    - Rate limits are keyed by profile, and anonymous callers by a trusted-hop client IP (`AIRBOARD_TRUSTED_PROXY_HOPS`) instead of the spoofable first X-Forwarded-For entry.
+    - Board state PATCH is compare-and-swap (409 `BOARD_VERSION_CONFLICT`). The client resolves benign conflicts and otherwise offers Keep mine or Load latest.
+    - Saves retry with backoff, flush on hide/close, and warn before unload.
+    - Asset binaries are erased on board purge and workspace/account deletion.
+    - A visible Undo button and an undo toast follow every applied command.
+    - Camera-frame UI state is throttled, and `inferenceMs` no longer drives gesture-trace posts.
+    - Trial expiry and load failures show recoverable states.
+    - The eval capability manifest is aligned to registry 2.0.
+  - **Still open from that review:**
+    - The production Supabase project is unreachable (NXDOMAIN).
+    - Lifecycle scheduler (RGB-001).
+    - Security headers.
+    - Sharing and version restore.
+    - First-run guidance.

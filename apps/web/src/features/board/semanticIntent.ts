@@ -432,6 +432,10 @@ function describeSemanticIntentError(code: string, serverMessage?: string): stri
       return "Airo's intent provider returned an invalid plan. The board was not changed.";
     case "SEMANTIC_INTENT_PROVIDER_UNAVAILABLE":
       return "Airo's intent provider is temporarily unavailable.";
+    case "ACTIVE_ENTITLEMENT_REQUIRED":
+      return "Your pilot access has ended, so Airo can't interpret new requests. Typed commands and pointer edits still work.";
+    case "RATE_LIMITED":
+      return "Airo is receiving a lot of requests. Wait a moment and try again.";
     default:
       return serverMessage || "Airo could not semantically interpret that command.";
   }

@@ -575,7 +575,7 @@ test("corpus runner converts executor observations and errors to result records"
   const corpus = {
     schemaVersion: "interaction-eval-corpus.v1",
     caseSchemaVersion: "interaction-eval-case.v1",
-    capabilityRegistryVersion: "1.2",
+    capabilityRegistryVersion: "2.0",
     coverage: {
       requiredCapabilities: ["action:create"],
     },

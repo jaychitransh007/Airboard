@@ -1,7 +1,7 @@
 {
   "schemaVersion": "capability-coverage.v2",
   "manifestVersion": "2.0",
-  "capabilityRegistryVersion": "1.2",
+  "capabilityRegistryVersion": "2.0",
   "description": "Fail-closed, capability-specific evidence links that cannot be inferred safely from structured Airboard corpora. Semantic nodes/actions and reference kinds are read from production at validation time; this file does not duplicate those registries.",
   "requiredEvidence": [
     "positive",
@@ -554,7 +554,7 @@
       "rationale": "A moving near-match is rejected."
     },
     {
-      "evidenceId": "browser:apps/web/e2e/catalogDock.spec.ts#air hover opens a category and one close-drag-release carries a shape",
+      "evidenceId": "browser:apps/web/e2e/catalogDock.spec.ts#air hover and one close-drag-release pinch carry a recent shape onto the board",
       "capabilities": [
         "channel:catalog",
         "gesture:manipulation_grab"

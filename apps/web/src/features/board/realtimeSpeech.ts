@@ -711,8 +711,13 @@ export function createRealtimeSpeechSession(
       socket.addEventListener("error", () => {
         fail("Could not connect to the realtime transcription service.", "WEBSOCKET_ERROR");
       });
-      socket.addEventListener("close", () => {
+      socket.addEventListener("close", (event) => {
         if (state === "ended") {
+          return;
+        }
+        const refusal = describeTranscriptionCloseRefusal(event?.reason ?? "");
+        if (refusal) {
+          fail(refusal, event.reason);
           return;
         }
         const reason: RealtimeSpeechEndReason = state === "stopping" ? "stopped" : "closed";
@@ -995,6 +1000,18 @@ function keytermFingerprint(keyterms: readonly string[]): string {
   return keyterms
     .map((term) => term.toLocaleLowerCase("en-US"))
     .join("\u0000");
+}
+
+/** Close reasons the API uses when it refuses a stream at connect time. */
+function describeTranscriptionCloseRefusal(reason: string): string | null {
+  switch (reason) {
+    case "ACTIVE_ENTITLEMENT_REQUIRED":
+      return "Your pilot access has ended, so Airo voice is off. Typed commands and pointer edits still work.";
+    case "AUTHORIZATION_UNAVAILABLE":
+      return "Airo couldn't confirm your access just now. Start Airo again in a moment.";
+    default:
+      return null;
+  }
 }
 
 function describeRealtimeSpeechError(error: unknown): string {

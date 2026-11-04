@@ -251,3 +251,132 @@ test("the deterministic endpoint rule fails closed when the repair is not unique
   assert.equal(malformed.statusCode, 400);
   assert.equal(malformed.json().error, "INVALID_TRANSCRIPT");
 });
+
+function fakeAuth({ entitledOrganizations = [] } = {}) {
+  const calls = { authenticate: 0, entitlement: [] };
+  return {
+    calls,
+    async authenticate(request) {
+      calls.authenticate += 1;
+      const header = request.headers.authorization;
+      const match = typeof header === "string" ? /^Bearer user:(.+)$/.exec(header) : null;
+      if (!match) return null;
+      return {
+        authUserId: match[1],
+        profileId: `profile-${match[1]}`,
+        organizationId: `org-${match[1]}`,
+        role: "owner",
+        email: null,
+        displayName: match[1],
+        tokenKind: "supabase",
+      };
+    },
+    async activeEntitlement(organizationId) {
+      calls.entitlement.push(organizationId);
+      return entitledOrganizations.includes(organizationId)
+        ? { status: "trialing" }
+        : null;
+    },
+  };
+}
+
+function productionConfig(overrides = {}) {
+  return {
+    ...makeConfig(),
+    localEntitlements: false,
+    apiToken: "operator-secret",
+    trustedProxyHops: 1,
+    ...overrides,
+  };
+}
+
+const fanInTranscript =
+  "Planner gets additional context from Golden Dataset and Historical Dataset.";
+
+test("intent resolution requires an active entitlement for signed-in callers", async (t) => {
+  const server = Fastify();
+  t.after(() => server.close());
+  const auth = fakeAuth({ entitledOrganizations: ["org-paid"] });
+  registerSemanticIntentRoutes(server, productionConfig(), undefined, auth);
+
+  const anonymous = await server.inject({
+    method: "POST",
+    url: "/intent/resolve",
+    headers: { origin },
+    payload: requestBody(fanInTranscript),
+  });
+  assert.equal(anonymous.statusCode, 401);
+  assert.equal(anonymous.json().error, "AUTH_REQUIRED");
+
+  // A freshly provisioned magic-link account has no active entitlement.
+  const unentitled = await server.inject({
+    method: "POST",
+    url: "/intent/resolve",
+    headers: { origin, authorization: "Bearer user:fresh" },
+    payload: requestBody(fanInTranscript),
+  });
+  assert.equal(unentitled.statusCode, 402);
+  assert.deepEqual(unentitled.json(), { error: "ACTIVE_ENTITLEMENT_REQUIRED" });
+  assert.deepEqual(auth.calls.entitlement, ["org-fresh"]);
+
+  const entitled = await server.inject({
+    method: "POST",
+    url: "/intent/resolve",
+    headers: { origin, authorization: "Bearer user:paid" },
+    payload: requestBody(fanInTranscript),
+  });
+  assert.equal(entitled.statusCode, 200, entitled.body);
+
+  // The operator token is trusted infrastructure and skips account checks.
+  const callsBefore = auth.calls.authenticate;
+  const operator = await server.inject({
+    method: "POST",
+    url: "/intent/resolve",
+    headers: { origin, authorization: "Bearer operator-secret" },
+    payload: requestBody(fanInTranscript),
+  });
+  assert.equal(operator.statusCode, 200, operator.body);
+  assert.equal(auth.calls.authenticate, callsBefore);
+});
+
+test("local entitlements keep intent resolution open without an entitlement lookup", async (t) => {
+  const server = Fastify();
+  t.after(() => server.close());
+  const auth = fakeAuth();
+  registerSemanticIntentRoutes(server, productionConfig({ localEntitlements: true }), undefined, auth);
+  const response = await server.inject({
+    method: "POST",
+    url: "/intent/resolve",
+    headers: { origin, authorization: "Bearer user:local" },
+    payload: requestBody(fanInTranscript),
+  });
+  assert.equal(response.statusCode, 200, response.body);
+  assert.deepEqual(auth.calls.entitlement, []);
+});
+
+test("intent rate limits follow the profile, not a spoofable forwarded address", async (t) => {
+  const server = Fastify();
+  t.after(() => server.close());
+  const auth = fakeAuth({ entitledOrganizations: ["org-a", "org-b"] });
+  registerSemanticIntentRoutes(
+    server,
+    productionConfig({ rateLimits: { intentPerMinute: 1 } }),
+    undefined,
+    auth,
+  );
+  const send = (user, forwardedFor) =>
+    server.inject({
+      method: "POST",
+      url: "/intent/resolve",
+      headers: { origin, authorization: `Bearer user:${user}`, "x-forwarded-for": forwardedFor },
+      payload: requestBody(fanInTranscript),
+    });
+
+  assert.equal((await send("a", "1.1.1.1, 9.9.9.9")).statusCode, 200);
+  // Rotating the client-controlled first entry does not reset the budget.
+  const rotated = await send("a", "2.2.2.2, 9.9.9.9");
+  assert.equal(rotated.statusCode, 429);
+  assert.equal(rotated.json().error, "RATE_LIMITED");
+  // A different account behind the same address keeps its own budget.
+  assert.equal((await send("b", "1.1.1.1, 9.9.9.9")).statusCode, 200);
+});

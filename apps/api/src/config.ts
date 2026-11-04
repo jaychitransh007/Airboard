@@ -20,6 +20,8 @@ export type ApiConfig = {
   sessionSigningSecret: string;
   /** Optional shared token guarding provider-spending endpoints. */
   apiToken?: string;
+  /** Proxies whose X-Forwarded-For entries are trusted for client IPs. */
+  trustedProxyHops: number;
   rateLimits: {
     intentPerMinute: number;
     sessionStartPerMinute: number;
@@ -98,6 +100,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     sessionSigningSecret,
     allowedOrigins,
     ...(env.AIRBOARD_API_TOKEN?.trim() ? { apiToken: env.AIRBOARD_API_TOKEN.trim() } : {}),
+    // Cloud Run (which always sets K_SERVICE) sits behind exactly one front
+    // end that appends the client address. Add a hop for an external load
+    // balancer in front of it; anything else defaults to the socket address.
+    trustedProxyHops: parseNumber(
+      env.AIRBOARD_TRUSTED_PROXY_HOPS,
+      env.K_SERVICE ? 1 : 0,
+      0,
+      5,
+      "AIRBOARD_TRUSTED_PROXY_HOPS",
+    ),
     rateLimits: {
       intentPerMinute: parseNumber(
         env.AIRBOARD_RATE_LIMIT_INTENT_PER_MINUTE,
@@ -279,6 +291,16 @@ export function loadTranscriptionConfig(
       1,
       100,
       "AIRBOARD_TRANSCRIPTION_MAX_CONCURRENT_STREAMS",
+    ),
+    // Two, not one: a live Airo stream plus one reconnect overlap, because a
+    // replacement socket can send transcription.start before the server has
+    // observed the old socket's close and released its slot.
+    maxStreamsPerProfile: parseNumber(
+      env.AIRBOARD_TRANSCRIPTION_MAX_STREAMS_PER_PROFILE,
+      2,
+      1,
+      20,
+      "AIRBOARD_TRANSCRIPTION_MAX_STREAMS_PER_PROFILE",
     ),
     maxSessionMs: parseNumber(
       env.AIRBOARD_TRANSCRIPTION_MAX_SESSION_MS,

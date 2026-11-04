@@ -242,12 +242,35 @@ export function canonicalizeBoardState(boardState, options = {}) {
     if (RAW_BOARD_KEYS.has(key) || isIgnoredField(key, `/${escapePointer(key)}`, context.options)) {
       continue;
     }
-    result[key] = canonicalizeValue(boardState[key], context, {
+    const value =
+      key === "elements"
+        ? canonicalSceneElements(boardState.elements, context.options.includeDeleted)
+        : boardState[key];
+    result[key] = canonicalizeValue(value, context, {
       key,
       path: `/${escapePointer(key)}`,
     });
   }
   return omitUndefined(result);
+}
+
+/**
+ * Scene elements follow the same semantics as strokes: deleted tombstones are
+ * omitted unless requested, and `revision` is dropped because it is a
+ * monotonic concurrency counter (like `lastSequence`) that an undo advances
+ * instead of restoring.
+ */
+function canonicalSceneElements(elements, includeDeleted) {
+  if (!isRecord(elements)) return elements;
+  return Object.fromEntries(
+    Object.entries(elements)
+      .filter(([, element]) => includeDeleted || !isRecord(element) || element.status !== "deleted")
+      .map(([id, element]) => {
+        if (!isRecord(element) || !("revision" in element)) return [id, element];
+        const { revision: _revision, ...rest } = element;
+        return [id, rest];
+      }),
+  );
 }
 
 /**

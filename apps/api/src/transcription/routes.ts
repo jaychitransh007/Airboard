@@ -9,6 +9,7 @@ import {
 } from "./protocol";
 import { publicTranscriptionConfig } from "./publicConfig";
 import type {
+  RealtimeTranscriptionProvider,
   RealtimeTranscriptionSession,
   TranscriptionProviderEvent,
   TranscriptionServerMessage,
@@ -25,9 +26,24 @@ type ActiveTranscription = {
   stopReason: "completed" | "aborted" | "provider_closed";
 };
 
-export function registerTranscriptionRoutes(server: FastifyInstance, config: ApiConfig, auth?: AuthService): void {
-  const provider = createTranscriptionProvider(config.transcription);
+type TranscriptionAuthorization =
+  | { allowed: true; profileId: string | null }
+  | { allowed: false; reason: string };
+
+export function registerTranscriptionRoutes(
+  server: FastifyInstance,
+  config: ApiConfig,
+  auth?: AuthService,
+  dependencies: { provider?: RealtimeTranscriptionProvider | null } = {},
+): void {
+  const provider =
+    dependencies.provider !== undefined
+      ? dependencies.provider
+      : createTranscriptionProvider(config.transcription);
   let concurrentStreams = 0;
+  // Live stream slots per signed-in profile, so one account cannot occupy
+  // every maxConcurrentStreams slot.
+  const streamsByProfile = new Map<string, number>();
 
   server.get("/transcription/config", async () => publicTranscriptionConfig(config.transcription));
 
@@ -36,9 +52,20 @@ export function registerTranscriptionRoutes(server: FastifyInstance, config: Api
       socket.close(1008, "Origin is not allowed");
       return;
     }
-    const authorize = async () => {
-      if (configuredApiTokenAllowed(request, config.apiToken) || config.localEntitlements) return true;
-      return Boolean(auth && (await auth.authenticate(request, { allowInstallation: true })));
+    const authorize = async (): Promise<TranscriptionAuthorization> => {
+      if (configuredApiTokenAllowed(request, config.apiToken) || config.localEntitlements) {
+        return { allowed: true, profileId: null };
+      }
+      const context = auth ? await auth.authenticate(request, { allowInstallation: true }) : null;
+      if (!auth || !context) {
+        return { allowed: false, reason: "Airboard authentication required" };
+      }
+      // Any email can sign in, so Deepgram spend also requires an entitled
+      // organization. The reason string is the client-facing error code.
+      if (!(await auth.activeEntitlement(context.organizationId))) {
+        return { allowed: false, reason: "ACTIVE_ENTITLEMENT_REQUIRED" };
+      }
+      return { allowed: true, profileId: context.profileId };
     };
 
     const clientSocket = socket as unknown as WebSocket;
@@ -49,6 +76,7 @@ export function registerTranscriptionRoutes(server: FastifyInstance, config: Api
     let startupBytes = 0;
     let closed = false;
     let streamSlotHeld = false;
+    let streamOwner: string | null = null;
     let sessionLimitTimer: ReturnType<typeof setTimeout> | null = null;
     let audioWindowStartedAt = Date.now();
     let audioBytesInWindow = 0;
@@ -62,14 +90,24 @@ export function registerTranscriptionRoutes(server: FastifyInstance, config: Api
       if (streamSlotHeld) {
         streamSlotHeld = false;
         concurrentStreams = Math.max(0, concurrentStreams - 1);
+        if (streamOwner) {
+          const remaining = (streamsByProfile.get(streamOwner) ?? 1) - 1;
+          if (remaining > 0) streamsByProfile.set(streamOwner, remaining);
+          else streamsByProfile.delete(streamOwner);
+        }
       }
     };
 
-    const acquireStreamSlot = () => {
+    const acquireStreamSlot = (): "TRANSCRIPTION_PROFILE_LIMIT" | "TRANSCRIPTION_CAPACITY_REACHED" | null => {
+      const ownerStreams = streamOwner ? (streamsByProfile.get(streamOwner) ?? 0) : 0;
+      if (streamOwner && ownerStreams >= config.transcription.maxStreamsPerProfile) {
+        return "TRANSCRIPTION_PROFILE_LIMIT";
+      }
       if (concurrentStreams >= config.transcription.maxConcurrentStreams) {
-        return false;
+        return "TRANSCRIPTION_CAPACITY_REACHED";
       }
       concurrentStreams += 1;
+      if (streamOwner) streamsByProfile.set(streamOwner, ownerStreams + 1);
       streamSlotHeld = true;
       sessionLimitTimer = setTimeout(() => {
         sendError(
@@ -80,7 +118,7 @@ export function registerTranscriptionRoutes(server: FastifyInstance, config: Api
         );
         stopActive("aborted");
       }, config.transcription.maxSessionMs);
-      return true;
+      return null;
     };
 
     const tokenIsCurrent = (token: symbol) =>
@@ -206,10 +244,20 @@ export function registerTranscriptionRoutes(server: FastifyInstance, config: Api
         sendError(clientSocket, resolved.error.code, resolved.error.message, true);
         return;
       }
-      if (!acquireStreamSlot()) {
+      const slotRefusal = acquireStreamSlot();
+      if (slotRefusal === "TRANSCRIPTION_PROFILE_LIMIT") {
         sendError(
           clientSocket,
-          "TRANSCRIPTION_CAPACITY_REACHED",
+          slotRefusal,
+          "This account already has the maximum number of live transcription streams. Stop Airo in another tab and try again.",
+          true,
+        );
+        return;
+      }
+      if (slotRefusal) {
+        sendError(
+          clientSocket,
+          slotRefusal,
           "The realtime transcription service is at capacity. Try again shortly.",
           true,
         );
@@ -378,14 +426,23 @@ export function registerTranscriptionRoutes(server: FastifyInstance, config: Api
       }
       receive(rawMessage, isBinary);
     });
-    void authorize().then((allowed) => {
-      if (!allowed) {
-        socket.close(1008, "Airboard authentication required");
-        return;
-      }
-      authorized = true;
-      for (const pending of pendingMessages.splice(0)) receive(pending.rawMessage, pending.isBinary);
-    });
+    void authorize().then(
+      (authorization) => {
+        if (!authorization.allowed) {
+          socket.close(1008, authorization.reason);
+          return;
+        }
+        streamOwner = authorization.profileId;
+        authorized = true;
+        for (const pending of pendingMessages.splice(0)) receive(pending.rawMessage, pending.isBinary);
+      },
+      (error: unknown) => {
+        // A failed profile/entitlement lookup must not become an unhandled
+        // rejection; the client sees a retryable server-side close instead.
+        request.log.error({ err: error }, "transcription authorization failed");
+        socket.close(1011, "AUTHORIZATION_UNAVAILABLE");
+      },
+    );
 
     clientSocket.on("close", () => {
       closed = true;

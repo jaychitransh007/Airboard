@@ -206,12 +206,19 @@ export async function buildServer(config: ApiConfig) {
       allowParticipantDrawing?: boolean;
     };
   }>("/sessions/start", async (request, reply) => {
-    if (!sessionStartLimiter.allow(clientKey(request))) {
-      return reply.code(429).send({ error: "RATE_LIMITED" });
-    }
     const account = await auth.authenticate(request, { allowInstallation: true });
     if (!account) {
       return reply.code(401).send({ error: "OWNER_AUTH_REQUIRED" });
+    }
+    if (
+      !sessionStartLimiter.allow(
+        clientKey(request, {
+          profileId: account.profileId,
+          trustedProxyHops: config.trustedProxyHops,
+        }),
+      )
+    ) {
+      return reply.code(429).send({ error: "RATE_LIMITED" });
     }
     // JSON off the wire is untyped: bound provider, meeting binding, and
     // title before they reach the store or persistence.

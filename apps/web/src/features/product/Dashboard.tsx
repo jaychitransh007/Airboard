@@ -13,6 +13,7 @@ export function Dashboard() {
   const [boards, setBoards] = useState<Board[]>([]);
   const [installations, setInstallations] = useState<Installation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   useEffect(() => {
     if (!auth.accessToken) return;
     void Promise.all([
@@ -22,7 +23,10 @@ export function Dashboard() {
       .then(([boardResult, installationResult]) => {
         setBoards(boardResult.boards);
         setInstallations(installationResult.installations);
+        setLoadFailed(false);
       })
+      // A failed load must not look like an empty account.
+      .catch(() => setLoadFailed(true))
       .finally(() => setLoading(false));
   }, [auth.accessToken]);
 
@@ -38,7 +42,7 @@ export function Dashboard() {
       </section>
       <section className="dashboard-section">
         <div className="section-heading"><div><h2>Recent boards</h2><p>Your content—not your camera or microphone—is saved here.</p></div><Link href="/app/boards">View all</Link></div>
-        {loading ? <div className="empty-panel">Loading your workspace…</div> : boards.length ? (
+        {loading ? <div className="empty-panel">Loading your workspace…</div> : loadFailed ? <div className="empty-panel" role="alert"><h3>Your boards didn't load</h3><p>Airboard couldn't be reached. Your boards are safe — reload to try again.</p><button className="button button-primary" type="button" onClick={() => window.location.reload()}>Reload</button></div> : boards.length ? (
           <div className="board-grid">{boards.slice(0, 6).map((board) => <Link className="board-card" href={`/app/boards/${board.id}`} key={board.id}><div className="board-thumbnail"><span>{board.title.slice(0, 1).toUpperCase()}</span></div><strong>{board.title}</strong><small>Version {board.latest_version} · {relativeTime(board.updated_at)}</small></Link>)}</div>
         ) : <div className="empty-panel"><span className="empty-icon">◇</span><h3>No saved boards yet</h3><p>Create your first Airboard. The 72-hour trial starts only after the setup succeeds.</p><Link className="button button-primary" href="/app/boards/new?preflight=1">Create first board</Link></div>}
       </section>

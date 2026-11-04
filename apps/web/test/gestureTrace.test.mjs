@@ -63,3 +63,32 @@ test("owner changes and safety events post immediately", () => {
     ],
   );
 });
+
+test("per-frame inference timing does not turn perception health into a post stream", () => {
+  const posted = [];
+  const report = createGestureTraceReporter({
+    observe: () => undefined,
+    post: (interactionId, stage, data) =>
+      posted.push({ interactionId, stage, data }),
+    sampleIntervalMs: 1_000,
+  });
+  for (let frame = 0; frame < 30; frame += 1) {
+    report({
+      interactionId: "gesture-interaction-3",
+      frameAtMs: frame * 33,
+      stage: "perception_health",
+      data: { handsDetected: 1, status: "ok", inferenceMs: 7 + (frame % 5) * 0.37 },
+    });
+  }
+  report({
+    interactionId: "gesture-interaction-3",
+    frameAtMs: 1_000,
+    stage: "perception_health",
+    data: { handsDetected: 0, status: "ok", inferenceMs: 9.1 },
+  });
+
+  assert.equal(posted.length, 2);
+  assert.equal(posted[0].data.inferenceMs, 7);
+  assert.equal(posted[1].data.handsDetected, 0);
+  assert.equal(posted[1].data.inferenceMs, 9.1);
+});

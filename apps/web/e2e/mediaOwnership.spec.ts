@@ -121,6 +121,8 @@ test("standalone combines camera and voice into one Airo entry point", async ({ 
       buttons.map((button) => button.getAttribute("aria-label") ?? button.textContent?.trim()),
     );
   expect(controlOrder).toEqual([
+    "Undo",
+    "Redo",
     "Enable Airo voice and hand tracking",
     "Choose a screen or window to show behind Airboard",
     "More board actions",

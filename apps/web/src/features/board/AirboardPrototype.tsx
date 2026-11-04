@@ -83,6 +83,7 @@ import {
 } from "./gestureFrameCoordinator";
 import type { GestureFrameOwner } from "./gestureFrameArbitration";
 import { createGestureTraceReporter } from "./gestureTrace";
+import { createFrameUiThrottle, type FrameUiThrottle } from "./frameUiThrottle";
 import { handPerceptionOptions } from "./gesturePerceptionConfig";
 import {
   GestureActionEvidenceTracker,
@@ -345,6 +346,8 @@ type CopilotActivityEntry = {
   title: string;
   detail: string;
   tone: "neutral" | "active" | "success" | "warning";
+  /** Applied a board change; offer the one-tap undo toast. */
+  undoable?: boolean;
 };
 
 type PrepareIntentCommandResult = "previewed" | "applied" | "no-op" | "rejected";
@@ -548,6 +551,7 @@ const OBJECT_DOCK: readonly { label: string; tool: ObjectDockTool }[] = [
 const CATALOG_DRAG_MIME = "application/x-airboard-tool";
 const CATALOG_DROP_EXIT_PX = 12;
 const CATALOG_DROP_MIN_TRAVEL_PX = 24;
+const UNDO_TOAST_VISIBLE_MS = 6_000;
 
 type DockGestureOutcome =
   | {
@@ -886,6 +890,7 @@ export function AirboardPrototype({
   const persistenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingPersistenceRef = useRef<BoardState | null>(null);
   const lastPersistenceHashRef = useRef("");
+  const pendingPersistenceHashRef = useRef("");
   const persistenceCallbackRef = useRef(onPersistentBoardChange);
   useEffect(() => {
     persistenceCallbackRef.current = onPersistentBoardChange;
@@ -1124,6 +1129,21 @@ export function AirboardPrototype({
     controllerState: "idle",
     requiresPinchRelease: false,
   });
+  // Camera frames arrive at ~30 Hz; route their UI state through throttles so
+  // the board re-renders only on discrete changes or ~8 times a second.
+  const gestureResultThrottleRef = useRef<FrameUiThrottle<GestureResult | null> | null>(null);
+  gestureResultThrottleRef.current ??= createFrameUiThrottle(setGestureResult);
+  const lastFrameGestureResultRef = useRef<GestureResult | null>(null);
+  const handControlDiagnosticsThrottleRef = useRef<FrameUiThrottle<HandControlDiagnostics> | null>(null);
+  handControlDiagnosticsThrottleRef.current ??= createFrameUiThrottle(setHandControlDiagnostics);
+  const lastHandControlDiscreteKeyRef = useRef("");
+  useEffect(
+    () => () => {
+      gestureResultThrottleRef.current?.cancel();
+      handControlDiagnosticsThrottleRef.current?.cancel();
+    },
+    [],
+  );
   const [labelDraft, setLabelDraft] = useState("");
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
   const [touchpadVariant, setTouchpadVariant] = useState<TouchpadModeVariant>("simple");
@@ -1218,10 +1238,23 @@ export function AirboardPrototype({
       // Preference persistence is best-effort.
     }
   }, []);
+  // No command ever asks for confirmation, so every applied change gets a
+  // short-lived, one-tap undo right where the person is looking.
+  const [undoToast, setUndoToast] = useState<{ id: number; detail: string } | null>(null);
+  useEffect(() => {
+    if (!undoToast) return;
+    const timer = window.setTimeout(() => {
+      setUndoToast((current) => (current?.id === undoToast.id ? null : current));
+    }, UNDO_TOAST_VISIBLE_MS);
+    return () => window.clearTimeout(timer);
+  }, [undoToast]);
   const appendCopilotActivity = useCallback(
     (entry: Omit<CopilotActivityEntry, "id">) => {
       copilotActivitySequenceRef.current += 1;
       const nextEntry = { ...entry, id: copilotActivitySequenceRef.current };
+      if (entry.undoable) {
+        setUndoToast({ id: nextEntry.id, detail: entry.detail });
+      }
       setCopilotActivity((current) => {
         const previous = current[current.length - 1];
         if (
@@ -1467,21 +1500,53 @@ export function AirboardPrototype({
     });
     if (hash === lastPersistenceHashRef.current) return;
     pendingPersistenceRef.current = snapshot;
+    pendingPersistenceHashRef.current = hash;
     if (persistenceTimerRef.current) clearTimeout(persistenceTimerRef.current);
-    persistenceTimerRef.current = setTimeout(() => {
-      const pending = pendingPersistenceRef.current;
-      if (!pending) return;
-      pendingPersistenceRef.current = null;
-      lastPersistenceHashRef.current = hash;
-      persistenceCallbackRef.current?.(pending);
-    }, 800);
+    persistenceTimerRef.current = setTimeout(flushPersistentSnapshot, 800);
   }, [persistentBoardId]);
 
-  useEffect(() => () => {
-    if (persistenceTimerRef.current) clearTimeout(persistenceTimerRef.current);
+  /**
+   * Hands the pending snapshot to the host immediately. A rejected save clears
+   * the dedupe hash so the same content is not skipped on the next attempt;
+   * the host owns retry and conflict handling.
+   */
+  const flushPersistentSnapshot = useCallback(() => {
+    if (persistenceTimerRef.current) {
+      clearTimeout(persistenceTimerRef.current);
+      persistenceTimerRef.current = null;
+    }
     const pending = pendingPersistenceRef.current;
-    if (pending) persistenceCallbackRef.current?.(pending);
+    const hash = pendingPersistenceHashRef.current;
+    if (!pending) return;
+    pendingPersistenceRef.current = null;
+    lastPersistenceHashRef.current = hash;
+    void Promise.resolve(persistenceCallbackRef.current?.(pending)).catch(() => {
+      if (lastPersistenceHashRef.current === hash) lastPersistenceHashRef.current = "";
+    });
   }, []);
+
+  // Leaving the tab or closing the window must not wait out the debounce.
+  useEffect(() => {
+    const flushWhenHidden = () => {
+      if (document.visibilityState === "hidden") flushPersistentSnapshot();
+    };
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!pendingPersistenceRef.current) return;
+      flushPersistentSnapshot();
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    document.addEventListener("visibilitychange", flushWhenHidden);
+    window.addEventListener("pagehide", flushPersistentSnapshot);
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => {
+      document.removeEventListener("visibilitychange", flushWhenHidden);
+      window.removeEventListener("pagehide", flushPersistentSnapshot);
+      window.removeEventListener("beforeunload", warnBeforeUnload);
+    };
+  }, [flushPersistentSnapshot]);
+
+  useEffect(() => () => flushPersistentSnapshot(), [flushPersistentSnapshot]);
 
   /**
    * Publishes a locally-applied event to the live session (no-op while
@@ -2961,6 +3026,7 @@ export function AirboardPrototype({
       appendCopilotActivity({
         source: voiceTurnId ? "Voice" : "Airo",
         title: "Board updated",
+        undoable: true,
         detail: `Connected ${drafts.length} relationship${drafts.length === 1 ? "" : "s"}.`,
         tone: "success",
       });
@@ -4611,7 +4677,13 @@ export function AirboardPrototype({
 
   const handleGesture = useCallback(
     (result: GestureResult | null, hybridOutput?: HybridGestureControllerOutput) => {
-      setGestureResult(result);
+      const previousGestureResult = lastFrameGestureResultRef.current;
+      lastFrameGestureResultRef.current = result;
+      gestureResultThrottleRef.current?.push(
+        result,
+        (previousGestureResult === null) !== (result === null) ||
+          getMarkerStatus(previousGestureResult) !== getMarkerStatus(result),
+      );
 
       if (inputPaused) {
         reportGestureStage("suppression", { reason: "input_paused" });
@@ -5199,6 +5271,7 @@ export function AirboardPrototype({
 
   const undoLastAction = useCallback(
     (source: UndoSource = "button", followUpInteractionId?: string) => {
+      setUndoToast(null);
       const action = undoStackRef.current.pop();
       if (!action) {
         setCommandFeedback("There is nothing to undo yet.");
@@ -6082,6 +6155,7 @@ export function AirboardPrototype({
           appendCopilotActivity({
             source: voiceTurnId ? "Voice" : "Airo",
             title: "Board updated",
+            undoable: true,
             detail: instruction,
             tone: "success",
           });
@@ -6649,6 +6723,7 @@ export function AirboardPrototype({
       appendCopilotActivity({
         source: "Board",
         title: "Board updated",
+        undoable: true,
         detail: pending.message,
         tone: "success",
       });
@@ -8804,16 +8879,28 @@ export function AirboardPrototype({
                   targets: screenTargets,
                 });
               setManipulationResult(hybridOutput);
-              setHandControlDiagnostics({
-                trackingConfidence: signal?.trackingConfidence ?? 0,
-                grabStrength: signal?.grabStrength ?? 0,
-                grabConfidence: signal?.grabConfidence ?? 0,
-                focusedTargetId: hybridOutput.focusedTargetId,
-                grabbedTargetId: hybridOutput.grabbedTargetId,
-                placementActive: cameraPlacementActiveRef.current,
-                controllerState: hybridOutput.state,
-                requiresPinchRelease: hybridOutput.requiresPinchRelease,
-              });
+              const discreteKey = [
+                hybridOutput.state,
+                hybridOutput.focusedTargetId,
+                hybridOutput.grabbedTargetId,
+                cameraPlacementActiveRef.current,
+                hybridOutput.requiresPinchRelease,
+              ].join("|");
+              const discreteChanged = discreteKey !== lastHandControlDiscreteKeyRef.current;
+              lastHandControlDiscreteKeyRef.current = discreteKey;
+              handControlDiagnosticsThrottleRef.current?.push(
+                {
+                  trackingConfidence: signal?.trackingConfidence ?? 0,
+                  grabStrength: signal?.grabStrength ?? 0,
+                  grabConfidence: signal?.grabConfidence ?? 0,
+                  focusedTargetId: hybridOutput.focusedTargetId,
+                  grabbedTargetId: hybridOutput.grabbedTargetId,
+                  placementActive: cameraPlacementActiveRef.current,
+                  controllerState: hybridOutput.state,
+                  requiresPinchRelease: hybridOutput.requiresPinchRelease,
+                },
+                discreteChanged,
+              );
             },
           },
         }),
@@ -8983,10 +9070,12 @@ export function AirboardPrototype({
           return;
         }
         const inferenceMs = performance.now() - inferenceStartedAt;
-        setStats((currentStats) => ({
-          ...currentStats,
-          handsDetected: hands.length,
-        }));
+        // Returning the same object lets React skip the per-frame re-render.
+        setStats((currentStats) =>
+          currentStats.handsDetected === hands.length
+            ? currentStats
+            : { ...currentStats, handsDetected: hands.length },
+        );
         const rect = canvas.getBoundingClientRect();
         processRawLandmarkFrame({
           hands,
@@ -10286,6 +10375,26 @@ export function AirboardPrototype({
             <div className="toolbar canvas-toolbar">
               <button
                 type="button"
+                className="toolbar-icon-button"
+                aria-label="Undo"
+                title="Undo (Ctrl/⌘ Z)"
+                data-testid="toolbar-undo"
+                onClick={() => undoLastAction("button")}
+              >
+                <span aria-hidden="true">↶</span>
+              </button>
+              <button
+                type="button"
+                className="toolbar-icon-button"
+                aria-label="Redo"
+                title="Redo (Ctrl/⌘ Shift Z)"
+                data-testid="toolbar-redo"
+                onClick={redoLastSceneAction}
+              >
+                <span aria-hidden="true">↷</span>
+              </button>
+              <button
+                type="button"
                 className={`toolbar-button${airoInputsActive ? " active" : ""}`}
                 disabled={cameraStatus === "starting" || cameraStatus === "tracker_loading"}
                 aria-label={
@@ -10861,6 +10970,14 @@ export function AirboardPrototype({
                 }}
               />
             </>
+          ) : null}
+          {undoToast && !broadcastSafe ? (
+            <div className="undo-toast" role="status" aria-live="polite" data-testid="undo-toast">
+              <span className="undo-toast-detail">{undoToast.detail}</span>
+              <button type="button" onClick={() => undoLastAction("button")}>
+                Undo
+              </button>
+            </div>
           ) : null}
           {voiceCaptureAvailable && voiceGate && !broadcastSafe ? (
             <div

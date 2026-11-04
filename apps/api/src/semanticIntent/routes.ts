@@ -45,15 +45,32 @@ export function registerSemanticIntentRoutes(
     if (!originAllowed(request.headers.origin, config.allowedOrigins)) {
       return reply.code(403).send({ error: "ORIGIN_NOT_ALLOWED" });
     }
-    if (
-      !configuredApiTokenAllowed(request, config.apiToken) &&
-      !(auth && (await auth.authenticate(request, { allowInstallation: true }))) &&
-      !config.localEntitlements
-    ) {
+    const operator = configuredApiTokenAllowed(request, config.apiToken);
+    const context =
+      !operator && auth ? await auth.authenticate(request, { allowInstallation: true }) : null;
+    if (!operator && !context && !config.localEntitlements) {
       return reply.code(401).send({ error: "AUTH_REQUIRED" });
     }
-    if (!rateLimiter.allow(clientKey(request))) {
+    if (
+      !rateLimiter.allow(
+        clientKey(request, {
+          profileId: context?.profileId,
+          trustedProxyHops: config.trustedProxyHops,
+        }),
+      )
+    ) {
       return reply.code(429).send({ error: "RATE_LIMITED" });
+    }
+    // Signing in is free (magic links auto-provision an account), so model
+    // spend additionally requires the caller's organization to hold an
+    // active, trialing, or grace entitlement.
+    if (
+      context &&
+      auth &&
+      !config.localEntitlements &&
+      !(await auth.activeEntitlement(context.organizationId))
+    ) {
+      return reply.code(402).send({ error: "ACTIVE_ENTITLEMENT_REQUIRED" });
     }
 
     const parsed = parseSemanticIntentRequest(request.body, config.semanticIntent);

@@ -321,3 +321,15 @@ test("translates Flux updates and final turns with stable deduplication keys", (
   assert.equal(acceptDeepgramFinal(seen, "turn:3"), false);
   assert.equal(acceptDeepgramFinal(seen, "turn:4"), true);
 });
+
+test("caps each profile at two concurrent streams unless configured", () => {
+  assert.equal(loadTranscriptionConfig({}).maxStreamsPerProfile, 2);
+  assert.equal(
+    loadTranscriptionConfig({ AIRBOARD_TRANSCRIPTION_MAX_STREAMS_PER_PROFILE: "1" }).maxStreamsPerProfile,
+    1,
+  );
+  assert.throws(
+    () => loadTranscriptionConfig({ AIRBOARD_TRANSCRIPTION_MAX_STREAMS_PER_PROFILE: "0" }),
+    /AIRBOARD_TRANSCRIPTION_MAX_STREAMS_PER_PROFILE/,
+  );
+});

@@ -272,6 +272,31 @@ export class AuthService {
     return roles.includes(context.role);
   }
 
+  /**
+   * The organization's current active/trialing/grace entitlement, or null
+   * when it has none (or the lookup failed). Gates both board creation and
+   * the provider-spending voice endpoints. Without a control-plane database
+   * every caller is entitled, matching the local account stub above.
+   */
+  async activeEntitlement(organizationId: string): Promise<Record<string, unknown> | null> {
+    if (!this.client) {
+      return { status: "active" };
+    }
+    const { data, error } = await this.client
+      .from("entitlements")
+      .select("id,plan,status,valid_until")
+      .eq("organization_id", organizationId)
+      .in("status", ["active", "trialing", "grace"])
+      .gt("valid_until", new Date().toISOString())
+      .order("valid_until", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error || !data) {
+      return null;
+    }
+    return data as Record<string, unknown>;
+  }
+
   private async ensureProfile(user: User): Promise<ProfileRow> {
     if (!this.client) {
       throw new Error("AUTH_NOT_CONFIGURED");

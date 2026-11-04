@@ -67,6 +67,8 @@ export type TranscriptionRuntimeConfig = {
   eagerEotThreshold?: number;
   eotTimeoutMs: number;
   maxConcurrentStreams: number;
+  /** Per-account share of maxConcurrentStreams. */
+  maxStreamsPerProfile: number;
   maxSessionMs: number;
   maxAudioBytesPerSecond: number;
   apiKey?: string;
