@@ -223,3 +223,25 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - 11/11 tools clickable at 800px (Airo, and Settings+Airo), 1100px (Airo) and 1280px (Airo, and Settings+Airo). The settings panel scrolls.
     - At 800px, the Hand and Move tools select from the dock.
     - Zoom in went to 125%, and Reset returned to 100% with the board saved.
+- **2026-11-04** — End-to-end UX review, then typed and voice diagram building fixed (`39e0e38`):
+  - **Review (live site plus a local new-user run):** top findings, in order:
+    1. Diagram building by command broke after the first shape (fixed below).
+    2. The 72-hour trial ends with no paid path.
+    3. Production sign-up email is unverified: no custom SMTP or templates in the repo, and only email sign-in is enabled.
+    4. Meet and desktop are headline promises but private previews.
+    5. Other gaps: no product video, internal jargon in public copy, empty templates, no Share button (the URL carries a 6-hour join token), gesture-first onboarding, and possibly no way to type on a sticky note (needs a manual check).
+  - **Problem:** on a fresh board, "add a user", "add an API to the right of the user", "connect user to API" produced two unlabeled User shapes stacked on one spot and a failed connect. Causes:
+    - The add path dropped every shape at the view centre.
+    - Placement next to a named element was ignored, and "called X to the left of Y" swallowed the placement into the label.
+    - The parser matched the sentence's last noun, so "an API … of the user" created a User.
+  - **Fix:**
+    - The parser reads "left/right of", "above/below" and "next to" a named element, with the last phrase winning and targets capped at 6 words, and ends the label before it.
+    - System and flow shapes get default names ("User", "API", "Gateway"), numbered when repeated ("User 2").
+    - New command-created elements move to the nearest open spot.
+    - A name matching several shapes resolves to the one labelled with it.
+    - Icon shapes draw their label under the icon.
+  - **Checks:**
+    - 606 unit tests pass, grammar eval 223/223, and the false-accept eval finds 0.
+    - The Playwright e2e specs could not run: browsers are not installed on this Mac.
+  - **Deployed:** `airboard-pilot-web-launch-39e0e38` at 100%, after a no-traffic tagged smoke. `launch-676fa97` stays Ready for rollback.
+  - **Verified live:** on a test board, the five-command sequence built User → API → Database, labeled and connected, and saved. The board was then undone back to blank.
