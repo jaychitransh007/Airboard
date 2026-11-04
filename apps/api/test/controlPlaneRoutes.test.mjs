@@ -416,7 +416,10 @@ test("a storage failure keeps expired boards for the next lifecycle run", async 
   client.storageError = { statusCode: "500", message: "storage unavailable" };
   const server = await buildApp(t, client);
   const response = await runLifecycle(server);
-  assert.equal(response.statusCode, 200, response.body);
+  // A failed step fails the run so Cloud Scheduler logs an error and alerts.
+  assert.equal(response.statusCode, 500, response.body);
+  assert.equal(response.json().error, "LIFECYCLE_STEP_FAILED");
+  assert.equal(response.json().failures, 1);
   const { deletedBoards } = response.json();
   assert.equal(deletedBoards.purged, 0);
   assert.equal(deletedBoards.storageFailures, 1);
@@ -425,7 +428,9 @@ test("a storage failure keeps expired boards for the next lifecycle run", async 
 
   // Already-missing objects (a bucket-level 404) do not block the purge.
   client.storageError = { statusCode: "404", message: "Bucket not found" };
-  const retried = (await runLifecycle(server)).json().deletedBoards;
+  const retry = await runLifecycle(server);
+  assert.equal(retry.statusCode, 200, retry.body);
+  const retried = retry.json().deletedBoards;
   assert.equal(retried.purged, 1);
   assert.equal(retried.storageFailures, 0);
 });

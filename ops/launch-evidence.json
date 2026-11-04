@@ -63,7 +63,7 @@
       "status": "pending",
       "owner": "Engineering",
       "evidence": "",
-      "notes": "2026-11-05: Cloud Scheduler job airboard-lifecycle-hourly (asia-south1, 0 * * * * UTC) POSTs /internal/lifecycle/run with the airboard-cron-secret bearer. First manual run returned 200 (3 trials expired, 0 data requests, 5 trash boards past retention purged in 3 organizations, notifications not configured); the scheduler's own run returned 200. Remaining: monitoring and an alert on a failed run, then prove one alerted failure."
+      "notes": "2026-11-05: Cloud Scheduler job airboard-lifecycle-hourly (asia-south1, 0 * * * * UTC) POSTs /internal/lifecycle/run with the airboard-cron-secret bearer; first manual run and the scheduler's own run returned 200. Alert policy 'Airboard lifecycle run failed' (log match on a scheduler AttemptFinished entry at ERROR or HTTP >= 400 for job ids starting airboard-lifecycle; at most one email per 5 minutes) notifies the email channel hellosigmascience@gmail.com. A temporary job with a wrong bearer produced the matching entry (ERROR, UNAUTHENTICATED, 401) at 2026-11-04T19:07:31Z, then was deleted. Remaining: confirm that alert email arrived, and deploy the API change that returns 500 when any lifecycle step reports failures so partial failures alert too."
     },
     "legal-approval": {
       "description": "Counsel approves the legal entity details, privacy notice, terms, DPA and deletion obligations.",

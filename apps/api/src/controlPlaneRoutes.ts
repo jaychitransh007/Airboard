@@ -1752,13 +1752,19 @@ function registerLifecycleRoutes(server: FastifyInstance, config: ApiConfig, aut
     await expireDiagnostics(auth);
     const operationalData = await expireOperationalData(auth);
     const deletedBoards = await purgeExpiredDeletedBoards(auth);
-    return {
+    const summary = {
       expiredTrials: organizationIds.length,
       dataRequests,
       notifications: delivered,
       operationalData,
       deletedBoards,
     };
+    // Any failed step fails the run, so Cloud Scheduler logs the attempt as an
+    // error and the "Airboard lifecycle run failed" alert fires. Every step is
+    // retried on the next run.
+    const failures = lifecycleFailureCount(summary);
+    if (failures > 0) return reply.code(500).send({ error: "LIFECYCLE_STEP_FAILED", failures, ...summary });
+    return summary;
   });
 }
 
@@ -2368,6 +2374,22 @@ async function expireDiagnostics(auth: AuthService) {
     .update({ status: "expired", diagnostics: {} })
     .in("status", ["ready", "attached"])
     .lt("expires_at", new Date().toISOString());
+}
+
+/** Failures each lifecycle step reported; any of them fails the run. */
+function lifecycleFailureCount(summary: {
+  dataRequests: { failed?: number; storageFailures?: number };
+  notifications: { failed?: number };
+  operationalData: { failures?: number };
+  deletedBoards: { failures?: number };
+}): number {
+  return [
+    summary.dataRequests.failed,
+    summary.dataRequests.storageFailures,
+    summary.notifications.failed,
+    summary.operationalData.failures,
+    summary.deletedBoards.failures,
+  ].reduce<number>((total, count) => total + (Number(count) || 0), 0);
 }
 
 async function expireOperationalData(auth: AuthService) {
