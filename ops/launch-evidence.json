@@ -56,7 +56,7 @@
       "status": "pending",
       "owner": "Engineering",
       "evidence": "",
-      "notes": "2026-11-04: ab43907 deployed (API and web revisions launch-ab43907). Production: readiness, auth-required routes, browser CORS for board saves, page loads and sign-in render pass; previous revisions figjam-c19290e are Ready for a one-command rollback. pnpm smoke:deploy (entitlement gate, save, stale-version 409, reload, export request, delete) passes on ab43907 against local Supabase. Still needed: a signed-in pass on production and an executed rollback."
+      "notes": "2026-11-04 signed-in production pass in the browser on API launch-ab43907 / web launch-8bbcdbf: sign-in link, board open, typed command, save (PATCH 200), reload persistence, toolbar undo, two-tab 409 conflict banner with Load latest (no overwrite), Export PNG (54 KB), move to Trash and restore, and the trial-ended state all pass. Rollback is ready (figjam-c19290e revisions Ready) but has not been executed. Remaining: execute a rollback drill."
     },
     "lifecycle-schedule": {
       "description": "The authenticated lifecycle endpoint is scheduled, monitored and has a failed-run alert.",

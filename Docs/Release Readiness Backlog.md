@@ -175,3 +175,18 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - **Problem:** Supabase only redirects sign-in links to the canonical `airboard-pilot-web-634900453473.asia-south1.run.app`, and `efs77okmmq-el` is not on its allow-list. Links requested on that host landed on the canonical root without their PKCE verifier, so sign-in failed silently.
   - **Fix:** web middleware now 307s `AIRBOARD_WEB_ALIAS_HOSTS` to `AIRBOARD_CANONICAL_WEB_ORIGIN`, keeping path and query. It is deployed as `airboard-pilot-web-launch-8bbcdbf` at 100%.
   - **Verified live:** the alias host redirects, while the canonical and tagged revision URLs serve in place.
+- **2026-11-04** — Signed-in production smoke in the browser (account with an expired trial, on a never-used board, restored to blank afterwards):
+  - **Passed:**
+    - Magic-link sign-in on the canonical host.
+    - "Your pilot access has ended" state on New Airboard (402).
+    - Typed command, then save (`PATCH /boards/:id` 200) and persistence after reload.
+    - Toolbar Undo and Redo.
+    - Two tabs: the stale save got 409, the "changed in another tab" banner appeared, and **Load latest** reloaded without overwriting.
+    - Export PNG (54 KB).
+    - Move to Trash with confirmation, then Restore.
+  - **Found:**
+    - On narrow widths, about 800px, the Airo panel (`aside.canvas-copilot`) covers the undo toast (`z-index: 9`), so the toast is invisible and its Undo can't be clicked; toolbar Undo still works.
+    - Every tab visibility change fires a Supabase `SIGNED_IN` event that reloads `/me`; it should reload only when the token changes.
+    - The home page ignores `?code=`/`?error=` from misrouted sign-in links.
+    - `/favicon.ico` returns 404.
+    - Realtime `/sessions/start` returns 403 `OWNER_ENTITLEMENT_REQUIRED` for expired trials (expected), and the board then works without live sync.
