@@ -171,3 +171,7 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - The `figjam-c19290e` revisions are Ready, which makes rollback a single traffic switch.
   - Not yet run on production: a signed-in pass (needs a real login) and an executed rollback.
   - Minor: the web app returns 404 for `/favicon.ico`.
+- **2026-11-04** — Sign-in on the alias web host fixed (`8bbcdbf`):
+  - **Problem:** Supabase only redirects sign-in links to the canonical `airboard-pilot-web-634900453473.asia-south1.run.app`, and `efs77okmmq-el` is not on its allow-list. Links requested on that host landed on the canonical root without their PKCE verifier, so sign-in failed silently.
+  - **Fix:** web middleware now 307s `AIRBOARD_WEB_ALIAS_HOSTS` to `AIRBOARD_CANONICAL_WEB_ORIGIN`, keeping path and query. It is deployed as `airboard-pilot-web-launch-8bbcdbf` at 100%.
+  - **Verified live:** the alias host redirects, while the canonical and tagged revision URLs serve in place.
