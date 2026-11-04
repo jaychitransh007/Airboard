@@ -28,7 +28,8 @@ import { bearerToken, issueSignedToken, verifySignedToken } from "./signedTokens
 import { registerBoardContentRoutes, removeBoardAssetObjects } from "./boardContentRoutes";
 import { BoardAssetLifecycleError } from "./boardAssetLifecycle";
 
-const TRIAL_DURATION_MS = 72 * 60 * 60 * 1_000;
+/** The pilot trial lasts one month from activation. */
+const TRIAL_DURATION_MS = 30 * 24 * 60 * 60 * 1_000;
 const PURGE_BOARD_BATCH = 100;
 const MAX_PURGE_BATCHES_PER_ORGANIZATION = 20;
 const PROFILE_ROLES: AccountRole[] = ["owner", "admin", "billing", "member", "viewer"];
@@ -2605,8 +2606,8 @@ function notificationMessage(template: string, payload: JsonRecord) {
   const name = boundedString(payload.displayName, 1, 120) ?? "there";
   const messages: Record<string, { subject: string; html: string }> = {
     trial_welcome: {
-      subject: "Your 3-day Airboard trial is live",
-      html: `<p>Hi ${escapeHtml(name)},</p><p>Your 72-hour Airboard trial has started. Open Airboard and create your first board.</p>`,
+      subject: "Your one-month Airboard pilot has started",
+      html: `<p>Hi ${escapeHtml(name)},</p><p>Your free one-month Airboard pilot has started. Open Airboard and create your first board.</p>`,
     },
     trial_24_hours_remaining: {
       subject: "24 hours left in your Airboard trial",

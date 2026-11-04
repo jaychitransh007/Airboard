@@ -40,7 +40,7 @@ Zoom and Microsoft Teams require their own implementation, identity, client-matr
 
 ### 3. Onboarding and trial
 
-- The trial duration is 72 hours.
+- The trial duration is one month (30 days), set on 2026-11-05.
 - The trial starts at first successful standalone or supported preview activation, not at account creation.
 - No card is required for the controlled pilot.
 - Paid access is not offered unless `/commercial/config` returns `checkoutEnabled: true` and the paid-GA evidence gate passes.

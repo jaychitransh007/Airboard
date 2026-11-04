@@ -24,7 +24,7 @@ already-used, or email-mismatched invitations cannot be accepted.
 
 ## Trial activation
 
-The controlled-pilot trial lasts 72 hours after a qualifying first-value event.
+The pilot lasts one month (30 days) after a qualifying first-value event.
 Signup alone does not consume the trial. Successful standalone or Meet
 preflight can activate it when the product confirms the required value event.
 

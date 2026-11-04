@@ -94,7 +94,7 @@ export function AuthPage({ mode }: { mode: "login" | "signup" }) {
           <p className="eyebrow">{mode === "signup" ? "Join the controlled pilot" : "Welcome back"}</p>
           <h1>{mode === "signup" ? "Make the idea visible." : "Continue your Airboard."}</h1>
           <p>
-            Your free 72-hour pilot starts when you open your first board. No card needed.
+            Your free one-month pilot starts when you open your first board. No card needed.
           </p>
           <ul>
             <li>Standalone visual workspace</li>

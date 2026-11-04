@@ -89,7 +89,7 @@ export function LandingPage() {
               See an idea move
             </Link>
           </div>
-          <small>Free 3-day pilot · No card required · Google Meet and desktop in preview</small>
+          <small>Free one-month pilot · No card required · Google Meet and desktop in preview</small>
         </div>
         <p className="hero-idea-caption">
           <span aria-hidden="true">✦</span>
