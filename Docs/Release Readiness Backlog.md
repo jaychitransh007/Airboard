@@ -297,3 +297,18 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - `airboard-pilot-api-launch-a0d7ed4` and `airboard-pilot-web-launch-a0d7ed4` are at 100% after tagged smokes. The API reports ready, with 401s without auth and a passing CORS preflight; the web serves 8 pages with the new copy.
     - Rollback targets: API `launch-ab43907`, web `launch-a226e33`. The migration's data extension is not rolled back by a traffic switch.
   - **Verified live:** the signed-in app loads all 5 boards through the new API, and Billing still shows the user's pilot ended Jul 22.
+- **2026-11-05** — Trust gaps (private boards, lifecycle schedule, rollback drill):
+  - **Private boards (`7be667a`):**
+    - Boards default to private, but every board route, the board-file routes and the session start checked only the organization, and the read policies only checked membership. Any member of a team organization could list, open, edit, delete and restore everyone's boards and read their history, live-session events and files.
+    - `boardAccessFilter` now limits private boards to their owner on every route; organization and link boards stay open to members.
+    - Migration `20261105130000_private_board_access.sql` adds `can_read_board` and `can_read_board_session` behind the read policies on boards, versions, sessions, participants, events, snapshots, exports and board assets.
+    - Tests: a new API test has another member try every route on a private board, and each returns 404. Locally, a second member saw 1 shared board of 6, 2 of 22 sessions, and 0 private history or events (rolled back).
+    - Deployed: migration pushed (dry runs before and after); `airboard-pilot-api-launch-7be667a` at 100% after a tagged smoke. The user's library still lists all 5 boards and a board opens and saves.
+    - Rollback: API `launch-a0d7ed4`.
+  - **Lifecycle schedule:**
+    - Enabled `cloudscheduler.googleapis.com`.
+    - Created job `airboard-lifecycle-hourly` (asia-south1, `0 * * * *` UTC), which POSTs `/internal/lifecycle/run` with the `airboard-cron-secret` bearer.
+    - First run (manual, 200): 3 trials expired, 0 data requests waiting, retention sweep clean, 5 Trash boards past retention purged in 3 other organizations (the user's library and empty Trash were unaffected), and email not configured, so jobs stay queued.
+    - The scheduler's own run returned 200.
+    - Still to do: a failed-run alert, which keeps the `lifecycle-schedule` gate pending. Clear stale queued emails before configuring Resend.
+  - **Rollback drill:** web traffic moved to `launch-a226e33` in 5s (confirmed by its copy, with pages at 200), then forward to `launch-a0d7ed4` in 4s; 16s on the previous revision. The `deployment-smoke` gate is now verified (launch check 5/23).

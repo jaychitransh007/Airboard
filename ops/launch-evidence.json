@@ -1,6 +1,6 @@
 {
   "releaseTarget": "controlled-pilot",
-  "lastReviewed": "2026-08-04",
+  "lastReviewed": "2026-11-05",
   "gates": {
     "release-owner": {
       "description": "A named business and technical release owner accepts the controlled-pilot scope and stop-ship authority.",
@@ -53,17 +53,17 @@
     },
     "deployment-smoke": {
       "description": "Production web, API, authentication, readiness, board save/export/delete and rollback smoke checks pass.",
-      "status": "pending",
+      "status": "verified",
       "owner": "Engineering",
-      "evidence": "",
-      "notes": "2026-11-04 signed-in production pass in the browser on API launch-ab43907 / web launch-8bbcdbf: sign-in link, board open, typed command, save (PATCH 200), reload persistence, toolbar undo, two-tab 409 conflict banner with Load latest (no overwrite), Export PNG (54 KB), move to Trash and restore, and the trial-ended state all pass. Rollback is ready (figjam-c19290e revisions Ready) but has not been executed. Remaining: execute a rollback drill."
+      "evidence": "Docs/Release Readiness Backlog.md \u2014 2026-11-04 signed-in production smoke and 2026-11-05 rollback drill (web launch-a0d7ed4 \u2192 launch-a226e33 \u2192 launch-a0d7ed4).",
+      "notes": "2026-11-04 signed-in production pass in the browser (sign-in, board open, typed command, save, reload persistence, undo, two-tab conflict, Export PNG, Trash/restore, trial-ended state). 2026-11-05 rollback drill: web traffic moved to the previous revision launch-a226e33 in 5s (verified by its copy), pages served 200, then rolled forward to launch-a0d7ed4 in 4s; 16s on the previous revision in total. Every deploy since is staged at 0% on a tag, smoked, then promoted."
     },
     "lifecycle-schedule": {
       "description": "The authenticated lifecycle endpoint is scheduled, monitored and has a failed-run alert.",
       "status": "pending",
       "owner": "Engineering",
       "evidence": "",
-      "notes": "Configure the scheduler and prove one successful and one alerted failed run."
+      "notes": "2026-11-05: Cloud Scheduler job airboard-lifecycle-hourly (asia-south1, 0 * * * * UTC) POSTs /internal/lifecycle/run with the airboard-cron-secret bearer. First manual run returned 200 (3 trials expired, 0 data requests, 5 trash boards past retention purged in 3 organizations, notifications not configured); the scheduler's own run returned 200. Remaining: monitoring and an alert on a failed run, then prove one alerted failure."
     },
     "legal-approval": {
       "description": "Counsel approves the legal entity details, privacy notice, terms, DPA and deletion obligations.",
