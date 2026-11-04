@@ -258,3 +258,27 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - 346 web tests pass.
   - **Deployed:** `airboard-pilot-web-launch-2768485` at 100% after a tagged smoke. The tagged host showed the new callback copy, and the signed-in app still loads. `launch-39e0e38` stays Ready for rollback.
   - **Still open:** custom SMTP on the user's own domain via Resend, plus the branded templates in the Supabase dashboard (account and password steps are the user's).
+- **2026-11-04** — First-impression set (`a226e33`):
+  - **On-canvas text:** placing a note or shape opens a focused editor on it; double-click, Enter or F2 edits existing text; each edit is one undo step.
+    - The editing state had existed since `c19290e`, but nothing rendered it, so typing after placing a note went into the Airo box.
+    - Commands create shapes without opening the editor, so focus stays in Airo.
+  - **Welcome card:** now "Make your first diagram". It shows three typed commands and the mouse path first, then voice and gestures with a link to the gesture guide, and has a "Start building" button (e2e selectors updated).
+  - **New boards:**
+    - A lost `/trial/activate` race is tolerated, and a second setup run is skipped.
+    - The address is rewritten in place to `/app/boards/<id>`. The previous router navigation raced the live session's URL update and could leave the page on `/app/boards/new`, where a reload created another board. That was probably live in production.
+  - **Templates:**
+    - Four Airo command scripts (`boardTemplates.ts`, each script tested) build a connected, named diagram on mount, before the live session opens. The session gets it in its opening snapshot; building after connect hit `BOARD_SEQUENCE_CONTENTION`.
+    - The result is framed beside the Airo panel (`fitViewportToBounds`).
+  - **Plain copy:**
+    - Billing shows "Free pilot · Active until/Ended on …" instead of `personal_trial` and the Stripe launch-gate sentence.
+    - Pricing reads "Free during the pilot".
+    - Dashboard, sign-up, landing, product, demo, templates, changelog, Meet (now with buttons) and status are rewritten.
+    - The Airo status line no longer names the speech vendor and model.
+    - The legal drafts are unchanged.
+  - **Also:** the placement preview clears after a mouse placement.
+  - **Checks:**
+    - 617 unit tests and both grammar evals pass.
+    - Every item was verified in the running app on a local copy.
+    - The e2e specs could not run (Playwright browser not installed).
+  - **Deployed:** `airboard-pilot-web-launch-a226e33` at 100% after a tagged smoke (12 pages 200, new copy and welcome card in the bundles). `launch-2768485` stays Ready for rollback.
+  - **Verified live:** Billing shows "Free pilot · Ended on Jul 22, 2026". Placing a note opened the editor, and the typed text saved to the note. The test board was then undone back to blank.
