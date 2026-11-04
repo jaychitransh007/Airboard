@@ -87,6 +87,44 @@ Commercial providers:
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PERSONAL_PRICE_ID`, `STRIPE_TEAM_PRICE_ID`
 - `RESEND_API_KEY`, `AIRBOARD_EMAIL_FROM`
 
+Sign-in email (Supabase Auth SMTP):
+
+Supabase's built-in mailer delivers only to members of the project's team and
+is capped at 2 messages an hour, so a stranger's sign-up link fails with
+`Email address not authorized`. Production needs custom SMTP before anyone
+outside the team can sign in. One Resend account can serve both this and the
+lifecycle email above.
+
+1. In Resend, add a sending domain you control (for example
+   `mail.<your-domain>`). Add the DNS records it lists, then wait for it to
+   show as verified.
+2. Create a Resend API key with sending access.
+3. Open Supabase → Authentication → Emails → SMTP Settings. Enable custom SMTP:
+   - host `smtp.resend.com`, port `465`;
+   - username `resend`, password set to the API key;
+   - sender `no-reply@mail.<your-domain>`, sender name `Airboard`.
+4. Open Supabase → Authentication → Rate Limits. Raise the email limit, which
+   starts low with custom SMTP, to what the pilot needs.
+5. Open Supabase → Authentication → Emails → Templates and use the
+   repository's branded templates:
+   - **Magic link:** `supabase/templates/magic_link.html`, subject "Your
+     Airboard sign-in link".
+   - **Confirm signup:** `supabase/templates/confirmation.html`, subject
+     "Confirm your email to open Airboard".
+
+   `supabase/config.toml` applies the same templates locally.
+6. Store the same key in Secret Manager. Set `RESEND_API_KEY` and
+   `AIRBOARD_EMAIL_FROM` on the API service.
+7. Ask a non-team address for a sign-in link and confirm it arrives.
+
+Stopgap without a domain: Gmail SMTP.
+- Host `smtp.gmail.com`, port `465`.
+- Username: the Gmail address. Password: a Google app password, which needs
+  2-Step Verification.
+- Sender: the same address.
+- Gmail allows roughly 500 recipients a day and shows the Gmail address as the
+  sender.
+
 Optional live intelligence:
 
 - `DEEPGRAM_API_KEY` for Airo transcription

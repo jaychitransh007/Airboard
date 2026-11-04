@@ -29,7 +29,7 @@ export function AuthCallback() {
     return (
       <CallbackFailure
         title="This sign-in could not be completed."
-        detail="No active confirmation was found. Request a new secure email link and try again."
+        detail="Sign-in links only work in the browser where you asked for them, and only once. Open the link on that device, or request a new one here."
         actionHref="/login?reason=authentication_failed"
         actionLabel="Request a new link"
       />

@@ -9,6 +9,7 @@ import {
   safeAppPath,
   type AuthProviderAvailability,
 } from "../../platform/config";
+import { MAGIC_LINK_RESEND_SECONDS, magicLinkFailureMessage } from "./magicLinkRequest";
 
 export function AuthPage({ mode }: { mode: "login" | "signup" }) {
   const auth = useAirboardAuth();
@@ -17,6 +18,8 @@ export function AuthPage({ mode }: { mode: "login" | "signup" }) {
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [sentTo, setSentTo] = useState<string | null>(null);
+  const [resendIn, setResendIn] = useState(0);
   const [providers, setProviders] = useState<AuthProviderAvailability>({
     google: false,
     microsoft: false,
@@ -45,6 +48,12 @@ export function AuthPage({ mode }: { mode: "login" | "signup" }) {
     }
   }, [reason]);
 
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const timer = setTimeout(() => setResendIn((seconds) => seconds - 1), 1_000);
+    return () => clearTimeout(timer);
+  }, [resendIn]);
+
   const oauth = async (provider: "google" | "azure") => {
     setBusy(true);
     setMessage(null);
@@ -57,19 +66,24 @@ export function AuthPage({ mode }: { mode: "login" | "signup" }) {
     }
   };
 
-  const magic = async (event: React.FormEvent) => {
-    event.preventDefault();
+  const sendLink = async (address: string) => {
     setBusy(true);
     setMessage(null);
     try {
       sessionStorage.setItem("airboard.auth.next", next);
-      await auth.signInWithMagicLink(email, next);
-      setMessage("A secure link is on its way. It is time-limited and can be used only once.");
+      await auth.signInWithMagicLink(address, next);
+      setSentTo(address);
+      setResendIn(MAGIC_LINK_RESEND_SECONDS);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not send the sign-in link.");
+      setMessage(magicLinkFailureMessage(error));
     } finally {
       setBusy(false);
     }
+  };
+
+  const magic = (event: React.FormEvent) => {
+    event.preventDefault();
+    void sendLink(email.trim());
   };
 
   return (
@@ -103,11 +117,37 @@ export function AuthPage({ mode }: { mode: "login" | "signup" }) {
             </button>
           ) : null}
           {providers.google || providers.microsoft ? <div className="auth-divider"><span>or</span></div> : null}
-          <form onSubmit={magic}>
-            <label htmlFor="auth-email">Work email</label>
-            <input id="auth-email" type="email" required autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@company.com" />
-            <button className="button button-primary" disabled={busy} type="submit">{reason ? "Email me a new secure link" : "Email me a sign-in link"}</button>
-          </form>
+          {sentTo ? (
+            <div className="auth-sent" role="status">
+              <h3>Check your inbox</h3>
+              <p>We sent a sign-in link to <strong>{sentTo}</strong>.</p>
+              <p>Open it on this device, in this browser—the link only works where you asked for it, and only once.</p>
+              <p className="auth-sent-hint">Not there after a minute? Check spam or promotions.</p>
+              <div className="auth-sent-actions">
+                <button
+                  className="button button-quiet"
+                  disabled={busy || resendIn > 0}
+                  onClick={() => void sendLink(sentTo)}
+                  type="button"
+                >
+                  {resendIn > 0 ? `Resend in ${resendIn}s` : "Resend the link"}
+                </button>
+                <button
+                  className="auth-sent-change"
+                  onClick={() => { setSentTo(null); setMessage(null); }}
+                  type="button"
+                >
+                  Use a different email
+                </button>
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={magic}>
+              <label htmlFor="auth-email">Work email</label>
+              <input id="auth-email" type="email" required autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@company.com" />
+              <button className="button button-primary" disabled={busy} type="submit">{reason ? "Email me a new secure link" : "Email me a sign-in link"}</button>
+            </form>
+          )}
           {message ? <p className="form-message" role="status">{message}</p> : null}
           {auth.error === "AUTH_NOT_CONFIGURED" ? (
             <p className="form-warning">Authentication must be configured before public signup. Local development uses a server-signed test account.</p>
