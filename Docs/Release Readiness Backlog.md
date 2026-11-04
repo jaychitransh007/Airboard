@@ -312,3 +312,9 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - The scheduler's own run returned 200.
     - Still to do: a failed-run alert, which keeps the `lifecycle-schedule` gate pending. Clear stale queued emails before configuring Resend.
   - **Rollback drill:** web traffic moved to `launch-a226e33` in 5s (confirmed by its copy, with pages at 200), then forward to `launch-a0d7ed4` in 4s; 16s on the previous revision. The `deployment-smoke` gate is now verified (launch check 5/23).
+- **2026-11-05** — Failed-run alert for the lifecycle job (`e0545e8`):
+  - **Alert:** a Monitoring email channel for `hellosigmascience@gmail.com` and the policy "Airboard lifecycle run failed". It is a log match on a Cloud Scheduler AttemptFinished entry at ERROR or HTTP ≥ 400 for jobs starting `airboard-lifecycle`, sends at most one email per 5 minutes, and includes a runbook note.
+  - **Test:** a temporary job with a wrong bearer produced the matching entry (ERROR, UNAUTHENTICATED, 401) at 19:07 UTC, then was deleted. The email itself couldn't be checked from this session (the Gmail connector isn't authenticated).
+  - **API:** `/internal/lifecycle/run` now returns 500 `LIFECYCLE_STEP_FAILED`, with the summary and a failure count, when any step reports failures. Previously partial failures, such as a storage error during a board purge, returned 200 and could not alert. All 114 API tests pass.
+  - **Deployed:** `airboard-pilot-api-launch-e0545e8` at 100% after a tagged smoke (a clean lifecycle run returned 200). The scheduler's run against it returned 200 at 19:20 UTC. The user's 5 boards load. Rollback: API `launch-7be667a`.
+  - **Gate:** `lifecycle-schedule` stays pending only until the test alert email is confirmed.
