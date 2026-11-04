@@ -201,3 +201,25 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - **Deployed:** `airboard-pilot-web-launch-e33fed1` at 100%, after a no-traffic tagged smoke (pages 200; the minified stylesheet keeps the new rules). `launch-8bbcdbf` stays Ready for rollback.
   - **Verified live at 800px:** the toast sits at 128–328px, clear of the Airo panel at 456px. Its Undo removed the test circle, and the board saved back to blank. The alias host still 307s to the canonical origin.
   - **Found while checking:** at 800px with Airo open, the bottom tool dock (`.object-dock.catalog-dock`) spans -177 to 599px. The Move tool is off-screen, and the right end slides under the Airo panel. The dock's `copilot-open` centring assumes the 378px desktop panel and doesn't fit narrow windows.
+- **2026-11-04** — Tool dock kept usable beside the side panels (`676fa97`):
+  - **Measured before the fix (Airo open):**
+    - At 701–900px the dock was clipped off the left edge (Move hidden), and only 5–9 of its 11 tools were clickable.
+    - At 981–1100px the zoom controls covered one or two tools.
+    - Settings plus Airo broke the same way below about 1280px.
+    - Cause: the `copilot-open` and `settings-open` rules shift the dock's `left` for the desktop panel widths without shrinking it. At 900px and below, the dock is also forced full-width.
+  - **Fix:**
+    - Above the fit points, the dock centres between the left edge and the zoom controls (`calc((100% - 536px) / 2)` with Airo open).
+    - Below them, the open panels stop 94px above the bottom (Airo-only ≤1120px, Settings+Airo ≤1300px, Settings-only ≤940px). The dock and zoom controls then keep their closed-panel layout.
+    - At 701–900px the full-width dock reserves 156px on its right for the zoom controls. This also fixes the zoom covering Insert at 701–740px with no panel open.
+  - **Also fixed:** the settings panel scrolls again at 900px and below. The old stacked-layout `.sidebar { overflow: visible }` had let 1,500px of settings spill out of the panel, over the dock and out of reach.
+  - **Checked before deploy** by injecting the rules into the live board. All 11 tools and all zoom buttons were clickable in every combination:
+    - No panel: 560, 701, 760, 800, 1100px.
+    - Airo: 701, 800, 900, 901, 980, 981, 1100, 1120, 1121, 1280, 1440px.
+    - Settings: 701, 800, 900, 940, 941, 1280px.
+    - Settings+Airo: 701, 800, 1000, 1300, 1301, 1440px.
+  - **Unchanged:** at 700px and below the Airo and Settings sheets still cover the dock by design. From 941px up, the full-height settings panel still hides the zoom controls.
+  - **Deployed:** `airboard-pilot-web-launch-676fa97` at 100%, after a no-traffic tagged smoke (pages 200; all the new rules survive minification). `launch-e33fed1` stays Ready for rollback.
+  - **Verified live:**
+    - 11/11 tools clickable at 800px (Airo, and Settings+Airo), 1100px (Airo) and 1280px (Airo, and Settings+Airo). The settings panel scrolls.
+    - At 800px, the Hand and Move tools select from the dock.
+    - Zoom in went to 125%, and Reset returned to 100% with the board saved.
