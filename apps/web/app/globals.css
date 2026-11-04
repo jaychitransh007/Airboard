@@ -3765,8 +3765,10 @@ button.screen-underlay-active {
   min-height: 92px;
 }
 
+/* Centre the dock between the canvas's left edge and the zoom controls, which
+   sit just left of the Airo panel (396px from the right, about 126px wide). */
 .canvas-workspace.copilot-open .object-dock.catalog-dock {
-  left: calc((100% - 378px) / 2);
+  left: calc((100% - 536px) / 2);
 }
 
 .canvas-workspace.settings-open:not(.copilot-open) .object-dock.catalog-dock {
@@ -4166,6 +4168,9 @@ button.screen-underlay-active {
   bottom: 12px;
   width: min(344px, calc(100vw - 24px));
   padding: 0 16px 18px;
+  /* Overrides the stacked-layout `.sidebar { overflow: visible }` at 900px and
+     below, which let settings spill out of the panel unscrollably. */
+  overflow-y: auto;
   border: 1px solid rgba(52, 34, 83, 0.12);
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.97);
@@ -4497,6 +4502,59 @@ button.screen-underlay-active {
     right: 354px;
   }
 
+}
+
+/* Where the 537px tool dock no longer fits beside the open side panels, the
+   panels stop above the bottom row instead, and the dock and zoom controls
+   keep their closed-panel layout across the full width. Each breakpoint is
+   where the dock stops fitting beside that panel combination. */
+@media (max-width: 1120px) {
+  .canvas-workspace.copilot-open .object-dock.catalog-dock {
+    left: 50%;
+  }
+}
+
+@media (max-width: 1300px) {
+  .canvas-workspace.settings-open.copilot-open .object-dock.catalog-dock {
+    left: 50%;
+  }
+}
+
+@media (max-width: 940px) {
+  .canvas-workspace.settings-open:not(.copilot-open) .object-dock.catalog-dock {
+    left: 50%;
+  }
+}
+
+@media (min-width: 701px) and (max-width: 1120px) {
+  .canvas-workspace.copilot-open .canvas-copilot {
+    bottom: 94px;
+  }
+
+  .canvas-workspace.copilot-open .canvas-zoom-controls {
+    right: 22px;
+  }
+}
+
+@media (min-width: 701px) and (max-width: 1300px) {
+  .canvas-workspace.settings-open.copilot-open .canvas-copilot,
+  .canvas-workspace.settings-open.copilot-open .canvas-inspector {
+    bottom: 94px;
+  }
+}
+
+@media (min-width: 701px) and (max-width: 940px) {
+  .canvas-workspace.settings-open .canvas-inspector {
+    bottom: 94px;
+  }
+}
+
+@media (min-width: 701px) and (max-width: 900px) {
+  /* The dock spans the canvas here, so reserve its right end for the zoom
+     controls (hidden while both panels are open). */
+  .canvas-workspace:not(.settings-open.copilot-open) .object-dock.catalog-dock.creation-toolbar {
+    padding-right: 156px;
+  }
 }
 
 @media (max-width: 700px) {
