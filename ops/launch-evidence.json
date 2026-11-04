@@ -56,7 +56,7 @@
       "status": "pending",
       "owner": "Engineering",
       "evidence": "",
-      "notes": "Deploy the release commit and attach endpoint and browser smoke evidence."
+      "notes": "2026-11-04: ab43907 deployed (API and web revisions launch-ab43907); readiness, auth-required routes, page loads and sign-in render pass. Still needed: signed-in board save/export/delete and a rollback exercise."
     },
     "lifecycle-schedule": {
       "description": "The authenticated lifecycle endpoint is scheduled, monitored and has a failed-run alert.",
