@@ -164,3 +164,10 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - A signed-in save, export and delete pass, and a rollback exercise (the `deployment-smoke` gate stays `pending`).
     - `AIRBOARD_TRUSTED_PROXY_HOPS=1` against real Cloud Run X-Forwarded-For.
     - The lifecycle schedule (Cloud Scheduler API still not enabled).
+- **2026-11-04** — Signed-in deploy smoke:
+  - Added `pnpm smoke:deploy`. It creates a throwaway account, then covers the entitlement 402→pass flip, board save, stale-version 409, reload, export request and delete-to-trash, and cleans up the account afterwards. It passes on `ab43907` against local Supabase, with no rows left behind.
+  - Production checks without a login:
+    - Browser CORS allows board PATCH only from the web origin.
+    - The `figjam-c19290e` revisions are Ready, which makes rollback a single traffic switch.
+  - Not yet run on production: a signed-in pass (needs a real login) and an executed rollback.
+  - Minor: the web app returns 404 for `/favicon.ico`.
