@@ -27,6 +27,7 @@ import {
 import { bearerToken, issueSignedToken, verifySignedToken } from "./signedTokens";
 import { registerBoardContentRoutes, removeBoardAssetObjects } from "./boardContentRoutes";
 import { BoardAssetLifecycleError } from "./boardAssetLifecycle";
+import { boardAccessFilter } from "./boardAccess";
 
 /** The pilot trial lasts one month from activation. */
 const TRIAL_DURATION_MS = 30 * 24 * 60 * 60 * 1_000;
@@ -340,7 +341,8 @@ export function registerControlPlaneRoutes(
     let query = auth.client
       .from("boards")
       .select("id,workspace_id,title,description,latest_version,visibility,created_at,updated_at,archived_at")
-      .eq("organization_id", context.organizationId);
+      .eq("organization_id", context.organizationId)
+      .or(boardAccessFilter(context.profileId));
     if (scope === "trash") query = query.not("deleted_at", "is", null);
     else query = query.is("deleted_at", null);
     if (scope === "shared") query = query.neq("visibility", "private");
@@ -400,6 +402,7 @@ export function registerControlPlaneRoutes(
       .select("*")
       .eq("id", request.params.boardId)
       .eq("organization_id", context.organizationId)
+      .or(boardAccessFilter(context.profileId))
       .is("deleted_at", null)
       .maybeSingle();
     if (error || !data) return reply.code(404).send({ error: "BOARD_NOT_FOUND" });
@@ -440,6 +443,7 @@ export function registerControlPlaneRoutes(
         .update(update)
         .eq("id", request.params.boardId)
         .eq("organization_id", context.organizationId)
+        .or(boardAccessFilter(context.profileId))
         .is("deleted_at", null);
       // State saves are compare-and-swap: the client sends its last known
       // latest_version + 1 and the write lands only if nobody else saved in
@@ -454,6 +458,7 @@ export function registerControlPlaneRoutes(
           .select("latest_version")
           .eq("id", request.params.boardId)
           .eq("organization_id", context.organizationId)
+          .or(boardAccessFilter(context.profileId))
           .is("deleted_at", null)
           .maybeSingle();
         if (currentError || (error && current)) {
@@ -511,6 +516,7 @@ export function registerControlPlaneRoutes(
       .update({ deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq("id", request.params.boardId)
       .eq("organization_id", context.organizationId)
+      .or(boardAccessFilter(context.profileId))
       .is("deleted_at", null)
       .select("id")
       .maybeSingle();
@@ -525,7 +531,7 @@ export function registerControlPlaneRoutes(
     if (!auth.client || !boundedUuid(request.params.boardId)) return reply.code(404).send({ error: "BOARD_NOT_FOUND" });
     const { data, error } = await auth.client.from("boards")
       .update({ deleted_at: null, updated_at: new Date().toISOString() })
-      .eq("id", request.params.boardId).eq("organization_id", context.organizationId)
+      .eq("id", request.params.boardId).eq("organization_id", context.organizationId).or(boardAccessFilter(context.profileId))
       .not("deleted_at", "is", null).select("id,title,updated_at").maybeSingle();
     if (error || !data) return reply.code(404).send({ error: "BOARD_NOT_FOUND" });
     await writeAudit(auth, context, request, "board.restored", "board", data.id);

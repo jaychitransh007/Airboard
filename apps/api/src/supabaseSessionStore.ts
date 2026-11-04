@@ -13,6 +13,7 @@ import {
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { JoinSessionInput, SessionStore } from "./store";
 import type { StartSessionInput } from "./types";
+import { boardAccessFilter } from "./boardAccess";
 
 type ProfileRow = {
   id: string;
@@ -105,6 +106,7 @@ export class SupabaseSessionStore implements SessionStore {
           .select("id,workspace_id")
           .eq("id", input.boardId)
           .eq("organization_id", input.organizationId)
+          .or(boardAccessFilter(profile.id))
           .is("deleted_at", null)
           .maybeSingle();
         if (!board || (workspaceId && board.workspace_id !== workspaceId)) {

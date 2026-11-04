@@ -93,6 +93,17 @@ class FakeQuery {
   }
   eq(column, value) { this.filters.push((row) => row[column] === value); return this; }
   neq(column, value) { this.filters.push((row) => row[column] !== value); return this; }
+  or(expression) {
+    // Supports the comma-separated `column.eq.value` / `column.neq.value` form.
+    const clauses = expression.split(",").map((clause) => {
+      const [column, operator, ...rest] = clause.split(".");
+      const value = rest.join(".");
+      assert.ok(operator === "eq" || operator === "neq", `unsupported or() operator ${operator}`);
+      return (row) => (operator === "eq" ? String(row[column]) === value : String(row[column]) !== value);
+    });
+    this.filters.push((row) => clauses.some((clause) => clause(row)));
+    return this;
+  }
   is(column, value) { this.filters.push((row) => (row[column] ?? null) === value); return this; }
   not(column, operator, value) {
     assert.equal(operator, "is");
@@ -236,6 +247,7 @@ function boardRow(overrides = {}) {
     latest_state: { nodes: ["original"] },
     latest_version: 3,
     visibility: "private",
+    owner_profile_id: PROFILE,
     deleted_at: null,
     updated_at: "2026-11-01T00:00:00.000Z",
     ...overrides,
@@ -279,6 +291,38 @@ test("board state saves are compare-and-swap on latest_version", async (t) => {
   assert.equal(next.statusCode, 200, next.body);
   assert.equal(next.json().board.latest_version, 5);
   assert.deepEqual(client.tables.board_versions.map((row) => row.version), [4, 5]);
+});
+
+test("another member's private board is invisible; organization boards stay shared", async (t) => {
+  const OTHER = "99999999-9999-4999-8999-999999999999";
+  const SHARED = "88888888-8888-4888-8888-888888888888";
+  const client = createFakeSupabase({
+    boards: [
+      boardRow({ owner_profile_id: OTHER }),
+      boardRow({ id: SHARED, owner_profile_id: OTHER, visibility: "organization", title: "Team map" }),
+    ],
+    board_versions: [],
+    audit_events: [],
+  });
+  const server = await buildApp(t, client);
+  const as = (method, url, payload) =>
+    server.inject({ method, url, headers: { authorization: "Bearer owner" }, ...(payload ? { payload } : {}) });
+
+  const listed = await as("GET", "/boards");
+  assert.deepEqual(listed.json().boards.map((board) => board.id), [SHARED]);
+  assert.equal((await as("GET", `/boards/${BOARD}`)).statusCode, 404);
+  assert.equal((await as("PATCH", `/boards/${BOARD}`, { title: "Taken over" })).statusCode, 404);
+  assert.equal((await as("PATCH", `/boards/${BOARD}`, { version: 4, state: { nodes: [] } })).statusCode, 404);
+  assert.equal((await as("DELETE", `/boards/${BOARD}`)).statusCode, 404);
+  assert.equal(client.tables.boards[0].title, "Board");
+  assert.equal(client.tables.boards[0].deleted_at, null);
+
+  client.tables.boards[0].deleted_at = "2026-11-02T00:00:00.000Z";
+  assert.equal((await as("GET", "/boards?scope=trash")).json().boards.length, 0);
+  assert.equal((await as("POST", `/boards/${BOARD}/restore`)).statusCode, 404);
+
+  assert.equal((await as("GET", `/boards/${SHARED}`)).statusCode, 200);
+  assert.equal((await as("PATCH", `/boards/${SHARED}`, { title: "Team map v2" })).statusCode, 200);
 });
 
 test("metadata-only board patches need no version and missing boards stay 404", async (t) => {

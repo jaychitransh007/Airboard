@@ -14,6 +14,7 @@ import {
   type PendingBoardAsset,
 } from "./boardAssetLifecycle";
 import { resolveBoardLinkPreview } from "./boardLinkPreview";
+import { boardAccessFilter } from "./boardAccess";
 
 export const ASSET_BUCKET = "board-assets";
 const STALE_ASSET_CLEANUP_LIMIT = 25;
@@ -314,6 +315,7 @@ async function canAccessBoard(auth: AuthService, context: AuthContext, boardId: 
     .select("id")
     .eq("id", boardId)
     .eq("organization_id", context.organizationId)
+    .or(boardAccessFilter(context.profileId))
     .is("deleted_at", null)
     .maybeSingle();
   return Boolean(data);
