@@ -282,3 +282,18 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - The e2e specs could not run (Playwright browser not installed).
   - **Deployed:** `airboard-pilot-web-launch-a226e33` at 100% after a tagged smoke (12 pages 200, new copy and welcome card in the bundles). `launch-2768485` stays Ready for rollback.
   - **Verified live:** Billing shows "Free pilot · Ended on Jul 22, 2026". Placing a note opened the editor, and the typed text saved to the note. The test board was then undone back to blank.
+- **2026-11-05** — One-month pilot (`a0d7ed4`, the user's decision):
+  - **API:** `TRIAL_DURATION_MS` is 30 days and the welcome email says one month.
+  - **Database:** migration `20261105120000_one_month_pilot_trial.sql`.
+    - The Chrome preflight trial function uses 30 days, with its grants kept.
+    - Pilots activated within the last 30 days are extended to activation + 30 days, their trial entitlement is restored, and queued reminder emails move to the new end.
+    - Older pilots, including the user's own account (activated around July 19), keep their original end.
+  - **Copy:** every "72-hour" and "3-day" mention now says one month, across the site, the help center (regenerated), the terms draft sentence (its date still reads 25 July 2026, for counsel) and internal docs.
+  - **Checks:**
+    - Locally, the migration moved a pilot from Nov 7 to Dec 4 along with its reminders, and kept the function's grants.
+    - 617 tests pass.
+  - **Deployed:**
+    - `supabase db push` applied only this migration (dry runs before and after; the remote is up to date).
+    - `airboard-pilot-api-launch-a0d7ed4` and `airboard-pilot-web-launch-a0d7ed4` are at 100% after tagged smokes. The API reports ready, with 401s without auth and a passing CORS preflight; the web serves 8 pages with the new copy.
+    - Rollback targets: API `launch-ab43907`, web `launch-a226e33`. The migration's data extension is not rolled back by a traffic switch.
+  - **Verified live:** the signed-in app loads all 5 boards through the new API, and Billing still shows the user's pilot ended Jul 22.
