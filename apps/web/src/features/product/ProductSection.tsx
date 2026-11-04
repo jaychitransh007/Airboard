@@ -5,15 +5,10 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AirboardApiError, airboardApi } from "../../platform/api";
 import { useAirboardAuth } from "../../platform/auth";
+import { BOARD_TEMPLATES, type BoardTemplate } from "../board/boardTemplates";
 
 type Board = { id: string; title: string; updated_at: string; latest_version: number; visibility: string };
 type Activity = { event_id: string; event_name: string; properties: Record<string, unknown>; occurred_at: string };
-const TEMPLATES = [
-  ["System architecture", "Services, data stores, boundaries and flows"],
-  ["Teaching canvas", "Concept, examples, checks and summary"],
-  ["Workshop map", "Questions, ideas, decisions and owners"],
-  ["Sales narrative", "Problem, change, solution and proof"],
-] as const;
 
 export function ProductSection({ section }: { section: string }) {
   if (section === "templates") return <Templates />;
@@ -25,8 +20,8 @@ export function ProductSection({ section }: { section: string }) {
 
 function Templates() {
   const auth = useAirboardAuth(); const router = useRouter(); const [busy, setBusy] = useState<string | null>(null); const [error, setError] = useState<string | null>(null);
-  const create = async (title: string) => { if (!auth.accessToken) return; setBusy(title); setError(null); try { const result = await airboardApi<{ board: Board }>("/boards", { method: "POST", accessToken: auth.accessToken, body: JSON.stringify({ title }) }); router.push(`/app/boards/${result.board.id}`); } catch (caught) { setBusy(null); setError(caught instanceof AirboardApiError && caught.code === "ACTIVE_ENTITLEMENT_REQUIRED" ? "Your pilot access has ended, so new boards can't be created. Your saved boards are still in your library." : "Could not create the board. Check your connection and try again."); } };
-  return <div><section className="app-page-heading"><p className="eyebrow">Reusable starts</p><h1>Templates</h1><p>Create an organization-owned board with a clear facilitation structure.</p></section>{error ? <p className="form-warning" role="alert">{error}{error.startsWith("Your pilot") ? <> <Link href="/support">Request more pilot time</Link></> : null}</p> : null}<div className="board-grid large">{TEMPLATES.map(([title,description]) => <button className="board-card" key={title} disabled={Boolean(busy)} onClick={() => void create(title)}><div className="board-thumbnail"><span>{title[0]}</span></div><strong>{title}</strong><small>{busy === title ? "Creating…" : description}</small></button>)}</div></div>;
+  const create = async (template: BoardTemplate) => { if (!auth.accessToken) return; setBusy(template.id); setError(null); try { const result = await airboardApi<{ board: Board }>("/boards", { method: "POST", accessToken: auth.accessToken, body: JSON.stringify({ title: template.title }) }); router.push(`/app/boards/${result.board.id}?template=${template.id}`); } catch (caught) { setBusy(null); setError(caught instanceof AirboardApiError && caught.code === "ACTIVE_ENTITLEMENT_REQUIRED" ? "Your pilot access has ended, so new boards can't be created. Your saved boards are still in your library." : "Could not create the board. Check your connection and try again."); } };
+  return <div><section className="app-page-heading"><p className="eyebrow">Reusable starts</p><h1>Templates</h1><p>Start from a ready-made diagram, then change anything by typing, speaking or double-clicking.</p></section>{error ? <p className="form-warning" role="alert">{error}{error.startsWith("Your pilot") ? <> <Link href="/support">Request more pilot time</Link></> : null}</p> : null}<div className="board-grid large">{BOARD_TEMPLATES.map((template) => <button className="board-card" key={template.id} disabled={Boolean(busy)} onClick={() => void create(template)}><div className="board-thumbnail"><span>{template.title[0]}</span></div><strong>{template.title}</strong><small>{busy === template.id ? "Creating…" : template.description}</small></button>)}</div></div>;
 }
 
 function ActivityView() {

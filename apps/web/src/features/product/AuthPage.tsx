@@ -94,8 +94,7 @@ export function AuthPage({ mode }: { mode: "login" | "signup" }) {
           <p className="eyebrow">{mode === "signup" ? "Join the controlled pilot" : "Welcome back"}</p>
           <h1>{mode === "signup" ? "Make the idea visible." : "Continue your Airboard."}</h1>
           <p>
-            Your 72-hour pilot trial begins only after your first successful standalone board or
-            supported preview preflight. Paid checkout is not open unless the billing page says so.
+            Your free 72-hour pilot starts when you open your first board. No card needed.
           </p>
           <ul>
             <li>Standalone visual workspace</li>

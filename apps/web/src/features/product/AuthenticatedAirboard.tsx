@@ -20,7 +20,7 @@ type SaveNotice =
   | { kind: "failed"; message: string }
   | { kind: "conflict" };
 
-export function AuthenticatedAirboard({ boardId }: { boardId?: string }) {
+export function AuthenticatedAirboard({ boardId, templateId }: { boardId?: string; templateId?: string }) {
   const auth = useAirboardAuth();
   const router = useRouter();
   const [ready, setReady] = useState(false);
@@ -37,8 +37,14 @@ export function AuthenticatedAirboard({ boardId }: { boardId?: string }) {
   const conflictRef = useRef(false);
   const allowUnloadRef = useRef(false);
   const saveBoardStateRef = useRef<((state: BoardState) => Promise<void>) | null>(null);
+  const preparingRef = useRef<string | null>(null);
   useEffect(() => {
     if (!auth.accessToken) return;
+    // A second run while one is still preparing (a remount or token refresh)
+    // would race the first to activate the trial and create a second board.
+    const preparationKey = boardId ?? "new";
+    if (preparingRef.current === preparationKey) return;
+    preparingRef.current = preparationKey;
     const prepare = async () => {
       // A standalone board preflight proves the canvas can render. Activation
       // is idempotent and begins here rather than at account creation.
@@ -53,11 +59,16 @@ export function AuthenticatedAirboard({ boardId }: { boardId?: string }) {
         }),
       });
       if (!preflight.passed) throw new Error("STANDALONE_PREFLIGHT_FAILED");
-      await airboardApi("/trial/activate", {
-        method: "POST",
-        accessToken: auth.accessToken,
-        body: JSON.stringify({ source: "standalone_preflight" }),
-      });
+      try {
+        await airboardApi("/trial/activate", {
+          method: "POST",
+          accessToken: auth.accessToken,
+          body: JSON.stringify({ source: "standalone_preflight" }),
+        });
+      } catch (caught) {
+        // Losing an activation race still leaves the trial active.
+        if (!(caught instanceof AirboardApiError && caught.code === "TRIAL_ALREADY_ACTIVATED")) throw caught;
+      }
       let durable: DurableBoard;
       if (!boardId) {
         const created = await airboardApi<{ board: DurableBoard }>("/boards", {
@@ -69,7 +80,10 @@ export function AuthenticatedAirboard({ boardId }: { boardId?: string }) {
           accessToken: auth.accessToken,
         });
         durable = loaded.board;
-        router.replace(`/app/boards/${durable.id}`);
+        // Rewrite the address in place before the canvas mounts. A router
+        // navigation here raced the live session's own URL update and could
+        // leave the page on /app/boards/new, where a reload makes another board.
+        window.history.replaceState(window.history.state, "", `/app/boards/${durable.id}`);
       } else {
         const loaded = await airboardApi<{ board: DurableBoard }>(`/boards/${boardId}`, {
           accessToken: auth.accessToken,
@@ -81,7 +95,11 @@ export function AuthenticatedAirboard({ boardId }: { boardId?: string }) {
       await auth.refreshAccount();
       setReady(true);
     };
-    void prepare().catch((caught) => setError(caught instanceof Error ? caught.message : "AIRBOARD_PREPARE_FAILED"));
+    void prepare()
+      .catch((caught) => setError(caught instanceof Error ? caught.message : "AIRBOARD_PREPARE_FAILED"))
+      .finally(() => {
+        if (preparingRef.current === preparationKey) preparingRef.current = null;
+      });
   }, [auth.accessToken, boardId, router]);
 
   useEffect(() => () => {
@@ -254,7 +272,7 @@ export function AuthenticatedAirboard({ boardId }: { boardId?: string }) {
   if (!ready || !auth.accessToken || !auth.account || !board) return <div className="product-loading">Opening your Airboard…</div>;
   return (
     <>
-      <AirboardPrototype surface="standalone" accessToken={auth.accessToken} accountUserId={auth.account.profile.id} persistentBoardId={board.id} persistentWorkspaceId={board.workspace_id} boardTitle={board.title} persistentSaveStatus={saveStatus} initialBoardState={normalizeBoardState(board.latest_state, board.id)} onPersistentBoardChange={persist} onRenameBoard={renameBoard} onDeleteBoard={deleteBoard} {...(auth.account.profile.preferences ? { initialPreferences: auth.account.profile.preferences } : {})} />
+      <AirboardPrototype surface="standalone" accessToken={auth.accessToken} accountUserId={auth.account.profile.id} persistentBoardId={board.id} persistentWorkspaceId={board.workspace_id} boardTitle={board.title} persistentSaveStatus={saveStatus} initialBoardState={normalizeBoardState(board.latest_state, board.id)} onPersistentBoardChange={persist} onRenameBoard={renameBoard} onDeleteBoard={deleteBoard} {...(templateId ? { initialTemplateId: templateId } : {})} {...(auth.account.profile.preferences ? { initialPreferences: auth.account.profile.preferences } : {})} />
       {saveNotice ? (
         <div className="board-save-warning" role={saveNotice.kind === "conflict" ? "alert" : "status"}>
           {saveNotice.kind === "conflict" ? (

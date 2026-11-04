@@ -10,7 +10,7 @@ test("typing a command creates and edits objects instantly", async ({ page }) =>
   await page.goto("/?testStandalone=1");
 
   // First run shows the onboarding overlay; dismissing it is part of the flow.
-  const onboarding = page.getByRole("button", { name: "Got it — let me try" });
+  const onboarding = page.getByRole("button", { name: "Start building" });
   await expect(onboarding).toBeVisible();
   await onboarding.click();
 
@@ -86,7 +86,7 @@ test("recipient narrative adds both dataset inputs atomically and repairs the ob
   page,
 }) => {
   await page.goto("/?testStandalone=1");
-  await page.getByRole("button", { name: "Got it — let me try" }).click();
+  await page.getByRole("button", { name: "Start building" }).click();
   const input = page.getByTestId("intent-command-input");
   const apply = async (command: string) => {
     await input.fill(command);
@@ -297,7 +297,7 @@ test("recipient narrative adds both dataset inputs atomically and repairs the ob
 
 test("section membership round-trips with scene undo and redo", async ({ page }) => {
   await page.goto("/?testStandalone=1");
-  await page.getByRole("button", { name: "Got it — let me try" }).click();
+  await page.getByRole("button", { name: "Start building" }).click();
   const input = page.getByTestId("intent-command-input");
   const apply = async (command: string) => {
     await input.fill(command);

@@ -6,6 +6,19 @@ export type ToggleableRichTextMark =
   | "strikethrough"
   | "inlineCode";
 
+/** Grows a sticky note to fit its wrapped text, never below its square size. */
+export function stickyHeightForText(
+  sticky: { layout: "square" | "rectangle"; transform: { width: number } },
+  value: string,
+): number {
+  const charactersPerLine = sticky.layout === "square" ? 18 : 30;
+  const lineCount = value.split("\n").reduce(
+    (count, line) => count + Math.max(1, Math.ceil(line.length / charactersPerLine)),
+    0,
+  );
+  return Math.max(sticky.layout === "square" ? sticky.transform.width : 92, 54 + lineCount * 22);
+}
+
 export function richTextPlainValue(document: RichTextDocument): string {
   return document.blocks
     .map((block) => block.runs.map((run) => run.text).join(""))

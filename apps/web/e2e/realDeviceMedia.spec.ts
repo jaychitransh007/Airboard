@@ -47,7 +47,7 @@ test("@real-device validates physical media and production HandLandmarker health
   ).toEqual([]);
 
   const onboarding = page.getByRole("button", {
-    name: "Got it — let me try",
+    name: "Start building",
   });
   if (await onboarding.isVisible()) await onboarding.click();
   await page.getByRole("button", { name: "Open board settings" }).click();

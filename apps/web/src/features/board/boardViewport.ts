@@ -89,6 +89,34 @@ export function zoomViewport(
   );
 }
 
+/**
+ * Frames board-space `bounds` inside the visible part of the canvas, which
+ * excludes `rightInset` screen pixels (the Airo panel). Never zooms past 100%,
+ * so a small diagram stays at its natural size instead of filling the screen.
+ */
+export function fitViewportToBounds(
+  bounds: { x: number; y: number; width: number; height: number },
+  limits: ViewportLimits,
+  options: { padding?: number; rightInset?: number } = {},
+): BoardViewport {
+  const padding = options.padding ?? 48;
+  const visibleWidth = Math.max(1, limits.canvasWidth - (options.rightInset ?? 0));
+  const scale = clampNumber(
+    Math.min(
+      1,
+      (visibleWidth - padding * 2) / Math.max(1, bounds.width),
+      (limits.canvasHeight - padding * 2) / Math.max(1, bounds.height),
+    ),
+    limits.minScale,
+    limits.maxScale,
+  );
+  return {
+    x: visibleWidth / 2 - (bounds.x + bounds.width / 2) * scale,
+    y: limits.canvasHeight / 2 - (bounds.y + bounds.height / 2) * scale,
+    scale,
+  };
+}
+
 export function clampViewport(
   viewport: BoardViewport,
   limits: ViewportLimits,

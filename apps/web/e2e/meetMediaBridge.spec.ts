@@ -20,7 +20,7 @@ test("the bridge restores embedded gesture on the Meet main stage", async ({ pag
   // The probe detects the (emulated) extension: gesture onboarding and the
   // camera entry point appear; voice stays off this surface; no companion
   // link is needed.
-  const onboarding = page.getByRole("button", { name: "Got it — let me try" });
+  const onboarding = page.getByRole("button", { name: "Start building" });
   await expect(onboarding).toBeVisible({ timeout: 10_000 });
   await onboarding.click();
 
@@ -59,7 +59,7 @@ test("camera overlay pumps neon frames to the compositor and disarms on toggle-o
 }) => {
   await page.goto("/meet/test-harness?bridge=emulate");
 
-  const onboarding = page.getByRole("button", { name: "Got it — let me try" });
+  const onboarding = page.getByRole("button", { name: "Start building" });
   await expect(onboarding).toBeVisible({ timeout: 10_000 });
   await onboarding.click();
 

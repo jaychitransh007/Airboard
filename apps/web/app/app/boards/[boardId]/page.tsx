@@ -1,2 +1,2 @@
 import { AuthenticatedAirboard } from "../../../../src/features/product/AuthenticatedAirboard";
-export default async function BoardPage({ params }: { params: Promise<{ boardId: string }> }) { const { boardId } = await params; return <div className="canvas-route"><AuthenticatedAirboard boardId={boardId} /></div>; }
+export default async function BoardPage({ params, searchParams }: { params: Promise<{ boardId: string }>; searchParams: Promise<{ template?: string | string[] }> }) { const [{ boardId }, { template }] = await Promise.all([params, searchParams]); return <div className="canvas-route"><AuthenticatedAirboard boardId={boardId} {...(typeof template === "string" ? { templateId: template } : {})} /></div>; }

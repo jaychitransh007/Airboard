@@ -66,6 +66,7 @@ import {
   boardPointFromScreen,
   clampViewport,
   DEFAULT_VIEWPORT_LIMITS,
+  fitViewportToBounds,
   IDENTITY_VIEWPORT,
   panViewport,
   screenPointFromBoard,
@@ -130,6 +131,13 @@ import {
 } from "../meet/extensionRelayTrust.ts";
 import { CreationToolbar } from "./CreationToolbar";
 import { SceneContextToolbar } from "./SceneContextToolbar";
+import {
+  replaceRichTextPlainValue,
+  richTextPlainValue,
+  stickyHeightForText,
+} from "./sceneContextToolbarHelpers";
+import { SceneTextEditor } from "./SceneTextEditor";
+import { boardTemplate } from "./boardTemplates";
 import { ScenePlaybackOverlay } from "./ScenePlaybackOverlay";
 import {
   ALL_SHAPES,
@@ -633,6 +641,7 @@ export function AirboardPrototype({
   boardTitle = "Untitled Airboard",
   persistentSaveStatus = "saved",
   initialPreferences,
+  initialTemplateId,
 }: {
   surface: Surface;
   meetingProvider?: MeetingProvider;
@@ -680,6 +689,8 @@ export function AirboardPrototype({
     videoEnabled?: boolean;
     audioEnabled?: boolean;
   };
+  /** Starter template to build once on a new, empty board (see boardTemplates). */
+  initialTemplateId?: string;
 }) {
   const [bridgedAccessToken, setBridgedAccessToken] = useState<string | undefined>();
   const effectiveAccessToken = accessToken ?? bridgedAccessToken;
@@ -1967,9 +1978,11 @@ export function AirboardPrototype({
         language?: CodeLanguage;
         /** Shift away from existing elements, trying this direction first. */
         avoidOverlap?: SceneIntentPlacementDirection;
+        /** Open the on-canvas text editor; commands leave focus in the Airo field. */
+        edit?: boolean;
       } = {},
     ) => {
-      const { avoidOverlap, ...creationOptions } = options;
+      const { avoidOverlap, edit = true, ...creationOptions } = options;
       const attachmentTarget = tool === "stamp" || tool === "insert:face-stamp"
         ? findSceneElementAtPoint(boardRef.current, point)
         : null;
@@ -1986,7 +1999,7 @@ export function AirboardPrototype({
         ? { ...drafted, transform: openSceneTransform(boardRef.current, drafted.transform, avoidOverlap) }
         : drafted;
       const created = commitSceneElement(element, {
-        edit: ["sticky", "shape", "text", "code_block", "mind_map_node"].includes(element.kind),
+        edit: edit && ["sticky", "shape", "text", "code_block", "mind_map_node"].includes(element.kind),
       });
       if (created.kind === "stamp" && attachmentTarget && attachmentTarget.id !== created.id) {
         const cellId = attachmentTarget.kind === "table"
@@ -2005,6 +2018,29 @@ export function AirboardPrototype({
       return created;
     },
     [accountUserId, commitSceneElement, patchSceneElements, selectedStampEmoji],
+  );
+
+  const commitSceneText = useCallback(
+    (elementId: string, text: string) => {
+      const element = boardRef.current.elements[elementId];
+      if (!element || element.status !== "active") return;
+      if (element.kind === "section") {
+        patchSceneElement(elementId, [{
+          op: "field.set",
+          path: ["title"],
+          value: replaceRichTextPlainValue(element.title, text),
+        }]);
+        return;
+      }
+      if (!isInlineTextEditable(element)) return;
+      patchSceneElement(elementId, [
+        { op: "field.set", path: ["content"], value: replaceRichTextPlainValue(element.content, text) },
+        ...(element.kind === "sticky"
+          ? [{ op: "field.set" as const, path: ["transform", "height"] as [string, string], value: stickyHeightForText(element, text) }]
+          : []),
+      ]);
+    },
+    [patchSceneElement],
   );
 
   const duplicateSceneElement = useCallback(
@@ -2774,6 +2810,7 @@ export function AirboardPrototype({
           : intent.label;
         const created = createSceneElementAtPoint(tool, placementCenter, {
           avoidOverlap: placement?.direction ?? "right",
+          edit: false,
           ...(label ? { label } : {}),
           ...(intent.table ? { table: intent.table } : {}),
           ...(intent.language ? { language: intent.language } : {}),
@@ -3107,6 +3144,49 @@ export function AirboardPrototype({
     },
     [currentViewportLimits, render],
   );
+
+  // Build a chosen starter template on mount, before the live session opens, so
+  // the session receives it in its single opening snapshot rather than as a
+  // burst of edits that contend for the server's sequence. It runs the
+  // template's ordinary Airo commands, then frames the result beside the panel.
+  const templateAppliedRef = useRef(false);
+  useEffect(() => {
+    const template = boardTemplate(initialTemplateId);
+    if (!template || templateAppliedRef.current) return;
+    templateAppliedRef.current = true;
+    const startedEmpty = !Object.values(boardRef.current.elements).some(
+      (element) => element.status === "active",
+    );
+    if (startedEmpty) {
+      for (const command of template.commands) {
+        const intent = parseBoardSceneIntent(command);
+        if (intent) executeSceneIntent(intent);
+      }
+      setSelectedElementId(null);
+      setSelectedElementIds([]);
+      const placed = Object.values(boardRef.current.elements).filter(
+        (element) => element.status === "active" && element.kind !== "connector",
+      );
+      if (placed.length > 0) {
+        const limits = currentViewportLimits();
+        applyViewport(fitViewportToBounds(sceneElementUnionBounds(placed, 0), limits, {
+          rightInset: copilotOpen ? Math.min(400, limits.canvasWidth * 0.45) : 0,
+        }));
+      }
+      setCommandFeedback(`Built the ${template.title} template. Double-click anything to change its text.`);
+    }
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("template")) {
+      url.searchParams.delete("template");
+      window.history.replaceState(window.history.state, "", url);
+    }
+  }, [
+    applyViewport,
+    copilotOpen,
+    currentViewportLimits,
+    executeSceneIntent,
+    initialTemplateId,
+  ]);
 
   useEffect(() => {
     const hash = window.location.hash;
@@ -8443,9 +8523,7 @@ export function AirboardPrototype({
         if (config.available && supportsRealtimeSpeech()) {
           setSpeechEngine("realtime");
           setSpeechSupported(true);
-          setCommandFeedback(
-            `Realtime Airo is ready (${config.provider ?? "provider"} / ${configuredModel || "default model"}). Typed commands also work.`,
-          );
+          setCommandFeedback("Airo is ready. Turn it on to talk, or type below.");
           return;
         }
 
@@ -9503,6 +9581,8 @@ export function AirboardPrototype({
         }
         if (isScenePlacementTool(creationTool)) {
           createSceneElementAtPoint(creationTool, point);
+          setGhostAnnotation(null);
+          setGhostAnnotations([]);
           return;
         }
         const sceneHit = findSceneElementAtPoint(boardRef.current, point);
@@ -10101,6 +10181,14 @@ export function AirboardPrototype({
     labelAnchor;
   const labelAnchorScreen = labelAnchor
     ? screenPointFromBoard(boardViewportRef.current, labelAnchor)
+    : null;
+  const editingSceneElement = editingElementId ? boardRef.current.elements[editingElementId] : undefined;
+  const inlineTextTarget = editingSceneElement?.status === "active" &&
+    (editingSceneElement.kind === "section" || isInlineTextEditable(editingSceneElement))
+    ? editingSceneElement
+    : null;
+  const inlineTextBounds = inlineTextTarget
+    ? sceneTextEditorBounds(inlineTextTarget, boardViewportRef.current, canvasRef.current)
     : null;
   const floatingLabelStyle = labelAnchorScreen
     ? {
@@ -11049,34 +11137,31 @@ export function AirboardPrototype({
           onboardingVisible &&
           !desktopOverlay &&
           inputMode === "gesture" ? (
-            <div className="onboarding-overlay" role="dialog" aria-label="How to use Airboard">
+            <div className="onboarding-overlay" role="dialog" aria-label="Make your first diagram">
               <div className="onboarding-card">
-                <h2>Talk to the board, not to software</h2>
-                <ul>
-                  <li>
-                    <strong>Hold an open palm still for 0.4 seconds</strong> and speak — no wake word.
-                    “Add a payment service next to the API.”
-                  </li>
-                  <li>
-                    <strong>Grab an element and hold it still</strong> to edit it by voice:
-                    “rename to Payments”, “delete”, “connect to the database.”
-                  </li>
-                  <li>
-                    <strong>Close your hand over an object to move it</strong>; reopen to drop.
-                    Camera gestures do not resize objects.
-                  </li>
-                  <li>
-                    <strong>Two open palms</strong> move the canvas; <strong>two closed
-                    hands</strong> spread apart or together to zoom.
-                  </li>
-                  <li>
-                    Everything applies instantly. Use the toolbar, Cmd/Ctrl+Z, or say
-                    “Airo, undo”; the Airo panel shows each board action.
-                  </li>
-                </ul>
+                <h2>Make your first diagram</h2>
+                <p>Type these into the Airo box on the right, pressing Enter after each:</p>
+                <ol className="onboarding-commands">
+                  <li><code>add a user</code></li>
+                  <li><code>add an API next to the user</code></li>
+                  <li><code>connect user to API</code></li>
+                </ol>
+                <p>
+                  Prefer the mouse? Pick a shape from the toolbar below, click the board, and
+                  type to name it. Double-click anything to change its text.
+                </p>
+                <p className="onboarding-aside">
+                  Turn on <strong>Airo</strong> in the top bar to use your voice and hands: hold an
+                  open palm still and speak, or close your hand over a shape to move it.{" "}
+                  <a href="/help/using-the-board/gestures" target="_blank" rel="noreferrer">
+                    All camera gestures
+                  </a>
+                  . Everything applies instantly; undo with Cmd/Ctrl+Z or “Airo, undo”.
+                </p>
                 <button
                   type="button"
                   className="primary"
+                  autoFocus
                   onClick={() => {
                     setOnboardingVisible(false);
                     try {
@@ -11084,9 +11169,10 @@ export function AirboardPrototype({
                     } catch {
                       // Best-effort persistence only.
                     }
+                    intentCommandInputRef.current?.focus();
                   }}
                 >
-                  Got it — let me try
+                  Start building
                 </button>
               </div>
             </div>
@@ -11207,6 +11293,19 @@ export function AirboardPrototype({
             ) : (
               <video ref={videoRef} className="camera-preview hidden" muted playsInline />
             )
+          ) : null}
+          {inlineTextTarget && inlineTextBounds && !broadcastSafe ? (
+            <SceneTextEditor
+              key={inlineTextTarget.id}
+              initialText={richTextPlainValue(
+                inlineTextTarget.kind === "section" ? inlineTextTarget.title : inlineTextTarget.content,
+              )}
+              label={`Edit ${sceneElementKindLabel(inlineTextTarget.kind).toLowerCase()} text`}
+              bounds={inlineTextBounds}
+              align={inlineTextTarget.kind === "text" || inlineTextTarget.kind === "section" ? "left" : "center"}
+              onCommit={(text) => commitSceneText(inlineTextTarget.id, text)}
+              onClose={() => setEditingElementId((current) => (current === inlineTextTarget.id ? null : current))}
+            />
           ) : null}
           {showFloatingLabelEditor && floatingLabelStyle && !broadcastSafe ? (
             <div className="floating-label-editor" style={floatingLabelStyle}>
@@ -12924,6 +13023,48 @@ function uniqueGeneratedSceneLabel(state: BoardState, label: string): string {
     const candidate = `${label} ${suffix}`;
     if (!taken.has(normalizeSceneReference(candidate))) return candidate;
   }
+}
+
+type InlineTextElement = Extract<BoardSceneElement, { kind: "sticky" | "shape" | "text" | "mind_map_node" }>;
+
+function isInlineTextEditable(element: BoardSceneElement): element is InlineTextElement {
+  return (
+    element.kind === "sticky" ||
+    element.kind === "shape" ||
+    element.kind === "text" ||
+    element.kind === "mind_map_node"
+  );
+}
+
+/**
+ * Places the on-canvas text editor over its element in the board area's
+ * coordinates. Sections edit their title in a strip along the top edge.
+ */
+function sceneTextEditorBounds(
+  element: InlineTextElement | Extract<BoardSceneElement, { kind: "section" }>,
+  viewport: BoardViewport,
+  canvas: HTMLCanvasElement | null,
+): { left: number; top: number; width: number; height: number } | null {
+  if (!canvas) return null;
+  const area = canvas.closest(".board-area")?.getBoundingClientRect();
+  const canvasRect = canvas.getBoundingClientRect();
+  const offsetX = area ? canvasRect.left - area.left : 0;
+  const offsetY = area ? canvasRect.top - area.top : 0;
+  const { x, y, width, height } = element.transform;
+  const topLeft = screenPointFromBoard(viewport, { x, y });
+  const bottomRight = screenPointFromBoard(viewport, { x: x + width, y: y + height });
+  const editorWidth = Math.max(160, bottomRight.x - topLeft.x);
+  const editorHeight = element.kind === "section" ? 44 : Math.max(48, bottomRight.y - topLeft.y);
+  const centerX = (topLeft.x + bottomRight.x) / 2;
+  const top = element.kind === "section"
+    ? topLeft.y
+    : (topLeft.y + bottomRight.y) / 2 - editorHeight / 2;
+  return {
+    left: centerX - editorWidth / 2 + offsetX,
+    top: top + offsetY,
+    width: editorWidth,
+    height: editorHeight,
+  };
 }
 
 function sceneIntentPlacementPoint(

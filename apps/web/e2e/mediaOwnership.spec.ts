@@ -104,7 +104,7 @@ test("standalone combines camera and voice into one Airo entry point", async ({ 
   await spyOnGetUserMedia(page);
   await page.goto("/?testStandalone=1");
 
-  const onboarding = page.getByRole("button", { name: "Got it — let me try" });
+  const onboarding = page.getByRole("button", { name: "Start building" });
   await expect(onboarding).toBeVisible();
   await onboarding.click();
 

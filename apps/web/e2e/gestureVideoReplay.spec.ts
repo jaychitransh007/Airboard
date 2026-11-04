@@ -148,7 +148,7 @@ for (const asset of assets) {
 
       await page.goto("/?testStandalone=1");
       const onboarding = page.getByRole("button", {
-        name: "Got it — let me try",
+        name: "Start building",
       });
       if (await onboarding.isVisible()) await onboarding.click();
       const setup = asset.annotations.browserReplay.setup;

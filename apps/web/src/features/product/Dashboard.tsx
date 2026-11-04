@@ -36,15 +36,15 @@ export function Dashboard() {
         <div><p className="eyebrow">Your visual workspace</p><h1>Good {dayPart()}, {firstName(auth.account?.profile.displayName)}.</h1><p>Start on Airboard or carry the same visual language into your next meeting.</p></div>
       </section>
       <section className="quick-start-grid">
-        <Link className="quick-card primary" href="/app/boards/new?preflight=1"><span>＋</span><div><strong>New Airboard</strong><p>Create a persistent board and begin your trial at first value.</p></div></Link>
-        <Link className="quick-card" href="/app/integrations?setup=chrome_meet"><span>◉</span><div><strong>Use in Google Meet</strong><p>Connect the extension, confirm media disclosure and run preflight.</p></div></Link>
-        <Link className="quick-card" href="/download"><span>↗</span><div><strong>Desktop overlay</strong><p>Place a literal click-through Airboard above any desktop application.</p></div></Link>
+        <Link className="quick-card primary" href="/app/boards/new?preflight=1"><span>＋</span><div><strong>New Airboard</strong><p>Start a board—type or say what you want to see.</p></div></Link>
+        <Link className="quick-card" href="/app/integrations?setup=chrome_meet"><span>◉</span><div><strong>Use in Google Meet</strong><p>Put your diagram on your camera video (private preview).</p></div></Link>
+        <Link className="quick-card" href="/download"><span>↗</span><div><strong>Desktop overlay</strong><p>Draw over any app on your screen (early preview).</p></div></Link>
       </section>
       <section className="dashboard-section">
         <div className="section-heading"><div><h2>Recent boards</h2><p>Your content—not your camera or microphone—is saved here.</p></div><Link href="/app/boards">View all</Link></div>
         {loading ? <div className="empty-panel">Loading your workspace…</div> : loadFailed ? <div className="empty-panel" role="alert"><h3>Your boards didn't load</h3><p>Airboard couldn't be reached. Your boards are safe — reload to try again.</p><button className="button button-primary" type="button" onClick={() => window.location.reload()}>Reload</button></div> : boards.length ? (
           <div className="board-grid">{boards.slice(0, 6).map((board) => <Link className="board-card" href={`/app/boards/${board.id}`} key={board.id}><div className="board-thumbnail"><span>{board.title.slice(0, 1).toUpperCase()}</span></div><strong>{board.title}</strong><small>Version {board.latest_version} · {relativeTime(board.updated_at)}</small></Link>)}</div>
-        ) : <div className="empty-panel"><span className="empty-icon">◇</span><h3>No saved boards yet</h3><p>Create your first Airboard. The 72-hour trial starts only after the setup succeeds.</p><Link className="button button-primary" href="/app/boards/new?preflight=1">Create first board</Link></div>}
+        ) : <div className="empty-panel"><span className="empty-icon">◇</span><h3>No saved boards yet</h3><p>Create your first Airboard—your free 72-hour pilot starts when it opens.</p><Link className="button button-primary" href="/app/boards/new?preflight=1">Create first board</Link></div>}
       </section>
       <section className="dashboard-section">
         <div className="section-heading"><div><h2>Integration health</h2><p>See whether Airboard is ready before a real meeting.</p></div><Link href="/app/integrations">Manage</Link></div>

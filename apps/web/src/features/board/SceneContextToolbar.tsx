@@ -32,6 +32,7 @@ import {
   replaceRichTextPlainValue,
   richTextMarkIsActive,
   richTextPlainValue,
+  stickyHeightForText,
   toggleRichTextMark,
   type ToggleableRichTextMark,
 } from "./sceneContextToolbarHelpers.ts";
@@ -348,13 +349,9 @@ export function SceneContextToolbar({
               label="Note text"
               value={richTextPlainValue(selected.content)}
               onChange={(value) => {
-                const lineCount = value.split("\n").reduce(
-                  (count, line) => count + Math.max(1, Math.ceil(line.length / (selected.layout === "square" ? 18 : 30))),
-                  0,
-                );
                 patch(
                   { op: "field.set", path: ["content"], value: replaceRichTextPlainValue(selected.content, value) },
-                  { op: "field.set", path: ["transform", "height"], value: Math.max(selected.layout === "square" ? selected.transform.width : 92, 54 + lineCount * 22) },
+                  { op: "field.set", path: ["transform", "height"], value: stickyHeightForText(selected, value) },
                 );
               }}
             />

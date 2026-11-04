@@ -21,7 +21,7 @@ async function openStandalone(page: Page) {
   // The public root is now the acquisition site. This guarded mount is
   // compiled only when the Playwright server enables test hooks.
   await page.goto("/?testStandalone=1");
-  const onboarding = page.getByRole("button", { name: "Got it — let me try" });
+  const onboarding = page.getByRole("button", { name: "Start building" });
   await expect(onboarding).toBeVisible();
   await onboarding.click();
   const cookieChoice = page.getByRole("button", { name: "Necessary only" });
