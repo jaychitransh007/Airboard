@@ -190,3 +190,14 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - The home page ignores `?code=`/`?error=` from misrouted sign-in links.
     - `/favicon.ico` returns 404.
     - Realtime `/sessions/start` returns 403 `OWNER_ENTITLEMENT_REQUIRED` for expired trials (expected), and the board then works without live sync.
+- **2026-11-04** — Undo toast kept clear of the side panels (`e33fed1`):
+  - **Fix:** the toast now centres in the canvas that the Airo panel and the settings inspector leave visible. At 700px and below, where the Airo panel fills the canvas, it sits on top of the panel (`z-index: 13`).
+  - **Checked before deploy** by injecting the rules into the live board. Toast Undo was clickable in every case:
+    - Airo open at 600, 800, 900, 980 and 1280px.
+    - Settings open at 1280px.
+    - Settings and Airo open at 900 and 1280px. At 900px the toast narrows to the 200px left free and its text is truncated.
+  - **Real toast Undo:** at 800px, a real toast's Undo removed the test circle.
+  - **Exception:** at phone widths with Settings open, the full-screen settings sheet still covers the toast, as before.
+  - **Deployed:** `airboard-pilot-web-launch-e33fed1` at 100%, after a no-traffic tagged smoke (pages 200; the minified stylesheet keeps the new rules). `launch-8bbcdbf` stays Ready for rollback.
+  - **Verified live at 800px:** the toast sits at 128–328px, clear of the Airo panel at 456px. Its Undo removed the test circle, and the board saved back to blank. The alias host still 307s to the canonical origin.
+  - **Found while checking:** at 800px with Airo open, the bottom tool dock (`.object-dock.catalog-dock`) spans -177 to 599px. The Move tool is off-screen, and the right end slides under the Airo panel. The dock's `copilot-open` centring assumes the 378px desktop panel and doesn't fit narrow windows.
