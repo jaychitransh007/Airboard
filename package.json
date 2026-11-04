@@ -36,6 +36,7 @@
     "docs:build": "node scripts/generate-help-content.mjs",
     "docs:check": "node scripts/generate-help-content.mjs --check",
     "smoke:commercial": "node scripts/smoke-commercial-journey.mjs",
+    "smoke:deploy": "node scripts/smoke-deploy-account.mjs",
     "launch:check": "node --env-file-if-exists=.env scripts/launch-ready-check.mjs",
     "launch:check:paid": "node --env-file-if-exists=.env scripts/launch-ready-check.mjs --scope=paid-ga",
     "supabase:start": "supabase start",
