@@ -14,3 +14,6 @@ overrides:
   "fast-uri": "^3.1.7"
   # Pulled in only by Electron's download helper (desktop app tooling).
   "undici": "^7.30.1"
+  # Node's types follow the Node 22 runtime; without this @types/ws resolves
+  # to the Node 24 types Electron brings in.
+  "@types/ws>@types/node": "^22.20.5"

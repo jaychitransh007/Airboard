@@ -112,11 +112,32 @@ unit/browser test, name exact capabilities (wildcards are rejected), and carry
 a capability-specific rationale. Reports preserve the evidence ID, source,
 assertion paths, and provenance for every credited facet.
 
+## Recorded semantic negatives
+
+`semantic-negatives.recorded.v1.json` holds one live answer from the
+production intent model for each of the 60 meeting-talk cases. Every PR
+replays them offline (`eval-semantic-negatives.mjs --replay`) through the
+API's fan-in rule, the production OpenAI provider's request and output checks,
+the browser's plan parser and the production command pipeline. Each case gets
+an outcome: `quiet`, `changes_board`, `acts`, `asks_clarification`,
+`wrong_issue`, `rejected` or `answered_by_rule`.
+
+- A case must be `quiet` unless
+  `semantic-negatives.known-false-accepts.v1.json` lists it with the same
+  outcome. A listed case that improves must leave the list, so the list only
+  grows through a reviewed change.
+- Each answer stores a hash of the exact request the provider sent. A change to
+  the prompt, tool schema, model or request shape makes the recordings stale,
+  and the gate fails until someone re-records.
+- Re-record with `node --env-file-if-exists=.env scripts/eval-semantic-negatives.mjs --record`
+  (needs `AIRBOARD_INTENT_API_KEY`; 60 requests). Pass `--model` to match the
+  production `AIRBOARD_INTENT_MODEL` if it changes.
+
 ## Commands and tiers
 
 | Command | Intended use | Provider/media policy |
 | --- | --- | --- |
-| `pnpm eval:pr` | Every PR: schemas, policy, coverage, deterministic text, grounded negatives, mocked pipelines, provider replay, landmark replay, properties, seeded faults, and core Chromium journeys | Fully offline; blocking |
+| `pnpm eval:pr` | Every PR: schemas, policy, coverage, deterministic text, grounded negatives, recorded semantic negatives, mocked pipelines, provider replay, landmark replay, properties, seeded faults, and core Chromium journeys | Fully offline; blocking |
 | `pnpm eval:canary` | Prompt, model, STT, routing, or threshold changes | Full 33-case semantic seed corpus plus a diversity-first maximum of 30 regression audio/Meet cases; protected providers/media; safety failures block |
 | `pnpm eval:nightly` | Full semantic corpus at three repetitions for baseline and candidate models, their blocking comparison, ambient negatives, regression-split live audio/gesture replay, and recorded-video browser/Meet journeys | Protected keys and encrypted media mount |
 | `pnpm eval:device` | Weekly and pre-release physical camera/microphone smoke, HandLandmarker health, OS journeys, and independently attested Meet bridge matrix | Approved real-device runner |

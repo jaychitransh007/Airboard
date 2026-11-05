@@ -41,6 +41,11 @@ function offlineCoreReleaseGateSteps() {
     nodeStep("deterministic-contract-matrix", "scripts/eval-contract-matrix.mjs"),
     nodeStep("deterministic-positive-corpus", "scripts/eval-grammar.mjs"),
     nodeStep("grounded-ambient-negatives", "scripts/eval-false-accepts.mjs"),
+    nodeStep(
+      "semantic-ambient-negative-replay",
+      "scripts/eval-semantic-negatives.mjs",
+      "--replay",
+    ),
     nodeStep("provider-event-replay", "scripts/eval-provider-events.mjs"),
     nodeStep("seeded-evaluator-faults", "scripts/eval-seeded-faults.mjs"),
   ];
