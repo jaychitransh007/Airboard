@@ -11,6 +11,7 @@
 | Web | Cloud Run `airboard-pilot-web`, revision `launch-6d2bb10` | `https://airboard-pilot-web-634900453473.asia-south1.run.app`; one instance, kept warm |
 | API | Cloud Run `airboard-pilot-api`, revision `launch-87aec6f` | Up to 3 instances, one kept warm; live boards are shared across instances |
 | Database and sign-in | Supabase `ujotgzjpkocuhtfrvbzu` (ap-south-1, Mumbai) | Every migration in `supabase/migrations` applied, the last `20261105140000` |
+| Google sign-in | Google Auth Platform in the pilot Google Cloud project | Consent screen "Airboard", published to every Google account; client "Airboard sign-in (Supabase)" |
 | Lifecycle jobs | Cloud Scheduler `airboard-lifecycle-hourly` | Alert on a failed run |
 
 - **Health:** the API's `/ready` reports the database and `boardFanOut` (live boards across instances).
@@ -36,6 +37,7 @@
   - PDF and copy-image export.
   - The landing-page demo.
   - Keyboard menus and dialog focus.
+- **Google sign-in:** "Continue with Google" works for everyone, with no email setup needed.
 - **Engineering hygiene:**
   - CI runs lint, audit, a secret scan and Dependabot.
   - No high or critical dependency advisories.
@@ -45,7 +47,7 @@
 
 ### Blocking the pilot launch (owner)
 
-1. **Sign-in email:** set up Resend on the company domain with a sender address. Until then, sign-in emails reach only members of the Supabase organization, so pilot users cannot sign in.
+1. **Sign-in email:** set up Resend on the company domain with a sender address. Anyone can sign in with Google today. Until Resend is set up, email-link sign-in reaches only members of the Supabase organization.
 2. **Release owner:** name a business owner and a technical owner. Both accept the pilot's scope and can stop a release.
 3. **Support path:** publish a pilot inbox that someone monitors, with an escalation owner.
 4. **Commercial smoke test:** run the signed-in customer journey against production.
