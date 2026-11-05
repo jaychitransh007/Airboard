@@ -726,3 +726,15 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
       - 04, 11 and 17 were accurate.
     - The remaining "Start Airo" hints and the Airo panel's Undo hint in the app now say "Turn Airo on" and "••• menu". The Meet and desktop surfaces keep their real Start Airo button.
     - This backlog's tables have a Status column for every item.
+  - **Merged:** jaychitransh007/Airboard#18 (merge `2b611e0`). Dependabot #2–#5 and #7–#9 and the regenerated #17 were closed as included; #10 was closed as declined.
+  - **Deployed:** API `airboard-pilot-api-launch-3e17071` at 100%, which matches `main` exactly. The web stays at `launch-d8446ea`.
+    - **Tagged smoke:** Mumbai settings and secret kept, read-only off, max 3. `/ready` passes for the database and `boardFanOut` on Supabase JS 2.118 and the updated Fastify plugins. Session start, board list and a forged token got 401. `/auth/config` lists Google. No errors.
+    - **Production:** `/ready` passes and the new revision logged no errors.
+    - **Tags:** the `live` image tag moved to `api:launch-3e17071`. The previous serving tag was removed.
+    - **Rollback:** API to `launch-87aec6f`.
+  - **Web deployed:** `airboard-pilot-web-launch-3e17071` at 100%, the same build as the API, so both match `main`.
+    - **Tagged smoke:** 7 pages returned 200. The MediaPipe 1.2 engine (14.6 MB) and the hand model are served, and the retired gesture model returns 404. The bundles carry the "Turn Airo on" hints and the menu Undo hint, with no "Press Start Airo" left. Help 03 and 10 show the corrected text. The bundles reference only Mumbai.
+    - **Production:** the pages and API `/ready` pass, and the new revision logged no errors.
+    - **Tags:** the `live` image tag moved to `web:launch-3e17071`. Only the serving revisions keep a tag.
+    - **Rollback:** web to `launch-d8446ea`.
+    - **Owner check:** wave a hand at a board once to confirm MediaPipe 1.2 detects real hands; no automated test covers that.
