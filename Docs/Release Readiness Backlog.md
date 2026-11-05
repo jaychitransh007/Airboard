@@ -85,7 +85,7 @@ These are fixable in the repo and each would make a public "supported product" c
 | RGB-026 | No index on `product_events.profile_id` or `audit_events.actor_profile_id` | Done 2026-11-05 | Engineering | Reported | export/erasure full-scans the two highest-volume tables | Add indexes in a migration. |
 | RGB-027 | `delete_workspace` erases the whole org; account deletion orphans non-default personal orgs | Done 2026-11-05 | Engineering | Reported | `supabase/migrations` account-operations | Verify & correct the deletion/ownership graph. |
 | RGB-028 | Migrations not cleanly re-runnable (create policy / add constraint / drop function lack guards) | Partly done 2026-11-05: new migrations are checked; the 30 statements in applied migrations stay as written | Engineering | Verified | `supabase/migrations/*` | Add `if not exists` / `drop … if exists` guards. |
-| RGB-029 | `board_shares` (hashed share tokens) is schema-only; no code creates or resolves share links | Done 2026-11-06 (not deployed) | Engineering / Product | Verified | migration defines table; no producer/consumer in code | Wire share-link flow or drop the table; ensure no UI advertises sharing that doesn't work. |
+| RGB-029 | `board_shares` (hashed share tokens) is schema-only; no code creates or resolves share links | Done and deployed 2026-11-06 (`launch-7fa8ff1`) | Engineering / Product | Verified | migration defines table; no producer/consumer in code | Wire share-link flow or drop the table; ensure no UI advertises sharing that doesn't work. |
 
 ### Packaging / images
 | ID | Title | Status | Owner | Verification | Evidence | Recommendation |
@@ -858,7 +858,7 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - **Decision:** `hellosigmascience@gmail.com` carries customer help and support mail only, so no outage, error or latency alerts are set up.
   - **Removed:** the earlier Cloud Monitoring policy "Airboard lifecycle run failed" is deleted; the project has no alert policies. Its email notification channel remains unused. The log-based metric `airboard_lifecycle_failed_runs` still counts failed runs.
   - **Launch gate:** the controlled-pilot `lifecycle-schedule` gate now asks for a scheduled, authenticated job whose failed runs are logged. Alerting on them belongs to the standalone-GA `monitoring-alerts` gate. Checked: the job is enabled, and the 16:00, 17:00 and 18:00 UTC runs on 2026-11-05 returned 200. `pnpm launch:check:deployed` still reports READY, 21 of 21.
-- **2026-11-06** — RGB-029: view-only share links (on `codex/production-readiness`; not yet deployed):
+- **2026-11-06** — RGB-029: view-only share links (on `codex/production-readiness`; deployed as `launch-7fa8ff1`, see below):
   - **API (`apps/api/src/boardShareRoutes.ts`):** the board's owner lists, creates and turns off links at `/boards/:id/share-links`.
     - Links last 7 days by default, or 30 days, or until turned off; a board holds at most 20 live links.
     - Each token is 32 random bytes; only its SHA-256 hash is stored in `board_shares`, so a link is shown once. Creating and turning off a link are audited.
@@ -875,3 +875,14 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - Browser, against a board built by the production diagram commands: the canvas paints, the screen-reader text, no editing controls, the turned-off message and zero WCAG 2.2 AA violations.
     - The dialog section is not covered by a browser test, because the test harness has no saved board.
   - **Help:** "Boards, versions, and export" describes view-only links.
+- **2026-11-06** — Deployed `launch-7fa8ff1` (view-only share links) to both services:
+  - **Order:** API first, then the web. No migration was pending.
+  - **Staged API checks:**
+    - `/ready` reported the database and `boardFanOut` ready.
+    - An unknown well-formed link answered 404 `SHARE_LINK_UNAVAILABLE`, with `no-store`, `noindex` and `no-referrer`. A malformed link and an unknown link's picture also answered 404.
+    - Listing or creating links without signing in answered 401.
+  - **Staged web checks:** `/`, `/login`, `/signup`, `/app`, the help page and `/s/<token>` answered 200, and the share page carries `noindex` and `no-referrer`.
+  - **After promoting:** on the canonical URL, `/s/<unknown token>` reaches the API and shows "This link no longer works".
+  - **Tags:** the `launch-e9912d6` tags were removed; only the serving revisions keep one.
+  - **Rollback:** both services to `launch-e9912d6`.
+  - **Not yet checked in production:** creating, opening and turning off a real link from a signed-in board.
