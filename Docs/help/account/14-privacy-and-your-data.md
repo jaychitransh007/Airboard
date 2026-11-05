@@ -6,7 +6,7 @@ categoryLabel: Account and administration
 order: 14
 status: reference
 audiences: ["everyone", "admins", "security"]
-lastVerified: 2026-07-30
+lastVerified: 2026-11-05
 sources: ["Docs/Official Launch Readiness.md", "Docs/Commercial Platform Runbook.md", "apps/web/src/features/product/SettingsPage.tsx", "apps/web/app/[marketingSlug]/page.tsx"]
 ---
 
@@ -16,8 +16,9 @@ replacement for the current privacy notice or a contractual commitment.
 ## Account and board data
 
 Airboard stores identity, organization membership, preferences, consent,
-boards and versions, visibility and sharing records, integration state, audit
-events, and billing references required to operate and secure the service.
+boards and versions, images and videos you add to boards, visibility and
+sharing records, integration state, audit events, and billing references
+required to operate and secure the service.
 
 Active boards remain until deletion. Deleted boards are purged after the
 organization recovery window.

@@ -6,7 +6,7 @@ categoryLabel: Using the board
 order: 4
 status: shipped
 audiences: ["everyone"]
-lastVerified: 2026-07-30
+lastVerified: 2026-11-05
 sources: ["packages/core/src/semanticCapabilities.ts", "apps/web/src/features/board/intentCanvasParser.ts", "apps/web/src/features/board/intentPipeline.ts"]
 ---
 

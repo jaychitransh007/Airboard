@@ -6,7 +6,7 @@ categoryLabel: Integrations
 order: 10
 status: private-preview
 audiences: ["everyone", "admins"]
-lastVerified: 2026-07-30
+lastVerified: 2026-11-05
 sources: ["extensions/chrome-meet-bridge/README.md", "extensions/chrome-meet-bridge/popup.html", "Docs/Meet Camera Composite Verification.md", "apps/web/src/features/product/IntegrationsPage.tsx"]
 ---
 
@@ -18,8 +18,10 @@ camera. There is no dedicated shared Airboard canvas inside Meet.
 
 1. Install the approved preview build in the Chrome profile you use for Meet.
 2. Open the Airboard extension popup and choose **Connect Airboard**.
-3. Sign in, connect the detected installation, and return to the popup.
-4. Review and accept the one-time live-media disclosure.
+3. Sign in, choose **Connect extension** on the setup page, and return to the
+   popup.
+4. Read the one-time live-media disclosure, tick the box, and choose
+   **Enable Airboard**.
 
 If Chrome cannot reach the installation, reload the extension and reopen the
 setup page from the toolbar popup. A one-time connection token can expire; in
@@ -28,17 +30,17 @@ that case, start **Connect Airboard** again.
 ## Run preflight
 
 Open or refresh a standard Google Meet meeting-code URL and turn on your normal
-Meet camera. In the extension popup, confirm all readiness checks complete:
+Meet camera. In the extension popup, confirm all six readiness checks complete:
 
-- private engine ready;
-- media confirmation complete;
-- compositor engaged;
-- sender attached;
-- encoded frames increasing;
-- outbound bytes increasing.
+1. **Account connected**
+2. **Media confirmed**
+3. **Meet detected**
+4. **Private engine**
+5. **Camera engaged** (the composite track is attached)
+6. **Outgoing verified** (encoded frames and bytes are being sent)
 
-The wording may be condensed in the popup, but readiness requires both a local
-compositor and evidence that the outgoing sender is transmitting.
+Readiness requires both a local compositor and evidence that the outgoing
+sender is transmitting.
 
 ## Receiver verification from a second participant
 
@@ -54,6 +56,7 @@ and selection feedback do not enter the intended audience output.
 
 ## Disconnect or revoke
 
-Disconnect from the extension and revoke the installation from **Airboard →
-Integrations** when the preview should no longer access the organization.
-Administrators can also revoke installations from installation health.
+To pause the overlay, turn off **Meeting overlay** in the extension popup. To
+disconnect, remove the extension from Chrome; Airboard then opens
+**Integrations**, where you choose **Revoke installation**. Owners and
+administrators can also revoke installations from **Installation health**.

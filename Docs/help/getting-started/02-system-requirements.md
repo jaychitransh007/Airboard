@@ -6,7 +6,7 @@ categoryLabel: Getting started
 order: 2
 status: reference
 audiences: ["everyone", "admins"]
-lastVerified: 2026-07-30
+lastVerified: 2026-11-05
 sources: ["Docs/Platform Support Matrix.md", "apps/api/src/config.ts", "apps/web/src/features/board/mediaPermissionPreference.ts", "extensions/chrome-meet-bridge/manifest.json"]
 ---
 
@@ -38,8 +38,9 @@ input. Airboard must not block the board because camera input is missing.
 ## Airo voice
 
 Airo requires microphone permission and a configured realtime transcription
-provider. If voice is unavailable, Airboard disables the voice entry point
-while typed commands continue to work.
+provider. If voice is unavailable, turning Airo on (**⏻** on the Airo panel, or
+**Turn on Airo voice and hands** in the **•••** menu) starts hand tracking only,
+and the Airo panel says why voice is off. Typed commands keep working.
 
 Natural-language recovery additionally depends on the semantic intent provider.
 Canonical commands continue to work when that provider is unavailable.

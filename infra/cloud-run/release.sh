@@ -97,6 +97,16 @@ promote() {
   # Traffic is pinned to named revisions, so a deploy alone never moves it.
   run gcloud run services update-traffic "$service" --project="$PROJECT" --region="$REGION" \
     --to-revisions="$service-$RELEASE=100" --quiet
+  # The registry's cleanup policy deletes images older than 3 days beyond the
+  # 10 newest, but keeps the one tagged `live`, so move that tag to the image
+  # now serving. A tagging failure only warns: traffic has already moved.
+  local image
+  image=$(gcloud run revisions describe "$service-$RELEASE" --project="$PROJECT" --region="$REGION" \
+    --format="value(spec.containers[0].image)" 2>/dev/null || true)
+  if [[ -n $image ]]; then
+    run gcloud artifacts docker tags add "$image" "$REGISTRY/$1:live" --quiet ||
+      echo "Warning: could not tag $image as live; tag it by hand so cleanup keeps it." >&2
+  fi
   [[ -n ${DRY_RUN:-} ]] && return
   gcloud run services describe "$service" --project="$PROJECT" --region="$REGION" --format=json |
     python3 -c 'import json,sys;[print("serving", t["percent"], "%", t["revisionName"]) for t in json.load(sys.stdin)["status"]["traffic"] if t.get("percent")]'

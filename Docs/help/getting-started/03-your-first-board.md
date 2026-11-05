@@ -6,7 +6,7 @@ categoryLabel: Getting started
 order: 3
 status: shipped
 audiences: ["everyone"]
-lastVerified: 2026-07-30
+lastVerified: 2026-11-05
 sources: ["apps/web/src/features/product/BoardsPage.tsx", "apps/web/src/features/product/AuthenticatedAirboard.tsx", "apps/web/src/features/board/AirboardPrototype.tsx"]
 ---
 
@@ -16,11 +16,10 @@ commands and a pointer; camera and microphone input are optional.
 ## Create the board
 
 1. Sign in and choose **New Airboard**.
-2. Complete any displayed standalone preflight.
-3. Give the board a name when prompted or rename it from the board header.
+2. The board opens as **Untitled Airboard**. Click the title in the top bar to
+   rename it.
 
-Your trial begins at the first qualifying value event shown by the product, not
-simply when you open the signup page.
+Your free one-month pilot starts when your first board opens. No card is needed.
 
 ## Add two objects
 
@@ -36,8 +35,8 @@ Then enter:
 add a service named API on the right
 ```
 
-You can instead choose the User and Service tools from the object dock and
-place them with a pointer. With supported camera input, choose a tool, move onto
+You can instead place them from the bottom tool dock: choose **Shape**, then
+**More shapes**, and pick **User**, then **Service** (in Advanced, or search). With supported camera input, choose a tool, move onto
 the canvas, close one hand, wait for the holding state, position the preview,
 and reopen.
 
@@ -54,8 +53,9 @@ Select the API object and press `Enter` or `F2` to edit its label. Change it to
 
 ## Undo safely
 
-Press `Cmd/Ctrl+Z` or choose **Undo**. Airboard reverts the latest board
-transaction. Redo the rename when you are ready.
+Press `Cmd/Ctrl+Z`, choose **•••** then **Undo**, or say “Airo, undo.” Airboard
+reverts the latest board transaction. Redo the rename with `Cmd/Ctrl+Shift+Z`
+or **•••** then **Redo** when you are ready.
 
 ## Confirm the board was saved
 

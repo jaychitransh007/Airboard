@@ -6,7 +6,7 @@ categoryLabel: Integrations
 order: 11
 status: development-preview
 audiences: ["everyone", "creators"]
-lastVerified: 2026-07-30
+lastVerified: 2026-11-05
 sources: ["README.md", "apps/desktop/src/main.mjs", "apps/desktop/src/overlayWindow.mjs"]
 ---
 

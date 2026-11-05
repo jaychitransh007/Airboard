@@ -7158,7 +7158,7 @@ export function AirboardPrototype({
         setCommandFeedback(
           micArmed
             ? "Open palm recognized — speak a board command, then relax your hand."
-            : "Open palm recognized. Press Start Airo once to enable voice commands.",
+            : "Open palm recognized. Turn Airo on once to enable voice commands.",
         );
         return;
       }
@@ -7169,7 +7169,7 @@ export function AirboardPrototype({
       setCommandFeedback(
         micArmed
           ? `Editing “${label}”: say “rename to …”, “delete”, “duplicate”, or “connect to …”.`
-          : `Holding “${label}”. Press Start Airo once to enable voice edits.`,
+          : `Holding “${label}”. Turn Airo on once to enable voice edits.`,
       );
     },
     [syncVoiceGateUi, voiceRouter],
@@ -7849,7 +7849,7 @@ export function AirboardPrototype({
               setSpeechRecognitionStatus("error");
               if (reason === "closed") {
                 setCommandFeedback(
-                  "The realtime transcription connection closed. Start Airo to reconnect; typed commands still work.",
+                  "The realtime transcription connection closed. Turn Airo on again to reconnect; typed commands still work.",
                 );
               }
             } else {
@@ -11033,7 +11033,7 @@ export function AirboardPrototype({
                           ? `“${truncateSpeechTranscript(speechHeardText, 180)}”`
                           : speechArmed
                             ? "Listening for your next command…"
-                            : "Start Airo, then hold an open palm for 0.4 seconds and speak."}
+                            : "Turn Airo on with ⏻, then hold an open palm for 0.4 seconds and speak."}
                       </p>
                       <small className={`copilot-status ${speechRecognitionStatus}`}>
                         {speechRecognitionLabel(speechRecognitionStatus)}
@@ -11121,7 +11121,7 @@ export function AirboardPrototype({
                 </form>
                 {copilotMode === "full" ? (
                   <footer className="canvas-copilot-hint">
-                    <span><strong>Undo:</strong> toolbar, Cmd/Ctrl+Z, or say “Airo, undo”</span>
+                    <span><strong>Undo:</strong> ••• menu, Cmd/Ctrl+Z, or say “Airo, undo”</span>
                     <span>Shift+Enter for a new line</span>
                   </footer>
                 ) : null}
@@ -11404,10 +11404,10 @@ export function AirboardPrototype({
               {voiceGate.mode === "ptt"
                 ? speechArmed
                   ? "Listening — speak a board command"
-                  : "Open palm detected — press Start Airo once to enable voice commands"
+                  : "Open palm detected — turn Airo on once to enable voice commands"
                 : speechArmed
                   ? `Editing “${voiceGate.label}” — “rename to …”, “delete”, “connect to …”`
-                  : `Holding “${voiceGate.label}” — press Start Airo once to enable voice edits`}
+                  : `Holding “${voiceGate.label}” — turn Airo on once to enable voice edits`}
             </div>
           ) : null}
           {inputMode === "gesture" &&
@@ -12233,7 +12233,7 @@ export function AirboardPrototype({
                     <>
                     <p className="hint">
                       {voiceCaptureAvailable
-                        ? "Start Airo once. Hold an open palm still for 0.4 seconds to speak. Use a relaxed hand to aim and a closed hand to move."
+                        ? "Turn Airo on once. Hold an open palm still for 0.4 seconds to speak. Use a relaxed hand to aim and a closed hand to move."
                         : "Click Enable hands to use the meeting camera. Use a relaxed hand to aim and a closed hand to move. Voice is not available on this surface yet."}
                     </p>
                     <details className="advanced-settings gesture-guide">
@@ -12277,7 +12277,7 @@ export function AirboardPrototype({
                             <div>
                               <dt>Speak to Airo</dt>
                               <dd>
-                                Start Airo once, then hold one open palm still (no
+                                Turn Airo on once, then hold one open palm still (no
                                 sideways motion) for about 0.4 seconds. Lower or relax it
                                 when finished.
                               </dd>
