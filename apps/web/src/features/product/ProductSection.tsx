@@ -13,7 +13,7 @@ type Activity = { event_id: string; event_name: string; properties: Record<strin
 export function ProductSection({ section }: { section: string }) {
   if (section === "templates") return <Templates />;
   if (section === "activity") return <ActivityView />;
-  if (section === "shared") return <BoardCollection title="Shared with me" description="Organization and link-visible boards available in this workspace." scope="shared" />;
+  if (section === "shared") return <BoardCollection title="Shared" description="Boards anyone in this workspace can open and edit." scope="shared" />;
   if (section === "trash") return <BoardCollection title="Trash" description="Deleted boards remain recoverable until your retention workflow removes them." scope="trash" />;
   return <div className="empty-panel"><h3>Surface unavailable</h3><Link href="/app">Return to Airboard</Link></div>;
 }

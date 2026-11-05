@@ -28,3 +28,21 @@ export function authCallbackFailure(params: SearchParamsLike): AuthCallbackFailu
     actionLabel: "Request a new link",
   };
 }
+
+/**
+ * Supabase sends a sign-in back to the site root when the requested redirect
+ * is not on its allow list. The root then showed the marketing page with the
+ * sign-in code or error ignored; forward both to the callback that handles them.
+ */
+export function authCallbackPathFromHome(
+  params: Record<string, string | string[] | undefined>,
+): string | null {
+  if (!params.code && !params.error && !params.error_code) return null;
+  const query = new URLSearchParams();
+  for (const [name, value] of Object.entries(params)) {
+    for (const item of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
+      query.append(name, item);
+    }
+  }
+  return `/auth/callback?${query.toString()}`;
+}

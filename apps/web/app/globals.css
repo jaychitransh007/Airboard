@@ -792,8 +792,12 @@ a { color: inherit; }
   .app-shell { grid-template-columns: 210px minmax(0,1fr); }.metric-grid { grid-template-columns: 1fr 1fr; }
 }
 
+@media (max-width: 480px) {
+  .marketing-brand .release-stage { display: none; }
+}
+
 @media (max-width: 720px) {
-  .marketing-header { padding: 0 18px; }.marketing-actions .button-quiet { display: none; }
+  .marketing-header { padding: 0 18px; }.marketing-actions { gap: 4px; }.marketing-actions .button { min-height: 40px; padding-inline: 14px; font-size: 13px; }.marketing-actions .button-quiet { padding-inline: 10px; border-color: transparent; background: transparent; }
   .landing-hero { min-height: 820px; margin: 4px 10px 0; padding: 55px 23px 315px; border-radius: 26px; }
   .landing-hero-art { top: auto !important; right: auto !important; bottom: 0 !important; left: -45% !important; width: 165% !important; height: auto !important; max-width: none; object-fit: contain; }
   .landing-hero-wash { background: linear-gradient(180deg,rgba(248,247,255,1) 0%,rgba(248,247,255,.98) 56%,rgba(248,247,255,.72) 67%,rgba(248,247,255,.03) 87%); }
@@ -3234,6 +3238,12 @@ button.screen-underlay-active {
 .integration-checklist li small { color: var(--air-muted); font-size: 10px; line-height: 1.45; }
 .integration-footnote { display: flex; gap: 10px; margin-top: 16px; padding: 13px 15px; border-radius: 15px; background: rgba(31, 20, 45, 0.05); color: var(--air-muted); font-size: 11px; line-height: 1.5; }
 .integration-footnote strong { color: var(--air-ink); white-space: nowrap; }
+.integration-meanwhile { display: grid; justify-items: start; gap: 8px; margin-top: 18px; padding: 16px 18px; border-radius: 15px; background: rgba(31, 20, 45, 0.05); }
+.integration-meanwhile strong { color: var(--air-ink); font-size: 14px; }
+.integration-meanwhile p { margin: 0; color: var(--air-muted); font-size: 13px; line-height: 1.55; }
+.waitlist-action { display: inline-grid; justify-items: end; gap: 4px; }
+.waitlist-action small { color: #b42318; font-size: 11px; }
+.waitlist-joined { display: inline-flex; align-items: center; min-height: 40px; color: #2f7d5b; font-size: 13px; font-weight: 750; white-space: nowrap; }
 .secondary-integrations { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .secondary-integrations .integration-card { min-height: 245px; }
 .download-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(290px, 0.65fr); gap: 18px; }
@@ -3616,6 +3626,162 @@ button.screen-underlay-active {
   font-size: 13px;
 }
 
+.canvas-toolbar .toolbar-share-button {
+  padding: 0 16px;
+  border-color: #6d4ce0;
+  background: #6d4ce0;
+  color: #fff;
+}
+
+.canvas-toolbar .toolbar-share-button:hover,
+.canvas-toolbar .toolbar-share-button:focus-visible {
+  border-color: #5b3dc0;
+  background: #5b3dc0;
+}
+
+.share-dialog {
+  width: min(480px, 100%);
+  max-height: calc(100dvh - 40px);
+  gap: 0;
+  overflow-y: auto;
+  padding: 22px 24px 24px;
+}
+
+.share-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 4px;
+}
+
+.share-dialog-header h2 {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  font-size: 20px;
+}
+
+.share-dialog-close {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #6f6877;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.share-dialog-close:hover {
+  background: #f2edff;
+  color: #5b3dc0;
+}
+
+.share-dialog-section {
+  display: grid;
+  gap: 10px;
+  padding: 16px 0;
+  border-top: 1px solid rgba(54, 36, 91, 0.1);
+}
+
+.share-dialog-section:first-of-type {
+  border-top: 0;
+}
+
+.share-dialog-section:last-child {
+  padding-bottom: 0;
+}
+
+.share-dialog-section h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.share-dialog-section p {
+  font-size: 13px;
+}
+
+.share-dialog-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.share-dialog-row button {
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 10px;
+  font-weight: 700;
+}
+
+.share-dialog-row .share-dialog-primary {
+  border-color: #6d4ce0;
+  background: #6d4ce0;
+  color: #fff;
+}
+
+.share-dialog-row .share-dialog-primary:disabled {
+  border-color: #d8d2e6;
+  background: #ece8f4;
+  color: #6f6877;
+}
+
+.share-dialog-hint,
+.share-dialog-note {
+  color: #6f6877;
+  font-size: 12px !important;
+}
+
+.share-dialog-link {
+  font-size: 12px;
+}
+
+.share-dialog-choices {
+  display: grid;
+  gap: 8px;
+}
+
+.share-dialog-choices label {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 11px 12px;
+  border: 1px solid rgba(54, 36, 91, 0.14);
+  border-radius: 12px;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.share-dialog-choices label.selected {
+  border-color: #6d4ce0;
+  background: #f7f4ff;
+}
+
+.share-dialog-choices input {
+  width: auto;
+  min-height: 0;
+  margin: 3px 0 0;
+  accent-color: #6d4ce0;
+}
+
+.share-dialog-choices span {
+  display: grid;
+  gap: 2px;
+}
+
+.share-dialog-choices strong {
+  font-size: 13px;
+}
+
+.share-dialog-choices small {
+  color: #6f6877;
+  font-size: 12px;
+}
+
 .canvas-save-state {
   display: inline-flex;
   align-items: center;
@@ -3749,6 +3915,10 @@ button.screen-underlay-active {
 }
 
 .canvas-workspace .board-canvas {
+  /* Fill the editor at every width; the older 64vh tablet rule is for the
+     stacked prototype layout and left portrait tablets a third empty. */
+  height: 100%;
+  min-height: 0;
   border-color: rgba(255, 255, 255, 0.16);
   border-radius: 14px;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
@@ -4638,6 +4808,22 @@ button.screen-underlay-active {
     gap: 2px;
   }
 
+  /* Undo and redo stay one tap away in the ••• menu, and phone browsers
+     cannot share a screen, so the top bar keeps only what fits. */
+  .canvas-toolbar [data-testid="toolbar-undo"],
+  .canvas-toolbar [data-testid="toolbar-redo"],
+  .canvas-toolbar [data-testid="screen-underlay-toggle"] {
+    display: none;
+  }
+
+  .canvas-toolbar .toolbar-share-button {
+    padding: 0 13px;
+  }
+
+  .canvas-topbar-identity {
+    min-width: 0;
+  }
+
   .canvas-workspace {
     overflow: hidden;
   }
@@ -4685,11 +4871,14 @@ button.screen-underlay-active {
     min-width: 0;
   }
 
+  /* A bottom sheet: the board stays in view above it, so typed commands
+     show their result without closing the panel. */
   .canvas-copilot {
-    top: 8px;
+    top: auto;
     right: 8px;
     bottom: 8px;
     width: calc(100% - 16px);
+    height: min(56dvh, 460px);
   }
 
   .canvas-workspace.settings-open .canvas-copilot {
@@ -4711,6 +4900,28 @@ button.screen-underlay-active {
     right: 8px;
     bottom: 8px;
     width: calc(100vw - 16px);
+  }
+}
+
+/* Eleven 42px tools need ~460px. On a phone they share the dock's width
+   instead of overlapping; the groups step aside so every button is one flex
+   item (their pop-overs are fixed to the dock here, not to the group). */
+@media (max-width: 560px) {
+  .canvas-workspace .object-dock.catalog-dock.creation-toolbar {
+    justify-content: space-between;
+  }
+
+  .canvas-workspace .object-dock.catalog-dock.creation-toolbar > .creation-toolbar-group {
+    display: contents;
+  }
+
+  .canvas-workspace .object-dock > .creation-toolbar-group > button {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+    max-width: 42px;
+    height: 40px;
+    min-height: 40px;
   }
 }
 

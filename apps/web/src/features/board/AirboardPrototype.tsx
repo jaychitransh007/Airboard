@@ -66,7 +66,9 @@ import {
   boardPointFromScreen,
   clampViewport,
   DEFAULT_VIEWPORT_LIMITS,
+  boundsFitViewport,
   fitViewportToBounds,
+  unobscuredCanvasCenter,
   IDENTITY_VIEWPORT,
   panViewport,
   screenPointFromBoard,
@@ -137,6 +139,9 @@ import {
   stickyHeightForText,
 } from "./sceneContextToolbarHelpers";
 import { SceneTextEditor } from "./SceneTextEditor";
+import { ShareDialog, type BoardShareAccess } from "./ShareDialog";
+import { liveBoardLink } from "./shareLinks";
+import { blockedMediaHelp, deniedMediaHelp } from "./mediaPermissionHelp";
 import { boardTemplate } from "./boardTemplates";
 import { ScenePlaybackOverlay } from "./ScenePlaybackOverlay";
 import {
@@ -642,6 +647,10 @@ export function AirboardPrototype({
   persistentSaveStatus = "saved",
   initialPreferences,
   initialTemplateId,
+  shareAccess,
+  liveGuest = false,
+  participantName,
+  onLiveJoinFailed,
 }: {
   surface: Surface;
   meetingProvider?: MeetingProvider;
@@ -691,6 +700,14 @@ export function AirboardPrototype({
   };
   /** Starter template to build once on a new, empty board (see boardTemplates). */
   initialTemplateId?: string;
+  /** Who can open the saved board; drives the Share dialog's access section. */
+  shareAccess?: BoardShareAccess;
+  /** Joined from a live link: no saved board, so the chrome shows live status instead. */
+  liveGuest?: boolean;
+  /** Name other participants see for this person in the live session. */
+  participantName?: string;
+  /** Live-link guests leave the board when joining fails rather than edit a local copy. */
+  onLiveJoinFailed?: (message: string) => void;
 }) {
   const [bridgedAccessToken, setBridgedAccessToken] = useState<string | undefined>();
   const effectiveAccessToken = accessToken ?? bridgedAccessToken;
@@ -1099,6 +1116,7 @@ export function AirboardPrototype({
   const openCatalogIdRef = useRef<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [titleEditing, setTitleEditing] = useState(false);
   const [titleDraft, setTitleDraft] = useState(boardTitle);
   const [titleStatus, setTitleStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -1288,11 +1306,7 @@ export function AirboardPrototype({
     if (!standaloneEditor) {
       return;
     }
-    try {
-      setCopilotOpen(window.localStorage.getItem("airboard.copilot.v1") !== "closed");
-    } catch {
-      // Keep the default-open copilot when storage is unavailable.
-    }
+    setCopilotOpen(copilotStartsOpen());
   }, [standaloneEditor]);
   const refreshStandaloneMediaPermissions = useCallback(async () => {
     if (!standaloneEditor) return;
@@ -2657,10 +2671,16 @@ export function AirboardPrototype({
         return "rejected";
       }
       const rect = canvasRef.current?.getBoundingClientRect();
-      const center = boardPointFromScreen(boardViewportRef.current, {
-        x: (rect?.width ?? 960) / 2,
-        y: (rect?.height ?? 640) / 2,
-      });
+      const panel = canvasRef.current
+        ?.closest(".canvas-workspace")
+        ?.querySelector(".canvas-copilot")
+        ?.getBoundingClientRect();
+      const center = boardPointFromScreen(
+        boardViewportRef.current,
+        rect
+          ? unobscuredCanvasCenter(rect, panel ?? null)
+          : { x: 480, y: 320 },
+      );
       const targetIds = (target: Extract<BoardSceneIntent, { type: "rename" | "delete" | "move" | "resize" | "style" | "group" | "layout" }>["target"]) =>
         resolveSceneIntentTargetIds(boardRef.current, target, selectedElementIdsRef.current);
 
@@ -3170,7 +3190,7 @@ export function AirboardPrototype({
       if (placed.length > 0) {
         const limits = currentViewportLimits();
         applyViewport(fitViewportToBounds(sceneElementUnionBounds(placed, 0), limits, {
-          rightInset: copilotOpen ? Math.min(400, limits.canvasWidth * 0.45) : 0,
+          rightInset: copilotRightInset(copilotStartsOpen(), limits.canvasWidth),
         }));
       }
       setCommandFeedback(`Built the ${template.title} template. Double-click anything to change its text.`);
@@ -3182,11 +3202,38 @@ export function AirboardPrototype({
     }
   }, [
     applyViewport,
-    copilotOpen,
     currentViewportLimits,
     executeSceneIntent,
     initialTemplateId,
   ]);
+
+  // A board opens framed on its content when part of it would start off
+  // screen, as boards made on a laptop do on a phone. Content already in view
+  // keeps the viewport the person expects.
+  const frameHiddenContent = useCallback(
+    (panelOpen: boolean) => {
+      const placed = Object.values(boardRef.current.elements).filter(
+        (element) => element.status === "active" && element.kind !== "connector",
+      );
+      if (placed.length === 0) return;
+      const limits = currentViewportLimits();
+      const bounds = sceneElementUnionBounds(placed, 0);
+      const rightInset = copilotRightInset(panelOpen, limits.canvasWidth);
+      if (boundsFitViewport(bounds, boardViewportRef.current, limits, rightInset)) return;
+      applyViewport(fitViewportToBounds(bounds, limits, { rightInset }));
+    },
+    [applyViewport, currentViewportLimits],
+  );
+  const frameHiddenContentRef = useRef(frameHiddenContent);
+  useEffect(() => {
+    frameHiddenContentRef.current = frameHiddenContent;
+  }, [frameHiddenContent]);
+  const openingFrameDoneRef = useRef(false);
+  useEffect(() => {
+    if (!standaloneEditor || openingFrameDoneRef.current) return;
+    openingFrameDoneRef.current = true;
+    frameHiddenContent(copilotStartsOpen());
+  }, [frameHiddenContent, standaloneEditor]);
 
   useEffect(() => {
     const hash = window.location.hash;
@@ -3602,7 +3649,8 @@ export function AirboardPrototype({
 
   // First-run onboarding: the gesture vocabulary is invisible until taught.
   useEffect(() => {
-    if (headlessMeetOverlay) {
+    // Live-link guests join someone else's board; the first-diagram card is for owners.
+    if (headlessMeetOverlay || liveGuest) {
       setOnboardingVisible(false);
       return;
     }
@@ -3617,7 +3665,7 @@ export function AirboardPrototype({
     } catch {
       // Storage may be unavailable; skip onboarding rather than block.
     }
-  }, [cameraCaptureAvailable, headlessMeetOverlay]);
+  }, [cameraCaptureAvailable, headlessMeetOverlay, liveGuest]);
 
   /**
    * Board sync bootstrap. With ?boardSessionId=… in the URL we join that
@@ -3672,7 +3720,7 @@ export function AirboardPrototype({
         ...(providerMeetingId ? { providerMeetingId } : {}),
         ...(persistentWorkspaceId ? { workspaceId: persistentWorkspaceId } : {}),
         ...(persistentBoardId ? { boardId: persistentBoardId } : {}),
-        displayName: requestedSessionId ? "Guest" : "Owner",
+        displayName: participantName ?? (requestedSessionId ? "Guest" : "Owner"),
         title: "Airboard",
       },
       {
@@ -3722,13 +3770,12 @@ export function AirboardPrototype({
           refreshRealtimeSpeechKeyterms(result.initialState, []);
           render();
           updateStats();
+          frameHiddenContentRef.current(copilotStartsOpen());
           setCommandFeedback("Joined the live board session.");
         } else {
           boardSyncSeedEligibleRef.current = true;
           trySeed();
-          setCommandFeedback(
-            "Live board session ready — share this page's URL to collaborate.",
-          );
+          setCommandFeedback("Live board ready. Use Share to invite people to edit with you.");
         }
         const url = new URL(window.location.href);
         url.searchParams.set("boardSessionId", result.handle.boardSessionId);
@@ -3742,13 +3789,15 @@ export function AirboardPrototype({
           role: result.handle.role,
         });
       })
-      .catch(() => {
+      .catch((caught: unknown) => {
         if (cancelled) {
           return;
         }
         boardSyncStatusRef.current = "offline";
         setBoardSyncStatus("offline");
-        if (requestedSessionId) {
+        if (requestedSessionId && onLiveJoinFailed) {
+          onLiveJoinFailed(caught instanceof Error ? caught.message : String(caught));
+        } else if (requestedSessionId) {
           setCommandFeedback(
             "Could not join the shared board session — working on a local board instead.",
           );
@@ -8466,6 +8515,8 @@ export function AirboardPrototype({
     [],
   );
 
+  const closeShareDialog = useCallback(() => setShareOpen(false), []);
+
   const exportPng = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) {
@@ -10423,11 +10474,29 @@ export function AirboardPrototype({
           </section>
         </div>
       ) : null}
+      {shareOpen ? (
+        <ShareDialog
+          boardTitle={boardTitle}
+          liveLink={
+            activeBoardSessionId && activeJoinToken
+              ? liveBoardLink(window.location.origin, activeBoardSessionId, activeJoinToken)
+              : null
+          }
+          liveUnavailable={!activeBoardSessionId && boardSyncStatus === "offline"}
+          {...(shareAccess ? { access: shareAccess } : {})}
+          onDownloadPng={exportPng}
+          onClose={closeShareDialog}
+        />
+      ) : null}
       <header className={`topbar${standaloneEditor ? " canvas-topbar" : ""}`}>
         {standaloneEditor ? (
           <>
             <div className="canvas-topbar-identity">
-              <Link className="canvas-back-link" href="/app/boards" aria-label="Back to boards">
+              <Link
+                className="canvas-back-link"
+                href={liveGuest ? "/" : "/app/boards"}
+                aria-label={liveGuest ? "Leave the live board" : "Back to boards"}
+              >
                 <span aria-hidden="true">←</span>
               </Link>
               <span className="canvas-brand-orbit" aria-hidden="true" />
@@ -10471,7 +10540,13 @@ export function AirboardPrototype({
                 )}
                 <span
                   className={`canvas-save-state ${
-                    titleStatus === "saving"
+                    liveGuest
+                      ? boardSyncStatus === "connected"
+                        ? "saved"
+                        : boardSyncStatus === "connecting" || boardSyncStatus === "reconnecting"
+                          ? "saving"
+                          : "error"
+                      : titleStatus === "saving"
                       ? "saving"
                       : titleStatus === "error"
                         ? "error"
@@ -10480,7 +10555,15 @@ export function AirboardPrototype({
                   role="status"
                   aria-live="polite"
                 >
-                  {titleError ??
+                  {liveGuest
+                    ? boardSyncStatus === "connected"
+                      ? "Live · changes save to the host's board"
+                      : boardSyncStatus === "connecting"
+                        ? "Connecting…"
+                        : boardSyncStatus === "reconnecting"
+                          ? "Reconnecting…"
+                          : "Not connected"
+                    : titleError ??
                   (titleStatus === "saving"
                     ? "Renaming…"
                     : titleStatus === "saved"
@@ -10552,6 +10635,19 @@ export function AirboardPrototype({
                       ? "Stop screen"
                       : "Use screen"}
                   </span>
+              </button>
+              <button
+                type="button"
+                className="toolbar-share-button"
+                data-testid="share-board"
+                aria-haspopup="dialog"
+                onClick={() => {
+                  setShareOpen(true);
+                  setMoreMenuOpen(false);
+                  setSettingsOpen(false);
+                }}
+              >
+                Share
               </button>
               <div className="canvas-more">
                 <button
@@ -11169,7 +11265,10 @@ export function AirboardPrototype({
                     } catch {
                       // Best-effort persistence only.
                     }
-                    intentCommandInputRef.current?.focus();
+                    // The command box lives in the Airo panel, which starts
+                    // closed on phones; open it before focusing.
+                    setCopilotVisibility(true);
+                    window.requestAnimationFrame(() => intentCommandInputRef.current?.focus());
                   }}
                 >
                   Start building
@@ -11561,10 +11660,9 @@ export function AirboardPrototype({
                 Airboard will then resume an input you previously enabled without asking again.
                 Screen/window sharing must still be chosen for each capture session.
               </p>
-              {microphonePermission === "denied" || cameraPermission === "denied" ? (
+              {deniedMediaHelp(cameraPermission, microphonePermission, navigator.userAgent) ? (
                 <p className="permission-warning">
-                  A blocked permission can only be changed from the site controls beside the
-                  browser address.
+                  {deniedMediaHelp(cameraPermission, microphonePermission, navigator.userAgent)}
                 </p>
               ) : null}
             </section>
@@ -12300,7 +12398,7 @@ function screenUnderlayStatusLabel(status: ScreenUnderlayStatus): string {
 
 function describeCameraError(error: unknown, hasVideoStream: boolean): string {
   if (error instanceof DOMException && error.name === "NotAllowedError") {
-    return "Camera permission is blocked. Allow camera access for localhost and click Camera again.";
+    return blockedMediaHelp("camera", navigator.userAgent);
   }
 
   if (hasVideoStream) {
@@ -13504,6 +13602,26 @@ function surfaceLabel(surface: Surface): string {
 }
 
 /**
+ * Whether the Airo panel opens with the board. On a phone it would cover the
+ * whole canvas, so the board opens canvas-first and Airo waits behind its
+ * button; elsewhere the person's last choice holds.
+ */
+function copilotStartsOpen(): boolean {
+  if (typeof window === "undefined") return true;
+  if (window.matchMedia?.("(max-width: 700px)").matches) return false;
+  try {
+    return window.localStorage.getItem("airboard.copilot.v1") !== "closed";
+  } catch {
+    return true;
+  }
+}
+
+/** Canvas width the open Airo panel covers on the right. */
+function copilotRightInset(panelOpen: boolean, canvasWidth: number): number {
+  return panelOpen ? Math.min(400, canvasWidth * 0.45) : 0;
+}
+
+/**
  * Opens the standalone surface bound to the same live board session. On
  * meeting surfaces that cannot capture media, this window is where gesture
  * and voice run; edits sync back to the shared stage for everyone.
@@ -13515,15 +13633,15 @@ function CompanionMediaLink({
   boardSessionId: string | null;
   joinToken?: string | null;
 }) {
-  if (!boardSessionId) {
+  if (!boardSessionId || !joinToken) {
     return <p className="hint">The companion link appears once the board connects.</p>;
   }
+  // The live route joins this exact session. /app/boards/live made a new saved
+  // board and dropped the session from the address, so the companion never synced.
   return (
     <a
       className="companion-link"
-      href={`/app/boards/live?boardSessionId=${encodeURIComponent(boardSessionId)}${
-        joinToken ? `&joinToken=${encodeURIComponent(joinToken)}` : ""
-      }`}
+      href={liveBoardLink(window.location.origin, boardSessionId, joinToken)}
       target="_blank"
       rel="noopener noreferrer"
       data-testid="companion-media-link"

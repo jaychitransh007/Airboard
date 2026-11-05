@@ -6,8 +6,8 @@ categoryLabel: Using the board
 order: 9
 status: shipped
 audiences: ["everyone"]
-lastVerified: 2026-07-30
-sources: ["apps/web/src/features/product/BoardsPage.tsx", "apps/web/src/features/board/boardLifecycle.ts", "apps/api/src/controlPlaneRoutes.ts"]
+lastVerified: 2026-11-05
+sources: ["apps/web/src/features/product/BoardsPage.tsx", "apps/web/src/features/board/boardLifecycle.ts", "apps/web/src/features/board/ShareDialog.tsx", "apps/web/src/features/product/LiveBoardJoin.tsx", "apps/api/src/controlPlaneRoutes.ts"]
 ---
 
 Airboard stores persistent boards and versioned board state in your workspace.
@@ -27,11 +27,24 @@ Saved board records include a latest version. Treat version history as a board
 recovery aid, not as a substitute for checking the current visible state before
 a presentation.
 
-## Visibility and sharing
+## Share a board
 
-Board availability depends on its visibility setting, workspace membership,
-and organization policy. Confirm that the intended recipient has access; do not
-assume a copied URL grants permission.
+Choose **Share** in the board header.
+
+- **Edit together now.** **Copy live link** and send it to anyone, for example
+  in the meeting chat. People who open it join your board straight away, with
+  no account, and can edit with you. Their changes save to your board while you
+  have it open. A live link stops working after 6 hours; copy a fresh one from
+  **Share** when you need it.
+- **Who can open this board later.** In a team workspace, the board's owner
+  chooses **Only you** or **Everyone in** the workspace. Shared boards appear
+  under **Shared** for every member, and **Copy board link** gives members a
+  link to the saved board. Only the person who made the board can change this.
+  Boards in a personal workspace stay private.
+- **Send a picture.** **Download PNG** saves the board as an image.
+
+Anyone with a live link can edit while it works, so share it only with the
+people you are working with.
 
 ## Trash and restore
 

@@ -15,6 +15,11 @@ const MAIN_NAV = [
   ["/app/activity", "Activity", "∿"],
 ] as const;
 
+// Boards other members opened up to the whole workspace; personal workspaces have none.
+const SHARED_NAV = ["/app/shared", "Shared", "⇄"] as const;
+
+const WORKSPACE_KIND_LABEL = { personal: "Personal workspace", team: "Team workspace", enterprise: "Enterprise workspace" } as const;
+
 const ADMIN_NAV = [
   ["/app/admin/overview", "Admin overview", "◫"],
   ["/app/admin/members", "Members", "◎"],
@@ -39,18 +44,21 @@ export function AppShell({ children }: { children: ReactNode }) {
     await auth.refreshAccount();
     window.location.assign("/app");
   };
-  const isAdmin = ["owner", "admin"].includes(auth.account?.organization.role ?? "");
+  const personal = auth.account?.organization.kind === "personal";
+  // Members, policies, SSO and audit have nothing to manage in a workspace of one.
+  const isAdmin = !personal && ["owner", "admin"].includes(auth.account?.organization.role ?? "");
+  const mainNav = personal ? MAIN_NAV : [MAIN_NAV[0], MAIN_NAV[1], SHARED_NAV, ...MAIN_NAV.slice(2)];
   const isBoardWorkspace = isImmersiveBoardPath(pathname);
   return (
     <div className={`app-shell${isBoardWorkspace ? " board-app-shell" : ""}`}>
       {!isBoardWorkspace ? <aside className="app-sidebar">
         <Link className="app-brand" href="/app"><span className="brand-orbit" />Airboard</Link>
         <div className="workspace-switcher">
-          <span>{auth.account?.organization.kind ?? "workspace"}</span>
+          <span>{auth.account ? WORKSPACE_KIND_LABEL[auth.account.organization.kind] : "Workspace"}</span>
           {organizations.length > 1 ? <select aria-label="Current organization" value={auth.account?.organization.id ?? ""} onChange={(event) => void selectOrganization(event.target.value)}>{organizations.map((membership) => <option value={membership.organization_id} key={membership.organization_id}>{membership.organizations?.name ?? "Airboard workspace"}</option>)}</select> : <strong>{auth.account?.organization.name ?? "Your Airboard"}</strong>}
         </div>
         <nav aria-label="Airboard">
-          {MAIN_NAV.map(([href, label, glyph]) => (
+          {mainNav.map(([href, label, glyph]) => (
             <Link className={navActive(pathname, href) ? "active" : ""} href={href} key={href}><span className="nav-glyph" aria-hidden="true">{glyph}</span><span>{label}</span></Link>
           ))}
         </nav>
@@ -79,7 +87,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <main className="app-content">{children}</main>
       </div>
       {!isBoardWorkspace ? <nav className="app-mobile-nav" aria-label="Airboard mobile navigation">
-        {[...MAIN_NAV.slice(0, 4), ["/help", "Help", "?"] as const].map(([href, label, glyph]) => (
+        {[...mainNav.slice(0, 4), ["/help", "Help", "?"] as const].map(([href, label, glyph]) => (
           <Link className={navActive(pathname, href) ? "active" : ""} href={href} key={href}><span aria-hidden="true">{glyph}</span><small>{label}</small></Link>
         ))}
       </nav> : null}

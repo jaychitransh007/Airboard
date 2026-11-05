@@ -10,6 +10,7 @@ import {
   CHROME_WEB_STORE_URL,
 } from "../../platform/distribution";
 import { useAirboardAuth } from "../../platform/auth";
+import { WaitlistButton } from "./WaitlistButton";
 import { CONFIGURED_CHROME_EXTENSION_ID } from "../meet/extensionRelayTrust";
 import {
   chromeMeetReadiness,
@@ -239,6 +240,9 @@ export function IntegrationsPage() {
   }), [displayedExtensionReachable, displayedExtensionState, meet]);
   const completeSteps = steps.filter((step) => step.complete).length;
   const isVerified = steps.every((step) => step.complete);
+  // The setup checklist only helps someone who has the extension or a linked
+  // installation; for everyone else it is a list of steps they cannot take.
+  const meetSetupStarted = extensionReachable || Boolean(detectedExtensionId) || activeMeetInstallations.length > 0;
   const versionMismatch = Boolean(displayedExtensionState && meet?.version && meet.version !== CHROME_EXTENSION_VERSION);
 
   return (
@@ -246,7 +250,7 @@ export function IntegrationsPage() {
       <section className="app-page-heading">
         <p className="eyebrow">Connected surfaces</p>
         <h1>Integrations</h1>
-        <p>Airboard belongs on your outgoing video—not in a second audience-facing Meet canvas.</p>
+        <p>Bring Airboard into the meetings and apps you already use.</p>
       </section>
 
       {detectedExtensionId && detectedInstallationInstanceId ? (
@@ -272,42 +276,52 @@ export function IntegrationsPage() {
         <div className="integration-console-head">
           <div className={`integration-icon ${isVerified ? "ready" : ""}`}>◉</div>
           <div>
-            <span className="integration-badge">{isVerified ? "Ready" : CHROME_EXTENSION_PUBLICLY_INSTALLABLE ? "Chrome extension" : "Private preview"}</span>
+            <span className="integration-badge">{isVerified ? "Ready" : CHROME_EXTENSION_PUBLICLY_INSTALLABLE ? "Chrome extension" : meetSetupStarted ? "Private preview" : "Coming soon"}</span>
             <h2>Airboard for Google Meet</h2>
-            <p>A private renderer composites neon diagrams into your outgoing camera. Meeting controls and account data stay outside Meet.</p>
+            <p>Your diagram appears on your camera video, so everyone in the call sees it without opening anything.</p>
           </div>
           <div className="integration-console-actions">
             {!extensionReachable && CHROME_WEB_STORE_URL ? <a className="button button-primary" href={CHROME_WEB_STORE_URL} target="_blank" rel="noreferrer">Add to Chrome</a> : null}
-            {!extensionReachable && !CHROME_WEB_STORE_URL ? <Link className="button button-primary" href="/contact-sales">Request preview access</Link> : null}
+            {!extensionReachable && !CHROME_WEB_STORE_URL ? <WaitlistButton surface="google_meet" primary /> : null}
             {extensionReachable ? <button className="button button-quiet" onClick={() => void refreshIntegrationStatus()}>Refresh status</button> : null}
           </div>
         </div>
 
-        <div className="integration-progress" aria-label={`${completeSteps} of ${steps.length} Google Meet setup checks complete`}>
-          <div><span style={{ width: `${(completeSteps / steps.length) * 100}%` }} /></div>
-          <strong>{completeSteps} / {steps.length} ready</strong>
-        </div>
-        <ol className="integration-checklist">
-          {steps.map((step, index) => (
-            <li className={step.complete ? "complete" : index === completeSteps ? "current" : ""} key={step.id}>
-              <span>{step.complete ? "✓" : index + 1}</span>
-              <div><strong>{step.label}</strong><small>{step.detail}</small></div>
-            </li>
-          ))}
-        </ol>
-        {versionMismatch ? <p className="form-warning">This browser reports {meet?.version}; Airboard expects {CHROME_EXTENSION_VERSION}. Update the extension before relying on a meeting.</p> : null}
-        {displayedExtensionState?.lastError || meet?.last_error_code ? <p className="form-warning">Diagnostic: {displayedExtensionState?.lastError || meet?.last_error_code}</p> : null}
-        <div className="integration-footnote">
-          <strong>No Meet activity required.</strong>
-          <span>After installation and consent, open or refresh a meeting. Airboard engages the camera track automatically and verifies the outbound sender.</span>
-          <Link href="/help/integrations/google-meet">Read the complete Google Meet guide →</Link>
-        </div>
+        {!meetSetupStarted && !CHROME_EXTENSION_PUBLICLY_INSTALLABLE ? (
+          <div className="integration-meanwhile">
+            <strong>Use Airboard in your meetings today</strong>
+            <p>Open a board and share that browser tab in Meet, Zoom or Teams. To let people edit with you, choose Share on the board and send the live link in the meeting chat — nobody needs an account.</p>
+            <Link className="button button-quiet" href="/app/boards">Open my boards</Link>
+          </div>
+        ) : (
+          <>
+          <div className="integration-progress" aria-label={`${completeSteps} of ${steps.length} Google Meet setup checks complete`}>
+            <div><span style={{ width: `${(completeSteps / steps.length) * 100}%` }} /></div>
+            <strong>{completeSteps} / {steps.length} ready</strong>
+          </div>
+          <ol className="integration-checklist">
+            {steps.map((step, index) => (
+              <li className={step.complete ? "complete" : index === completeSteps ? "current" : ""} key={step.id}>
+                <span>{step.complete ? "✓" : index + 1}</span>
+                <div><strong>{step.label}</strong><small>{step.detail}</small></div>
+              </li>
+            ))}
+          </ol>
+          {versionMismatch ? <p className="form-warning">This browser reports {meet?.version}; Airboard expects {CHROME_EXTENSION_VERSION}. Update the extension before relying on a meeting.</p> : null}
+          {displayedExtensionState?.lastError || meet?.last_error_code ? <p className="form-warning">Diagnostic: {displayedExtensionState?.lastError || meet?.last_error_code}</p> : null}
+          <div className="integration-footnote">
+            <strong>No Meet activity required.</strong>
+            <span>After installation and consent, open or refresh a meeting. Airboard engages the camera track automatically and verifies the outbound sender.</span>
+            <Link href="/help/integrations/google-meet">Read the complete Google Meet guide →</Link>
+          </div>
+          </>
+        )}
       </section>
 
       <div className="integration-list secondary-integrations">
-        <IntegrationCard name="Airboard desktop" badge="Development build" description="A transparent, always-on-top, click-through native overlay for arbitrary desktop applications." state="preview" details="Signed, auto-updating installers remain a release gate." action={<Link className="button button-quiet" href="/contact-sales">Request desktop preview</Link>} />
-        <IntegrationCard name="Zoom" badge="Controlled beta" description="Planned around Zoom Camera Mode so Airboard content can enter the outgoing camera through the supported API." state="preview" details="Marketplace registration and real-client verification required." action={<Link className="button button-quiet" href="/contact-sales">Join beta</Link>} />
-        <IntegrationCard name="Microsoft Teams" badge="Design partner" description="Shared-stage collaboration first. Camera-overlay capability will be claimed only after client-specific validation." state="preview" details="Windows and macOS desktop pilot planned." action={<Link className="button button-quiet" href="/contact-sales">Become a partner</Link>} />
+        <IntegrationCard name="Airboard desktop" badge="Coming soon" description="Draw over any app on your screen — slides, prototypes, spreadsheets — with a see-through overlay." state="preview" details="We'll let you know when it's ready to install." action={<WaitlistButton surface="desktop" />} />
+        <IntegrationCard name="Zoom" badge="Coming soon" description="Your diagram on your Zoom camera video, the same way it works in Google Meet." state="preview" details="Until then, share your Airboard tab in Zoom." action={<WaitlistButton surface="zoom" />} />
+        <IntegrationCard name="Microsoft Teams" badge="Coming soon" description="Airboard inside Teams meetings on Windows and macOS." state="preview" details="Until then, share your Airboard tab in Teams." action={<WaitlistButton surface="teams" />} />
       </div>
     </div>
   );

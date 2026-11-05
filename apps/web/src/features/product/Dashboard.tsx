@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { airboardApi } from "../../platform/api";
 import { useAirboardAuth } from "../../platform/auth";
+import { CHROME_EXTENSION_PUBLICLY_INSTALLABLE } from "../../platform/distribution";
 
 type Board = { id: string; title: string; updated_at: string; latest_version: number };
 type Installation = { id: string; platform: string; status: string; last_success_at: string | null };
@@ -29,6 +30,10 @@ export function Dashboard() {
       .catch(() => setLoadFailed(true))
       .finally(() => setLoading(false));
   }, [auth.accessToken]);
+  // Until the Meet extension is in the Chrome Web Store, health rows for
+  // surfaces nobody can install are noise; they show once one can be used.
+  const meetInstallable = CHROME_EXTENSION_PUBLICLY_INSTALLABLE;
+  const meetConnected = installations.some((item) => item.platform === "chrome_meet" && item.status !== "revoked");
 
   return (
     <div className="dashboard-page">
@@ -37,8 +42,8 @@ export function Dashboard() {
       </section>
       <section className="quick-start-grid">
         <Link className="quick-card primary" href="/app/boards/new?preflight=1"><span>＋</span><div><strong>New Airboard</strong><p>Start a board—type or say what you want to see.</p></div></Link>
-        <Link className="quick-card" href="/app/integrations?setup=chrome_meet"><span>◉</span><div><strong>Use in Google Meet</strong><p>Put your diagram on your camera video (private preview).</p></div></Link>
-        <Link className="quick-card" href="/download"><span>↗</span><div><strong>Desktop overlay</strong><p>Draw over any app on your screen (early preview).</p></div></Link>
+        <Link className="quick-card" href="/app/integrations"><span>◉</span><div><strong>Use in Google Meet</strong><p>{meetInstallable || meetConnected ? "Put your diagram on your camera video." : "Coming soon. Share your board tab in any meeting today."}</p></div></Link>
+        <Link className="quick-card" href="/app/integrations"><span>↗</span><div><strong>Desktop overlay</strong><p>Coming soon: draw over any app on your screen.</p></div></Link>
       </section>
       <section className="dashboard-section">
         <div className="section-heading"><div><h2>Recent boards</h2><p>Your content—not your camera or microphone—is saved here.</p></div><Link href="/app/boards">View all</Link></div>
@@ -46,14 +51,14 @@ export function Dashboard() {
           <div className="board-grid">{boards.slice(0, 6).map((board) => <Link className="board-card" href={`/app/boards/${board.id}`} key={board.id}><div className="board-thumbnail"><span>{board.title.slice(0, 1).toUpperCase()}</span></div><strong>{board.title}</strong><small>Version {board.latest_version} · {relativeTime(board.updated_at)}</small></Link>)}</div>
         ) : <div className="empty-panel"><span className="empty-icon">◇</span><h3>No saved boards yet</h3><p>Create your first Airboard—your free one-month pilot starts when it opens.</p><Link className="button button-primary" href="/app/boards/new?preflight=1">Create first board</Link></div>}
       </section>
-      <section className="dashboard-section">
+      {meetInstallable || meetConnected ? <section className="dashboard-section">
         <div className="section-heading"><div><h2>Integration health</h2><p>See whether Airboard is ready before a real meeting.</p></div><Link href="/app/integrations">Manage</Link></div>
         <div className="health-row">
           <div><span className={installationStatus(installations, "chrome_meet")} /><div><strong>Google Meet overlay</strong><small>{installationText(installations, "chrome_meet")}</small></div></div>
-          <div><span className="status-dot preview" /><div><strong>Zoom Camera Mode</strong><small>Controlled beta</small></div></div>
-          <div><span className="status-dot preview" /><div><strong>Microsoft Teams</strong><small>Design-partner pilot</small></div></div>
+          <div><span className="status-dot preview" /><div><strong>Zoom</strong><small>Coming soon</small></div></div>
+          <div><span className="status-dot preview" /><div><strong>Microsoft Teams</strong><small>Coming soon</small></div></div>
         </div>
-      </section>
+      </section> : null}
     </div>
   );
 }

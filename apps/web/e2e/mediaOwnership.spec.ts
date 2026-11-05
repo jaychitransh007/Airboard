@@ -46,7 +46,7 @@ test("undelegated main stage offers the companion window instead of media button
   // The companion link binds to the live board session once sync connects.
   const companion = page.getByTestId("companion-media-link").first();
   await expect(companion).toBeVisible({ timeout: 15_000 });
-  await expect(companion).toHaveAttribute("href", /\/app\/boards\/live\?boardSessionId=.+/);
+  await expect(companion).toHaveAttribute("href", /\/live\/[^/?]+\?joinToken=.+/);
 
   // The typed fallback is a working input path, not a dead end.
   const input = page.getByTestId("intent-command-input");

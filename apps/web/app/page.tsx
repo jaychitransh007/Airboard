@@ -1,6 +1,8 @@
 import { AirboardPrototype } from "../src/features/board/AirboardPrototype";
 import { TestAirboardHarness } from "../src/features/board/TestAirboardHarness";
+import { redirect } from "next/navigation";
 import { LandingPage } from "../src/features/product/LandingPage";
+import { authCallbackPathFromHome } from "../src/features/product/authCallbackState";
 
 export default async function Home({
   searchParams,
@@ -8,6 +10,8 @@ export default async function Home({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
+  const authCallback = authCallbackPathFromHome(params);
+  if (authCallback) redirect(authCallback);
   const desktopOverlayValue = params.desktopOverlay;
   const desktopOverlay = Array.isArray(desktopOverlayValue)
     ? desktopOverlayValue.includes("1")

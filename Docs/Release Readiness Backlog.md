@@ -330,3 +330,36 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - The user confirmed the alert email arrived.
     - The test job, Pub/Sub channel, topic and subscription were removed; only `airboard-lifecycle-hourly` remains.
   - **Gate:** `lifecycle-schedule` is now verified (launch check 6/23).
+- **2026-11-05** — Experience gaps: sharing, phones, solo workspaces, waitlists and small fixes:
+  - **Share:**
+    - A **Share** button in the board header opens a dialog with three parts:
+      - **Copy live link:** opens `/live/<session>?joinToken=…`, a new page where anyone joins the running session as a guest, with no account, for the token's 6 hours.
+      - **Who can open this board later:** Only you or Everyone in the workspace. Team workspaces only.
+      - **Download PNG.**
+    - Guests see a live status rather than "Saved". Their edits reach the host, whose board saves them. If a link expired or its session ended, the guest sees a page that explains it.
+    - A board address that still carries a live session now sends people who cannot open the saved board to the live page, instead of "board not found".
+    - The Meet companion link now joins the same session. Before, `/app/boards/live` created a new saved board and dropped the session, so the companion never synced.
+    - The API lets only a board's owner change who can open it (403 `BOARD_OWNER_ONLY`). Before, any member could hide a teammate's shared board.
+    - Team workspaces get a **Shared** sidebar entry.
+  - **Phones and tablets:**
+    - Airo starts closed on phones and opens as a bottom sheet.
+    - The top bar fits at 375px: undo and redo move to the ••• menu, and Use screen is hidden.
+    - All 11 dock tools fit without overlapping. A later 42px rule had overridden the small-screen sizes.
+    - Boards open framed on their content when any of it would start off screen.
+    - Commands place new objects in the part of the canvas the Airo panel leaves visible.
+    - On portrait tablets the canvas fills the screen. A 64vh rule had left a third of it empty.
+    - **Sign in** shows in the landing header on phones.
+  - **Solo workspaces:** the admin menu is hidden, old admin links explain why, and the sidebar names the workspace type.
+  - **Meet, desktop, Zoom and Teams:** in-app sales-form links are replaced with a one-tap **Notify me**, which files a `waitlist` support request. The Meet setup checklist appears only once an extension or installation exists; until then the page explains how to use Airboard in meetings today. Overview hides integration health until a surface can be used.
+  - **Small fixes:**
+    - Added a favicon, SVG icon and Apple touch icon.
+    - Camera and microphone blocks give browser-specific steps. The camera message used to say "for localhost".
+    - `/me` reloads only when the signed-in person changes, not on token refreshes or tab focus.
+    - The home page forwards `?code=` and `?error=` to `/auth/callback`.
+  - **Verified locally:**
+    - A guest from another origin joined with no account, and their command saved to the host's board (version 2).
+    - The access toggle saved, then reverted.
+    - Expired and incomplete links show the right page.
+    - Layouts checked at 375, 768 and 1280px.
+    - A waitlist request landed in `support_requests`.
+    - Web 365/365 and API 115/115 tests pass, and every package typechecks. The e2e suite was not run (no Playwright browser installed).

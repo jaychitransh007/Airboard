@@ -8,11 +8,13 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { airboardApi } from "./api";
 import { AUTH_CONFIGURED, safeAppPath, SUPABASE_ANON_KEY, SUPABASE_URL } from "./config";
+import { liveLinkFromBoardAddress } from "../features/board/shareLinks";
 
 export type AirboardAccount = {
   profile: {
@@ -99,16 +101,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // The account belongs to the signed-in person, not to a token. Supabase
+  // reports hourly token refreshes and tab-focus re-checks as auth events too;
+  // reloading /me on each one doubled start-up requests and let one transient
+  // failure blank the account (and the board) mid-session.
+  const sessionUserRef = useRef<string | null | undefined>(undefined);
+  const accountLoadRef = useRef<Promise<void>>(Promise.resolve());
+  const syncSession = useCallback((nextSession: Session | null) => {
+    setSession(nextSession);
+    const nextUser = nextSession?.user.id ?? null;
+    if (sessionUserRef.current !== nextUser) {
+      sessionUserRef.current = nextUser;
+      accountLoadRef.current = loadAccount(nextSession?.access_token ?? null);
+    }
+    return accountLoadRef.current;
+  }, [loadAccount]);
+
   useEffect(() => {
     const client = supabaseBrowserClient();
     if (client) {
       void client.auth.getSession().then(({ data }) => {
-        setSession(data.session);
-        void loadAccount(data.session?.access_token ?? null).finally(() => setLoading(false));
+        void syncSession(data.session).finally(() => setLoading(false));
       });
       const { data } = client.auth.onAuthStateChange((_event, nextSession) => {
-        setSession(nextSession);
-        void loadAccount(nextSession?.access_token ?? null);
+        void syncSession(nextSession);
       });
       return () => data.subscription.unsubscribe();
     }
@@ -122,7 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => setError("AUTH_NOT_CONFIGURED"))
       .finally(() => setLoading(false));
-  }, [loadAccount]);
+  }, [loadAccount, syncSession]);
 
   const value = useMemo<AuthValue>(
     () => ({
@@ -156,6 +172,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       signOut: async () => {
         await supabaseBrowserClient()?.auth.signOut();
+        sessionUserRef.current = null;
         setDevelopmentToken(null);
         setSession(null);
         setAccount(null);
@@ -179,6 +196,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const router = useRouter();
   useEffect(() => {
     if (!auth.loading && !auth.accessToken) {
+      // A board address carrying a live session admits guests without an account.
+      const live = pathname.startsWith("/app/boards/")
+        ? liveLinkFromBoardAddress(window.location.origin, window.location.search)
+        : null;
+      if (live) {
+        window.location.replace(live);
+        return;
+      }
       const returnPath = safeAppPath(
         `${pathname}${typeof window !== "undefined" ? window.location.search : ""}`,
         pathname,

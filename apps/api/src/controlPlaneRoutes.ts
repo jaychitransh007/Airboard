@@ -429,6 +429,23 @@ export function registerControlPlaneRoutes(
         update.visibility = body.visibility;
       }
       if (typeof body.archived === "boolean") update.archived_at = body.archived ? new Date().toISOString() : null;
+      if (update.visibility !== undefined) {
+        // Members may edit a shared board, but only its owner decides who can
+        // open it; otherwise a member could make a teammate's board vanish.
+        const { data: owned, error: ownerError } = await auth.client
+          .from("boards")
+          .select("owner_profile_id")
+          .eq("id", request.params.boardId)
+          .eq("organization_id", context.organizationId)
+          .or(boardAccessFilter(context.profileId))
+          .is("deleted_at", null)
+          .maybeSingle();
+        if (ownerError) return reply.code(500).send({ error: "BOARD_SAVE_FAILED" });
+        if (!owned) return reply.code(404).send({ error: "BOARD_NOT_FOUND" });
+        if (owned.owner_profile_id !== context.profileId) {
+          return reply.code(403).send({ error: "BOARD_OWNER_ONLY" });
+        }
+      }
       let version: number | null = null;
       if (body.state && typeof body.state === "object") {
         const stateText = JSON.stringify(body.state);

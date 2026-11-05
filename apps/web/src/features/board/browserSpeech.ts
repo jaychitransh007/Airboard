@@ -1,4 +1,5 @@
 import { AIRBOARD_SEMANTIC_TRANSCRIPTION_KEYTERMS } from "@airboard/core/semantic-capabilities";
+import { blockedMediaHelp } from "./mediaPermissionHelp.ts";
 
 export type BrowserSpeechCallbacks = {
   onStart?: () => void;
@@ -858,7 +859,7 @@ function describeContinuousSpeechError(error?: string, message?: string): string
 
 function describeSpeechError(error?: string, message?: string): string {
   if (error === "not-allowed" || error === "service-not-allowed") {
-    return "Microphone access is blocked. Allow it or type the command instead.";
+    return blockedMediaHelp("microphone", typeof navigator === "undefined" ? "" : navigator.userAgent);
   }
   if (error === "no-speech") {
     return "No command was heard. Try again or type it below.";

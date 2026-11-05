@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BOARD_SCENE_VERSION, type BoardState } from "@airboard/core";
 import { AirboardPrototype } from "../board/AirboardPrototype";
+import type { BoardShareAccess, BoardVisibility } from "../board/ShareDialog";
+import { liveLinkFromBoardAddress, savedBoardLink } from "../board/shareLinks";
 import { AirboardApiError, airboardApi } from "../../platform/api";
 import { useAirboardAuth } from "../../platform/auth";
 
@@ -96,7 +98,16 @@ export function AuthenticatedAirboard({ boardId, templateId }: { boardId?: strin
       setReady(true);
     };
     void prepare()
-      .catch((caught) => setError(caught instanceof Error ? caught.message : "AIRBOARD_PREPARE_FAILED"))
+      .catch((caught) => {
+        const code = caught instanceof Error ? caught.message : "AIRBOARD_PREPARE_FAILED";
+        // Someone outside the board's workspace opened the owner's address with
+        // its live session attached: join that session as a guest instead.
+        const live = code === "BOARD_NOT_FOUND"
+          ? liveLinkFromBoardAddress(window.location.origin, window.location.search)
+          : null;
+        if (live) window.location.replace(live);
+        else setError(code);
+      })
       .finally(() => {
         if (preparingRef.current === preparationKey) preparingRef.current = null;
       });
@@ -252,6 +263,16 @@ export function AuthenticatedAirboard({ boardId, templateId }: { boardId?: strin
     setBoard((current) => current ? { ...current, title: result.board.title } : current);
   }, [auth.accessToken, board]);
 
+  const changeVisibility = useCallback(async (visibility: "private" | "organization") => {
+    if (!auth.accessToken || !board) throw new Error("The saved canvas is not available.");
+    const result = await airboardApi<{ board: { visibility: BoardVisibility } }>(`/boards/${board.id}`, {
+      method: "PATCH",
+      accessToken: auth.accessToken,
+      body: JSON.stringify({ visibility }),
+    });
+    setBoard((current) => current ? { ...current, visibility: result.board.visibility } : current);
+  }, [auth.accessToken, board]);
+
   const deleteBoard = useCallback(async (latestState: BoardState) => {
     if (!auth.accessToken || !board) throw new Error("The saved canvas is not available.");
     try {
@@ -270,9 +291,17 @@ export function AuthenticatedAirboard({ boardId, templateId }: { boardId?: strin
   }, [auth.accessToken, board, router, saveBoardState]);
   if (error) return <BoardUnavailable code={error} />;
   if (!ready || !auth.accessToken || !auth.account || !board) return <div className="product-loading">Opening your Airboard…</div>;
+  const shareAccess: BoardShareAccess = {
+    visibility: board.visibility ?? "private",
+    canChange: board.owner_profile_id === auth.account.profile.id,
+    personal: auth.account.organization.kind === "personal",
+    workspaceName: auth.account.organization.name,
+    boardLink: savedBoardLink(window.location.origin, board.id),
+    onChange: changeVisibility,
+  };
   return (
     <>
-      <AirboardPrototype surface="standalone" accessToken={auth.accessToken} accountUserId={auth.account.profile.id} persistentBoardId={board.id} persistentWorkspaceId={board.workspace_id} boardTitle={board.title} persistentSaveStatus={saveStatus} initialBoardState={normalizeBoardState(board.latest_state, board.id)} onPersistentBoardChange={persist} onRenameBoard={renameBoard} onDeleteBoard={deleteBoard} {...(templateId ? { initialTemplateId: templateId } : {})} {...(auth.account.profile.preferences ? { initialPreferences: auth.account.profile.preferences } : {})} />
+      <AirboardPrototype surface="standalone" accessToken={auth.accessToken} accountUserId={auth.account.profile.id} persistentBoardId={board.id} persistentWorkspaceId={board.workspace_id} boardTitle={board.title} persistentSaveStatus={saveStatus} initialBoardState={normalizeBoardState(board.latest_state, board.id)} onPersistentBoardChange={persist} onRenameBoard={renameBoard} onDeleteBoard={deleteBoard} shareAccess={shareAccess} {...(templateId ? { initialTemplateId: templateId } : {})} {...(auth.account.profile.preferences ? { initialPreferences: auth.account.profile.preferences } : {})} />
       {saveNotice ? (
         <div className="board-save-warning" role={saveNotice.kind === "conflict" ? "alert" : "status"}>
           {saveNotice.kind === "conflict" ? (
@@ -340,6 +369,8 @@ type DurableBoard = {
   title: string;
   latest_state: unknown;
   latest_version: number;
+  visibility?: BoardVisibility;
+  owner_profile_id?: string;
 };
 
 function normalizeBoardState(value: unknown, boardId: string): BoardState {

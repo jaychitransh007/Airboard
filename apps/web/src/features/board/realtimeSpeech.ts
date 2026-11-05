@@ -1,3 +1,5 @@
+import { blockedMediaHelp } from "./mediaPermissionHelp.ts";
+
 export const DEFAULT_REALTIME_TRANSCRIPTION_SAMPLE_RATE = 16_000;
 export const DEFAULT_REALTIME_TRANSCRIPTION_PATH = "/transcription/ws";
 export const REALTIME_TRANSCRIPTION_FRAME_DURATION_MS = 80;
@@ -1020,7 +1022,7 @@ function describeRealtimeSpeechError(error: unknown): string {
     error instanceof DOMException &&
     error.name === "NotAllowedError"
   ) {
-    return "Microphone permission was denied. Allow microphone access and try again.";
+    return blockedMediaHelp("microphone", typeof navigator === "undefined" ? "" : navigator.userAgent);
   }
   if (error instanceof Error && error.message) {
     return error.message;

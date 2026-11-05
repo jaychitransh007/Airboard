@@ -325,6 +325,31 @@ test("another member's private board is invisible; organization boards stay shar
   assert.equal((await as("PATCH", `/boards/${SHARED}`, { title: "Team map v2" })).statusCode, 200);
 });
 
+test("only a board's owner changes who can open it", async (t) => {
+  const OTHER = "99999999-9999-4999-8999-999999999999";
+  const SHARED = "88888888-8888-4888-8888-888888888888";
+  const client = createFakeSupabase({
+    boards: [
+      boardRow(),
+      boardRow({ id: SHARED, owner_profile_id: OTHER, visibility: "organization" }),
+    ],
+    board_versions: [],
+    audit_events: [],
+  });
+  const server = await buildApp(t, client);
+  const as = (url, payload) =>
+    server.inject({ method: "PATCH", url, headers: { authorization: "Bearer owner" }, payload });
+
+  const shared = await as(`/boards/${BOARD}`, { visibility: "organization" });
+  assert.equal(shared.statusCode, 200, shared.body);
+  assert.equal(client.tables.boards[0].visibility, "organization");
+
+  const hidden = await as(`/boards/${SHARED}`, { visibility: "private" });
+  assert.equal(hidden.statusCode, 403);
+  assert.equal(hidden.json().error, "BOARD_OWNER_ONLY");
+  assert.equal(client.tables.boards[1].visibility, "organization");
+});
+
 test("metadata-only board patches need no version and missing boards stay 404", async (t) => {
   const client = createFakeSupabase({ boards: [boardRow()], board_versions: [], audit_events: [] });
   const server = await buildApp(t, client);

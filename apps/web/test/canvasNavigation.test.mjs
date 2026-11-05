@@ -3,11 +3,13 @@ import test from "node:test";
 
 import {
   boardPointFromScreen,
+  boundsFitViewport,
   clampViewport,
   fitViewportToBounds,
   IDENTITY_VIEWPORT,
   panViewport,
   screenPointFromBoard,
+  unobscuredCanvasCenter,
   zoomViewport,
 } from "../src/features/board/boardViewport.ts";
 import { CanvasNavigationTracker } from "../src/features/board/canvasNavigationTracker.ts";
@@ -174,3 +176,27 @@ test("fitting a diagram frames it beside the Airo panel without zooming in", () 
   assert.deepEqual(screenPointFromBoard(small, { x: 100, y: 50 }), { x: 400, y: 350 });
 });
 
+
+test("a board laid out on a laptop is detected as partly off a phone screen", () => {
+  const diagram = { x: 0, y: 0, width: 900, height: 300 };
+  const laptop = { canvasWidth: 1_400, canvasHeight: 800 };
+  const phone = { canvasWidth: 360, canvasHeight: 640 };
+  assert.equal(boundsFitViewport(diagram, IDENTITY_VIEWPORT, laptop), true);
+  assert.equal(boundsFitViewport(diagram, IDENTITY_VIEWPORT, phone), false);
+  // A panel over the right edge hides what sits beneath it.
+  assert.equal(boundsFitViewport(diagram, IDENTITY_VIEWPORT, laptop, 600), false);
+  // Content above or left of the visible area counts as hidden too.
+  assert.equal(boundsFitViewport({ x: -40, y: 10, width: 100, height: 100 }, IDENTITY_VIEWPORT, laptop), false);
+});
+
+test("commands place new objects in the part of the canvas the Airo panel leaves visible", () => {
+  const canvas = { left: 0, top: 60, width: 1_200, height: 700 };
+  assert.deepEqual(unobscuredCanvasCenter(canvas, null), { x: 600, y: 350 });
+  // Side panel on a laptop: centre of the area left of it.
+  assert.deepEqual(unobscuredCanvasCenter(canvas, { left: 820, top: 78, width: 360, height: 660 }), { x: 410, y: 350 });
+  // Bottom sheet on a phone: centre of the area above it.
+  const phone = { left: 6, top: 64, width: 363, height: 740 };
+  assert.deepEqual(unobscuredCanvasCenter(phone, { left: 14, top: 344, width: 347, height: 452 }), { x: 181.5, y: 140 });
+  // A panel covering nearly everything still leaves a usable quarter.
+  assert.deepEqual(unobscuredCanvasCenter(canvas, { left: 20, top: 70, width: 1_180, height: 690 }), { x: 600, y: 87.5 });
+});

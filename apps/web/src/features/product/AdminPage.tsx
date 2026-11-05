@@ -1,17 +1,26 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { airboardApi } from "../../platform/api";
 import { AIRBOARD_API_URL } from "../../platform/config";
 import { useAirboardAuth } from "../../platform/auth";
 
 export function AdminPage({ section }: { section: string }) {
+  const auth = useAirboardAuth();
+  // A personal workspace has one member and nothing to administer; the
+  // sidebar hides these pages there, and an old link lands somewhere useful.
+  if (auth.account?.organization.kind === "personal") return <PersonalWorkspaceAdmin />;
   if (section === "members") return <MembersAdmin />;
   if (section === "policies") return <PoliciesAdmin />;
   if (section === "audit-logs") return <AuditAdmin />;
   if (section === "installations") return <InstallationsAdmin />;
   if (section === "identity-directory") return <IdentityDirectoryAdmin />;
   return <AdminOverview />;
+}
+
+function PersonalWorkspaceAdmin() {
+  return <div className="empty-panel"><h3>Your personal workspace is just for you</h3><p>Members, policies and audit tools are for team workspaces. To work with someone now, open a board and choose Share.</p><Link className="button button-primary" href="/app/boards">Go to my boards</Link></div>;
 }
 
 function AdminOverview() {

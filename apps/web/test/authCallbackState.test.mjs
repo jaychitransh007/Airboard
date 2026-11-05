@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { authCallbackFailure } from "../src/features/product/authCallbackState.ts";
+import { authCallbackFailure, authCallbackPathFromHome } from "../src/features/product/authCallbackState.ts";
 
 test("maps an expired Supabase confirmation to a recoverable resend path", () => {
   const params = new URLSearchParams({ error: "access_denied", error_code: "otp_expired" });
@@ -20,4 +20,14 @@ test("leaves successful PKCE callbacks in the session-exchange state", () => {
 test("fails closed with a fresh-link action for unknown provider errors", () => {
   const failure = authCallbackFailure(new URLSearchParams({ error: "access_denied" }));
   assert.equal(failure?.actionHref, "/login?reason=authentication_failed");
+});
+
+test("a sign-in that lands on the home page is forwarded to the callback", () => {
+  assert.equal(authCallbackPathFromHome({}), null);
+  assert.equal(authCallbackPathFromHome({ utm_source: "mail" }), null);
+  assert.equal(authCallbackPathFromHome({ code: "abc" }), "/auth/callback?code=abc");
+  assert.equal(
+    authCallbackPathFromHome({ error: "access_denied", error_code: "otp_expired", error_description: "Email link is invalid or has expired" }),
+    "/auth/callback?error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired",
+  );
 });
