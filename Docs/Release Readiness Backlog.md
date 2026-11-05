@@ -392,3 +392,9 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - The trial and its entitlement now run 30 days from today, to 2026-12-05. The change was one production transaction, and the original activation date is kept. No reminder emails were queued for the new end.
   - Billing now reads "Active until Dec 5, 2026", and **Share** on a board offers **Copy live link**.
   - Seen while connecting: the Supabase project is in ap-northeast-2 (Seoul) and the API is in asia-south1 (Mumbai), so every database call crosses regions. This bears on the slow board open.
+- **2026-11-05** — Board writes work on any PostgREST version:
+  - **Problem:** saving, trashing and restoring a board used an OR access filter on the update. PostgREST v14.3 rejects that with 42703 ("column boards.… does not exist"), so every board write failed on a fresh local stack. A new worktree without `supabase/.temp` version pins gets v14.3. Production runs v14.5, which accepts the filter, so production was not affected (checked with `supabase services` and the same request against both versions).
+  - **Fix:** `writeAccessibleBoard` (`apps/api/src/boardAccess.ts`) runs each write with plain filters, first as the board's owner, then, only if that matched nothing, on a shared board. That is the same access rule, with no double write; the second step costs a member on a shared board one extra round trip.
+  - **Tests:** the test fake now rejects an OR filter on writes, and a new test covers a member saving (including a version conflict), trashing and restoring a shared board.
+  - **Verified** against real PostgREST v14.3 and v14.5 containers: owner save, member save, trash and restore on a temporary shared board, and refusal on another person's private board. The old filter fails only on v14.3.
+  - API 118/118 and web 368/368 tests pass, and every package typechecks.

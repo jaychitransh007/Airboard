@@ -95,7 +95,15 @@ class FakeQuery {
   }
   eq(column, value) { this.filters.push((row) => row[column] === value); return this; }
   neq(column, value) { this.filters.push((row) => row[column] !== value); return this; }
+  filter(column, operator, value) {
+    assert.ok(operator === "eq" || operator === "neq", `unsupported filter() operator ${operator}`);
+    this.filters.push((row) => (operator === "eq" ? row[column] === value : row[column] !== value));
+    return this;
+  }
   or(expression) {
+    // PostgREST v14.3 rejects or= on UPDATE … RETURNING (42703); writes must
+    // use writeAccessibleBoard's two plain filters instead.
+    assert.equal(this.op, "select", `or() on ${this.op} breaks on PostgREST v14.3`);
     // Supports the comma-separated `column.eq.value` / `column.neq.value` form.
     const clauses = expression.split(",").map((clause) => {
       const [column, operator, ...rest] = clause.split(".");
@@ -574,4 +582,30 @@ test("live sessions use the workspace's entitlement, so team members can start t
     store.startSession({ ownerUserId: PROFILE, organizationId: ORG, provider: "standalone", allowParticipantDrawing: true }),
     /OWNER_ENTITLEMENT_REQUIRED/,
   );
+});
+
+test("team members save, trash and restore a shared board", async (t) => {
+  const OTHER = "99999999-9999-4999-8999-999999999999";
+  const client = createFakeSupabase({
+    boards: [boardRow({ owner_profile_id: OTHER, visibility: "organization" })],
+    board_versions: [],
+    audit_events: [],
+  });
+  const server = await buildApp(t, client);
+  const as = (method, url, payload) =>
+    server.inject({ method, url, headers: { authorization: "Bearer owner" }, ...(payload ? { payload } : {}) });
+
+  // The owner-scoped attempt matches nothing, so the shared-board attempt saves.
+  const saved = await as("PATCH", `/boards/${BOARD}`, { version: 4, state: { nodes: ["member"] } });
+  assert.equal(saved.statusCode, 200);
+  assert.equal(client.tables.boards[0].latest_version, 4);
+  // A stale save fails both attempts and still reports the conflict.
+  const stale = await as("PATCH", `/boards/${BOARD}`, { version: 4, state: { nodes: ["stale"] } });
+  assert.equal(stale.statusCode, 409);
+  assert.deepEqual(client.tables.boards[0].latest_state, { nodes: ["member"] });
+
+  assert.equal((await as("DELETE", `/boards/${BOARD}`)).statusCode, 204);
+  assert.notEqual(client.tables.boards[0].deleted_at, null);
+  assert.equal((await as("POST", `/boards/${BOARD}/restore`)).statusCode, 200);
+  assert.equal(client.tables.boards[0].deleted_at, null);
 });

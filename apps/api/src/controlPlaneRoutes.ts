@@ -27,7 +27,7 @@ import {
 import { bearerToken, issueSignedToken, verifySignedToken } from "./signedTokens";
 import { registerBoardContentRoutes, removeBoardAssetObjects } from "./boardContentRoutes";
 import { BoardAssetLifecycleError } from "./boardAssetLifecycle";
-import { boardAccessFilter } from "./boardAccess";
+import { boardAccessFilter, writeAccessibleBoard } from "./boardAccess";
 
 /** The pilot trial lasts one month from activation. */
 const TRIAL_DURATION_MS = 30 * 24 * 60 * 60 * 1_000;
@@ -455,20 +455,21 @@ export function registerControlPlaneRoutes(
         update.latest_state = body.state;
         update.latest_version = version;
       }
-      let boardUpdate = auth.client
-        .from("boards")
-        .update(update)
-        .eq("id", request.params.boardId)
-        .eq("organization_id", context.organizationId)
-        .or(boardAccessFilter(context.profileId))
-        .is("deleted_at", null);
-      // State saves are compare-and-swap: the client sends its last known
-      // latest_version + 1 and the write lands only if nobody else saved in
-      // between, so two tabs or devices cannot silently overwrite each other.
-      if (version !== null) boardUpdate = boardUpdate.eq("latest_version", version - 1);
-      const { data, error } = await boardUpdate
-        .select("id,title,latest_version,visibility,updated_at")
-        .maybeSingle();
+      const client = auth.client;
+      const { data, error } = await writeAccessibleBoard(context.profileId, (scope) => {
+        let boardUpdate = client
+          .from("boards")
+          .update(update)
+          .eq("id", request.params.boardId)
+          .eq("organization_id", context.organizationId)
+          .filter(scope.column, scope.operator, scope.value)
+          .is("deleted_at", null);
+        // State saves are compare-and-swap: the client sends its last known
+        // latest_version + 1 and the write lands only if nobody else saved in
+        // between, so two tabs or devices cannot silently overwrite each other.
+        if (version !== null) boardUpdate = boardUpdate.eq("latest_version", version - 1);
+        return boardUpdate.select("id,title,latest_version,visibility,updated_at").maybeSingle();
+      });
       if (!data) {
         const { data: current, error: currentError } = await auth.client
           .from("boards")
@@ -528,15 +529,17 @@ export function registerControlPlaneRoutes(
     if (!auth.client || !boundedUuid(request.params.boardId)) {
       return reply.code(404).send({ error: "BOARD_NOT_FOUND" });
     }
-    const { data, error } = await auth.client
+    const client = auth.client;
+    const deletedAt = new Date().toISOString();
+    const { data, error } = await writeAccessibleBoard(context.profileId, (scope) => client
       .from("boards")
-      .update({ deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .update({ deleted_at: deletedAt, updated_at: deletedAt })
       .eq("id", request.params.boardId)
       .eq("organization_id", context.organizationId)
-      .or(boardAccessFilter(context.profileId))
+      .filter(scope.column, scope.operator, scope.value)
       .is("deleted_at", null)
       .select("id")
-      .maybeSingle();
+      .maybeSingle());
     if (error || !data) return reply.code(404).send({ error: "BOARD_NOT_FOUND" });
     await writeAudit(auth, context, request, "board.deleted", "board", data.id);
     return reply.code(204).send();
@@ -546,10 +549,12 @@ export function registerControlPlaneRoutes(
     const context = await requireAuth(auth, request, reply);
     if (!context) return;
     if (!auth.client || !boundedUuid(request.params.boardId)) return reply.code(404).send({ error: "BOARD_NOT_FOUND" });
-    const { data, error } = await auth.client.from("boards")
+    const client = auth.client;
+    const { data, error } = await writeAccessibleBoard(context.profileId, (scope) => client.from("boards")
       .update({ deleted_at: null, updated_at: new Date().toISOString() })
-      .eq("id", request.params.boardId).eq("organization_id", context.organizationId).or(boardAccessFilter(context.profileId))
-      .not("deleted_at", "is", null).select("id,title,updated_at").maybeSingle();
+      .eq("id", request.params.boardId).eq("organization_id", context.organizationId)
+      .filter(scope.column, scope.operator, scope.value)
+      .not("deleted_at", "is", null).select("id,title,updated_at").maybeSingle());
     if (error || !data) return reply.code(404).send({ error: "BOARD_NOT_FOUND" });
     await writeAudit(auth, context, request, "board.restored", "board", data.id);
     return { board: data };
