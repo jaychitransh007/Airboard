@@ -83,12 +83,17 @@ export function registerControlPlaneRoutes(
   config: ApiConfig,
   auth: AuthService,
 ): void {
-  server.get("/auth/config", async () => ({
-    supabaseEnabled: auth.enabled,
-    developmentAccessEnabled: config.localEntitlements,
-    readOnly: config.readOnly,
-    providers: await auth.providerAvailability(),
-  }));
+  server.get("/auth/config", async () => {
+    const providers = await auth.providerAvailability();
+    return {
+      supabaseEnabled: auth.enabled,
+      developmentAccessEnabled: config.localEntitlements,
+      readOnly: config.readOnly,
+      // Supabase only says sign-up is open; whether a link can reach anyone
+      // is this deployment's call.
+      providers: { ...providers, emailMagicLink: providers.emailMagicLink && config.emailSignInEnabled },
+    };
+  });
 
   server.get("/integrations/extension/compatibility", async () => ({
     bridge: CHROME_BRIDGE_MARKER,
@@ -1285,7 +1290,9 @@ function registerOrganizationRoutes(server: FastifyInstance, _config: ApiConfig,
         properties: { role },
       }),
     ]);
-    return reply.code(201).send({ invitationId: data.id, expiresAt });
+    // The pilot sends no email, so the inviting admin shares this link; the
+    // invitee still has to sign in as the invited address to accept it.
+    return reply.code(201).send({ invitationId: data.id, expiresAt, inviteUrl: `${_config.appUrl}/invite/${rawToken}` });
   });
 
   server.delete<{ Params: { invitationId: string } }>("/organization/invitations/:invitationId", async (request, reply) => {
@@ -2425,8 +2432,21 @@ async function queueTrialNotifications(
   );
 }
 
+// An email that could not go out within a day of its time is canceled, not
+// sent late: without an email provider (the pilot has none) queued reminders
+// and invitations would otherwise pile up and all go out the day one is added.
+const NOTIFICATION_STALE_MS = 24 * 60 * 60 * 1_000;
+
 async function deliverNotifications(config: ApiConfig, auth: AuthService) {
-  if (!auth.client || !config.email.resendApiKey) return { configured: false, sent: 0, failed: 0 };
+  if (!auth.client) return { configured: false, sent: 0, failed: 0, expired: 0 };
+  const { data: expiredJobs, error: expireError } = await auth.client
+    .from("notification_jobs")
+    .update({ status: "canceled", last_error: "NOT_SENT_IN_TIME" })
+    .eq("status", "queued")
+    .lt("send_after", new Date(Date.now() - NOTIFICATION_STALE_MS).toISOString())
+    .select("id");
+  const expired = expiredJobs?.length ?? 0;
+  if (!config.email.resendApiKey) return { configured: false, sent: 0, failed: expireError ? 1 : 0, expired };
   const { data: jobs } = await auth.client
     .from("notification_jobs")
     .select("*")
@@ -2480,7 +2500,7 @@ async function deliverNotifications(config: ApiConfig, auth: AuthService) {
       failed += 1;
     }
   }
-  return { configured: true, sent, failed };
+  return { configured: true, sent, failed: failed + (expireError ? 1 : 0), expired };
 }
 
 async function expireDiagnostics(auth: AuthService) {

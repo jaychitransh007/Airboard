@@ -33,14 +33,14 @@ const baseEnv = {
   AIRBOARD_CHROME_EXTENSION_ENABLED: "true",
 };
 
-function launchReport(overrides = {}) {
+function launchReport(overrides = {}, scope = "chrome-public") {
   const env = { ...process.env, ...baseEnv, ...overrides };
   for (const [name, value] of Object.entries(overrides)) {
     if (value === undefined) delete env[name];
   }
   const result = spawnSync(
     process.execPath,
-    ["scripts/launch-ready-check.mjs", "--scope=chrome-public", "--json"],
+    ["scripts/launch-ready-check.mjs", `--scope=${scope}`, "--json"],
     { cwd: root, env, encoding: "utf8" },
   );
   assert.notEqual(result.status, 2, result.stderr);
@@ -118,6 +118,13 @@ test("Chrome launch configuration rejects oversized, mismatched, and unsafe orig
       "https://chromewebstore.google.com/detail/airboard/abcdefghijklmnop",
   });
   assert.equal(configurationCheck(malformedStoreReport, "chrome-store-url")?.passed, false);
+});
+
+test("the controlled pilot needs no email sender; wider releases do", () => {
+  const withoutEmail = { RESEND_API_KEY: undefined, AIRBOARD_EMAIL_FROM: undefined };
+  assert.equal(configurationCheck(launchReport(withoutEmail, "controlled-pilot"), "lifecycle-email"), undefined);
+  assert.equal(configurationCheck(launchReport(withoutEmail, "standalone-ga"), "lifecycle-email").passed, false);
+  assert.equal(configurationCheck(launchReport({}, "standalone-ga"), "lifecycle-email").passed, true);
 });
 
 test("the board socket URL follows the API URL unless AIRBOARD_WS_URL overrides it", () => {

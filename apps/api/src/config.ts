@@ -15,6 +15,12 @@ export type ApiConfig = {
   readOnly: boolean;
   /** Share live-board events across API instances through Supabase Realtime (AIRBOARD_REALTIME_FANOUT, on unless "off"). */
   realtimeFanOut: boolean;
+  /**
+   * Offer email sign-in links (AIRBOARD_EMAIL_SIGN_IN_ENABLED). Off in
+   * production unless set to "true": Supabase's built-in mailer reaches only
+   * the project's own team, and the pilot signs people in with Google.
+   */
+  emailSignInEnabled: boolean;
   chromeExtensionEnabled: boolean;
   /** Exact reviewed Chrome Web Store package ID; required when enabled in production. */
   chromeExtensionId?: string;
@@ -116,6 +122,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     localEntitlements: !isProduction && env.AIRBOARD_LOCAL_ENTITLEMENTS !== "false",
     readOnly: env.AIRBOARD_READ_ONLY === "true",
     realtimeFanOut: env.AIRBOARD_REALTIME_FANOUT !== "off",
+    emailSignInEnabled: isProduction
+      ? env.AIRBOARD_EMAIL_SIGN_IN_ENABLED === "true"
+      : env.AIRBOARD_EMAIL_SIGN_IN_ENABLED !== "false",
     chromeExtensionEnabled,
     ...(chromeExtensionId ? { chromeExtensionId } : {}),
     chromeExtensionCompatibleVersions,

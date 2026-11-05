@@ -37,10 +37,43 @@ export function parseSupabaseAuthSettings(value: unknown): AuthProviderAvailabil
   };
 }
 
+/** What the sign-in page offers for the available providers. */
+export function signInOptions(providers: AuthProviderAvailability) {
+  const social = providers.google || providers.microsoft;
+  return {
+    intro: providers.emailMagicLink
+      ? social ? "Use your work identity or a secure email link." : "Use a secure email link."
+      : providers.microsoft ? "Use your work identity." : "Continue with your Google account.",
+    showDivider: providers.emailMagicLink && social,
+    showEmailForm: providers.emailMagicLink,
+  };
+}
+
+/** The sign-in options the API reports; it knows whether email links can be delivered. */
+export function parseApiAuthProviders(value: unknown): AuthProviderAvailability | null {
+  const config = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const providers = config.providers && typeof config.providers === "object"
+    ? config.providers as Record<string, unknown>
+    : null;
+  if (!providers) return null;
+  return {
+    google: providers.google === true,
+    microsoft: providers.microsoft === true,
+    emailMagicLink: providers.emailMagicLink === true,
+  };
+}
+
 export async function fetchAuthProviderAvailability(
   fetcher: typeof fetch = fetch,
 ): Promise<AuthProviderAvailability> {
   if (!AUTH_CONFIGURED) return { google: false, microsoft: false, emailMagicLink: false };
+  try {
+    const response = await fetcher(`${AIRBOARD_API_URL}/auth/config`);
+    const providers = response.ok ? parseApiAuthProviders(await response.json()) : null;
+    if (providers) return providers;
+  } catch {
+    // Fall back to Supabase's own settings below.
+  }
   try {
     const response = await fetcher(`${SUPABASE_URL}/auth/v1/settings`, {
       headers: { apikey: SUPABASE_ANON_KEY },

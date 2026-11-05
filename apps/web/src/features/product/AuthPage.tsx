@@ -7,6 +7,7 @@ import { useAirboardAuth } from "../../platform/auth";
 import {
   fetchAuthProviderAvailability,
   safeAppPath,
+  signInOptions,
   type AuthProviderAvailability,
 } from "../../platform/config";
 import { MAGIC_LINK_RESEND_SECONDS, magicLinkFailureMessage } from "./magicLinkRequest";
@@ -26,6 +27,7 @@ export function AuthPage({ mode }: { mode: "login" | "signup" }) {
     microsoft: false,
     emailMagicLink: true,
   });
+  const options = signInOptions(providers);
   const next = safeAppPath(search.get("next"));
   const reason = search.get("reason");
 
@@ -105,7 +107,7 @@ export function AuthPage({ mode }: { mode: "login" | "signup" }) {
         </section>
         <section className="auth-card">
           <h2>{mode === "signup" ? "Create your account" : "Sign in"}</h2>
-          <p>{providers.google || providers.microsoft ? "Use your work identity or a secure email link." : "Use a secure email link."}</p>
+          <p>{options.intro}</p>
           {providers.google ? (
             <button className="auth-provider" disabled={busy} onClick={() => void oauth("google")}>
               <span>G</span> Continue with Google
@@ -116,8 +118,8 @@ export function AuthPage({ mode }: { mode: "login" | "signup" }) {
               <span className="microsoft-mark">■</span> Continue with Microsoft
             </button>
           ) : null}
-          {providers.google || providers.microsoft ? <div className="auth-divider"><span>or</span></div> : null}
-          {sentTo ? (
+          {options.showDivider ? <div className="auth-divider"><span>or</span></div> : null}
+          {!options.showEmailForm ? null : sentTo ? (
             <div className="auth-sent" role="status">
               <h3>Check your inbox</h3>
               <p>We sent a sign-in link to <strong>{sentTo}</strong>.</p>
