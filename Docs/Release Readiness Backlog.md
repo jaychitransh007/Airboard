@@ -635,3 +635,25 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - **Production:** the pages and API `/ready` pass, and the new revision logged no errors.
     - **Rollback:** web to `launch-6d2bb10`.
   - **Release script:** `promote` now prints only the serving revision. The services still carry old tagged revisions (24 web, 16 API) that stay reachable at their own addresses.
+- **2026-11-05** — Calmer board (commits `c68493b`, `6c4ca43`). The owner found the board too crowded with the camera on, Airo listening and a section selected.
+  - **Top bar:** Share plus one menu (**•••**). Airo voice and hands, the screen background, undo and redo, diagram visibility, the exports, board settings, help and Move to Trash all live in the menu. The menu now opens above the settings drawer; before, the drawer covered it.
+  - **Airo:**
+    - While Airo is on, its panel is a corner strip: what it heard, what it is doing, and a one-line composer. **⤢** shows the activity and **⤡** shrinks it again.
+    - The on/off switch (**⏻**) is on the panel.
+    - A camera that is still starting counts as on, so the panel doesn't flip between strip and full while hand tracking loads.
+  - **Element toolbar:**
+    - Compact by default: kind, colour swatches, order, duplicate, delete and **More**.
+    - **More** shows every field (size, rotation, lock and the kind-specific controls), and **Less** goes back.
+    - It floats above the selection, or below it near the top bar, and stays clear of the dock (`contextToolbarPosition`). This also ends the clipped Fill, Border and Width labels.
+  - **Zoom:** at the end of the tool dock. Phones hide it and pinch instead. The dock's breakpoints beside open panels moved for its new width (675px).
+  - **Help:** the voice, screen and pointer articles describe the new controls.
+  - **Build fix:** the web build's command-contract check looked for a literal `className="canvas-copilot"`, now conditional, so the first image build failed. The check now looks for the panel's test id, and the capability evidence names the renamed top-bar test. This failure was missed because the full web build was not run locally before the commit; typecheck, lint and tests all passed.
+  - **Tests:**
+    - Web unit tests: 386.
+    - Script tests: 182. The PR evals, docs check and local web build pass.
+    - Full e2e: 59 passed and 2 skipped. New `boardLayout.spec.ts` covers the floating toolbar, the Airo strip and the dock zoom, and passed 3 of 3 runs.
+    - Screenshots were reviewed with a fake camera at 1000×650.
+  - **Deployed** with `infra/cloud-run/release.sh`: web `airboard-pilot-web-launch-6c4ca43` at 100%. The API is unchanged at `launch-87aec6f`.
+    - **Tagged smoke:** revision max 1 and no revision minimum. 7 pages returned 200. The bundles carry the strip, dock zoom and menu changes and reference only Mumbai. The screen help article shows the new wording.
+    - **Production:** the pages and API `/ready` pass, and the new revision logged no errors.
+    - **Rollback:** web to `launch-f33b2cb`.
