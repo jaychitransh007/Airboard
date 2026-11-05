@@ -128,7 +128,7 @@ It would be slower than today and would tie the two apps together.
 ### Phase 2 — Cut-over (about 30–45 minutes, in a quiet hour)
 
 1. Pause the Cloud Scheduler lifecycle job.
-2. Turn on the read-only switch: `gcloud run services update airboard-pilot-api --update-env-vars AIRBOARD_READ_ONLY=true` (a new revision; about a minute). Live connections still open on the old revision only write session events, not saved boards, because board saves go through the API.
+2. Turn on the read-only switch with two commands: `gcloud run services update airboard-pilot-api --project=project-1217dd57-9cac-491d-b8d --region=asia-south1 --update-env-vars AIRBOARD_READ_ONLY=true`, then `gcloud run services update-traffic airboard-pilot-api --project=project-1217dd57-9cac-491d-b8d --region=asia-south1 --to-latest`. About a minute. Deploys pin traffic to a named revision, so the settings change alone creates a revision that gets no traffic; the second command sends traffic to it. Every later deploy copies the service's saved settings, so turn the switch off the same way before deploying again. Confirm `/auth/config` reports `readOnly: true`. Live connections still open on the old revision only write session events, not saved boards, because board saves go through the API.
 3. Copy the data. Following [Supabase's backup and restore guide](https://supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore), but data-only because Phase 0 built the schema:
    ```bash
    supabase db dump --db-url "$OLD" -f data.sql --use-copy --data-only \
@@ -155,7 +155,7 @@ It would be slower than today and would tie the two apps together.
 
 ### Phase 3 — Rollback
 
-- **Before promotion:** turn the read-only switch off on the current API (`--update-env-vars AIRBOARD_READ_ONLY=false`). The old project was never changed.
+- **Before promotion:** turn the read-only switch off on the current API (`gcloud run services update airboard-pilot-api --project=project-1217dd57-9cac-491d-b8d --region=asia-south1 --update-env-vars AIRBOARD_READ_ONLY=false`, then `gcloud run services update-traffic airboard-pilot-api --project=project-1217dd57-9cac-491d-b8d --region=asia-south1 --to-latest`). The old project was never changed.
 - **After promotion:** route traffic back to the current revisions, which still point at the old project. Anything written on the new project since cut-over would be lost, so this is only for the first hour. After that, fix forward.
 - Keep the old project untouched, then paused, for 14 days before deleting it (your decision).
 
