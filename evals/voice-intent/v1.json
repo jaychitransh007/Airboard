@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0",
-  "semanticPromptVersion": "2.10",
+  "semanticPromptVersion": "2.11",
   "description": "Airboard semantic voice-intent regression corpus for production plan contract 1.1 and semantic prompt 2.8. Every case is an independently replayable finalized voice turn.",
   "cases": [
     {
