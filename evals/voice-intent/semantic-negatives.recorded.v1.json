@@ -1,12 +1,12 @@
 {
   "schemaVersion": "airboard-semantic-negative-recordings.v1",
   "description": "One live provider answer per ambient meeting case, replayed offline by eval-semantic-negatives.mjs --replay.",
-  "recordedAt": "2026-11-05T16:18:39.459Z",
+  "recordedAt": "2026-11-05T16:35:22.872Z",
   "model": "gpt-5.6-luna",
   "answers": [
     {
       "caseId": "ambient-standup-01",
-      "requestHash": "sha256:7b62d44cace5d18ab33530eb5aa7eafa4de00fde67ac2fa7304e78016733dce8",
+      "requestHash": "sha256:3015fea1d84211520e9f9e6ac67fcbdbc4047b19c304062a224cf909984515d7",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -21,7 +21,7 @@
     },
     {
       "caseId": "ambient-standup-02",
-      "requestHash": "sha256:a18c159ec716f44f1006d83cdfbf8556e1b49ab9dcceb0ea3562efd12a1d968f",
+      "requestHash": "sha256:57e8a066d0d2fbb1e4b3eae79d9895e8d6033dffdc65bb6d0da453bc888399b8",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -36,7 +36,7 @@
     },
     {
       "caseId": "ambient-standup-03",
-      "requestHash": "sha256:ba23b224c0b583130a921913b79d010d93154e100b25f5c25e071033e5b6e001",
+      "requestHash": "sha256:ad859fdacddc7ecab7a7c593f5e05a00814691bc9731360a6a1b77a83890486a",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -51,7 +51,7 @@
     },
     {
       "caseId": "ambient-planning-01",
-      "requestHash": "sha256:bb956dc95593ee47f9901b06f422338b6475d23a525bf875e2b1aa5ff67c0e9e",
+      "requestHash": "sha256:64b174508c6f40d5cbaf67c545f251916ffe54ee4ba51bdf275e8461ebbb7196",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -66,7 +66,7 @@
     },
     {
       "caseId": "ambient-planning-02",
-      "requestHash": "sha256:d65344a54e0766888f1c48fe2e65ce6347148d35679d0c0ea08e767552572ffd",
+      "requestHash": "sha256:e878835db5ef73f0d5a8ec3802926ab5fe4b6ce47e9a3b535741bf0c7989d1dc",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -81,7 +81,7 @@
     },
     {
       "caseId": "ambient-planning-03",
-      "requestHash": "sha256:e4c0857ea434387c782e8268bc6e9aa89c8254b49c36f7391dd58e5a990077df",
+      "requestHash": "sha256:2de5ace69a6495eb43da8478aa129d2fda2b565a523980dc4af00bfcdea8d6e6",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -96,7 +96,7 @@
     },
     {
       "caseId": "ambient-planning-04",
-      "requestHash": "sha256:4ebe5dfbe980c6198d68e9b6c7067b3a37a75b591bf2a263ced4b32c5513537c",
+      "requestHash": "sha256:5f21ab5cd589d8a2ad8a40f06604efdd5d26eeafda6e0b723c6ee4da3b1f56e0",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -111,7 +111,7 @@
     },
     {
       "caseId": "ambient-planning-05",
-      "requestHash": "sha256:4badb0c829d193e7a1f5c9f4ebf26aaa2157e8c69b4e44d8aa82f65428c963b1",
+      "requestHash": "sha256:aaa492e10180ae19b22bdaed05bfb212d36fd9c73711a71d61e4df398bf7ac0a",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -126,7 +126,7 @@
     },
     {
       "caseId": "ambient-planning-06",
-      "requestHash": "sha256:b3793156396bc2adbf5a7097c3b30434a608075f2f2855c400b3eba22b45302b",
+      "requestHash": "sha256:387a85395cc0a76b5c176b9d35715aa87f26131176809981461d0a5aa51e2ccb",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -141,7 +141,7 @@
     },
     {
       "caseId": "ambient-planning-07",
-      "requestHash": "sha256:b7fab1000c05120e931aff70830b9f0fe39efd825714ed54967a70d57f93cf22",
+      "requestHash": "sha256:ac3a6d29ee7937f4b2105e51edf2d5da2e2a651d99dc1af2ac772ced2f8912c5",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -156,7 +156,7 @@
     },
     {
       "caseId": "ambient-planning-08",
-      "requestHash": "sha256:3f78d340a75cf11444f5a719125c3dc2b4fb2d3fd060e7d7bcbd95fb8c45ab5d",
+      "requestHash": "sha256:9842696951a3d97a0437b01f0725d6ff2f169fbfa09a687fba0196d5f1027f64",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -171,7 +171,7 @@
     },
     {
       "caseId": "ambient-architecture-01",
-      "requestHash": "sha256:c4ee3ba2f555d1ad6241e3f7c497a4e8836ac6c2a537d8becccf5fce1288cdbc",
+      "requestHash": "sha256:2c362575644c7a5e5485812006d8cf1ad0748c74e78954b47f40c4234557eab3",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -179,14 +179,29 @@
           {
             "type": "function_call",
             "name": "propose_diagram_plan",
-            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+            "arguments": "{\"version\":\"1.1\",\"status\":\"resolved\",\"issueCode\":\"none\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
           }
         ]
       }
     },
     {
       "caseId": "ambient-architecture-02",
-      "requestHash": "sha256:96c728ee1c49a71d722dbc20098a266fc281a98b0e9f9801542ae001351a2f56",
+      "requestHash": "sha256:b8160523f055ccc3336de08002c83f592e6df9e1e97a857b9e82a2b2c38b9abe",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.6-luna",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"clarification\",\"issueCode\":\"ambiguous_reference\",\"clarificationQuestion\":\"Which service and database should be connected, and should the queue be the intermediary (service → queue → database)?\",\"missingSlots\":[\"source\",\"target\"],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-architecture-03",
+      "requestHash": "sha256:baf2f6a875f958c1f9836af06cc0202f3d567225180e539591d46a9a7dd97f75",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -200,23 +215,8 @@
       }
     },
     {
-      "caseId": "ambient-architecture-03",
-      "requestHash": "sha256:2ed0e5b4a12bb3f27dd09e79f6db6657bd448f0b2ff54d4a0e956d7940a3a5b6",
-      "response": {
-        "status": "completed",
-        "model": "gpt-5.6-luna",
-        "output": [
-          {
-            "type": "function_call",
-            "name": "propose_diagram_plan",
-            "arguments": "{\"version\":\"1.1\",\"status\":\"clarification\",\"issueCode\":\"missing_source\",\"clarificationQuestion\":\"Which existing board object should the gateway route requests to first?\",\"missingSlots\":[\"source\"],\"actions\":[]}"
-          }
-        ]
-      }
-    },
-    {
       "caseId": "ambient-architecture-04",
-      "requestHash": "sha256:1d143bc549686e5174f38bac892476aadeab585af142a86ebe502e03ad702185",
+      "requestHash": "sha256:43ca2cea6be957b0ea6764c94da44a0448e2942c78fc19250c74f2ec40e3fe89",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -231,7 +231,7 @@
     },
     {
       "caseId": "ambient-architecture-05",
-      "requestHash": "sha256:78d25815fe7cd1867179cd6758f49eb3d57b77f0cc439eb29b8dbf0b2fa16c8d",
+      "requestHash": "sha256:07971dd119c745297cdeac069ffac5139fa866f85913afa61c36d65b3e83aa18",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -239,14 +239,14 @@
           {
             "type": "function_call",
             "name": "propose_diagram_plan",
-            "arguments": "{\"version\":\"1.1\",\"status\":\"clarification\",\"issueCode\":\"ambiguous_reference\",\"clarificationQuestion\":\"Which arrow should I reverse: User → Payment API, Payment API → Ledger Database, or Billing Service → Orders Queue?\",\"missingSlots\":[\"object_reference\"],\"actions\":[]}"
+            "arguments": "{\"version\":\"1.1\",\"status\":\"clarification\",\"issueCode\":\"ambiguous_reference\",\"clarificationQuestion\":\"Which arrow should I reverse? Please name its source and target, such as User to Payment API.\",\"missingSlots\":[\"object_reference\"],\"actions\":[]}"
           }
         ]
       }
     },
     {
       "caseId": "ambient-architecture-06",
-      "requestHash": "sha256:d55b1b4020c759d44be7bacf61167090486b0119d06fbd5bd31d81e85d296512",
+      "requestHash": "sha256:d845e6fef6947b08401f5ee1104a29c1cc78dad23355030418ad12e3de5d1e78",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -254,14 +254,14 @@
           {
             "type": "function_call",
             "name": "propose_diagram_plan",
-            "arguments": "{\"version\":\"1.1\",\"status\":\"clarification\",\"issueCode\":\"missing_context\",\"clarificationQuestion\":\"Which worker object(s) should the queue be between? No worker is visible on the board, and should I create the queue and the worker(s) or only connect existing objects?\",\"missingSlots\":[\"source\",\"target\",\"node_type\"],\"actions\":[]}"
+            "arguments": "{\"version\":\"1.1\",\"status\":\"clarification\",\"issueCode\":\"missing_source\",\"clarificationQuestion\":\"Which worker object should the queue connect to, and should I create a new queue or use the existing Orders Queue?\",\"missingSlots\":[\"source\",\"target\"],\"actions\":[]}"
           }
         ]
       }
     },
     {
       "caseId": "ambient-architecture-07",
-      "requestHash": "sha256:4566b7d0d8d812d31f11a00b816a29a073f49c2c79f4734d0a0ee04e606b5a64",
+      "requestHash": "sha256:2e767c4c8232a4910a754b0104c69f6d698b5dbb7ddf4fbd127e1b484e662ef8",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -276,7 +276,7 @@
     },
     {
       "caseId": "ambient-architecture-08",
-      "requestHash": "sha256:cf6111ecad62be17c9f4b809628d4838fb22343fa374289f2c818922c5b64d2b",
+      "requestHash": "sha256:00d5ee2f88c253ffafe27b7677de2ce68eb68cb6753118ce9b2e806ff475781b",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -291,7 +291,7 @@
     },
     {
       "caseId": "ambient-chitchat-01",
-      "requestHash": "sha256:e235e7c89570e9cf8deb993ecf915a283285268ef88a78e4f4f1f4ec7282a341",
+      "requestHash": "sha256:57b9a54372ccd6d6004ded339b0542318475ee80058d4f2debd248c4b16ab016",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -306,7 +306,7 @@
     },
     {
       "caseId": "ambient-chitchat-02",
-      "requestHash": "sha256:960d21bf9c3c1c8bbf61689d61ad65976541f163dc02ed00f5a7cb5b105eda77",
+      "requestHash": "sha256:5bfc9cdd86adc474af9ea7956ca5f5d4ed57fb6c0acbecfa028a037ce0a1d5b8",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -321,7 +321,7 @@
     },
     {
       "caseId": "ambient-chitchat-03",
-      "requestHash": "sha256:7e756e6c36f5f70721fa2789b04a3860d23bf3b7854d41ac79bcf1dc5014b951",
+      "requestHash": "sha256:9f738ee671405b09c2f89cbd5d3d1ece878659a31210e3fba70b4cecbe7fb19c",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -336,7 +336,7 @@
     },
     {
       "caseId": "ambient-chitchat-04",
-      "requestHash": "sha256:9318c527db112718ad55f0e8366dda1b622e05f36552e7a504654b983627685b",
+      "requestHash": "sha256:cd6fea089c9cf0e74062c9ce445cc725ffbe17c133b18c93d5159204527070d7",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -351,7 +351,7 @@
     },
     {
       "caseId": "ambient-chitchat-05",
-      "requestHash": "sha256:fd148c510c8b831cdcfa13b0e9d76f38cdc455a44d0dc01bdbf0f0b7daf8f5f0",
+      "requestHash": "sha256:91bb4fa26765c61b2a587488852fb14738500bedc215989f5fece1df040b3d38",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -366,7 +366,7 @@
     },
     {
       "caseId": "ambient-chitchat-06",
-      "requestHash": "sha256:2a70585c300e77efbf30abd86fcd7442754770e466130c6e1583f2d498e6282f",
+      "requestHash": "sha256:2f6492fed599fa6a0c905a08b8255de409c1a41b9a005b26d595f9a821969580",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -381,7 +381,7 @@
     },
     {
       "caseId": "ambient-chitchat-07",
-      "requestHash": "sha256:ecf60167ee8201d9f60f0b90a32e16af9322a7b2a7eaca059652ed1a4d9a2c7f",
+      "requestHash": "sha256:0f4c8f60ece2d5ca115118048d1af9c05cb1aeb7527255880578f7e8f617f051",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -396,7 +396,7 @@
     },
     {
       "caseId": "ambient-chitchat-08",
-      "requestHash": "sha256:7435b21a96338a6aa0b6b20d9bbdd3862afecf39f207fc2b6139d2fff716fc78",
+      "requestHash": "sha256:2640bd0fea9d9f0db0d2a1794ad31e389f214fbdd14c815459cdd19fb6120051",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -411,7 +411,7 @@
     },
     {
       "caseId": "ambient-review-01",
-      "requestHash": "sha256:2d139dbf6ef6e3bda86a8664c17738581fb6e52759cf11b3b1db8e23eabd7f21",
+      "requestHash": "sha256:943de1f3b180dc62e20f2c4126b2325b48f855cf55e2342ac5523850791b978e",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -426,7 +426,7 @@
     },
     {
       "caseId": "ambient-review-02",
-      "requestHash": "sha256:4555c762e58ad83fe5eea1c9dcce64b086357ec1713b1b7d59d70e98ba665a03",
+      "requestHash": "sha256:2b86f09dba8a13e13cc2e13e80ec52b6d5a531b565b78170aa161a3c5b6eaeef",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -441,7 +441,7 @@
     },
     {
       "caseId": "ambient-review-03",
-      "requestHash": "sha256:f1356d7991a99301628c8bf6eaa6b15dd3905dd30084e13c4c1401732b902073",
+      "requestHash": "sha256:fd48d9f80937590bca2b59cf5e2be387572d15b8001a4f1940e3acbdb9f57e7c",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -456,7 +456,7 @@
     },
     {
       "caseId": "ambient-review-04",
-      "requestHash": "sha256:7f52dbd1cfb99793670624fa53b200bfab72f617b6e1b03b034435ae7f7790b0",
+      "requestHash": "sha256:2619f95a3ff481170519ffb2f0fb7741b0c192f6f643650c515e59ef82624ff6",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -471,7 +471,7 @@
     },
     {
       "caseId": "ambient-review-05",
-      "requestHash": "sha256:3d63b153d4531f2923ec18d74aead4f52eea85e86e019f92902d53d52a31b5c0",
+      "requestHash": "sha256:5cbf08600c88302837f1fdfe440be3e44c316fe5e806cd129510c335aabc0c36",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -486,7 +486,7 @@
     },
     {
       "caseId": "ambient-phonetic-01",
-      "requestHash": "sha256:843678273083d28bbc8ee5346e863d18f9dd7d508477e99377f4eedb427b646a",
+      "requestHash": "sha256:c23e33b1cf344ea16e78fe22ef31e410036b6b4624bc7c2271f83192c4bd4132",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -501,7 +501,7 @@
     },
     {
       "caseId": "ambient-phonetic-02",
-      "requestHash": "sha256:88f6dd33eb93612246dd5d6adcbb2bd8097d55976e50167fa0bb2a449b907193",
+      "requestHash": "sha256:1d5a5f3c428276fdbda3eb9336931ac6b3b52483da73cc449f90f5fadbc57090",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -516,7 +516,7 @@
     },
     {
       "caseId": "ambient-phonetic-03",
-      "requestHash": "sha256:f2ef08b5f5d8a45ee47ddb6d5f38a635590f6907699402f95c42c0e9d535f291",
+      "requestHash": "sha256:421ed0c51291f0c07e3077066c185e71145af09b6d3a86d3bfcaf3770228bf28",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -531,7 +531,7 @@
     },
     {
       "caseId": "ambient-phonetic-04",
-      "requestHash": "sha256:b5dc751ed5db0669b3c54f64b5b7ec91f4ec0cb3c9b7ad58dcaf808802077e79",
+      "requestHash": "sha256:7a66210c8b3ca351db09c6b1646e3c67341bdb4a2f954b4e1edd49e94385b4a3",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -546,7 +546,7 @@
     },
     {
       "caseId": "ambient-imperative-01",
-      "requestHash": "sha256:bc0c558ad389f1c3788e160f2e77aee28b64c53b24451edfb054be916b6235b4",
+      "requestHash": "sha256:c4e22c0a5f82d2f66c479faedd0be0c767fdb10c7f27415db2a9bcc9c35171c3",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -561,7 +561,7 @@
     },
     {
       "caseId": "ambient-imperative-02",
-      "requestHash": "sha256:c977733ac8b2a22f307ccdc83198b07647d711af938822e8bdcbea870ef65de1",
+      "requestHash": "sha256:685a312dbdfbabf8bdb33860876802bac01cd885c1cfc244808ca54aae8d4945",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -576,7 +576,7 @@
     },
     {
       "caseId": "ambient-imperative-03",
-      "requestHash": "sha256:8a42f9c4e796dd5f7ba77dea962b75f569c1a3e2880a20e455d86934ec1badfb",
+      "requestHash": "sha256:95252bc518b8a395d1a53918c4c586191caacf725e95b759fccd5141ba097ada",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -591,7 +591,7 @@
     },
     {
       "caseId": "ambient-imperative-04",
-      "requestHash": "sha256:801a0bdaf72065a0df9bd58a63a319a3fae51127e312275b830c66e3c5297877",
+      "requestHash": "sha256:f54b95d58873d4d071077ad03fd5a41ab6812cb5237930d0b50309b9de107e44",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -606,7 +606,7 @@
     },
     {
       "caseId": "ambient-imperative-05",
-      "requestHash": "sha256:2efafbb6e3a1e25a5c8d874e408e9e92ba456aab79e91a3b6bd281e3d2890216",
+      "requestHash": "sha256:e92a5fc769a63263e89b0ba805f6111ae70e2f38375ce9ae46fe9a56822b380b",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -614,14 +614,14 @@
           {
             "type": "function_call",
             "name": "propose_diagram_plan",
-            "arguments": "{\"version\":\"1.1\",\"status\":\"clarification\",\"issueCode\":\"missing_context\",\"clarificationQuestion\":\"What node type should the new “Churn” item be, and where should it be placed relative to “Revenue”?\",\"missingSlots\":[\"node_type\",\"placement\"],\"actions\":[]}"
+            "arguments": "{\"version\":\"1.1\",\"status\":\"clarification\",\"issueCode\":\"missing_context\",\"clarificationQuestion\":\"What board shape should I insert for “churn,” and should it be placed to the right of the Revenue object?\",\"missingSlots\":[\"node_type\",\"object_reference\",\"placement\"],\"actions\":[]}"
           }
         ]
       }
     },
     {
       "caseId": "ambient-imperative-06",
-      "requestHash": "sha256:26d19bcad0bda45cd26338c1cdb2152e38a00826cd7e6133a0e6fc19e9d9a5eb",
+      "requestHash": "sha256:842ff9c985df8fb2e0db287d555a1bfaed65c8253e73ace440619ba7970a5c91",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -636,7 +636,7 @@
     },
     {
       "caseId": "ambient-shapes-01",
-      "requestHash": "sha256:a4bcb79d22bf40ec494b019a2c4f6dbd7671715027716f7a3ee4849891ce443f",
+      "requestHash": "sha256:56e3a26e644f967b7b7d18cb1c267eb861136f345d52297320ee0d4e781b6ca5",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -651,7 +651,7 @@
     },
     {
       "caseId": "ambient-shapes-02",
-      "requestHash": "sha256:f36ce76fd048f3a3dd3c577e6a8d92bd64e87bd3638905d56499cbdf88dc593f",
+      "requestHash": "sha256:3c01084cfd7a6a86e509c669f3de3e0ab1aabbff7ee2cbecfed6c175eb94ecf1",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -666,7 +666,7 @@
     },
     {
       "caseId": "ambient-shapes-03",
-      "requestHash": "sha256:dec0936ffc7fdebdc1851119e2cbdaf4dd779d88b2d3faa9a9c8a853f4f51e0b",
+      "requestHash": "sha256:95c1e7c1f2bb7428637ddf281dcc7b348108eba7ff4067b4551808ddea652d44",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -681,7 +681,7 @@
     },
     {
       "caseId": "ambient-shapes-04",
-      "requestHash": "sha256:2aec9d7baf1a6c1cb535271885f79f4c6e5e3277f7d2c9efe5384a67d27fb281",
+      "requestHash": "sha256:2008cb99e088af5ca319b1b58cc3723cc31f5b0f8acd437ee2843b65c28935a8",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -696,7 +696,7 @@
     },
     {
       "caseId": "ambient-shapes-05",
-      "requestHash": "sha256:e7ef6ae699ed18bdd32e3f47beb419167e53fc90a9e757a6f0a5090bc43fecc4",
+      "requestHash": "sha256:98348e957d3129ba5c395839519a0019de8ff21c3a2424fbe1ff14c722e68ac8",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -711,7 +711,7 @@
     },
     {
       "caseId": "ambient-shapes-06",
-      "requestHash": "sha256:cc36d988553ab1557b8319e94519641ead12ffb1fb830a57d46898f8869d9559",
+      "requestHash": "sha256:144aa9248233ceeca5cd022c4da8ff2ccceae663eaf5a528af66cfd14a120d9d",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -726,7 +726,7 @@
     },
     {
       "caseId": "ambient-shapes-07",
-      "requestHash": "sha256:c73a274a107c13ab5aae70d5d7ad895f47dd0ec6c8453d754184ea8fde072c0a",
+      "requestHash": "sha256:7a23406fecc55da5c030fdc0ad52f6f1ca2206449159721594addaea8eab439f",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -741,7 +741,7 @@
     },
     {
       "caseId": "ambient-parity-01",
-      "requestHash": "sha256:d47df5f5e18295669868b421df601cf1614d2dff0b7416cd2f3d838c2c573352",
+      "requestHash": "sha256:525bf335753e33a8333de850a9c77e43beb46dc426d5164db88175a348d32655",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -749,14 +749,14 @@
           {
             "type": "function_call",
             "name": "propose_diagram_plan",
-            "arguments": "{\"version\":\"1.1\",\"status\":\"clarification\",\"issueCode\":\"ambiguous_reference\",\"clarificationQuestion\":\"Which two board objects should I disconnect?\",\"missingSlots\":[\"object_reference\"],\"actions\":[]}"
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
           }
         ]
       }
     },
     {
       "caseId": "ambient-parity-02",
-      "requestHash": "sha256:188cffee53c353eee614430c5096ed98bb235a4397252495847505823c155af8",
+      "requestHash": "sha256:40965bb02c4d984bce98edcde62d02497c8de82a24174c78f91af079105c3e92",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -771,7 +771,7 @@
     },
     {
       "caseId": "ambient-parity-03",
-      "requestHash": "sha256:f7eb0f415bdc5a4439765b4586ce215f3574c3cbe6ede20dd30a1d8316db0e09",
+      "requestHash": "sha256:5d5255797fe7c918b1ec813f7dae662958b9e2a16d0094b405e6e8e0d7798e8d",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -786,7 +786,7 @@
     },
     {
       "caseId": "ambient-parity-04",
-      "requestHash": "sha256:344cf01651c512826322fa14807af1b821bce341e102238829dcfefef6542fe8",
+      "requestHash": "sha256:c630a0805488fed2e7180fdd9d7aa2baf745373a5c83fa919067ea4bcab089c6",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -801,7 +801,7 @@
     },
     {
       "caseId": "ambient-parity-05",
-      "requestHash": "sha256:deb8229f7c9fe03da22c52b050d9c6d2ff38b18b8e9ebf5d272a981f215ccafe",
+      "requestHash": "sha256:6e6eddb41c7f0194ee6adcb31aeffcadce3e7a3fd9b72d80dda1f41a5971303c",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -816,7 +816,7 @@
     },
     {
       "caseId": "ambient-parity-06",
-      "requestHash": "sha256:850c5594767a978282d7f365635529cc188fbd301a210ec0eea81f9bf1c7ba34",
+      "requestHash": "sha256:955af4b5012412a55cff4c25e94f4fca6e20e6147ebf39e20a9295f70e150803",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -831,7 +831,7 @@
     },
     {
       "caseId": "ambient-parity-07",
-      "requestHash": "sha256:4a00eac84dbcd21a6f365f6e6b779fda4238a141b99c2e32a8f50949de1f8b81",
+      "requestHash": "sha256:e7d6181f1ace7642fccfaabcc90079d734c0f963c1f1d8b8551ca7013fa0ea24",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -846,7 +846,7 @@
     },
     {
       "caseId": "ambient-capability-reverse-connection",
-      "requestHash": "sha256:985634f966be800589f3e4d59eed518e4e335d29d864bf8b0c4accd6eea24074",
+      "requestHash": "sha256:2ab307aceca836de7808cb3df5e6e96e9c72e4fb97c22ee57c2ecbaf01d8dc71",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -861,7 +861,7 @@
     },
     {
       "caseId": "ambient-capability-distribute",
-      "requestHash": "sha256:aa273335c766a9e4406bc7605779e5bb65b778f62d32bc4349d3e7a219462aa2",
+      "requestHash": "sha256:836667e0345093c3d487b26bb21d6f705920be9ddc0ab15ddec33dff03d7ca0d",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -876,7 +876,7 @@
     },
     {
       "caseId": "ambient-capability-layout",
-      "requestHash": "sha256:4c440758d3978eb1c3e5d5c363af8534a4ad5a5dbd4ee2e5c9bf38884e9eb916",
+      "requestHash": "sha256:53984c0dc89539db973a6797ca8f431aed4b4ea395024c56ebb134c4cb87f489",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",
@@ -891,7 +891,7 @@
     },
     {
       "caseId": "ambient-capability-group-custom",
-      "requestHash": "sha256:954b5dc67127946b0143db462a06b9fadb8a10bbe6f4fbdadca01d37168d80e2",
+      "requestHash": "sha256:c739dca720260803ec866763a4f1a05476a0f6586cdd3751bd0bff7b228f12c5",
       "response": {
         "status": "completed",
         "model": "gpt-5.6-luna",

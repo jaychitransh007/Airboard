@@ -1,12 +1,12 @@
 {
   "schemaVersion": "airboard-semantic-negative-known.v1",
-  "description": "Meeting talk the production model (gpt-5.6-luna) does not leave alone, recorded 2026-11-05 with prompt 2.10 on the priority tier. scripts/eval-semantic-negatives.mjs --replay fails on any case not listed here with its outcome, so this list may only shrink unless a reviewed change adds to it. Tracked as RGB-038 in Docs/Release Readiness Backlog.md.",
+  "description": "Meeting talk the production model (gpt-5.6-luna) does not leave alone, recorded 2026-11-05 with prompt 2.11 on the priority tier. scripts/eval-semantic-negatives.mjs --replay fails on any case not listed here with its outcome, so this list may only shrink unless a reviewed change adds to it. Tracked as RGB-038 in Docs/Release Readiness Backlog.md.",
   "model": "gpt-5.6-luna",
   "cases": [
     {
-      "caseId": "ambient-architecture-03",
+      "caseId": "ambient-architecture-02",
       "outcome": "asks_clarification",
-      "answer": "clarification/missing_source"
+      "answer": "clarification/ambiguous_reference"
     },
     {
       "caseId": "ambient-architecture-05",
@@ -16,17 +16,12 @@
     {
       "caseId": "ambient-architecture-06",
       "outcome": "asks_clarification",
-      "answer": "clarification/missing_context"
+      "answer": "clarification/missing_source"
     },
     {
       "caseId": "ambient-imperative-05",
       "outcome": "asks_clarification",
       "answer": "clarification/missing_context"
-    },
-    {
-      "caseId": "ambient-parity-01",
-      "outcome": "asks_clarification",
-      "answer": "clarification/ambiguous_reference"
     },
     {
       "caseId": "ambient-chitchat-07",
@@ -37,6 +32,11 @@
       "caseId": "ambient-parity-06",
       "outcome": "wrong_issue",
       "answer": "unsupported/unsupported_operation"
+    },
+    {
+      "caseId": "ambient-architecture-01",
+      "outcome": "rejected",
+      "answer": "the API rejected the answer: Semantic intent provider returned an invalid diagram plan: A resolved plan requires at least one action."
     }
   ]
 }
