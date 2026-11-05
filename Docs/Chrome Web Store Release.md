@@ -39,7 +39,7 @@ The detailed description must explain that Airboard:
 5. sends microphone audio to the configured transcription provider only while
    Airo is enabled;
 6. can be disabled or uninstalled at any time; and
-7. may require a paid plan after the three-day trial.
+7. may require a paid plan after the one-month pilot.
 
 ## Permission and data-use declarations
 

@@ -4,7 +4,7 @@ Intent-driven diagram canvas for meetings, with typed, voice, pointer, and hand-
 
 ## Current Product Slice
 
-The current prototype is **Intent Canvas**: users describe a diagram change and it is applied instantly — by voice, gesture, or typed command — with no confirmation step. A finalized voice turn executes automatically; the collapsible translucent Airo panel on the right shows the live transcript, current system action, recent board-tool activity, and an optional typed composer. Undo is the safety net: use the toolbar, `Cmd/Ctrl+Z`, or say “Airo, undo”. To edit an existing element, grab it (or select it) and say what you want (e.g. "Airo, rename this to Payments"). Pointer and camera gestures are used for placement, selection, and precise object manipulation rather than mid-air freehand drawing.
+The current prototype is **Intent Canvas**: users describe a diagram change and it is applied instantly — by voice, gesture, or typed command — with no confirmation step. A finalized voice turn executes automatically. The Airo panel on the right shows the live transcript, current system action, recent board-tool activity and an optional typed composer; while Airo listens it shrinks to a strip in the corner. Undo is the safety net: use the ••• menu, `Cmd/Ctrl+Z`, or say “Airo, undo”. To edit an existing element, grab it (or select it) and say what you want (e.g. "Airo, rename this to Payments"). Pointer and camera gestures are used for placement, selection, and precise object manipulation rather than mid-air freehand drawing.
 
 See [Intent Canvas Implementation Notes](Docs/Intent%20Canvas%20Implementation%20Notes.md) for the supported commands, interaction model, test path, and current browser/hardware limits.
 
@@ -22,7 +22,7 @@ The local slice focuses on proving the Intent Canvas interaction before meeting-
 
 ## Screen and camera composition
 
-On the standalone surface, **Use screen** lets the user choose a screen or window as the live background. Airboard renders a light global dim plus local dark-glass plates behind diagram clusters, keeping slides readable without sacrificing neon contrast. There is no separate presentation wizard or clean-output mode: the regular canvas is the only standalone mode. Source selection is automatic—selected screen first, otherwise active camera, otherwise dark canvas. The selected screen is never uploaded by this flow, capture ends when the user stops it or the source ends, and studio recording uses the same unmirrored full-frame composition.
+On the standalone surface, **Show a screen behind the board** in the ••• menu lets the user choose a screen or window as the live background. Airboard renders a light global dim plus local dark-glass plates behind diagram clusters, keeping slides readable without sacrificing neon contrast. There is no separate presentation wizard or clean-output mode: the regular canvas is the only standalone mode. Source selection is automatic—selected screen first, otherwise active camera, otherwise dark canvas. The selected screen is never uploaded by this flow, capture ends when the user stops it or the source ends, and studio recording uses the same unmirrored full-frame composition.
 
 Camera mode uses one fixed compositing contract everywhere: camera video at the bottom, a full-frame dark transparent scrim above it, and the diagram canvas on top. The visible video, scrim, hand landmarks, two-hand navigation, and hybrid controller share the same centered `object-fit: cover` geometry, so a cropped 16:9 camera remains aligned at every canvas aspect ratio. Airboard does not segment or redraw the presenter above diagram ink.
 
@@ -137,7 +137,7 @@ The API uses Supabase persistence when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE
 
 ## Commercial platform
 
-Airboard now includes the public acquisition site, Supabase-backed account and tenant bootstrap, invitation acceptance, three-day value-triggered trial, persistent/versioned boards, Stripe checkout/webhook/portal integration, organization administration, installation health, SAML/OIDC configuration, SCIM 2.0 provisioning, privacy requests, support intake, consent records, content-free product events, audit logs, request tracing and lifecycle jobs.
+Airboard now includes the public acquisition site, Supabase-backed account and tenant bootstrap, invitation acceptance, a one-month pilot that starts when the first board opens, persistent/versioned boards, Stripe checkout/webhook/portal integration, organization administration, installation health, SAML/OIDC configuration, SCIM 2.0 provisioning, privacy requests, support intake, consent records, content-free product events, audit logs, request tracing and lifecycle jobs.
 
 The implemented routes, data contract, environment variables, acceptance test and honest external launch gates are documented in [Commercial Platform Runbook](Docs/Commercial%20Platform%20Runbook.md). Run the complete local control-plane journey with a local API and Supabase stack using:
 

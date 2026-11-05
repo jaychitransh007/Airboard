@@ -329,26 +329,10 @@
   font-size: 10px;
 }
 
-:global(.canvas-workspace.copilot-open) .surface {
-  left: calc((100vw - 378px) / 2);
-  max-width: calc(100vw - 410px);
-}
-
-:global(.canvas-workspace.settings-open:not(.copilot-open)) .surface {
-  left: calc((100vw - 368px) / 2);
-  max-width: calc(100vw - 400px);
-}
-
-:global(.canvas-workspace.settings-open.copilot-open) .surface {
-  left: calc((100vw - 720px) / 2);
-  max-width: calc(100vw - 752px);
-}
-
+/* Phones keep one full-width bar under the top bar; wider screens float it
+   beside the selection (SceneContextToolbar). */
 @media (max-width: 720px) {
-  .surface,
-  :global(.canvas-workspace.copilot-open) .surface,
-  :global(.canvas-workspace.settings-open:not(.copilot-open)) .surface,
-  :global(.canvas-workspace.settings-open.copilot-open) .surface {
+  .surface {
     top: 64px;
     right: 8px;
     left: 8px;

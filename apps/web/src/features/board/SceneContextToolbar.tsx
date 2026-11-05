@@ -45,6 +45,8 @@ import {
 // Measuring the toolbar before paint keeps it from flashing in the wrong spot;
 // the server render has nothing to measure.
 const useBrowserLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+/** At or below this width the toolbar is a full-width bar (SceneContextToolbar.module.css). */
+const PHONE_MAX_WIDTH = 720;
 
 export type SceneContextToolbarProps = {
   selected: BoardSceneElement | null;
@@ -230,11 +232,13 @@ export function SceneContextToolbar({
   };
 
   const measured = surfaceSize.width > 0;
+  // Phones keep the full-width bar from the stylesheet (PHONE_MAX_WIDTH matches it).
+  const canFloat = Boolean(anchor) && typeof window !== "undefined" && window.innerWidth > PHONE_MAX_WIDTH;
   const floating =
-    anchor && measured && typeof window !== "undefined"
+    canFloat && anchor && measured
       ? contextToolbarPosition(anchor, surfaceSize, { width: window.innerWidth, height: window.innerHeight })
       : null;
-  const surfaceStyle = anchor
+  const surfaceStyle = canFloat
     ? floating
       ? { left: floating.left, top: floating.top, transform: "none" }
       : { visibility: "hidden" as const }

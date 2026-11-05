@@ -67,15 +67,6 @@ export function buildSessionKeyterms(
   ]);
 }
 
-export function boardVoiceKeytermFingerprint(
-  state: BoardState,
-  selectedElementIds: readonly string[] = [],
-): string {
-  return buildSessionKeyterms(state, selectedElementIds)
-    .map((term) => term.toLocaleLowerCase("en-US"))
-    .join("\u0000");
-}
-
 function isBoardNode(stroke: Stroke): boolean {
   const type = stroke.annotation?.type;
   return Boolean(

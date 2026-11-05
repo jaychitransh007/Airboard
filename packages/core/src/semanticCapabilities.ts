@@ -335,25 +335,3 @@ export const AIRBOARD_SEMANTIC_OPERATION_CAPABILITIES = [
   "undo",
   "cancel",
 ] as const;
-
-/** Existing canonical string grammar retained for legacy clients. */
-export const AIRBOARD_SEMANTIC_CANONICAL_FORMS = [
-  "add/create [one to twenty] <node type> [named <label>] [placement]",
-  "connect <visible label|this|that> to <visible label|this|that> [as <connector label>]",
-  "reverse the connector from <source> to <target> [as <connector label>]",
-  "delete the connector from <source> to <target>",
-  "rename selected to <label>",
-  "delete selected",
-  "duplicate selected",
-  "move selected <left|right|above|below>",
-  "align selected <left|right|top|bottom|horizontally|vertically>",
-  "distribute selected <horizontally|vertically>",
-  "layout selected <left to right|right to left|top to bottom|bottom to top|grid>",
-  "add a <rows> by <columns> table",
-  "create a section around selected",
-  "make a mind map [named <label>]",
-  "add a code block [in <language>]",
-  "add a <basic|flowchart|advanced|Airboard shape name>",
-  "undo",
-  "cancel",
-] as const;

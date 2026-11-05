@@ -6,7 +6,7 @@ categoryLabel: Troubleshooting and reference
 order: 15
 status: reference
 audiences: ["everyone", "admins"]
-lastVerified: 2026-07-30
+lastVerified: 2026-11-05
 sources: ["apps/web/src/features/board/AirboardPrototype.tsx", "apps/web/src/features/product/chromeMeetReadiness.ts", "apps/web/src/features/product/IntegrationsPage.tsx", "apps/web/src/platform/auth.tsx"]
 ---
 
@@ -24,7 +24,8 @@ meeting URLs, credentials, or raw media in a support request.
 ## Airo voice is unavailable
 
 1. Confirm microphone permission.
-2. Start Airo explicitly and check the displayed provider state.
+2. Turn Airo on (**⏻** on the Airo panel, or **Turn on Airo voice and hands**
+   in the **•••** menu) and check the displayed provider state.
 3. Check whether organization policy permits audio input.
 4. Use the typed composer.
 

@@ -16,3 +16,6 @@ supabase/.temp
 test-results
 playwright-report
 artifacts/evals
+
+# Local Claude Code settings and worktrees
+.claude/

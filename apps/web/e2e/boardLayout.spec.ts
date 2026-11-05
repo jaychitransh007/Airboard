@@ -106,3 +106,22 @@ test("zoom lives at the end of the tool dock", async ({ page }) => {
   await zoom.getByRole("button", { name: "Reset canvas zoom" }).click();
   await expect(zoom.getByRole("button", { name: "Reset canvas zoom" })).toHaveText("100%");
 });
+
+test("on a phone the element toolbar is one full-width bar under the top bar", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 760 });
+  await openBoard(page);
+  // On a phone the Airo panel covers the canvas; close it to reach the dock.
+  const hideAiro = page.getByRole("button", { name: "Hide Airo copilot" });
+  if (await hideAiro.isVisible()) await hideAiro.click();
+  const canvas = page.locator("canvas.board-canvas");
+  const canvasBox = (await canvas.boundingBox())!;
+  await page.getByRole("toolbar", { name: "Board creation tools" }).getByRole("button", { name: /^Section/ }).click();
+  await canvas.click({ position: { x: canvasBox.width * 0.5, y: canvasBox.height * 0.5 } });
+
+  const toolbar = page.getByRole("complementary", { name: "Section properties" });
+  await expect(toolbar).toBeVisible();
+  const box = (await toolbar.boundingBox())!;
+  expect(Math.round(box.x)).toBe(8);
+  expect(Math.round(box.width)).toBe(375 - 16);
+  expect(Math.round(box.y)).toBe(64);
+});

@@ -88,7 +88,7 @@ function render(state) {
   });
   document.getElementById("verification").textContent = state.lastVerifiedAt
     ? `Last verified ${new Date(state.lastVerifiedAt).toLocaleString()}`
-    : "Your 3-day trial starts only after the first verified outgoing composite.";
+    : "Your free one-month pilot starts when you open your first board.";
   if (state.lastError) showError(errorMessage(state.lastError)); else errorNode.hidden = true;
 }
 function nextAction(state, diagnostics) {
