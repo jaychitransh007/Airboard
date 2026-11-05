@@ -17,7 +17,7 @@
 - **Health:** the API's `/ready` reports the database and `boardFanOut` (live boards across instances).
 - **Launch check:** `pnpm launch:check:deployed` checks the live revisions and passes **19 of 23**.
 - **Rollback:** both services to `launch-34df218` (`AIRBOARD_RELEASE=launch-34df218 infra/cloud-run/release.sh promote api|web`).
-- **Code:** `main`, after pull request #1 merged `codex/production-readiness` on 5 November 2026. The live revisions match its code.
+- **Code:** `main`. Pull requests #1 (launch hardening) and #11 (Google sign-in) merged the working branch `codex/production-readiness` into it on 5 November 2026. The live revisions match its code.
 
 ## Shipped in the launch hardening (November 2026)
 
@@ -54,7 +54,10 @@
 
 ### Housekeeping (owner)
 
-- Sign in once to confirm your boards came across to Mumbai.
+- Sign in once on the live site with **Continue with Google**: the first real end-to-end test of Google sign-in. Then confirm your boards came across to Mumbai.
+- Review Dependabot's 9 update pull requests:
+  - #2 to #6 are routine (GitHub Actions versions and 12 minor or patch packages).
+  - #7 (MediaPipe 1.2, which drives gestures), #8 (React Hooks lint 7), #9 (Electron 45) and #10 (Node types 26) are major upgrades that each need testing.
 - Delete the unused Seoul secret `airboard-supabase-secret-key` in Secret Manager.
 - Keep the API on the legacy service-role key. In testing, the new `sb_secret_` key failed to join the private Realtime channels that live boards use.
 
