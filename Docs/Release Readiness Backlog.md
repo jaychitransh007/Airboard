@@ -854,3 +854,7 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - **Decision:** the founder moved `commercial-smoke` to the standalone-GA stage. The gate runs `pnpm smoke:commercial` against a disposable organization on the release database, which needs an account there.
   - **Result:** `pnpm launch:check:deployed` reports READY, 21 of 21, for the controlled pilot.
   - **Still owed outside the gates:** a manual screen-reader and reduced-motion pass (the `accessibility-audit` gate belongs to standalone GA), and a signed-in check of the invite-link flow.
+- **2026-11-06** — No alerts to the support inbox (founder's decision):
+  - **Decision:** `hellosigmascience@gmail.com` carries customer help and support mail only, so no outage, error or latency alerts are set up.
+  - **Removed:** the earlier Cloud Monitoring policy "Airboard lifecycle run failed" is deleted; the project has no alert policies. Its email notification channel remains unused. The log-based metric `airboard_lifecycle_failed_runs` still counts failed runs.
+  - **Launch gate:** the controlled-pilot `lifecycle-schedule` gate now asks for a scheduled, authenticated job whose failed runs are logged. Alerting on them belongs to the standalone-GA `monitoring-alerts` gate. Checked: the job is enabled, and the 16:00, 17:00 and 18:00 UTC runs on 2026-11-05 returned 200. `pnpm launch:check:deployed` still reports READY, 21 of 21.
