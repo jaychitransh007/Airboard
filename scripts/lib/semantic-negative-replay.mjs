@@ -48,7 +48,7 @@ export const SEMANTIC_NEGATIVE_RECORDINGS_SCHEMA =
   "airboard-semantic-negative-recordings.v1";
 // The pilot API sets AIRBOARD_INTENT_MODEL to this; record with the model
 // production uses, and re-record when it changes.
-export const SEMANTIC_NEGATIVE_DEFAULT_MODEL = "gpt-5.4-mini";
+export const SEMANTIC_NEGATIVE_DEFAULT_MODEL = "gpt-5.6-luna";
 export const SEMANTIC_NEGATIVE_RECORD_COMMAND =
   "node --env-file-if-exists=.env scripts/eval-semantic-negatives.mjs --record";
 

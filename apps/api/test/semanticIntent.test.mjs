@@ -110,7 +110,8 @@ const resolvedPlan = {
 
 test("loads bounded planner configuration without exposing credentials", () => {
   const config = loadSemanticIntentConfig({ OPENAI_API_KEY: "server-only-secret" });
-  assert.equal(config.defaultModel, "gpt-5.6-terra");
+  assert.equal(config.defaultModel, "gpt-5.6-luna");
+  assert.deepEqual(config.allowedModels, ["gpt-5.6-luna"]);
   assert.equal(config.reasoningEffort, "none");
   assert.equal(config.timeoutMs, 5_000);
   assert.equal(config.apiKey, "server-only-secret");

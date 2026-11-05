@@ -710,7 +710,11 @@ function validateConnectionReference(
 }
 
 function validateReferences(value: unknown, path: string, minimum: number): SemanticPlanParseError | null {
-  if (!Array.isArray(value) || value.length < minimum || value.length > 20) return issue("invalid_value", path, `Expected ${minimum} to 20 object references.`);
+  // A lone current_selection stands for every selected object, so it meets
+  // any minimum; the board checks the selection size when it runs the step.
+  const selectionOnly =
+    Array.isArray(value) && value.length === 1 && isRecord(value[0]) && value[0].kind === "current_selection";
+  if (!Array.isArray(value) || (value.length < minimum && !selectionOnly) || value.length > 20) return issue("invalid_value", path, `Expected ${minimum} to 20 object references.`);
   for (let index = 0; index < value.length; index += 1) {
     const refIssue = validateReference(value[index], `${path}[${index}]`);
     if (refIssue) return refIssue;

@@ -265,6 +265,22 @@ test("rejects invalid variants for every reference kind", () => {
   ]);
 });
 
+test("the current selection alone satisfies multi-object actions", () => {
+  const selection = [{ kind: "current_selection" }];
+  for (const action of [
+    { type: "align", targets: selection, alignment: "left" },
+    { type: "distribute", targets: selection, axis: "horizontal" },
+    { type: "layout", targets: selection, direction: "grid" },
+  ]) {
+    assert.equal(parseSemanticPlan(resolved([action])).ok, true, action.type);
+  }
+  // A single named object is still too few.
+  assert.equal(
+    parseSemanticPlan(resolved([{ type: "align", targets: [ref("A")], alignment: "left" }])).ok,
+    false,
+  );
+});
+
 test("enforces resolution and clarification consistency", () => {
   assert.equal(parseSemanticPlan(resolved([])).ok, false);
   assert.equal(

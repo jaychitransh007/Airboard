@@ -217,7 +217,7 @@ export function loadSemanticIntentConfig(
   const explicitAllowedModels = splitList(env.AIRBOARD_INTENT_ALLOWED_MODELS);
   const allowedModels = explicitAllowedModels.length
     ? explicitAllowedModels
-    : ["gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.4-mini"];
+    : ["gpt-5.6-luna"];
   const defaultModel = (env.AIRBOARD_INTENT_MODEL ?? allowedModels[0])?.trim();
   if (!defaultModel || !allowedModels.includes(defaultModel)) {
     throw new Error("AIRBOARD_INTENT_MODEL must be included in AIRBOARD_INTENT_ALLOWED_MODELS.");
