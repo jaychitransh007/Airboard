@@ -500,3 +500,27 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
       - on production, the first Tab lands on the skip link.
     - **Rollback:** `mumbai-fff6d97` (both services). Earlier revisions point at the deleted Seoul project.
   - **Tests:** API 129, web 376, all packages pass, and the full e2e suite (53 passed, 2 skipped) includes two new keyboard tests.
+- **2026-11-05** — Remaining engineering items (built and tested, not deployed):
+  - **Hook dependency review (all 28 warnings):**
+    - **Real bugs fixed:**
+      - Airo's AI interpretation and voice diagnostics kept a stale sign-in token after the hourly refresh, so they would fail after an hour on one board.
+      - Leaving a board with the camera on left the camera running: the unmount cleanup read a `<video>` ref that React had already cleared. The stream now lives in `cameraStreamRef`.
+    - The rest were stable helpers, now listed, or deliberate triggers, documented in place.
+    - Lint is now at 0 errors and 0 warnings.
+  - **Keyboard menus:** `useMenuKeyboard` gives the ••• board menu and the library's board menus focus-on-open, arrow keys and Home/End, Escape back to the button, and close-on-Tab. The drawing-tool pop-outs share the same stepping rule.
+  - **Lighter landing page:** the home page loads the board (desktop overlay, test harness) only on demand. First-load JS for `/` is 113 KB, down from 298 KB.
+  - **Faster live start:**
+    - A saved board's page sends `/sessions/start` alongside the board load (`requestBoardSessionStart`).
+    - The board reuses that request through a cloned response, so it is safe when React remounts it.
+    - The API takes a board's session workspace from the board itself. The single-insert session change was skipped: it needs a migration, and Mumbai made the saving small.
+  - **Library:**
+    - `GET /boards?preview=1` returns each board's outline (`boardPreview` in core: up to 60 shapes and lines, plus up to 40 text snippets), never its full content.
+    - The library and dashboard draw miniatures.
+    - Search matches titles and the words on boards.
+    - Cards read "Updated 5 minutes ago · Only you" instead of "private · version N".
+  - **Exports:**
+    - **Export PDF:** a one-page PDF from a small writer with no dependencies. The page has the on-screen size and the image keeps every pixel.
+    - **Copy image:** a PNG on the clipboard. Share has it too.
+    - The app's embedded browser pane denies clipboard writes, so this was verified in Playwright with clipboard permission.
+  - **Landing demo:** a CSS-only loop (`IdeaDemo`) on the landing page and `/demo`, where a typed sentence becomes a connected diagram. With reduced motion it shows the finished board. "See an idea move" scrolls to it.
+  - **Tests:** API 131, web 384, core 64, scripts 182; lint and typecheck clean; the full e2e suite (56 passed, 2 skipped) includes new tests for the board menu keyboard, Copy image and Export PDF. One stylus e2e test failed once under 5 parallel workers and passed 4/4 alone and in a full rerun.

@@ -108,24 +108,24 @@ export class SupabaseSessionStore implements SessionStore {
     // is redone when the profile was found by its local key instead.
     const profileLookup = this.getProfileByIdentity(input.ownerUserId);
     const assumedOwnerId = UUID_PATTERN.test(input.ownerUserId) ? input.ownerUserId : null;
-    const [profile, entitlement, assumedScopeDenial] = await Promise.all([
+    const [profile, entitlement, assumedScope] = await Promise.all([
       profileLookup,
       input.organizationId
         ? this.getActiveEntitlement(input.ownerUserId, input.organizationId)
         : profileLookup.then((owner) => this.getActiveEntitlement(owner.id)),
-      assumedOwnerId ? this.sessionScopeDenial(input, assumedOwnerId) : null,
+      assumedOwnerId ? this.sessionScope(input, assumedOwnerId) : null,
     ]);
 
     if (!canStartBoard(entitlement)) {
       throw new Error("OWNER_ENTITLEMENT_REQUIRED");
     }
 
-    const scopeDenial =
-      profile.id === assumedOwnerId
-        ? assumedScopeDenial
-        : await this.sessionScopeDenial(input, profile.id);
-    if (scopeDenial) {
-      throw new Error(scopeDenial);
+    const scope =
+      profile.id === assumedOwnerId && assumedScope
+        ? assumedScope
+        : await this.sessionScope(input, profile.id);
+    if (scope.denial) {
+      throw new Error(scope.denial);
     }
 
     const now = new Date();
@@ -137,7 +137,7 @@ export class SupabaseSessionStore implements SessionStore {
       owner_last_seen_at: now.toISOString(),
       expires_at: new Date(now.getTime() + 6 * 60 * 60 * 1000).toISOString(),
       ...(input.organizationId ? { organization_id: input.organizationId } : {}),
-      ...(input.workspaceId ? { workspace_id: input.workspaceId } : {}),
+      ...(scope.workspaceId ? { workspace_id: scope.workspaceId } : {}),
       ...(input.boardId ? { board_id: input.boardId } : {}),
       ...(input.providerMeetingId ? { provider_meeting_id: input.providerMeetingId } : {}),
       ...(input.title ? { title: input.title } : { title: "Airboard" }),
@@ -343,12 +343,20 @@ export class SupabaseSessionStore implements SessionStore {
     return mapSession(data as BoardSessionRow);
   }
 
-  /** Why the owner may not start a session on the requested board or workspace, if not. */
-  private async sessionScopeDenial(input: StartSessionInput, profileId: string): Promise<string | null> {
-    if (!input.organizationId || (!input.boardId && !input.workspaceId)) {
-      return null;
+  /**
+   * Whether the owner may start a session on the requested board or
+   * workspace, and the workspace the session belongs to. A board's session
+   * takes the board's own workspace, so a client that starts the session
+   * before the board has loaded need only send the board id.
+   */
+  private async sessionScope(
+    input: StartSessionInput,
+    profileId: string,
+  ): Promise<{ denial: string | null; workspaceId: string | null }> {
+    const requestedWorkspaceId = input.workspaceId ?? null;
+    if (!input.organizationId || (!input.boardId && !requestedWorkspaceId)) {
+      return { denial: null, workspaceId: requestedWorkspaceId };
     }
-    const workspaceId = input.workspaceId ?? null;
     if (input.boardId) {
       const { data: board } = await this.client
         .from("boards")
@@ -358,15 +366,20 @@ export class SupabaseSessionStore implements SessionStore {
         .or(boardAccessFilter(profileId))
         .is("deleted_at", null)
         .maybeSingle();
-      return !board || (workspaceId && board.workspace_id !== workspaceId) ? "BOARD_ACCESS_DENIED" : null;
+      if (!board || (requestedWorkspaceId && board.workspace_id !== requestedWorkspaceId)) {
+        return { denial: "BOARD_ACCESS_DENIED", workspaceId: null };
+      }
+      return { denial: null, workspaceId: board.workspace_id ?? requestedWorkspaceId };
     }
     const { data: workspace } = await this.client
       .from("workspaces")
       .select("id")
-      .eq("id", workspaceId)
+      .eq("id", requestedWorkspaceId)
       .eq("organization_id", input.organizationId)
       .maybeSingle();
-    return workspace ? null : "WORKSPACE_ACCESS_DENIED";
+    return workspace
+      ? { denial: null, workspaceId: requestedWorkspaceId }
+      : { denial: "WORKSPACE_ACCESS_DENIED", workspaceId: null };
   }
 
   private async getProfileByIdentity(identity: string): Promise<ProfileRow> {

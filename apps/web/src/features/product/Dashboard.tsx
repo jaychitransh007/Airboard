@@ -5,8 +5,10 @@ import { useEffect, useState } from "react";
 import { airboardApi } from "../../platform/api";
 import { useAirboardAuth } from "../../platform/auth";
 import { CHROME_EXTENSION_PUBLICLY_INSTALLABLE } from "../../platform/distribution";
+import { BoardThumbnail } from "./BoardThumbnail";
+import { boardCardDetail, type LibraryBoard } from "./boardLibrary";
 
-type Board = { id: string; title: string; updated_at: string; latest_version: number };
+type Board = LibraryBoard & { id: string; latest_version: number };
 type Installation = { id: string; platform: string; status: string; last_success_at: string | null };
 
 export function Dashboard() {
@@ -18,7 +20,7 @@ export function Dashboard() {
   useEffect(() => {
     if (!auth.accessToken) return;
     void Promise.all([
-      airboardApi<{ boards: Board[] }>("/boards", { accessToken: auth.accessToken }),
+      airboardApi<{ boards: Board[] }>("/boards?preview=1", { accessToken: auth.accessToken }),
       airboardApi<{ installations: Installation[] }>("/integrations", { accessToken: auth.accessToken }),
     ])
       .then(([boardResult, installationResult]) => {
@@ -48,7 +50,7 @@ export function Dashboard() {
       <section className="dashboard-section">
         <div className="section-heading"><div><h2>Recent boards</h2><p>Your content—not your camera or microphone—is saved here.</p></div><Link href="/app/boards">View all</Link></div>
         {loading ? <div className="empty-panel">Loading your workspace…</div> : loadFailed ? <div className="empty-panel" role="alert"><h3>Your boards didn't load</h3><p>Airboard couldn't be reached. Your boards are safe — reload to try again.</p><button className="button button-primary" type="button" onClick={() => window.location.reload()}>Reload</button></div> : boards.length ? (
-          <div className="board-grid">{boards.slice(0, 6).map((board) => <Link className="board-card" href={`/app/boards/${board.id}`} key={board.id}><div className="board-thumbnail"><span>{board.title.slice(0, 1).toUpperCase()}</span></div><strong>{board.title}</strong><small>Version {board.latest_version} · {relativeTime(board.updated_at)}</small></Link>)}</div>
+          <div className="board-grid">{boards.slice(0, 6).map((board) => <Link className="board-card" href={`/app/boards/${board.id}`} key={board.id}><BoardThumbnail board={board} /><strong>{board.title}</strong><small>{boardCardDetail(board)}</small></Link>)}</div>
         ) : <div className="empty-panel"><span className="empty-icon">◇</span><h3>No saved boards yet</h3><p>Create your first Airboard—your free one-month pilot starts when it opens.</p><Link className="button button-primary" href="/app/boards/new?preflight=1">Create first board</Link></div>}
       </section>
       {meetInstallable || meetConnected ? <section className="dashboard-section">
@@ -65,6 +67,5 @@ export function Dashboard() {
 
 function dayPart() { const hour = new Date().getHours(); return hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"; }
 function firstName(name?: string) { return name?.trim().split(/\s+/)[0] || "there"; }
-function relativeTime(value: string) { const days = Math.floor((Date.now() - new Date(value).getTime()) / 86_400_000); return days <= 0 ? "today" : days === 1 ? "yesterday" : `${days} days ago`; }
 function installationStatus(items: Installation[], platform: string) { return `status-dot ${items.find((item) => item.platform === platform)?.status === "connected" ? "ready" : "pending"}`; }
 function installationText(items: Installation[], platform: string) { const item = items.find((candidate) => candidate.platform === platform); return item?.status === "connected" ? "Connected and policy checked" : "Not connected"; }

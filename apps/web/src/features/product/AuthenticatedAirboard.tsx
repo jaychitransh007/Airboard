@@ -6,9 +6,11 @@ import { useRouter } from "next/navigation";
 import { BOARD_SCENE_VERSION, type BoardState } from "@airboard/core";
 import { AirboardPrototype } from "../board/AirboardPrototype";
 import type { BoardShareAccess, BoardVisibility } from "../board/ShareDialog";
+import { requestBoardSessionStart } from "../board/boardSync";
 import { liveLinkFromBoardAddress, savedBoardLink } from "../board/shareLinks";
 import { AirboardApiError, airboardApi } from "../../platform/api";
 import { useAirboardAuth } from "../../platform/auth";
+import { AIRBOARD_API_URL } from "../../platform/config";
 import { prepareDurableBoard } from "./boardPreparation";
 import { PilotExtensionButton } from "./OneTapRequestButton";
 
@@ -42,6 +44,7 @@ export function AuthenticatedAirboard({ boardId, templateId }: { boardId?: strin
   const allowUnloadRef = useRef(false);
   const saveBoardStateRef = useRef<((state: BoardState) => Promise<void>) | null>(null);
   const preparingRef = useRef<string | null>(null);
+  const pendingSessionStartRef = useRef<Promise<Response> | null>(null);
   useEffect(() => {
     if (!auth.accessToken) return;
     // A second run while one is still preparing (a remount or token refresh)
@@ -50,6 +53,15 @@ export function AuthenticatedAirboard({ boardId, templateId }: { boardId?: strin
     if (preparingRef.current === preparationKey) return;
     preparingRef.current = preparationKey;
     const accessToken = auth.accessToken;
+    // The live session doesn't depend on the board's contents, so a saved
+    // board starts it now, alongside the board load, instead of after the
+    // canvas mounts. An address that names a session to rejoin skips this.
+    pendingSessionStartRef.current = null;
+    if (boardId && !new URLSearchParams(window.location.search).get("boardSessionId")) {
+      const pending = requestBoardSessionStart({ apiBaseUrl: AIRBOARD_API_URL, accessToken, boardId, title: "Airboard" });
+      pending.catch(() => undefined);
+      pendingSessionStartRef.current = pending;
+    }
     const prepare = async () => {
       const { board: durable, created } = await prepareDurableBoard<DurableBoard>(boardId, {
         api: (path, init) => airboardApi(path, { ...init, accessToken }),
@@ -80,6 +92,9 @@ export function AuthenticatedAirboard({ boardId, templateId }: { boardId?: strin
       .finally(() => {
         if (preparingRef.current === preparationKey) preparingRef.current = null;
       });
+    // Preparation runs once per board (preparingRef guards it); the auth
+    // helpers read refs, so a new function identity must not re-run it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth.accessToken, boardId, router]);
 
   useEffect(() => () => {
@@ -270,7 +285,7 @@ export function AuthenticatedAirboard({ boardId, templateId }: { boardId?: strin
   };
   return (
     <>
-      <AirboardPrototype surface="standalone" accessToken={auth.accessToken} accountUserId={auth.account.profile.id} persistentBoardId={board.id} persistentWorkspaceId={board.workspace_id} boardTitle={board.title} persistentSaveStatus={saveStatus} initialBoardState={normalizeBoardState(board.latest_state, board.id)} onPersistentBoardChange={persist} onRenameBoard={renameBoard} onDeleteBoard={deleteBoard} shareAccess={shareAccess} {...(templateId ? { initialTemplateId: templateId } : {})} {...(auth.account.profile.preferences ? { initialPreferences: auth.account.profile.preferences } : {})} />
+      <AirboardPrototype surface="standalone" accessToken={auth.accessToken} accountUserId={auth.account.profile.id} persistentBoardId={board.id} persistentWorkspaceId={board.workspace_id} pendingSessionStart={pendingSessionStartRef.current} boardTitle={board.title} persistentSaveStatus={saveStatus} initialBoardState={normalizeBoardState(board.latest_state, board.id)} onPersistentBoardChange={persist} onRenameBoard={renameBoard} onDeleteBoard={deleteBoard} shareAccess={shareAccess} {...(templateId ? { initialTemplateId: templateId } : {})} {...(auth.account.profile.preferences ? { initialPreferences: auth.account.profile.preferences } : {})} />
       {saveNotice ? (
         <div className="board-save-warning" role={saveNotice.kind === "conflict" ? "alert" : "status"}>
           {saveNotice.kind === "conflict" ? (

@@ -132,6 +132,8 @@ export function SceneContextToolbar({
     setSelectedRowId(table.rows[0]?.id ?? "");
     setSelectedColumnId(table.columns[0]?.id ?? "");
     setTableMessage("");
+    // Reset the selection only when a different table is selected.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [table?.id]);
 
   useEffect(() => {
@@ -150,6 +152,8 @@ export function SceneContextToolbar({
         ? current
         : (table.columns[0]?.id ?? ""),
     );
+    // Re-check the selection when the table's cells, rows or columns change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [table?.cells, table?.columns, table?.rows]);
 
   const selectedCell = table?.cells[selectedCellIds[0] ?? ""];

@@ -26,6 +26,7 @@ import {
   type CreationToolId,
   type ShapeDefinition,
 } from "./creationToolCatalog";
+import { menuFocusIndex, menuItems } from "../../platform/menuKeyboard";
 
 export type CreationPanelId = "draw" | "shape" | "connector" | "table" | "stamp" | "insert";
 
@@ -597,13 +598,10 @@ function CreationPopover({
   children: React.ReactNode;
 }) {
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (!["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-    const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-      .filter((button) => !button.disabled);
-    if (items.length === 0) return;
-    const current = items.indexOf(document.activeElement as HTMLButtonElement);
-    const forward = event.key === "ArrowDown" || event.key === "ArrowRight";
-    const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : (current + (forward ? 1 : -1) + items.length) % items.length;
+    const items = menuItems(event.currentTarget);
+    const current = document.activeElement instanceof HTMLElement ? items.indexOf(document.activeElement) : -1;
+    const next = menuFocusIndex(items.length, current, event.key);
+    if (next === null) return;
     event.preventDefault();
     items[next]?.focus();
   };

@@ -1,3 +1,4 @@
+import { boardPreview } from "@airboard/core";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ApiConfig } from "./config";
@@ -336,14 +337,17 @@ export function registerControlPlaneRoutes(
     };
   });
 
-  server.get<{ Querystring: { scope?: string } }>("/boards", async (request, reply) => {
+  server.get<{ Querystring: { scope?: string; preview?: string } }>("/boards", async (request, reply) => {
     const context = await requireAuth(auth, request, reply);
     if (!context) return;
     if (!auth.client) return { boards: [] };
     const scope = String(request.query.scope ?? "active");
+    // The library asks for previews; other lists stay light and skip the
+    // saved state entirely.
+    const withPreview = request.query.preview === "1";
     let query = auth.client
       .from("boards")
-      .select("id,workspace_id,title,description,latest_version,visibility,created_at,updated_at,archived_at")
+      .select(`id,workspace_id,title,description,latest_version,visibility,created_at,updated_at,archived_at${withPreview ? ",latest_state" : ""}`)
       .eq("organization_id", context.organizationId)
       .or(boardAccessFilter(context.profileId));
     if (scope === "trash") query = query.not("deleted_at", "is", null);
@@ -355,7 +359,14 @@ export function registerControlPlaneRoutes(
       .order("updated_at", { ascending: false })
       .limit(200);
     if (error) return reply.code(500).send({ error: "BOARD_LIST_FAILED" });
-    return { boards: data ?? [] };
+    const rows = (data ?? []) as unknown as JsonRecord[];
+    if (!withPreview) return { boards: rows };
+    return {
+      boards: rows.map(({ latest_state: latestState, ...board }) => ({
+        ...board,
+        preview: boardPreview(latestState),
+      })),
+    };
   });
 
   server.post<{ Body: unknown }>("/boards", async (request, reply) => {

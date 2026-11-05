@@ -91,6 +91,9 @@ export function ScenePlaybackOverlay({
       controller.abort();
       if (loadedObjectUrl) revokeObjectUrl(loadedObjectUrl);
     };
+    // Keyed by the media's identity and URL so a re-render with an equal
+    // media object does not reload the asset.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, loadAsset, media?.asset.id, media?.asset.url, media?.id]);
 
   const frame = useMemo(

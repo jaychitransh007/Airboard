@@ -72,6 +72,8 @@ function PrivacySettings() {
   const [confirmation, setConfirmation] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const reload = async () => { if (!auth.accessToken) return; const result = await airboardApi<{ requests: DataRequest[] }>("/privacy/data-requests", { accessToken: auth.accessToken }); setRequests(result.requests); };
+  // reload only reads the current token, so the token is the trigger.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { void reload(); }, [auth.accessToken]);
   const request = async (requestType: "export" | "delete_account") => { if (!auth.accessToken) return; const result = await airboardApi<{ id: string }>("/privacy/data-requests", { method: "POST", accessToken: auth.accessToken, body: JSON.stringify({ requestType, ...(requestType === "delete_account" ? { confirmation } : {}) }) }); setMessage(requestType === "export" ? `Export queued: ${result.id}` : "Deletion scheduled with a seven-day cancellation window."); setConfirmation(""); await reload(); };
   const cancel = async (id: string) => { if (!auth.accessToken) return; await airboardApi(`/privacy/data-requests/${id}`, { method: "DELETE", accessToken: auth.accessToken }); await reload(); };
@@ -114,6 +116,8 @@ function SessionSettings() {
   const auth = useAirboardAuth();
   const [sessions, setSessions] = useState<AirboardSession[]>([]);
   const reload = async () => { if (!auth.accessToken) return; const result = await airboardApi<{ sessions: AirboardSession[] }>("/me/sessions", { accessToken: auth.accessToken }); setSessions(result.sessions); };
+  // reload only reads the current token, so the token is the trigger.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { void reload(); }, [auth.accessToken]);
   const end = async (id: string) => { if (!auth.accessToken) return; await airboardApi(`/me/sessions/${id}`, { method: "DELETE", accessToken: auth.accessToken }); await reload(); };
   return <><p className="eyebrow">Live access</p><h1>Sessions</h1><p>End stale collaboration sessions and revoke their realtime access.</p><div className="data-table"><div className="table-head"><span>Session</span><span>Status</span><span>Action</span></div>{sessions.length ? sessions.map((session) => <div key={session.id}><span><strong>{session.title ?? "Airboard"}</strong><small>{session.provider} · {new Date(session.created_at).toLocaleString()}</small></span><span>{session.status}</span><span>{session.status !== "ended" ? <button onClick={() => void end(session.id)}>End</button> : "—"}</span></div>) : <div><span>No sessions yet.</span></div>}</div></>;

@@ -4,15 +4,15 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { airboardApi } from "../../platform/api";
 import { useAirboardAuth } from "../../platform/auth";
+import { useMenuKeyboard } from "../../platform/menuKeyboard";
 import { useModalFocus } from "../../platform/modalFocus";
 import { validateBoardTitle } from "../board/boardLifecycle";
+import { BoardThumbnail } from "./BoardThumbnail";
+import { boardCardDetail, boardMatchesQuery, type LibraryBoard } from "./boardLibrary";
 
-type Board = {
+type Board = LibraryBoard & {
   id: string;
-  title: string;
-  updated_at: string;
   latest_version: number;
-  visibility: string;
 };
 
 type BoardAction =
@@ -26,6 +26,9 @@ export function BoardsPage() {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  // Only one board menu is open at a time, so one ref serves them all.
+  const boardMenuRef = useRef<HTMLDivElement | null>(null);
+  useMenuKeyboard(boardMenuRef, openMenuId !== null, () => setOpenMenuId(null));
   const [action, setAction] = useState<BoardAction>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -34,7 +37,7 @@ export function BoardsPage() {
 
   useEffect(() => {
     if (!auth.accessToken) return;
-    void airboardApi<{ boards: Board[] }>("/boards", { accessToken: auth.accessToken })
+    void airboardApi<{ boards: Board[] }>("/boards?preview=1", { accessToken: auth.accessToken })
       .then((result) => setBoards(result.boards))
       .finally(() => setLoading(false));
     if (new URLSearchParams(window.location.search).get("deleted") === "1") {
@@ -44,7 +47,7 @@ export function BoardsPage() {
   }, [auth.accessToken]);
 
   const visible = useMemo(
-    () => boards.filter((board) => board.title.toLowerCase().includes(query.toLowerCase())),
+    () => boards.filter((board) => boardMatchesQuery(board, query)),
     [boards, query],
   );
 
@@ -156,7 +159,8 @@ export function BoardsPage() {
       <div className="library-toolbar">
         <input
           type="search"
-          placeholder="Search boards"
+          aria-label="Search boards"
+          placeholder="Search titles and what's on boards"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
@@ -173,13 +177,9 @@ export function BoardsPage() {
           {visible.map((board) => (
             <article className="board-card library-board-card" key={board.id}>
               <Link className="board-card-link" href={`/app/boards/${board.id}`}>
-                <div className="board-thumbnail">
-                  <span>{board.title[0]?.toUpperCase()}</span>
-                </div>
+                <BoardThumbnail board={board} />
                 <strong>{board.title}</strong>
-                <small>
-                  {board.visibility} · version {board.latest_version}
-                </small>
+                <small>{boardCardDetail(board)}</small>
               </Link>
               <div className="library-board-actions">
                 <button
@@ -201,7 +201,7 @@ export function BoardsPage() {
                   </svg>
                 </button>
                 {openMenuId === board.id ? (
-                  <div className="library-board-menu" role="menu">
+                  <div ref={boardMenuRef} className="library-board-menu" role="menu" aria-label={`Actions for ${board.title}`}>
                     <button
                       type="button"
                       role="menuitem"
@@ -302,3 +302,4 @@ export function BoardsPage() {
     </div>
   );
 }
+

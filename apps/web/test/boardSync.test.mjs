@@ -9,6 +9,7 @@ import {
 } from "@airboard/core";
 import {
   buildBoardWebSocketUrl,
+  requestBoardSessionStart,
   snapshotBoardEvents,
   startBoardSync,
 } from "../src/features/board/boardSync.ts";
@@ -276,4 +277,38 @@ test("snapshotBoardEvents seeds committed objects re-addressed to the session", 
 test("buildBoardWebSocketUrl maps http(s) to ws(s)", () => {
   assert.equal(buildBoardWebSocketUrl("http://127.0.0.1:4600"), "ws://127.0.0.1:4600/ws");
   assert.equal(buildBoardWebSocketUrl("https://api.airboard.app/x?y=1"), "wss://api.airboard.app/ws");
+});
+
+test("a session start sent while the board loads is used instead of a new one, and can be read twice", async () => {
+  const sent = [];
+  const startFetch = async (url, init) => {
+    sent.push({ url: String(url), body: JSON.parse(init.body), auth: init.headers.Authorization });
+    return new Response(JSON.stringify({
+      session: { id: "early-session" },
+      ownerParticipant: { id: "owner-p", role: "owner" },
+      realtimeTicket: "realtime-early",
+      joinToken: "join-early",
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  const pendingStart = requestBoardSessionStart(
+    { apiBaseUrl: "http://127.0.0.1:4600", accessToken: "account-9", boardId: "board-1", title: "Airboard" },
+    startFetch,
+  );
+  assert.deepEqual(sent[0].body, { provider: "standalone", title: "Airboard", boardId: "board-1" });
+  assert.equal(sent[0].auth, "Bearer account-9");
+
+  // startBoardSync must not send its own start when one is already in flight.
+  const { fetchImpl, calls } = fakeFetchRouter([]);
+  const start = () => startBoardSync(
+    { apiBaseUrl: "http://127.0.0.1:4600", ownerUserId: "user-1", accessToken: "account-9", boardId: "board-1", pendingStart },
+    { onRemoteEvent: () => {} },
+    { fetchImpl, createClient: (o) => new FakeClient(o), ...noTimers },
+  );
+  const first = await start();
+  // A remounted board (React runs effects twice in development) reuses it.
+  const second = await start();
+  assert.equal(first.handle.boardSessionId, "early-session");
+  assert.equal(second.handle.boardSessionId, "early-session");
+  assert.equal(calls.filter((call) => call.url.includes("/sessions/start")).length, 0);
+  assert.equal(sent.length, 1);
 });

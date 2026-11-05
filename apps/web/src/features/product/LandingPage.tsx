@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import { IdeaDemo } from "./IdeaDemo";
 import { PublicShell } from "./PublicShell";
 
 const ideaJourney = [
@@ -85,7 +86,7 @@ export function LandingPage() {
             <Link className="button button-primary button-large" href="/signup">
               Join the standalone pilot
             </Link>
-            <Link className="button button-quiet button-large" href="/demo">
+            <Link className="button button-quiet button-large" href="#see-it-move">
               See an idea move
             </Link>
           </div>
@@ -95,6 +96,14 @@ export function LandingPage() {
           <span aria-hidden="true">✦</span>
           Thought → shape → shared understanding
         </p>
+      </section>
+
+      <section className="landing-demo" id="see-it-move" aria-labelledby="see-it-move-title">
+        <div className="section-intro">
+          <p className="eyebrow">See an idea move</p>
+          <h2 id="see-it-move-title">One sentence. A whole diagram.</h2>
+        </div>
+        <IdeaDemo />
       </section>
 
       <section className="idea-journey" aria-labelledby="idea-journey-title">

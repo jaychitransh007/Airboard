@@ -82,9 +82,46 @@ export function buildBoardWebSocketUrl(apiBaseUrl: string): string {
   return url.toString();
 }
 
+/**
+ * Asks the API to start a new live session as its owner. Exported so a page
+ * can send it while the board is still loading and hand it to startBoardSync.
+ */
+export function requestBoardSessionStart(
+  options: {
+    apiBaseUrl: string;
+    accessToken?: string;
+    provider?: MeetingProvider;
+    providerMeetingId?: string;
+    title?: string;
+    workspaceId?: string;
+    boardId?: string;
+  },
+  fetchImpl: typeof fetch = fetch,
+): Promise<Response> {
+  return fetchImpl(new URL("/sessions/start", options.apiBaseUrl).toString(), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.accessToken ? { Authorization: `Bearer ${options.accessToken}` } : {}),
+    },
+    body: JSON.stringify({
+      provider: options.provider ?? "standalone",
+      ...(options.providerMeetingId ? { providerMeetingId: options.providerMeetingId } : {}),
+      ...(options.title ? { title: options.title } : {}),
+      ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+      ...(options.boardId ? { boardId: options.boardId } : {}),
+    }),
+  });
+}
+
 export async function startBoardSync(
   options: {
     apiBaseUrl: string;
+    /**
+     * A session start already in flight from requestBoardSessionStart. Each
+     * use reads its own copy, so a remounted board can reuse it.
+     */
+    pendingStart?: Promise<Response> | null;
     /** Join this existing session; omit to create a new one as owner. */
     boardSessionId?: string | null;
     ownerUserId: string;
@@ -144,25 +181,9 @@ export async function startBoardSync(
     realtimeTicket = payload.realtimeTicket;
     outcome = "joined";
   } else {
-    const response = await fetchImpl(
-      new URL("/sessions/start", options.apiBaseUrl).toString(),
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(options.accessToken ? { Authorization: `Bearer ${options.accessToken}` } : {}),
-        },
-        body: JSON.stringify({
-          provider: options.provider ?? "standalone",
-          ...(options.providerMeetingId
-            ? { providerMeetingId: options.providerMeetingId }
-            : {}),
-          ...(options.title ? { title: options.title } : {}),
-          ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
-          ...(options.boardId ? { boardId: options.boardId } : {}),
-        }),
-      },
-    );
+    const response = options.pendingStart
+      ? (await options.pendingStart).clone()
+      : await requestBoardSessionStart(options, fetchImpl);
     if (!response.ok) {
       throw new Error(await describeSessionError(response, "start"));
     }

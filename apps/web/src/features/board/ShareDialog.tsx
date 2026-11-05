@@ -26,6 +26,7 @@ export function ShareDialog({
   liveUnavailable,
   access,
   onDownloadPng,
+  onCopyImage,
   onClose,
 }: {
   boardTitle: string;
@@ -35,6 +36,7 @@ export function ShareDialog({
   liveUnavailable: LiveStartFailure | null;
   access?: BoardShareAccess;
   onDownloadPng: () => void;
+  onCopyImage: () => void;
   onClose: () => void;
 }) {
   const [copied, setCopied] = useState<CopyTarget | null>(null);
@@ -237,6 +239,7 @@ export function ShareDialog({
           <h3 id="share-picture-title">Send a picture</h3>
           <div className="share-dialog-row">
             <button type="button" onClick={onDownloadPng}>Download PNG</button>
+            <button type="button" onClick={onCopyImage}>Copy image</button>
             <span className="share-dialog-hint">Drop it into chat, email or slides</span>
           </div>
         </section>

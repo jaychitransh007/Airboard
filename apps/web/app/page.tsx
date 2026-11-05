@@ -1,6 +1,5 @@
-import { AirboardPrototype } from "../src/features/board/AirboardPrototype";
-import { TestAirboardHarness } from "../src/features/board/TestAirboardHarness";
 import { redirect } from "next/navigation";
+import { HomeBoardSurface } from "../src/features/product/HomeBoardSurface";
 import { LandingPage } from "../src/features/product/LandingPage";
 import { authCallbackPathFromHome } from "../src/features/product/authCallbackState";
 
@@ -23,9 +22,9 @@ export default async function Home({
       ? testStandaloneValue.includes("1")
       : testStandaloneValue === "1");
   return testStandalone ? (
-    <TestAirboardHarness surface="standalone" />
+    <HomeBoardSurface mode="test-harness" />
   ) : desktopOverlay ? (
-    <AirboardPrototype surface="standalone" {...(desktopOverlay ? { desktopOverlay: true } : {})} />
+    <HomeBoardSurface mode="desktop-overlay" />
   ) : (
     <LandingPage />
   );

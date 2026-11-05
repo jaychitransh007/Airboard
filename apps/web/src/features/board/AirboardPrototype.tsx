@@ -241,7 +241,9 @@ import type {
   WheelEvent as ReactWheelEvent,
 } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMenuKeyboard } from "../../platform/menuKeyboard";
 import { useModalFocus } from "../../platform/modalFocus";
+import { copyCanvasImage, downloadCanvasPdf } from "./boardExport";
 import {
   finalizeTouchpadStroke,
   getTouchpadModeConfig,
@@ -632,6 +634,7 @@ export function AirboardPrototype({
   meetingProvider = "standalone",
   providerMeetingId,
   initialBoardSessionId,
+  pendingSessionStart,
   onBoardSessionReady,
   embeddedMediaCapture = false,
   desktopOverlay = false,
@@ -657,6 +660,8 @@ export function AirboardPrototype({
   meetingProvider?: MeetingProvider;
   providerMeetingId?: string;
   initialBoardSessionId?: string | null;
+  /** A live-session start the page sent while the board was loading. */
+  pendingSessionStart?: Promise<Response> | null;
   onBoardSessionReady?: (session: {
     boardSessionId: string;
     participantId: string;
@@ -836,6 +841,9 @@ export function AirboardPrototype({
   const focusedSectionHashRef = useRef<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const screenUnderlayVideoRef = useRef<HTMLVideoElement | null>(null);
+  // The live camera stream, kept apart from the <video> element: React clears
+  // element refs before unmount cleanups run, and the camera must still stop.
+  const cameraStreamRef = useRef<MediaStream | null>(null);
   const screenUnderlayStreamRef = useRef<MediaStream | null>(null);
   const screenUnderlayStartInProgressRef = useRef(false);
   const meetBridgeSessionRef = useRef<MeetMediaBridgeVideoSession | null>(null);
@@ -1117,6 +1125,8 @@ export function AirboardPrototype({
   const openCatalogIdRef = useRef<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement | null>(null);
+  useMenuKeyboard(moreMenuRef, moreMenuOpen, () => setMoreMenuOpen(false));
   const [shareOpen, setShareOpen] = useState(false);
   const [liveStartProblem, setLiveStartProblem] = useState<LiveStartFailure | null>(null);
   const [titleEditing, setTitleEditing] = useState(false);
@@ -1225,6 +1235,8 @@ export function AirboardPrototype({
     : null;
   const playbackViewport = useMemo(
     () => ({ ...boardViewportRef.current }),
+    // viewportRevision is the trigger: the viewport itself lives in a ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [viewportRevision],
   );
   // Scene events live in a mutable board ref; reading this state makes their
@@ -1254,7 +1266,7 @@ export function AirboardPrototype({
       markerGestureConfidenceThreshold: confidenceThreshold,
       dusterGestureConfidenceThreshold: Math.max(0.45, confidenceThreshold * 0.72),
     }),
-    [confidenceThreshold, inputMode],
+    [confidenceThreshold],
   );
   const frictionConfig = useMemo<Partial<VirtualSurfaceFrictionConfig>>(
     () => ({
@@ -1264,7 +1276,7 @@ export function AirboardPrototype({
       enablePostStrokeSmoothing: strokeCleanupEnabled,
       enableLineSnap: strokeCleanupEnabled,
     }),
-    [autoLiftEnabled, frictionPreset, inputMode, strokeCleanupEnabled],
+    [autoLiftEnabled, frictionPreset, strokeCleanupEnabled],
   );
 
   const broadcastSafe =
@@ -1517,6 +1529,26 @@ export function AirboardPrototype({
     }));
   }, []);
 
+  /**
+   * Hands the pending snapshot to the host immediately. A rejected save clears
+   * the dedupe hash so the same content is not skipped on the next attempt;
+   * the host owns retry and conflict handling.
+   */
+  const flushPersistentSnapshot = useCallback(() => {
+    if (persistenceTimerRef.current) {
+      clearTimeout(persistenceTimerRef.current);
+      persistenceTimerRef.current = null;
+    }
+    const pending = pendingPersistenceRef.current;
+    const hash = pendingPersistenceHashRef.current;
+    if (!pending) return;
+    pendingPersistenceRef.current = null;
+    lastPersistenceHashRef.current = hash;
+    void Promise.resolve(persistenceCallbackRef.current?.(pending)).catch(() => {
+      if (lastPersistenceHashRef.current === hash) lastPersistenceHashRef.current = "";
+    });
+  }, []);
+
   const schedulePersistentSnapshot = useCallback((state: BoardState) => {
     const callback = persistenceCallbackRef.current;
     if (!callback || !persistentBoardId) return;
@@ -1539,27 +1571,7 @@ export function AirboardPrototype({
     pendingPersistenceHashRef.current = hash;
     if (persistenceTimerRef.current) clearTimeout(persistenceTimerRef.current);
     persistenceTimerRef.current = setTimeout(flushPersistentSnapshot, 800);
-  }, [persistentBoardId]);
-
-  /**
-   * Hands the pending snapshot to the host immediately. A rejected save clears
-   * the dedupe hash so the same content is not skipped on the next attempt;
-   * the host owns retry and conflict handling.
-   */
-  const flushPersistentSnapshot = useCallback(() => {
-    if (persistenceTimerRef.current) {
-      clearTimeout(persistenceTimerRef.current);
-      persistenceTimerRef.current = null;
-    }
-    const pending = pendingPersistenceRef.current;
-    const hash = pendingPersistenceHashRef.current;
-    if (!pending) return;
-    pendingPersistenceRef.current = null;
-    lastPersistenceHashRef.current = hash;
-    void Promise.resolve(persistenceCallbackRef.current?.(pending)).catch(() => {
-      if (lastPersistenceHashRef.current === hash) lastPersistenceHashRef.current = "";
-    });
-  }, []);
+  }, [flushPersistentSnapshot, persistentBoardId]);
 
   // Leaving the tab or closing the window must not wait out the debounce.
   useEffect(() => {
@@ -3723,6 +3735,7 @@ export function AirboardPrototype({
       {
         apiBaseUrl: AIRBOARD_API_URL,
         boardSessionId: requestedSessionId,
+        ...(!requestedSessionId && pendingSessionStart ? { pendingStart: pendingSessionStart } : {}),
         ownerUserId: accountUserId ?? OWNER_USER_ID,
         ...(effectiveAccessToken ? { accessToken: effectiveAccessToken } : {}),
         ...(requestedJoinToken ? { joinToken: requestedJoinToken } : {}),
@@ -5359,9 +5372,9 @@ export function AirboardPrototype({
 
     },
     [
+      activeObjectTool,
       appendStrokePoint,
       beginObjectInteraction,
-      activeObjectTool,
       cancelCatalogClose,
       cancelObjectInteraction,
       commitStroke,
@@ -5372,14 +5385,15 @@ export function AirboardPrototype({
       inputPaused,
       makeFrictionPoint,
       makePoint,
-      moveObjectInteraction,
       moveCursor,
       moveCursorPoint,
+      moveObjectInteraction,
+      reportGestureStage,
       scheduleCatalogClose,
+      selectAnnotationObject,
       startStroke,
       toBoardPoint,
       updateAnnotationObject,
-      reportGestureStage,
     ],
   );
 
@@ -5924,11 +5938,14 @@ export function AirboardPrototype({
       }
     },
     [
+      appendCopilotActivity,
       cancelPendingIntent,
       hoverStrokeId,
+      reportVoiceTrace,
       selectedAnnotationId,
       selectedAnnotationIds,
       strokeColor,
+      toBoardPoint,
     ],
   );
 
@@ -6188,12 +6205,13 @@ export function AirboardPrototype({
       }
     },
     [
-      appendCopilotActivity,
       cancelPendingIntent,
       hoverStrokeId,
+      reportVoiceTrace,
       selectedAnnotationId,
       selectedAnnotationIds,
       strokeColor,
+      toBoardPoint,
       undoLastAction,
     ],
   );
@@ -6284,9 +6302,10 @@ export function AirboardPrototype({
       return prepareParsedIntentPlan([parsed], text.trim(), "deterministic", voiceTurnId);
     },
     [
-      cancelPendingIntent,
       cancelObjectInteraction,
+      cancelPendingIntent,
       prepareParsedIntentPlan,
+      reportVoiceTrace,
       setDiagramVisibility,
       undoLastAction,
     ],
@@ -6761,12 +6780,15 @@ export function AirboardPrototype({
     },
     [
       appendCopilotActivity,
+      effectiveAccessToken,
       executeSceneIntent,
       hoverStrokeId,
       prepareIntentCommand,
       prepareSceneFanIn,
       prepareSemanticActionPlan,
       reportAttributedVoiceFollowUp,
+      reportVoiceTrace,
+      toBoardPoint,
     ],
   );
 
@@ -6940,6 +6962,7 @@ export function AirboardPrototype({
     cancelPendingIntent,
     refreshRealtimeSpeechKeyterms,
     render,
+    reportVoiceTrace,
     updateStats,
   ]);
 
@@ -8103,8 +8126,8 @@ export function AirboardPrototype({
     meetBridgeSessionRef.current?.stop();
     meetBridgeSessionRef.current = null;
     const video = videoRef.current;
-    const stream = video?.srcObject as MediaStream | null;
-    stream?.getTracks().forEach((track) => track.stop());
+    stopMediaStream(cameraStreamRef.current ?? (video?.srcObject as MediaStream | null));
+    cameraStreamRef.current = null;
     if (video) {
       video.srcObject = null;
     }
@@ -8225,6 +8248,7 @@ export function AirboardPrototype({
         throw new Error("Video element is unavailable");
       }
 
+      cameraStreamRef.current = stream;
       video.srcObject = stream;
       await video.play();
       setCameraStatus("tracker_loading");
@@ -8253,8 +8277,8 @@ export function AirboardPrototype({
       // error). Otherwise the acquired MediaStream keeps the camera light on with
       // no live tracking, and a retry acquires a second stream, orphaning this one.
       const video = videoRef.current;
-      const stream = video?.srcObject as MediaStream | null;
-      stream?.getTracks().forEach((track) => track.stop());
+      stopMediaStream(cameraStreamRef.current ?? (video?.srcObject as MediaStream | null));
+      cameraStreamRef.current = null;
       if (video) {
         video.srcObject = null;
       }
@@ -8326,6 +8350,7 @@ export function AirboardPrototype({
     airoInputsActive,
     airoVoiceAvailable,
     cameraStatus,
+    setCopilotVisibility,
     speechArmed,
     toggleCameraInput,
     toggleVoiceInput,
@@ -8540,6 +8565,23 @@ export function AirboardPrototype({
     anchor.href = exportCanvasPng(canvas);
     anchor.download = `airboard-${new Date().toISOString().replaceAll(":", "-")}.png`;
     anchor.click();
+  }, []);
+
+  const exportPdf = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    void downloadCanvasPdf(canvas).catch(() =>
+      setCommandFeedback("The PDF couldn't be made in this browser. Export PNG still works."),
+    );
+  }, []);
+
+  const copyBoardImage = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    void copyCanvasImage(canvas).then(
+      () => setCommandFeedback("Copied the board as an image. Paste it into chat, a doc or slides."),
+      () => setCommandFeedback("This browser blocked copying images. Use Export PNG instead."),
+    );
   }, []);
 
   useEffect(() => {
@@ -9550,15 +9592,13 @@ export function AirboardPrototype({
       meetBridgeSessionRef.current?.stop();
       meetBridgeSessionRef.current = null;
       trackerRef.current?.close();
-      const video = videoRef.current;
-      const stream = video?.srcObject as MediaStream | null;
-      stream?.getTracks().forEach((track) => track.stop());
+      // Element refs are already cleared here, so each stream is stopped
+      // through its own ref; leaving a board must turn the camera off.
+      stopMediaStream(cameraStreamRef.current);
+      cameraStreamRef.current = null;
       screenUnderlayStartInProgressRef.current = false;
       stopMediaStream(screenUnderlayStreamRef.current);
       screenUnderlayStreamRef.current = null;
-      if (screenUnderlayVideoRef.current) {
-        screenUnderlayVideoRef.current.srcObject = null;
-      }
     };
   }, [cancelHeadlessSpeechConfigRetry, cancelHeadlessVoiceRetry]);
 
@@ -9744,25 +9784,25 @@ export function AirboardPrototype({
       moveCursorPoint({ point, mode: "writing", inputSource });
     },
     [
-      eraseAt,
+      beginObjectInteraction,
       beginSceneDrawing,
       beginSceneMove,
-      beginObjectInteraction,
       createSceneElementAtPoint,
+      eraseAt,
       eraseSceneDrawingsAt,
       inputMode,
       inputPaused,
       insertLinkAtPoint,
       makePoint,
       moveCursorPoint,
-      patchSceneElements,
       requestMediaAtPoint,
       selectAnnotationObject,
       selectSceneElements,
       startStroke,
+      toBoardPoint,
+      toggleAnnotationObject,
       touchpadConfig,
       touchpadTool,
-      toggleAnnotationObject,
     ],
   );
 
@@ -9897,8 +9937,8 @@ export function AirboardPrototype({
       appendStrokePoint(pointerStrokeIdRef.current, makePoint(point.x, point.y));
     },
     [
-      appendStrokePoint,
       appendSceneDrawingPoint,
+      appendStrokePoint,
       applyViewport,
       currentViewportLimits,
       eraseAt,
@@ -9906,9 +9946,10 @@ export function AirboardPrototype({
       inputMode,
       inputPaused,
       makePoint,
-      moveObjectInteraction,
       moveCursorPoint,
+      moveObjectInteraction,
       previewSceneMove,
+      toBoardPoint,
       touchpadConfig,
       touchpadTool,
     ],
@@ -9988,6 +10029,7 @@ export function AirboardPrototype({
       endObjectInteraction,
       inputMode,
       patchSceneElements,
+      toBoardPoint,
     ],
   );
 
@@ -10020,7 +10062,7 @@ export function AirboardPrototype({
       setLabelDraft(hitStroke.annotation.label ?? "");
       setEditingAnnotationId(hitStroke.id);
     },
-    [inputMode, selectSceneElements],
+    [inputMode, selectSceneElements, toBoardPoint],
   );
 
   const handlePointerLeave = useCallback(
@@ -10112,7 +10154,7 @@ export function AirboardPrototype({
         `${objectToolLabel(tool)} preview ready. Close your hand anywhere, move it, then open to place.`,
       );
     },
-    [cancelObjectInteraction, updatePlacementGhost],
+    [cancelObjectInteraction, toBoardPoint, updatePlacementGhost],
   );
 
   const activateCreationTool = useCallback(
@@ -10502,6 +10544,7 @@ export function AirboardPrototype({
           }
           {...(shareAccess ? { access: shareAccess } : {})}
           onDownloadPng={exportPng}
+          onCopyImage={copyBoardImage}
           onClose={closeShareDialog}
         />
       ) : null}
@@ -10681,7 +10724,7 @@ export function AirboardPrototype({
                   <span aria-hidden="true">•••</span>
                 </button>
                 {moreMenuOpen ? (
-                  <div className="canvas-more-menu" role="menu">
+                  <div ref={moreMenuRef} className="canvas-more-menu" role="menu" aria-label="Board actions">
                     <button
                       type="button"
                       role="menuitem"
@@ -10726,6 +10769,28 @@ export function AirboardPrototype({
                     >
                       <span aria-hidden="true">⇩</span>
                       Export PNG
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        exportPdf();
+                        setMoreMenuOpen(false);
+                      }}
+                    >
+                      <span aria-hidden="true">⇩</span>
+                      Export PDF
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        copyBoardImage();
+                        setMoreMenuOpen(false);
+                      }}
+                    >
+                      <span aria-hidden="true">⧉</span>
+                      Copy image
                     </button>
                     <Link
                       href="/help/using-the-board/commands"

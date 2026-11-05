@@ -49,6 +49,8 @@ function BoardCollection({ title, description, scope }: { title: string; descrip
 
   useEffect(() => {
     void reload();
+    // reload reads only the token and scope, which are the triggers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth.accessToken, scope]);
 
   const restore = async (id: string) => {

@@ -7,11 +7,18 @@ order: 9
 status: shipped
 audiences: ["everyone"]
 lastVerified: 2026-11-05
-sources: ["apps/web/src/features/product/BoardsPage.tsx", "apps/web/src/features/board/boardLifecycle.ts", "apps/web/src/features/board/ShareDialog.tsx", "apps/web/src/features/product/LiveBoardJoin.tsx", "apps/api/src/controlPlaneRoutes.ts"]
+sources: ["apps/web/src/features/product/BoardsPage.tsx", "apps/web/src/features/board/boardExport.ts", "packages/core/src/boardPreview.ts", "apps/web/src/features/board/boardLifecycle.ts", "apps/web/src/features/board/ShareDialog.tsx", "apps/web/src/features/product/LiveBoardJoin.tsx", "apps/api/src/controlPlaneRoutes.ts"]
 ---
 
 Airboard stores persistent boards and versioned board state in your workspace.
 Camera and microphone media are not saved with a board.
+
+## Find a board
+
+**Boards** shows a small preview of each board's shapes and arrows, when it was
+last updated, and whether only you or your workspace can open it. Search
+matches board titles and the words on boards, so you can find a diagram by
+anything written on it.
 
 ## Save and rename
 
@@ -54,5 +61,13 @@ expires. Administrators can configure that window within allowed limits.
 
 ## Export
 
-Use **Export PNG** from the board menu. Review the exported image for customer
-or confidential content before sending it outside your organization.
+From the board menu (**•••**):
+
+- **Export PNG** saves the board as an image.
+- **Export PDF** saves it as a one-page PDF, ready to email or print.
+- **Copy image** puts the board on your clipboard to paste into chat, a doc or
+  slides. **Share → Copy image** does the same. If your browser blocks
+  copying images, use **Export PNG** instead.
+
+Review an export for customer or confidential content before sending it outside
+your organization.

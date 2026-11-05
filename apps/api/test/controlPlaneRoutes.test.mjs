@@ -665,3 +665,58 @@ test("session start reads the owner, entitlement and board together and still gu
     /BOARD_ACCESS_DENIED/,
   );
 });
+
+test("a session started with only the board id belongs to the board's workspace", async () => {
+  const tables = {
+    profiles: [{ id: PROFILE, display_name: "Owner" }],
+    entitlements: [{
+      id: "entitlement-1",
+      user_id: PROFILE,
+      organization_id: ORG,
+      plan: "personal_trial",
+      status: "trialing",
+      source: "trial",
+      valid_until: "2999-01-01T00:00:00.000Z",
+    }],
+    boards: [boardRow()],
+  };
+  const store = new SupabaseSessionStore(createFakeSupabase(tables));
+  // The board page starts the session while the board is still loading, so
+  // it knows the board id but not yet its workspace.
+  await store.startSession({ ownerUserId: PROFILE, organizationId: ORG, boardId: BOARD, provider: "standalone", allowParticipantDrawing: true });
+  assert.equal(tables.board_sessions[0].workspace_id, boardRow().workspace_id);
+  assert.equal(tables.board_sessions[0].board_id, BOARD);
+
+  // A workspace that doesn't match the board is still refused.
+  await assert.rejects(
+    store.startSession({
+      ownerUserId: PROFILE,
+      organizationId: ORG,
+      boardId: BOARD,
+      workspaceId: "66666666-6666-4666-8666-666666666666",
+      provider: "standalone",
+      allowParticipantDrawing: true,
+    }),
+    /BOARD_ACCESS_DENIED/,
+  );
+});
+
+test("the library list carries a small preview of each board, and only when asked", async (t) => {
+  const state = {
+    elements: {
+      api: { id: "api", kind: "shape", status: "active", visible: true, zIndex: 0, shapeKind: "rectangle", transform: { x: 10, y: 20, width: 100, height: 50, rotation: 0 }, content: { type: "doc", blocks: [{ type: "paragraph", runs: [{ text: "Payments API" }] }] } },
+    },
+  };
+  const client = createFakeSupabase({ boards: [boardRow({ latest_state: state })] });
+  const server = await buildApp(t, client);
+  const list = (url) => server.inject({ method: "GET", url, headers: { authorization: "Bearer owner" } });
+
+  const plain = (await list("/boards")).json().boards[0];
+  assert.equal("preview" in plain, false);
+  assert.equal("latest_state" in plain, false);
+
+  const withPreview = (await list("/boards?preview=1")).json().boards[0];
+  assert.equal("latest_state" in withPreview, false, "the full board content is never sent with the list");
+  assert.deepEqual(withPreview.preview.text, ["Payments API"]);
+  assert.deepEqual(withPreview.preview.shapes, [{ kind: "shape", x: 10, y: 20, width: 100, height: 50 }]);
+});

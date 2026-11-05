@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { IdeaDemo } from "../../src/features/product/IdeaDemo";
 import { FeatureGrid, MarketingPage } from "../../src/features/product/PublicShell";
 import {
   CHROME_EXTENSION_PUBLICLY_INSTALLABLE,
@@ -35,7 +36,7 @@ export default async function MarketingSlugPage({ params }: { params: Promise<{ 
   if (marketingSlug === "download") return <Download />;
   const page = PAGES[marketingSlug];
   if (!page) notFound();
-  return <MarketingPage eyebrow={page.eyebrow} title={page.title} summary={page.summary}><FeatureGrid items={page.sections.map((section) => ({ title: section.title, description: section.body }))} />{["product","demo","templates"].includes(marketingSlug) ? <div className="content-cta"><h2>Try Airboard free.</h2><p>Your free one-month pilot starts when you open your first board. Google Meet and desktop overlays are in preview.</p><Link className="button button-primary" href="/signup">Start free</Link></div> : null}</MarketingPage>;
+  return <MarketingPage eyebrow={page.eyebrow} title={page.title} summary={page.summary}>{marketingSlug === "demo" ? <IdeaDemo /> : null}<FeatureGrid items={page.sections.map((section) => ({ title: section.title, description: section.body }))} />{["product","demo","templates"].includes(marketingSlug) ? <div className="content-cta"><h2>Try Airboard free.</h2><p>Your free one-month pilot starts when you open your first board. Google Meet and desktop overlays are in preview.</p><Link className="button button-primary" href="/signup">Start free</Link></div> : null}</MarketingPage>;
 }
 
 function Download() {

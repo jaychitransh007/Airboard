@@ -6318,3 +6318,224 @@ button.screen-underlay-active {
 #main-content:focus {
   outline: none;
 }
+
+/* Library previews: a light outline of the board's shapes and arrows. */
+.board-thumbnail .board-preview {
+  position: absolute;
+  inset: 16px;
+  width: calc(100% - 32px);
+  height: calc(100% - 32px);
+}
+
+.board-preview rect,
+.board-preview ellipse {
+  fill: rgba(255, 255, 255, 0.1);
+  stroke: rgba(204, 255, 247, 0.75);
+  stroke-width: 1.5;
+}
+
+.board-preview rect.sticky {
+  fill: rgba(255, 229, 143, 0.45);
+  stroke: rgba(255, 229, 143, 0.8);
+}
+
+.board-preview line {
+  stroke: rgba(255, 255, 255, 0.55);
+  stroke-width: 1.5;
+}
+
+/* Landing demo: a sentence typed to Airo becomes a diagram. The finished
+   board is the default; the 10-second loop runs only when motion is welcome. */
+.idea-demo {
+  width: min(880px, 100%);
+  margin: 0 auto;
+}
+
+.idea-demo-board {
+  position: relative;
+  overflow: hidden;
+  padding: 26px 22px 84px;
+  border-radius: 22px;
+  background: radial-gradient(circle at 20% 15%, rgba(157, 233, 224, 0.18), transparent 16rem), radial-gradient(circle at 85% 85%, rgba(118, 87, 235, 0.3), transparent 18rem), #1d1430;
+  box-shadow: 0 24px 60px rgba(38, 22, 58, 0.22);
+}
+
+.idea-demo-diagram {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.idea-demo-node rect {
+  fill: rgba(255, 255, 255, 0.1);
+  stroke: #ccfff7;
+  stroke-width: 2;
+}
+
+.idea-demo-node-3 rect {
+  fill: rgba(255, 229, 143, 0.16);
+  stroke: #ffe58f;
+}
+
+.idea-demo-node text {
+  fill: #ffffff;
+  font-size: 17px;
+  font-weight: 700;
+  text-anchor: middle;
+}
+
+.idea-demo-link {
+  stroke: rgba(255, 255, 255, 0.75);
+  stroke-width: 2.5;
+  stroke-dasharray: 60;
+}
+
+#idea-demo-arrow path {
+  fill: rgba(255, 255, 255, 0.85);
+}
+
+.idea-demo-command {
+  position: absolute;
+  right: 22px;
+  bottom: 20px;
+  left: 22px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 14px;
+  background: rgba(15, 9, 26, 0.72);
+  color: #ffffff;
+  font-size: 14px;
+}
+
+.idea-demo-airo {
+  flex: none;
+  color: #b9a6ff;
+  font-weight: 800;
+}
+
+.idea-demo-typed {
+  overflow: hidden;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  text-overflow: ellipsis;
+}
+
+.idea-demo-applied {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(15, 9, 26, 0.82);
+  color: #d9ffe8;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+.idea-demo-applied span {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #a5b4fc;
+  color: #1d1430;
+}
+
+.idea-demo figcaption {
+  max-width: 620px;
+  margin: 16px auto 0;
+  color: var(--air-muted);
+  font-size: 15px;
+  line-height: 1.55;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .idea-demo-typed {
+    width: 59ch;
+    max-width: 0;
+    text-overflow: clip;
+    animation: idea-demo-type 10s steps(59, end) infinite;
+  }
+
+  .idea-demo-node {
+    animation: idea-demo-appear 10s ease-out infinite;
+  }
+
+  .idea-demo-node-2 { animation-name: idea-demo-appear-2; }
+  .idea-demo-node-3 { animation-name: idea-demo-appear-3; }
+
+  .idea-demo-link-1 { animation: idea-demo-draw-1 10s ease-out infinite; }
+  .idea-demo-link-2 { animation: idea-demo-draw-2 10s ease-out infinite; }
+
+  .idea-demo-applied { animation: idea-demo-applied 10s ease-out infinite; }
+}
+
+@keyframes idea-demo-type {
+  0%, 3% { max-width: 0; }
+  32%, 92% { max-width: 59ch; }
+  100% { max-width: 0; }
+}
+
+@keyframes idea-demo-appear {
+  0%, 35% { opacity: 0; transform: translateY(8px); }
+  40%, 92% { opacity: 1; transform: none; }
+  100% { opacity: 0; }
+}
+
+@keyframes idea-demo-appear-2 {
+  0%, 40% { opacity: 0; transform: translateY(8px); }
+  45%, 92% { opacity: 1; transform: none; }
+  100% { opacity: 0; }
+}
+
+@keyframes idea-demo-appear-3 {
+  0%, 45% { opacity: 0; transform: translateY(8px); }
+  50%, 92% { opacity: 1; transform: none; }
+  100% { opacity: 0; }
+}
+
+@keyframes idea-demo-draw-1 {
+  0%, 52% { stroke-dashoffset: 60; opacity: 0; }
+  53% { opacity: 1; }
+  60%, 92% { stroke-dashoffset: 0; opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes idea-demo-draw-2 {
+  0%, 57% { stroke-dashoffset: 60; opacity: 0; }
+  58% { opacity: 1; }
+  65%, 92% { stroke-dashoffset: 0; opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes idea-demo-applied {
+  0%, 67% { opacity: 0; transform: translate(-50%, -6px); }
+  71%, 92% { opacity: 1; transform: translateX(-50%); }
+  100% { opacity: 0; transform: translateX(-50%); }
+}
+
+@media (max-width: 560px) {
+  .idea-demo-board { padding: 18px 12px 74px; }
+  .idea-demo-command { right: 12px; left: 12px; padding: 10px 12px; }
+  .idea-demo-typed { font-size: 11px; }
+  .idea-demo-applied { font-size: 11px; }
+}
+
+.landing-demo {
+  padding: 72px 20px 24px;
+  scroll-margin-top: 80px;
+}
+
+.landing-demo .section-intro {
+  display: block;
+  margin: 0 auto 28px;
+  text-align: center;
+}

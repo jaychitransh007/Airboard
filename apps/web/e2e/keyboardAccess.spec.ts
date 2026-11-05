@@ -33,3 +33,23 @@ test("the first Tab on a page offers a skip link to the main content", async ({ 
   await page.keyboard.press("Enter");
   await expect(page.locator("#main-content")).toBeFocused();
 });
+
+test("the board menu opens from the keyboard, moves with arrows and closes on Escape", async ({ page }) => {
+  await page.goto("/?testStandalone=1");
+  const more = page.getByRole("button", { name: "More board actions" });
+  await more.focus();
+  await page.keyboard.press("Enter");
+  const menu = page.getByRole("menu", { name: "Board actions" });
+  await expect(menu).toBeVisible();
+  const items = menu.getByRole("menuitem");
+  await expect(items.first()).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(items.nth(1)).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(items.last()).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(items.first()).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+  await expect(more).toBeFocused();
+});
