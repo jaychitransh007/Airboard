@@ -598,3 +598,10 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
       - Neither revision logged errors.
       - The deployed launch check is unchanged at 19/23.
     - **Rollback:** both services to `launch-34df218` (untagged; route with `--to-revisions`). The new function is additive, and older revisions ignore it.
+- **2026-11-05** — Release tooling and status (part of RGB-004):
+  - **`infra/cloud-run/release.sh`:** `build`, `stage api|web` and `promote api|web` commit the deploy steps used through November.
+    - It builds both images for HEAD as `launch-<commit>`, and refuses to build with uncommitted tracked changes.
+    - It stages each revision with no traffic on its own tagged URL. The API may grow to 3 instances and the web to 1, and staged revisions hold no warm instances.
+    - It sends all traffic to a named revision.
+    - `AIRBOARD_RELEASE` picks another release (rollback). `DRY_RUN=1` prints the commands instead of running them.
+  - **`Docs/Project Status.md`:** what is live, what shipped, what is left with owners, and how to release.
