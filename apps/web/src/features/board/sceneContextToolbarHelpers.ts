@@ -1,4 +1,4 @@
-import type { RichTextDocument, RichTextMark } from "@airboard/core";
+import type { BoardSceneElement, RichTextDocument, RichTextMark } from "@airboard/core";
 
 export type ToggleableRichTextMark =
   | "bold"
@@ -95,3 +95,70 @@ export function httpLinkHref(value: string): string | null {
     return null;
   }
 }
+
+/** A colour the compact element toolbar offers as a swatch. */
+export type CompactColorField = {
+  label: string;
+  path: [string, ...string[]];
+  value: string;
+};
+
+/**
+ * The colours an element's compact toolbar shows; everything else waits
+ * behind More. Kinds without a main colour (tables, media, links, code,
+ * stamps) show none.
+ */
+export function compactColorFields(element: BoardSceneElement): CompactColorField[] {
+  switch (element.kind) {
+    case "drawing":
+      return [{ label: "Color", path: ["style", "color"], value: element.style.color }];
+    case "sticky":
+      return [{ label: "Paper", path: ["color"], value: element.color }];
+    case "shape":
+      return [
+        { label: "Fill", path: ["style", "fill"], value: element.style.fill },
+        { label: "Stroke", path: ["style", "stroke"], value: element.style.stroke },
+      ];
+    case "connector":
+      return [{ label: "Line", path: ["style", "color"], value: element.style.color }];
+    case "text":
+      return [{ label: "Color", path: ["style", "color"], value: element.style.color }];
+    case "section":
+      return [
+        { label: "Fill", path: ["style", "fill"], value: element.style.fill },
+        { label: "Border", path: ["style", "stroke"], value: element.style.stroke },
+      ];
+    case "mind_map_node":
+      return [
+        { label: "Fill", path: ["style", "fill"], value: element.style.fill },
+        { label: "Line", path: ["style", "lineColor"], value: element.style.lineColor },
+      ];
+    default:
+      return [];
+  }
+}
+
+export type ScreenBounds = { left: number; top: number; right: number; bottom: number };
+
+/**
+ * Where the element toolbar floats: centred above the selection, or below it
+ * when the top bar leaves no room, always inside the window and clear of the
+ * top bar and the bottom dock.
+ */
+export function contextToolbarPosition(
+  anchor: ScreenBounds,
+  size: { width: number; height: number },
+  viewport: { width: number; height: number },
+  options: { gap?: number; margin?: number; minTop?: number; bottomReserve?: number } = {},
+): { left: number; top: number } {
+  const gap = options.gap ?? 12;
+  const margin = options.margin ?? 12;
+  const minTop = options.minTop ?? 72;
+  const maxTop = Math.max(minTop, viewport.height - (options.bottomReserve ?? 96) - size.height);
+  const centred = (anchor.left + anchor.right) / 2 - size.width / 2;
+  const left = Math.min(Math.max(margin, centred), Math.max(margin, viewport.width - margin - size.width));
+  const above = anchor.top - gap - size.height;
+  const top = above >= minTop ? above : Math.min(anchor.bottom + gap, maxTop);
+  return { left: Math.round(left), top: Math.round(Math.max(minTop, top)) };
+}
+

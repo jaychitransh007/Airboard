@@ -6,13 +6,16 @@ categoryLabel: Using the board
 order: 5
 status: shipped
 audiences: ["everyone"]
-lastVerified: 2026-07-30
+lastVerified: 2026-11-05
 sources: ["apps/web/src/features/board/voiceCommandRouter.ts", "apps/web/src/features/board/palmVoiceGestureTracker.ts", "apps/web/src/features/board/holdToEditTracker.ts", "apps/web/src/features/board/realtimeSpeech.ts"]
 ---
 
 Airo turns finalized speech into the same command pipeline used by typed input.
-Start Airo once before using voice. The interface shows whether realtime voice
-is available in the current environment.
+Turn Airo on once before using voice: use **⏻** on the Airo panel, or
+**Turn on Airo voice and hands** in the board menu (**•••**). The interface
+shows whether realtime voice is available in the current environment. While
+Airo listens, its panel shrinks to a strip in the corner with what it heard,
+what it is doing and a line to type into; **⤢** shows its full activity.
 
 ## Address Airo
 

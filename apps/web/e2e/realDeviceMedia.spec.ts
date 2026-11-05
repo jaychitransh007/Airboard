@@ -50,7 +50,8 @@ test("@real-device validates physical media and production HandLandmarker health
     name: "Start building",
   });
   if (await onboarding.isVisible()) await onboarding.click();
-  await page.getByRole("button", { name: "Open board settings" }).click();
+  await page.getByRole("button", { name: "More board actions" }).click();
+  await page.getByRole("menuitem", { name: "Board settings" }).click();
   const cameraRow = page
     .locator(".media-permission-row")
     .filter({ hasText: "Camera" });

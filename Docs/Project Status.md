@@ -8,7 +8,7 @@
 
 | Part | Where | Notes |
 | --- | --- | --- |
-| Web | Cloud Run `airboard-pilot-web`, revision `launch-f33b2cb` | `https://airboard-pilot-web-634900453473.asia-south1.run.app`; one instance, kept warm |
+| Web | Cloud Run `airboard-pilot-web`, revision `launch-6c4ca43` | `https://airboard-pilot-web-634900453473.asia-south1.run.app`; one instance, kept warm |
 | API | Cloud Run `airboard-pilot-api`, revision `launch-87aec6f` | Up to 3 instances, one kept warm; live boards are shared across instances |
 | Database and sign-in | Supabase `ujotgzjpkocuhtfrvbzu` (ap-south-1, Mumbai) | Every migration in `supabase/migrations` applied, the last `20261105140000` |
 | Google sign-in | Google Auth Platform in the pilot Google Cloud project | Consent screen "Airboard", published to every Google account; client "Airboard sign-in (Supabase)" |
@@ -16,8 +16,8 @@
 
 - **Health:** the API's `/ready` reports the database and `boardFanOut` (live boards across instances).
 - **Launch check:** `pnpm launch:check:deployed` checks the live revisions and passes **19 of 23**.
-- **Rollback:** web to `launch-6d2bb10`, API to `launch-34df218` (`AIRBOARD_RELEASE=launch-<hash> infra/cloud-run/release.sh promote web|api`).
-- **Code:** `main`. Pull requests #1 (launch hardening) and #11 (Google sign-in) merged the working branch `codex/production-readiness` into it on 5 November 2026. The live API matches its code; the live web adds the camera start fix on the branch (`f33b2cb`).
+- **Rollback:** web to `launch-f33b2cb`, API to `launch-34df218` (`AIRBOARD_RELEASE=launch-<hash> infra/cloud-run/release.sh promote web|api`).
+- **Code:** `main`. Pull requests #1 (launch hardening) and #11 (Google sign-in) merged the working branch `codex/production-readiness` into it on 5 November 2026. The live API matches its code. The live web is the branch's `6c4ca43` (decluttered board), which `main` gets when the branch is next merged.
 
 ## Shipped in the launch hardening (November 2026)
 
@@ -37,6 +37,11 @@
   - PDF and copy-image export.
   - The landing-page demo.
   - Keyboard menus and dialog focus.
+- **Calmer board:**
+  - The top bar is Share plus one menu.
+  - Airo shrinks to a corner strip while it listens.
+  - The selected element gets a compact floating toolbar.
+  - Zoom sits in the tool dock.
 - **Faster camera start:** hand tracking downloads while the browser asks for the camera, and a slow prompt is explained.
 - **Google sign-in:** "Continue with Google" works for everyone, with no email setup needed.
 - **Engineering hygiene:**

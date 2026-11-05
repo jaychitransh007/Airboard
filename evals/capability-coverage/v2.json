@@ -676,7 +676,7 @@
       "rationale": "A snap emitted through the production gesture hook reaches the shared visibility action and the mounted final hidden state."
     },
     {
-      "evidenceId": "browser:apps/web/e2e/mediaOwnership.spec.ts#standalone combines camera and voice into one Airo entry point",
+      "evidenceId": "browser:apps/web/e2e/mediaOwnership.spec.ts#standalone keeps a quiet top bar and one Airo entry point",
       "capabilities": [
         "surface:standalone"
       ],

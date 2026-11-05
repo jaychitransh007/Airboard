@@ -39,6 +39,8 @@ type CreationToolbarProps = {
   onTableSizeSelect?: (rows: number, columns: number) => void;
   dockRef: RefObject<HTMLDivElement | null>;
   gestureHover?: string | null;
+  /** Extra controls at the dock's end, such as the canvas zoom. */
+  trailing?: React.ReactNode;
 };
 
 const DEFAULT_RECENT_SHAPES = [
@@ -62,6 +64,7 @@ export function CreationToolbar({
   onTableSizeSelect,
   dockRef,
   gestureHover = null,
+  trailing = null,
 }: CreationToolbarProps) {
   const [shapeLibraryOpen, setShapeLibraryOpen] = useState(false);
   const [shapeSearch, setShapeSearch] = useState("");
@@ -448,6 +451,13 @@ export function CreationToolbar({
             </CreationPopover>
           ) : null}
         </div>
+
+        {trailing ? (
+          <>
+            <span className="catalog-dock-divider" aria-hidden="true" />
+            {trailing}
+          </>
+        ) : null}
       </div>
 
       {shapeLibraryOpen ? (

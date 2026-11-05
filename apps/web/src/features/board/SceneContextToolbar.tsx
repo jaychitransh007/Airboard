@@ -19,7 +19,9 @@ import {
 } from "@airboard/core";
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type ClipboardEvent,
   type KeyboardEvent,
@@ -27,6 +29,8 @@ import {
 } from "react";
 import styles from "./SceneContextToolbar.module.css";
 import {
+  compactColorFields,
+  contextToolbarPosition,
   httpLinkHref,
   normalizeRotation,
   replaceRichTextPlainValue,
@@ -34,11 +38,18 @@ import {
   richTextPlainValue,
   stickyHeightForText,
   toggleRichTextMark,
+  type ScreenBounds,
   type ToggleableRichTextMark,
 } from "./sceneContextToolbarHelpers.ts";
 
+// Measuring the toolbar before paint keeps it from flashing in the wrong spot;
+// the server render has nothing to measure.
+const useBrowserLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+
 export type SceneContextToolbarProps = {
   selected: BoardSceneElement | null;
+  /** The selection's on-screen bounds; the toolbar floats beside it. */
+  anchor?: ScreenBounds | null;
   onPatch: (patches: BoardElementPatchOperation[]) => void;
   onDelete: () => void;
   onDuplicate: () => void;
@@ -99,6 +110,7 @@ const KIND_LABELS: Record<BoardSceneElement["kind"], string> = {
 
 export function SceneContextToolbar({
   selected,
+  anchor = null,
   onPatch,
   onDelete,
   onDuplicate,
@@ -118,6 +130,23 @@ export function SceneContextToolbar({
   const [selectedRowId, setSelectedRowId] = useState("");
   const [selectedColumnId, setSelectedColumnId] = useState("");
   const [tableMessage, setTableMessage] = useState("");
+  // Compact by default: colours, order, duplicate and delete. More shows every field.
+  const [expanded, setExpanded] = useState(false);
+  const surfaceRef = useRef<HTMLElement | null>(null);
+  const [surfaceSize, setSurfaceSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    setExpanded(false);
+  }, [selected?.id]);
+
+  useBrowserLayoutEffect(() => {
+    const node = surfaceRef.current;
+    if (!node) return;
+    const next = { width: node.offsetWidth, height: node.offsetHeight };
+    setSurfaceSize((current) =>
+      current.width === next.width && current.height === next.height ? current : next,
+    );
+  });
 
   useEffect(() => {
     if (!table) {
@@ -200,17 +229,84 @@ export function SceneContextToolbar({
     }
   };
 
+  const measured = surfaceSize.width > 0;
+  const floating =
+    anchor && measured && typeof window !== "undefined"
+      ? contextToolbarPosition(anchor, surfaceSize, { width: window.innerWidth, height: window.innerHeight })
+      : null;
+  const surfaceStyle = anchor
+    ? floating
+      ? { left: floating.left, top: floating.top, transform: "none" }
+      : { visibility: "hidden" as const }
+    : undefined;
+  const identity = (
+    <div className={styles.identity}>
+      <span className={styles.kindIcon} aria-hidden="true">{kindIcon(selected.kind)}</span>
+      <span className={styles.kindLabel}>{KIND_LABELS[selected.kind]}</span>
+    </div>
+  );
+
+  if (!expanded) {
+    const colors = compactColorFields(selected);
+    return (
+      <aside
+        ref={surfaceRef}
+        className={`${styles.surface} ${styles.compact}`}
+        style={surfaceStyle}
+        aria-label={`${KIND_LABELS[selected.kind]} properties`}
+        data-element-kind={selected.kind}
+      >
+        <div className={styles.scroller}>
+          {identity}
+          <Divider />
+          {colors.length > 0 ? (
+            <div className={styles.group} role="group" aria-label="Colours">
+              {colors.map((color) => (
+                <Swatch
+                  key={color.path.join(".")}
+                  label={color.label}
+                  value={color.value}
+                  onChange={(value) => setField(color.path, value)}
+                />
+              ))}
+            </div>
+          ) : null}
+          {selected.kind === "text" ? (
+            <RichTextMarkButtons document={selected.content} onChange={(document) => setDocument(["content"], document)} />
+          ) : null}
+          <div className={styles.group} role="group" aria-label="Arrange">
+            <IconButton label="Send backward" icon="↓" onClick={() => setField(["zIndex"], selected.zIndex - 1)} />
+            <IconButton label="Bring forward" icon="↑" onClick={() => setField(["zIndex"], selected.zIndex + 1)} />
+          </div>
+          <Divider />
+          <div className={styles.group} role="group" aria-label="Element actions">
+            <IconButton label="Duplicate element" icon="⧉" onClick={onDuplicate} />
+            <IconButton danger label="Delete element" icon="⌫" onClick={onDelete} />
+            <button
+              type="button"
+              className={styles.textButton}
+              aria-expanded={false}
+              aria-label={`More ${KIND_LABELS[selected.kind].toLowerCase()} options`}
+              onClick={() => setExpanded(true)}
+            >
+              More
+            </button>
+          </div>
+        </div>
+      </aside>
+    );
+  }
+
   return (
     <aside
+      ref={surfaceRef}
       className={styles.surface}
+      style={surfaceStyle}
       aria-label={`${KIND_LABELS[selected.kind]} properties`}
       data-element-kind={selected.kind}
     >
       <div className={styles.scroller}>
-        <div className={styles.identity}>
-          <span className={styles.kindIcon} aria-hidden="true">{kindIcon(selected.kind)}</span>
-          <span className={styles.kindLabel}>{KIND_LABELS[selected.kind]}</span>
-        </div>
+        {identity}
 
         <Divider />
 
@@ -721,9 +817,26 @@ export function SceneContextToolbar({
         <div className={styles.group} role="group" aria-label="Element actions">
           <IconButton label="Duplicate element" icon="⧉" onClick={onDuplicate} />
           <IconButton danger label="Delete element" icon="⌫" onClick={onDelete} />
+          <button
+            type="button"
+            className={styles.textButton}
+            aria-expanded
+            aria-label={`Fewer ${KIND_LABELS[selected.kind].toLowerCase()} options`}
+            onClick={() => setExpanded(false)}
+          >
+            Less
+          </button>
         </div>
       </div>
     </aside>
+  );
+}
+
+function Swatch({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <label className={styles.swatch} title={`${label}: ${value.toUpperCase()}`}>
+      <input aria-label={`${label} color`} type="color" value={validColor(value)} onChange={(event) => onChange(event.currentTarget.value)} />
+    </label>
   );
 }
 

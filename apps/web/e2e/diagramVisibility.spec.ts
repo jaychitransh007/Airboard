@@ -118,7 +118,8 @@ test("snap, keyboard, menu, and voice share one local visibility action", async 
 
 test("gesture guide teaches the exact conflict-safe poses", async ({ page }) => {
   await page.goto("/?testStandalone=1");
-  await page.getByRole("button", { name: "Open board settings" }).click();
+  await page.getByRole("button", { name: "More board actions" }).click();
+  await page.getByRole("menuitem", { name: "Board settings" }).click();
   await page.getByText("Gesture guide", { exact: true }).click();
 
   await expect(
