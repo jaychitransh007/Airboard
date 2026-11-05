@@ -147,6 +147,7 @@ export function registerControlPlaneRoutes(
       })
       .eq("id", context.profileId);
     if (error) return reply.code(500).send({ error: "PROFILE_UPDATE_FAILED" });
+    auth.forgetProfile(context.profileId);
     await writeAudit(auth, context, request, "profile.updated", "profile", context.profileId);
     return { updated: true };
   });
@@ -254,6 +255,7 @@ export function registerControlPlaneRoutes(
       .maybeSingle();
     if (!membership) return reply.code(404).send({ error: "ORGANIZATION_NOT_FOUND" });
     await auth.client.from("profiles").update({ default_organization_id: request.params.organizationId }).eq("id", context.profileId);
+    auth.forgetProfile(context.profileId);
     return { selected: true };
   });
 
@@ -1177,6 +1179,7 @@ function registerOrganizationRoutes(server: FastifyInstance, _config: ApiConfig,
         properties: { role: invitation.role },
       }),
     ]);
+    auth.forgetProfile(context.profileId);
     return { accepted: true, organizationId: invitation.organization_id };
   });
 
@@ -1213,6 +1216,7 @@ function registerOrganizationRoutes(server: FastifyInstance, _config: ApiConfig,
     const update = { ...(role ? { role } : {}), ...(status ? { status } : {}), updated_at: new Date().toISOString() };
     const { data, error } = await auth.client.from("organization_memberships").update(update).eq("id", current.id).select("id,role,status").single();
     if (error) return reply.code(500).send({ error: "MEMBERSHIP_UPDATE_FAILED" });
+    auth.forgetProfile(current.profile_id);
     await writeAudit(auth, context, request, "member.updated", "membership", current.id, update);
     return { membership: data };
   });
@@ -2043,6 +2047,7 @@ async function processDataRequests(auth: AuthService) {
           await auth.client.from("organizations").delete().eq("id", item.organization_id);
         }
         await auth.client.from("profiles").delete().eq("id", item.profile_id);
+        auth.forgetProfile(item.profile_id);
       }
       completed += 1;
     } catch (error) {

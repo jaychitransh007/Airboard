@@ -34,10 +34,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const auth = useAirboardAuth();
   const [organizations, setOrganizations] = useState<Array<{ organization_id: string; organizations: { name?: string } | null }>>([]);
+  const isBoardWorkspace = isImmersiveBoardPath(pathname);
   useEffect(() => {
-    if (!auth.accessToken) return;
+    // The organization switcher lives in the sidebar, which a board hides.
+    if (!auth.accessToken || isBoardWorkspace) return;
     void airboardApi<{ organizations: Array<{ organization_id: string; organizations: { name?: string } | null }> }>("/me/organizations", { accessToken: auth.accessToken }).then((result) => setOrganizations(result.organizations));
-  }, [auth.accessToken, auth.account?.organization.id]);
+  }, [auth.accessToken, auth.account?.organization.id, isBoardWorkspace]);
   const selectOrganization = async (organizationId: string) => {
     if (!auth.accessToken || organizationId === auth.account?.organization.id) return;
     await airboardApi(`/me/organizations/${organizationId}/select`, { method: "POST", accessToken: auth.accessToken });
@@ -48,7 +50,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Members, policies, SSO and audit have nothing to manage in a workspace of one.
   const isAdmin = !personal && ["owner", "admin"].includes(auth.account?.organization.role ?? "");
   const mainNav = personal ? MAIN_NAV : [MAIN_NAV[0], MAIN_NAV[1], SHARED_NAV, ...MAIN_NAV.slice(2)];
-  const isBoardWorkspace = isImmersiveBoardPath(pathname);
   return (
     <div className={`app-shell${isBoardWorkspace ? " board-app-shell" : ""}`}>
       {!isBoardWorkspace ? <aside className="app-sidebar">

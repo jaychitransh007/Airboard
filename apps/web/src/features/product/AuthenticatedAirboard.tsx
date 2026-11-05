@@ -9,6 +9,7 @@ import type { BoardShareAccess, BoardVisibility } from "../board/ShareDialog";
 import { liveLinkFromBoardAddress, savedBoardLink } from "../board/shareLinks";
 import { AirboardApiError, airboardApi } from "../../platform/api";
 import { useAirboardAuth } from "../../platform/auth";
+import { prepareDurableBoard } from "./boardPreparation";
 import { PilotExtensionButton } from "./OneTapRequestButton";
 
 const SAVE_RETRY_BASE_MS = 1_000;
@@ -48,54 +49,21 @@ export function AuthenticatedAirboard({ boardId, templateId }: { boardId?: strin
     const preparationKey = boardId ?? "new";
     if (preparingRef.current === preparationKey) return;
     preparingRef.current = preparationKey;
+    const accessToken = auth.accessToken;
     const prepare = async () => {
-      // A standalone board preflight proves the canvas can render. Activation
-      // is idempotent and begins here rather than at account creation.
-      const preflight = await airboardApi<{ passed: boolean }>("/integrations/preflight", {
-        method: "POST",
-        accessToken: auth.accessToken,
-        body: JSON.stringify({
-          platform: "standalone",
-          checks: { canvas: true, firstAction: true },
-          activateTrial: true,
-          eventId: crypto.randomUUID(),
-        }),
+      const { board: durable, created } = await prepareDurableBoard<DurableBoard>(boardId, {
+        api: (path, init) => airboardApi(path, { ...init, accessToken }),
+        accountReady: auth.accountReady,
+        refreshAccount: auth.refreshAccount,
       });
-      if (!preflight.passed) throw new Error("STANDALONE_PREFLIGHT_FAILED");
-      try {
-        await airboardApi("/trial/activate", {
-          method: "POST",
-          accessToken: auth.accessToken,
-          body: JSON.stringify({ source: "standalone_preflight" }),
-        });
-      } catch (caught) {
-        // Losing an activation race still leaves the trial active.
-        if (!(caught instanceof AirboardApiError && caught.code === "TRIAL_ALREADY_ACTIVATED")) throw caught;
-      }
-      let durable: DurableBoard;
-      if (!boardId) {
-        const created = await airboardApi<{ board: DurableBoard }>("/boards", {
-          method: "POST",
-          accessToken: auth.accessToken,
-          body: JSON.stringify({ title: "Untitled Airboard" }),
-        });
-        const loaded = await airboardApi<{ board: DurableBoard }>(`/boards/${created.board.id}`, {
-          accessToken: auth.accessToken,
-        });
-        durable = loaded.board;
+      if (created) {
         // Rewrite the address in place before the canvas mounts. A router
         // navigation here raced the live session's own URL update and could
         // leave the page on /app/boards/new, where a reload makes another board.
         window.history.replaceState(window.history.state, "", `/app/boards/${durable.id}`);
-      } else {
-        const loaded = await airboardApi<{ board: DurableBoard }>(`/boards/${boardId}`, {
-          accessToken: auth.accessToken,
-        });
-        durable = loaded.board;
       }
       versionRef.current = durable.latest_version ?? 0;
       setBoard(durable);
-      await auth.refreshAccount();
       setReady(true);
     };
     void prepare()
