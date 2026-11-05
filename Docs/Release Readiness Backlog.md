@@ -387,3 +387,8 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - On production, the owner's Billing reads "Ended on Jul 22, 2026" with the explanation and **Ask for more pilot time**; the request was not sent. **Share** on a board says the pilot has ended and links to Billing.
     - Rollback: API and web `launch-0f6ab46`.
     - Seen while checking: opening a board takes about 8 seconds on production, because the page makes about six API calls one after another and each takes 1–2 seconds. Latency matches earlier revisions, so this deploy did not cause it.
+- **2026-11-05** — The owner's pilot extended, with the user's approval:
+  - The owner's personal workspace had a 3-day trial that ended on 2026-07-22 (the lifecycle job marked it expired on 2026-11-04).
+  - The trial and its entitlement now run 30 days from today, to 2026-12-05. The change was one production transaction, and the original activation date is kept. No reminder emails were queued for the new end.
+  - Billing now reads "Active until Dec 5, 2026", and **Share** on a board offers **Copy live link**.
+  - Seen while connecting: the Supabase project is in ap-northeast-2 (Seoul) and the API is in asia-south1 (Mumbai), so every database call crosses regions. This bears on the slow board open.
