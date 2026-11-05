@@ -1,6 +1,39 @@
 # Moving Airboard's Supabase to Mumbai — plan
 
-Status: **new project created and set up (schema and sign-in settings), no data copied.** Written 2026-11-05.
+Status: **done 2026-11-05.** Production runs on the Mumbai project. The Seoul project is untouched and waits for the owner to delete it. Written 2026-11-05.
+
+## What happened on 2026-11-05
+
+The owner asked to finish the move the same day, since there was no pilot traffic. The separate rehearsal was skipped; the old project stayed untouched throughout, so rollback stayed one command.
+
+1. **Before:** row counts were taken in both projects. Seoul had 2 sign-in users, 3 profiles, 11 boards, 193 board versions and 5,870 live-session events (24 MB in all), and no uploaded files.
+2. **Writes paused:** the lifecycle job was paused, and the API was switched to read-only (revision `00033-9r7`).
+3. **Data copied:**
+   - Dumped with `supabase db dump --data-only --use-copy -s public,auth`. Its `-x` excludes were ignored, so the auth blocks other than `users`, `identities` and `mfa_factors` were removed from the file by hand.
+   - That left out 20 flow states, 2 sessions, 2 MFA claims and 25 refresh tokens; everyone signs in again.
+   - Restored into Mumbai in one transaction with `session_replication_role = replica`.
+4. **Verified:**
+   - All 38 tables have matching row counts.
+   - Content fingerprints match for users, profiles, boards (including saved state), board versions, entitlements and trials.
+   - Seoul was unchanged during the copy, and there were no storage files to copy.
+5. **Keys:**
+   - The owner created Secret Manager secret `airboard-supabase-secret-key-mumbai` (Mumbai `service_role` key) and granted it to the API's runtime account, `airboard-pilot-runtime@…`. The agent isn't allowed to write secrets.
+   - The web build uses Mumbai's publishable key.
+6. **Staged:**
+   - API `airboard-pilot-api-mumbai-fff6d97`: the `launch-513185f` image with `SUPABASE_URL` set to Mumbai, the secret pinned to version 1, and read-only off.
+   - Web `airboard-pilot-web-mumbai-fff6d97`: a new build pointed at Mumbai.
+   - Smoke: readiness queried the Mumbai database successfully; sign-in settings came from Mumbai; forged and bad tokens got 401; the web build references only Mumbai.
+7. **Switched:** both revisions promoted to 100%, and the lifecycle job resumed. A manual lifecycle run returned 200. The old browser session now lands on sign-in, as expected.
+8. **Tidied:**
+   - The repo's CLI is linked to Mumbai, and its version pins now match Mumbai.
+   - `.env` has `SUPABASE_DB_PASSWORD` for Mumbai and `SUPABASE_DB_PASSWORD_SEOUL` for the old project.
+   - The launch evidence names the Mumbai project, and the local copies of the dump were deleted.
+
+**Rollback** (only sensible before anything new is written in Mumbai): route API traffic to `airboard-pilot-api-launch-513185f` and web traffic to `airboard-pilot-web-launch-513185f`. Both still point at Seoul.
+
+**Still open:**
+- Resend SMTP on the owner's domain. Until then, sign-in emails reach only Aura organization members, at most 2 an hour.
+- Deleting the Seoul project. The owner does this; the agent isn't allowed to delete data.
 
 **New project:** `ujotgzjpkocuhtfrvbzu` ("Airboard"), in the Aura organization,
 region ap-south-1 (Mumbai), Micro compute, Postgres 17.11. Created 2026-11-05

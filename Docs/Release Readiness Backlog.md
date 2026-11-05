@@ -458,3 +458,16 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - **Production after promotion:** `/auth/config` reports `readOnly: false`. On the owner's board, every request returned 200 (including the banner's `/auth/config` check), the live session started and no banner showed. The new API revision logged no server errors.
     - **Rollback:** API and web `launch-6cdeed8`.
     - **To turn it on at cut-over:** `gcloud run services update airboard-pilot-api --project=project-1217dd57-9cac-491d-b8d --region=asia-south1 --update-env-vars AIRBOARD_READ_ONLY=true`, then `gcloud run services update-traffic airboard-pilot-api --project=project-1217dd57-9cac-491d-b8d --region=asia-south1 --to-latest`. Turn it off the same way with `false`. Deploys pin traffic to a named revision, so the settings change alone creates a revision that gets no traffic; the second command sends traffic to it. Every later deploy copies the service's saved settings, so turn the switch off the same way before deploying again.
+- **2026-11-05** — Supabase moved from Seoul to Mumbai:
+  - Production now uses `ujotgzjpkocuhtfrvbzu` (Aura organization, ap-south-1), next to the API and most pilot users. The step-by-step record is in `Docs/Supabase Move to Mumbai Plan.md`.
+  - **Copy:**
+    - Data-only copy while the API was read-only.
+    - All 38 tables have matching row counts, and content fingerprints match.
+    - Sign-in sessions were left behind, so everyone signs in again.
+    - There were no storage files to copy.
+  - **Live:** API `airboard-pilot-api-mumbai-fff6d97` (the `launch-513185f` image; `SUPABASE_URL` set to Mumbai; secret `airboard-supabase-secret-key-mumbai:1`) and web `airboard-pilot-web-mumbai-fff6d97` (built with Mumbai's URL and publishable key).
+  - **Checks:** readiness against the Mumbai database passes, the lifecycle run returns 200, and read-only is off.
+  - **Rollback:** both services to `launch-513185f`, which still point at Seoul.
+  - **Open:**
+    - Resend SMTP. Until then, sign-in emails reach only Aura organization members.
+    - Deleting the Seoul project `ljqxegqdfhqcmkbivldr`. The owner does this.
