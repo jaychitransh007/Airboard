@@ -125,6 +125,7 @@ test("standalone combines camera and voice into one Airo entry point", async ({ 
     "Redo",
     "Enable Airo voice and hand tracking",
     "Choose a screen or window to show behind Airboard",
+    "Share",
     "More board actions",
     "Open board settings",
   ]);
@@ -145,16 +146,24 @@ test("standalone combines camera and voice into one Airo entry point", async ({ 
   await toolbar.getByRole("button", { name: "More board actions" }).click();
 
   // Compact view keeps the same four controls visible instead of hiding
-  // whichever actions happen to occupy particular child positions.
+  // whichever actions happen to occupy particular child positions. Undo and
+  // redo stay in the ••• menu, and phone browsers cannot share a screen, so
+  // those leave the top bar.
   await page.setViewportSize({ width: 375, height: 812 });
   for (const controlName of [
     "Enable Airo voice and hand tracking",
-    "Choose a screen or window to show behind Airboard",
+    "Share",
     "More board actions",
     "Open board settings",
   ]) {
     await expect(toolbar.getByRole("button", { name: controlName })).toBeVisible();
   }
+  for (const controlName of ["Undo", "Redo", "Choose a screen or window to show behind Airboard"]) {
+    await expect(toolbar.getByRole("button", { name: controlName, exact: true })).toBeHidden();
+  }
+  await toolbar.getByRole("button", { name: "More board actions" }).click();
+  await expect(page.getByRole("menuitem", { name: "Undo" })).toBeVisible();
+  await toolbar.getByRole("button", { name: "More board actions" }).click();
   const toolbarBounds = await toolbar.boundingBox();
   expect(toolbarBounds).not.toBeNull();
   expect(toolbarBounds!.x + toolbarBounds!.width).toBeLessThanOrEqual(375);

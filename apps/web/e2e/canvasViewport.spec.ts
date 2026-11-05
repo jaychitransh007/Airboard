@@ -3,7 +3,8 @@ import { expect, test, type Page } from "@playwright/test";
 /**
  * Canvas navigation acceptance: the viewport pans/zooms, and every input path
  * still lands in correct BOARD coordinates — a command issued while zoomed and
- * panned must create its object where the user is looking, not at the origin.
+ * panned must create its object where the user is looking, not at the origin
+ * or behind the Airo panel.
  */
 
 type Hooks = {
@@ -59,11 +60,17 @@ test("typed commands land where the user is looking under pan+zoom", async ({ pa
   const position = summary.positions[0];
   expect(position).not.toBeNull();
 
-  // Expected: the visible window's center, in board coordinates.
+  // Expected: the middle of the canvas area the open Airo panel leaves
+  // visible, in board coordinates. At this desktop size the panel covers the
+  // canvas's right edge, so the visible area ends where the panel starts.
   const canvas = page.locator("canvas.board-canvas");
   const box = await canvas.boundingBox();
+  const panel = await page.locator(".canvas-copilot").boundingBox();
+  expect(panel).not.toBeNull();
+  expect(panel!.width).toBeLessThan(box!.width * 0.6);
+  const visibleRight = Math.min(box!.width, panel!.x - box!.x);
   const expected = {
-    x: (box!.width / 2 - viewport.x) / viewport.scale,
+    x: (visibleRight / 2 - viewport.x) / viewport.scale,
     y: (box!.height / 2 - viewport.y) / viewport.scale,
   };
   expect(Math.abs(position!.x - expected.x)).toBeLessThan(60);
