@@ -798,7 +798,7 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - **Rollback:** both services to `launch-854858a`. That API revision keeps its own settings, so rolling back also restores `gpt-5.4-mini`.
   - **Not verified in production:** a signed-in voice command through Luna (needs a real sign-in). The same code and model passed 34 of 38 real commands locally.
   - **Local setup:** `.env` must name an allowed model, so a local `AIRBOARD_INTENT_MODEL=gpt-5.6-terra` now stops the API from starting; the repository's `.env` was moved to Luna.
-- **2026-11-05** — Intent prompt 2.9: Luna leaves meeting talk alone (on `codex/production-readiness`; not yet deployed):
+- **2026-11-05** — Intent prompt 2.9: Luna leaves meeting talk alone (commit `fe9f36b`):
   - **What changed:** the prompt used to say every transcript was captured "only after diagram-command mode was activated", gave one example of non-board speech, and told the model to ask whenever a detail was missing. It now tells the model that people keep talking to each other while Airo listens, and asks it to decide first whether the speech is meant for the board. That holds when it addresses Airo, uses editing language on objects that are on the board, or states a new relationship between objects named by their visible labels. Editing verbs on things that are not on the board (tickets, invites, branches, slides), generic type words in conversation, reports and suggestions, descriptions of how a system works, and figures of speech ("make a note that…") are `not_board_command`. Questions are only for clear board commands, and a request about another document is `not_board_command` rather than `unsupported_operation`. Answers to Airo's own question skip the test.
   - **Result with Luna, against the 2.8 baseline:**
 
@@ -811,4 +811,4 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
 
     Real-command misses stayed within the 2.8 range. The two dialogue cases ("…with yes and", then "No.") passed 8 of 10 runs each way.
   - **CI:** the replay is re-recorded with prompt 2.9, and the known list shrank from 30 to 5: 3 questions about system talk or a document, and 2 requests about another document reported as `unsupported_operation`.
-  - **Deploy:** the prompt lives in the API, so it reaches users only with an API release.
+  - **Deployed:** API `airboard-pilot-api-launch-fe9f36b` at 100% (image digest checked against the `launch-fe9f36b` tag). It keeps Luna as the only model, `/ready` passes, intent without sign-in returns 401 and the revision logged no errors. The web stays on `launch-05c0281`; the prompt lives only in the API. Rollback: the API to `launch-05c0281`.
