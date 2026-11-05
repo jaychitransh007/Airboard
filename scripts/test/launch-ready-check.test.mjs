@@ -127,6 +127,12 @@ test("the controlled pilot needs no email sender; wider releases do", () => {
   assert.equal(configurationCheck(launchReport({}, "standalone-ga"), "lifecycle-email").passed, true);
 });
 
+test("the commercial smoke is a standalone-GA gate, not a controlled-pilot one", () => {
+  const evidence = (report, id) => report.checks.find((check) => check.type === "evidence" && check.id === id);
+  assert.equal(evidence(launchReport({}, "controlled-pilot"), "commercial-smoke"), undefined);
+  assert.ok(evidence(launchReport({}, "standalone-ga"), "commercial-smoke"));
+});
+
 test("the board socket URL follows the API URL unless AIRBOARD_WS_URL overrides it", () => {
   const derived = launchReport({ AIRBOARD_WS_URL: undefined });
   assert.equal(configurationCheck(derived, "websocket-url").passed, true);

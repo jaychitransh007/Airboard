@@ -16,7 +16,7 @@
 
 - **Voice commands:** the built-in grammar handles exact phrasings instantly; anything else goes to OpenAI `gpt-5.6-luna`, the only allowed intent model since 5 November 2026, on OpenAI's priority tier (typically 1.7 s, the slowest 5% about 2.6 s).
 - **Health:** the API's `/ready` reports the database and `boardFanOut` (live boards across instances). Cloud Run restarts an instance that stops answering its health path (API `/health`, web `/favicon.ico`) for 90 seconds.
-- **Launch check:** `pnpm launch:check:deployed` checks the live revisions and passes **21 of 22**; only the commercial smoke test remains, which matters once billing is on. The founder is the release owner and support owner, on `hellosigmascience@gmail.com`. The pilot signs people in with Google and sends no email, so it needs no email sender (decided 5 November 2026).
+- **Launch check:** `pnpm launch:check:deployed` checks the live revisions and reports **READY, 21 of 21** for the controlled pilot. The commercial smoke test, which needs a disposable account on the release database, is a standalone-GA gate (decided 5 November 2026). The founder is the release owner and support owner, on `hellosigmascience@gmail.com`. The pilot signs people in with Google and sends no email, so it needs no email sender (decided 5 November 2026).
 - **Rollback:** the web to `launch-47e7eb5` (email sign-in shown) and the API to `launch-e8e1644`. Earlier API revisions restore older intent prompts.
 - **Code:** `main`. The working branch `codex/production-readiness` reached it on 5 November 2026 through these pull requests:
   - #1: launch hardening.

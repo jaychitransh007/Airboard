@@ -850,3 +850,7 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - **Web:** `airboard-pilot-web-launch-e9912d6` at 100%. On staging, 6 pages returned 200 with no WCAG violations. A tagged revision's origin is not on the API's allow-list, so its sign-in page falls back to Supabase's settings and still showed email there. In production, `/login` and `/signup` show one "Continue with Google" button, no email field and the line "Continue with your Google account."
   - **Not checked in production:** creating an invitation and copying its link, which needs a signed-in admin.
   - **Rollback:** the web to `launch-47e7eb5` and the API to `launch-e8e1644`.
+- **2026-11-05** — The controlled pilot passes every launch gate:
+  - **Decision:** the founder moved `commercial-smoke` to the standalone-GA stage. The gate runs `pnpm smoke:commercial` against a disposable organization on the release database, which needs an account there.
+  - **Result:** `pnpm launch:check:deployed` reports READY, 21 of 21, for the controlled pilot.
+  - **Still owed outside the gates:** a manual screen-reader and reduced-motion pass (the `accessibility-audit` gate belongs to standalone GA), and a signed-in check of the invite-link flow.
