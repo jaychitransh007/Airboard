@@ -769,3 +769,4 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - **Lifecycle:** the 14:00 UTC scheduled run, the first on the new erasure code, returned 200 and logged no errors.
   - **Launch check:** `pnpm launch:check:deployed` still passes 19 of 23. The blockers are unchanged: lifecycle email, release owner, support path and the commercial smoke.
   - **Owner check:** turn Airo on once in production. It is the first signed-in use of the voice ticket, which no automated test covers against production.
+  - **Merged:** jaychitransh007/Airboard#21 (merge `49bf2c4`).

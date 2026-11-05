@@ -24,7 +24,7 @@
   - #13: camera start.
   - #14: calmer board.
 
-  #16 (cleanup) and #18 (dependency updates and docs) followed. Both live revisions are `launch-854858a`, the hardening commit on `codex/production-readiness`, which is not yet merged to `main`.
+  #16 (cleanup), #18 (dependency updates and docs) and #21 (security, robustness, erasure and image hardening) followed. Both live revisions are `launch-854858a`, which #21 merged to `main`.
 - **Image retention:** Artifact Registry keeps images tagged `live`, plus the 10 newest per image, and deletes anything older than 3 days. `release.sh promote` moves the `live` tag.
 
 ## Shipped in the launch hardening (November 2026)
