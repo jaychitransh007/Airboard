@@ -2,11 +2,11 @@
 
 ## Pivot
 
-Touchpad Writing Mode is now the reliable precision path for Airboard. It avoids camera dependency and uses browser Pointer Events, because web browsers do not expose raw laptop trackpad contact geometry consistently.
+Touchpad Writing Mode is Airboard's camera-free precision path for freehand writing. It uses browser Pointer Events, because web browsers do not expose raw laptop trackpad contact geometry consistently. The board opens in Intent Canvas (`gesture`) mode; Touchpad Writing is the other choice in the input selector.
 
 ## Implemented V1 Behavior
 
-- Default input mode is `Touchpad Writing`.
+- Chosen from the input selector; the default input mode is `Intent Canvas` (`AirboardInputMode` is `"touchpad" | "gesture"`).
 - Camera is optional and hidden unless enabled.
 - Press/click and drag on the canvas starts a marker stroke.
 - Release commits the stroke.
@@ -26,8 +26,7 @@ Touchpad Writing Mode is now the reliable precision path for Airboard. It avoids
 The input selector exposes:
 
 - `Touchpad Writing`
-- `Gesture Annotation`
-- `Marker Mode Beta`
+- `Intent Canvas` (the default)
 
 Touchpad controls expose:
 

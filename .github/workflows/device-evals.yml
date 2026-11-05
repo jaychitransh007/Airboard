@@ -52,14 +52,14 @@ jobs:
           echo "::error::Re-run with confirm_device_capture enabled."
           exit 1
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           clean: true
           persist-credentials: false
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -92,7 +92,7 @@ jobs:
       # source media from the persistent device runner.
       - name: Upload privacy-safe device reports
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: device-eval-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |

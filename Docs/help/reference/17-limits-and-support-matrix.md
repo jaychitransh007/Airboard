@@ -6,7 +6,7 @@ categoryLabel: Troubleshooting and reference
 order: 17
 status: reference
 audiences: ["everyone", "admins", "security"]
-lastVerified: 2026-07-30
+lastVerified: 2026-11-05
 sources: ["Docs/Platform Support Matrix.md", "apps/api/src/config.ts", "apps/web/src/platform/distribution.ts", "Docs/Commercial Platform Runbook.md"]
 ---
 
