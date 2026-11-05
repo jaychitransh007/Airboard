@@ -49,7 +49,7 @@ test("two browsers share one live board; reload rehydrates it", async ({ browser
     });
   }
   const owner = await ownerContext.newPage();
-  await owner.goto("/");
+  await owner.goto("/?testStandalone=1");
   await waitForLiveSession(owner);
   const shareUrl = owner.url();
 

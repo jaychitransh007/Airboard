@@ -37,6 +37,8 @@ export type BoardSyncHandle = {
   boardSessionId: string;
   participantId: string;
   role: string;
+  /** Share token used to invite a guest without exposing a guessable session. */
+  joinToken?: string;
   /**
    * Publishes local events to peers. Returns false when the socket is not
    * open (the events were dropped — local state is still correct, but peers
@@ -56,6 +58,7 @@ export type BoardSyncDependencies = {
     url: string;
     boardSessionId: string;
     participantId: string;
+    realtimeTicket?: string;
   }) => Pick<
     AirboardRealtimeClient,
     "connect" | "close" | "sendEvents" | "onEvent" | "onStatus" | "onRejection"
@@ -79,12 +82,53 @@ export function buildBoardWebSocketUrl(apiBaseUrl: string): string {
   return url.toString();
 }
 
+/**
+ * Asks the API to start a new live session as its owner. Exported so a page
+ * can send it while the board is still loading and hand it to startBoardSync.
+ */
+export function requestBoardSessionStart(
+  options: {
+    apiBaseUrl: string;
+    accessToken?: string;
+    provider?: MeetingProvider;
+    providerMeetingId?: string;
+    title?: string;
+    workspaceId?: string;
+    boardId?: string;
+  },
+  fetchImpl: typeof fetch = fetch,
+): Promise<Response> {
+  return fetchImpl(new URL("/sessions/start", options.apiBaseUrl).toString(), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.accessToken ? { Authorization: `Bearer ${options.accessToken}` } : {}),
+    },
+    body: JSON.stringify({
+      provider: options.provider ?? "standalone",
+      ...(options.providerMeetingId ? { providerMeetingId: options.providerMeetingId } : {}),
+      ...(options.title ? { title: options.title } : {}),
+      ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+      ...(options.boardId ? { boardId: options.boardId } : {}),
+    }),
+  });
+}
+
 export async function startBoardSync(
   options: {
     apiBaseUrl: string;
+    /**
+     * A session start already in flight from requestBoardSessionStart. Each
+     * use reads its own copy, so a remounted board can reuse it.
+     */
+    pendingStart?: Promise<Response> | null;
     /** Join this existing session; omit to create a new one as owner. */
     boardSessionId?: string | null;
     ownerUserId: string;
+    accessToken?: string;
+    joinToken?: string;
+    workspaceId?: string;
+    boardId?: string;
     provider?: MeetingProvider;
     providerMeetingId?: string;
     displayName?: string;
@@ -106,6 +150,8 @@ export async function startBoardSync(
   let role: string;
   let initialState: BoardState | null = null;
   let outcome: "created" | "joined";
+  let realtimeTicket: string;
+  let joinToken: string | null = null;
 
   if (options.boardSessionId) {
     const response = await fetchImpl(
@@ -113,7 +159,10 @@ export async function startBoardSync(
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ displayName: options.displayName ?? "Guest" }),
+        body: JSON.stringify({
+          displayName: options.displayName ?? "Guest",
+          joinToken: options.joinToken,
+        }),
       },
     );
     if (!response.ok) {
@@ -123,40 +172,32 @@ export async function startBoardSync(
       session: { id: string };
       participant: { id: string; role: string };
       state: BoardState;
+      realtimeTicket: string;
     };
     boardSessionId = payload.session.id;
     participantId = payload.participant.id;
     role = payload.participant.role;
     initialState = payload.state;
+    realtimeTicket = payload.realtimeTicket;
     outcome = "joined";
   } else {
-    const response = await fetchImpl(
-      new URL("/sessions/start", options.apiBaseUrl).toString(),
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-airboard-user-id": options.ownerUserId,
-        },
-        body: JSON.stringify({
-          provider: options.provider ?? "standalone",
-          ...(options.providerMeetingId
-            ? { providerMeetingId: options.providerMeetingId }
-            : {}),
-          ...(options.title ? { title: options.title } : {}),
-        }),
-      },
-    );
+    const response = options.pendingStart
+      ? (await options.pendingStart).clone()
+      : await requestBoardSessionStart(options, fetchImpl);
     if (!response.ok) {
       throw new Error(await describeSessionError(response, "start"));
     }
     const payload = (await response.json()) as {
       session: { id: string };
       ownerParticipant: { id: string; role: string };
+      realtimeTicket: string;
+      joinToken: string;
     };
     boardSessionId = payload.session.id;
     participantId = payload.ownerParticipant.id;
     role = payload.ownerParticipant.role;
+    realtimeTicket = payload.realtimeTicket;
+    joinToken = payload.joinToken;
     outcome = "created";
   }
 
@@ -178,6 +219,7 @@ export async function startBoardSync(
     url: buildBoardWebSocketUrl(options.apiBaseUrl),
     boardSessionId,
     participantId,
+    realtimeTicket,
   });
   client.onEvent((event) => {
     if (event.id && sentEventIds.has(event.id)) {
@@ -204,7 +246,7 @@ export async function startBoardSync(
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ participantId }),
+        body: JSON.stringify({ realtimeTicket }),
       },
     ).catch(() => undefined);
   }, heartbeatIntervalMs);
@@ -213,6 +255,7 @@ export async function startBoardSync(
     boardSessionId,
     participantId,
     role,
+    ...(joinToken ? { joinToken } : {}),
     publish: (input) => {
       const events = Array.isArray(input) ? input : [input as BoardEvent];
       if (events.length === 0) {
@@ -277,6 +320,20 @@ export function snapshotBoardEvents(
       strokeId: stroke.id,
       points: stroke.points,
       cleanupApplied: true,
+    });
+  }
+  for (const element of Object.values(state.elements)) {
+    // Legacy strokes are already replayed above and their scene mirrors are
+    // regenerated by the v2 reducer. Publishing both would duplicate them.
+    if (element.status !== "active" || element.legacyStrokeId) continue;
+    events.push({
+      ...createEventEnvelope({
+        boardSessionId: target.boardSessionId,
+        actorParticipantId: target.actorParticipantId,
+        createdAt: element.createdAt,
+      }),
+      type: "element.created",
+      element: { ...element, boardId: target.boardSessionId },
     });
   }
   return events;

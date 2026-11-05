@@ -3,37 +3,31 @@ import { PilotInfoPage } from "../../../src/features/pilot/PilotInfoPage";
 export default function PilotSetupPage() {
   return (
     <PilotInfoPage
-      title="Install and open Airboard Pilot"
-      summary="The customer-shaped installation path for approved Google Workspace Marketplace draft testers."
+      title="Install the Airboard Meet overlay"
+      summary="The controlled Chrome-extension path puts Airboard on your camera without opening a dedicated Meet canvas."
     >
       <section>
-        <h2>Install</h2>
+        <h2>Install and connect</h2>
         <ol>
-          <li>Sign in to Google Workspace Marketplace with the approved draft-tester account.</li>
-          <li>Open the Airboard Pilot draft listing and select Install.</li>
-          <li>Review the requested basic profile and email scopes and complete Google&apos;s consent flow.</li>
+          <li>Install the approved private-preview build in the Chrome profile you use for Meet.</li>
+          <li>Open the Airboard toolbar popup and choose Connect Airboard.</li>
+          <li>Sign in, connect the detected installation, and return to the popup.</li>
+          <li>Review and accept the one-time live-media disclosure.</li>
         </ol>
       </section>
-
       <section>
-        <h2>Open in a meeting</h2>
+        <h2>Use in Meet</h2>
         <ol>
-          <li>Start or join an eligible Google Meet meeting.</li>
-          <li>Open Meeting tools, choose Add-ons, then select Airboard Pilot.</li>
-          <li>Use the side panel to start the activity; Airboard opens in Meet&apos;s main stage.</li>
+          <li>Open or refresh a Google Meet meeting-code URL.</li>
+          <li>Turn on your ordinary Meet camera. Do not launch an Airboard activity.</li>
+          <li>Open the extension popup and confirm all six readiness checks pass.</li>
+          <li>Ask a second participant to confirm the decoded neon composite.</li>
         </ol>
       </section>
-
       <section>
-        <h2>Safe pilot path</h2>
-        <p>
-          Typed commands, pointer, keyboard, and direct canvas controls work in every Meet
-          surface. Gesture and voice input start only when you enable them: on the shared board
-          when your Meet client delegates camera and microphone permission to the add-on, or
-          through the companion window link in the Airboard side panel otherwise. Google
-          Meet&apos;s own meeting media controls are never affected. Do not use confidential or
-          production meeting content.
-        </p>
+        <h2>What the audience sees</h2>
+        <p>Only your normal Meet camera tile with the Airboard diagram composite. Account settings, controls, logs, selection feedback, and the private renderer never enter the audience output.</p>
+        <p><a href="/help/integrations/google-meet">Open the complete Google Meet guide →</a></p>
       </section>
     </PilotInfoPage>
   );

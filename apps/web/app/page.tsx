@@ -1,5 +1,31 @@
-import { AirboardPrototype } from "../src/features/board/AirboardPrototype";
+import { redirect } from "next/navigation";
+import { HomeBoardSurface } from "../src/features/product/HomeBoardSurface";
+import { LandingPage } from "../src/features/product/LandingPage";
+import { authCallbackPathFromHome } from "../src/features/product/authCallbackState";
 
-export default function Home() {
-  return <AirboardPrototype surface="standalone" />;
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const authCallback = authCallbackPathFromHome(params);
+  if (authCallback) redirect(authCallback);
+  const desktopOverlayValue = params.desktopOverlay;
+  const desktopOverlay = Array.isArray(desktopOverlayValue)
+    ? desktopOverlayValue.includes("1")
+    : desktopOverlayValue === "1";
+  const testStandaloneValue = params.testStandalone;
+  const testStandalone =
+    process.env.NEXT_PUBLIC_AIRBOARD_TEST_HOOKS === "1" &&
+    (Array.isArray(testStandaloneValue)
+      ? testStandaloneValue.includes("1")
+      : testStandaloneValue === "1");
+  return testStandalone ? (
+    <HomeBoardSurface mode="test-harness" />
+  ) : desktopOverlay ? (
+    <HomeBoardSurface mode="desktop-overlay" />
+  ) : (
+    <LandingPage />
+  );
 }

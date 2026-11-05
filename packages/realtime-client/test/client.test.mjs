@@ -74,6 +74,7 @@ test("connects with session/participant query params and receives events", () =>
   const socket = sockets[0];
   assert.ok(socket.url.includes("boardSessionId=session-1"));
   assert.ok(socket.url.includes("participantId=participant-1"));
+  assert.equal(new URL(socket.url).searchParams.get("sceneVersion"), "2");
   socket.open();
   socket.message({ type: "board.event", event: { id: "e1", type: "cursor.moved" } });
   assert.deepEqual(statuses, ["connecting", "connected"]);

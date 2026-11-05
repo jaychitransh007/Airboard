@@ -13,6 +13,7 @@ import {
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { JoinSessionInput, SessionStore } from "./store";
 import type { StartSessionInput } from "./types";
+import { boardAccessFilter } from "./boardAccess";
 
 type ProfileRow = {
   id: string;
@@ -68,12 +69,23 @@ type BoardEventRow = {
   created_at: string;
 };
 
+// PostgreSQL's uuid type accepts the full hexadecimal UUID shape. Local seed
+// identities intentionally use a nil-style UUID, so restricting this to RFC
+// version/variant bits would treat that profile id as a local_user_key.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // Page size for board_events replay. Must be <= PostgREST [api] max_rows (1000)
 // so each page is returned in full and truncation is detected by a short page.
 const BOARD_EVENT_PAGE_SIZE = 1000;
 
 export class SupabaseSessionStore implements SessionStore {
-  constructor(private readonly client: SupabaseClient) {}
+  // A declared field rather than a parameter property, so Node's type
+  // stripping can load this module in tests.
+  private readonly client: SupabaseClient;
+
+  constructor(client: SupabaseClient) {
+    this.client = client;
+  }
 
   static create(input: { supabaseUrl: string; serviceRoleKey: string }): SupabaseSessionStore {
     return new SupabaseSessionStore(
@@ -90,32 +102,53 @@ export class SupabaseSessionStore implements SessionStore {
     session: BoardSession;
     ownerParticipant: Participant;
   }> {
-    const profile = await this.getProfileByLocalKey(input.ownerUserId);
-    const entitlement = await this.getActiveEntitlement(profile.id);
+    // The owner, the entitlement and the board or workspace scope are
+    // independent reads, so they go out together. The scope check assumes the
+    // identity is the owner's profile id, as it is for signed-in owners, and
+    // is redone when the profile was found by its local key instead.
+    const profileLookup = this.getProfileByIdentity(input.ownerUserId);
+    const assumedOwnerId = UUID_PATTERN.test(input.ownerUserId) ? input.ownerUserId : null;
+    const [profile, entitlement, assumedScope] = await Promise.all([
+      profileLookup,
+      input.organizationId
+        ? this.getActiveEntitlement(input.ownerUserId, input.organizationId)
+        : profileLookup.then((owner) => this.getActiveEntitlement(owner.id)),
+      assumedOwnerId ? this.sessionScope(input, assumedOwnerId) : null,
+    ]);
 
     if (!canStartBoard(entitlement)) {
       throw new Error("OWNER_ENTITLEMENT_REQUIRED");
     }
 
-    const now = new Date();
-    const sessionInsert = {
-      owner_user_id: profile.id,
-      provider: input.provider,
-      status: "active",
-      allow_participant_drawing: input.allowParticipantDrawing,
-      owner_last_seen_at: now.toISOString(),
-      expires_at: new Date(now.getTime() + 6 * 60 * 60 * 1000).toISOString(),
-      ...(input.providerMeetingId ? { provider_meeting_id: input.providerMeetingId } : {}),
-      ...(input.title ? { title: input.title } : { title: "Airboard" }),
-    };
-    const sessionRow = await this.insertSingle<BoardSessionRow>("board_sessions", sessionInsert);
-    const ownerParticipantRow = await this.insertSingle<ParticipantRow>("participants", {
-      board_session_id: sessionRow.id,
-      user_id: profile.id,
-      display_name: profile.display_name || "Owner",
-      role: "owner",
-      input_enabled: true,
-    });
+    const scope =
+      profile.id === assumedOwnerId && assumedScope
+        ? assumedScope
+        : await this.sessionScope(input, profile.id);
+    if (scope.denial) {
+      throw new Error(scope.denial);
+    }
+
+    // One round trip: the session and its owner participant are created
+    // together (migration 20261105140000_start_board_session_rpc).
+    const { data: started, error: startError } = await this.client
+      .rpc("start_board_session", {
+        p_owner_user_id: profile.id,
+        p_provider: input.provider,
+        p_allow_participant_drawing: input.allowParticipantDrawing,
+        p_owner_display_name: profile.display_name || "Owner",
+        p_organization_id: input.organizationId ?? null,
+        p_workspace_id: scope.workspaceId,
+        p_board_id: input.boardId ?? null,
+        p_provider_meeting_id: input.providerMeetingId ?? null,
+        p_title: input.title ?? null,
+      })
+      .single();
+    const startedRow = started as { session: BoardSessionRow; participant: ParticipantRow } | null;
+    if (startError || !startedRow?.session || !startedRow.participant) {
+      throw new Error(startError?.message ?? "SESSION_START_FAILED");
+    }
+    const sessionRow = startedRow.session;
+    const ownerParticipantRow = startedRow.participant;
 
     return {
       session: mapSession(sessionRow),
@@ -309,25 +342,81 @@ export class SupabaseSessionStore implements SessionStore {
     return mapSession(data as BoardSessionRow);
   }
 
-  private async getProfileByLocalKey(localUserKey: string): Promise<ProfileRow> {
+  /**
+   * Whether the owner may start a session on the requested board or
+   * workspace, and the workspace the session belongs to. A board's session
+   * takes the board's own workspace, so a client that starts the session
+   * before the board has loaded need only send the board id.
+   */
+  private async sessionScope(
+    input: StartSessionInput,
+    profileId: string,
+  ): Promise<{ denial: string | null; workspaceId: string | null }> {
+    const requestedWorkspaceId = input.workspaceId ?? null;
+    if (!input.organizationId || (!input.boardId && !requestedWorkspaceId)) {
+      return { denial: null, workspaceId: requestedWorkspaceId };
+    }
+    if (input.boardId) {
+      const { data: board } = await this.client
+        .from("boards")
+        .select("id,workspace_id")
+        .eq("id", input.boardId)
+        .eq("organization_id", input.organizationId)
+        .or(boardAccessFilter(profileId))
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (!board || (requestedWorkspaceId && board.workspace_id !== requestedWorkspaceId)) {
+        return { denial: "BOARD_ACCESS_DENIED", workspaceId: null };
+      }
+      return { denial: null, workspaceId: board.workspace_id ?? requestedWorkspaceId };
+    }
+    const { data: workspace } = await this.client
+      .from("workspaces")
+      .select("id")
+      .eq("id", requestedWorkspaceId)
+      .eq("organization_id", input.organizationId)
+      .maybeSingle();
+    return workspace
+      ? { denial: null, workspaceId: requestedWorkspaceId }
+      : { denial: "WORKSPACE_ACCESS_DENIED", workspaceId: null };
+  }
+
+  private async getProfileByIdentity(identity: string): Promise<ProfileRow> {
+    if (UUID_PATTERN.test(identity)) {
+      const { data, error } = await this.client
+        .from("profiles")
+        .select("*")
+        .eq("id", identity)
+        .maybeSingle();
+      if (error) {
+        throw new Error("OWNER_PROFILE_LOOKUP_FAILED");
+      }
+      if (data) {
+        return data as ProfileRow;
+      }
+    }
     const { data, error } = await this.client
       .from("profiles")
       .select("*")
-      .eq("local_user_key", localUserKey)
-      .single();
-
+      .eq("local_user_key", identity)
+      .maybeSingle();
     if (error || !data) {
       throw new Error("OWNER_PROFILE_NOT_FOUND");
     }
-
     return data as ProfileRow;
   }
 
-  private async getActiveEntitlement(userId: string): Promise<Entitlement | null> {
-    const { data, error } = await this.client
-      .from("entitlements")
-      .select("*")
-      .eq("user_id", userId)
+  // Access belongs to the organization, as in the control plane: a team's
+  // entitlement row is held by its owner, so members are checked through the
+  // organization. Sessions without one fall back to the person's own row.
+  private async getActiveEntitlement(
+    userId: string,
+    organizationId?: string,
+  ): Promise<Entitlement | null> {
+    const entitlements = this.client.from("entitlements").select("*");
+    const { data, error } = await (organizationId
+      ? entitlements.eq("organization_id", organizationId)
+      : entitlements.eq("user_id", userId))
       .in("status", ["active", "trialing"])
       .order("valid_until", { ascending: false })
       .limit(1)
@@ -351,6 +440,20 @@ export class SupabaseSessionStore implements SessionStore {
     }
 
     return ((data ?? []) as ParticipantRow[]).map(mapParticipant);
+  }
+
+  async getEventsInRange(sessionId: string, from: number, to: number): Promise<BoardEvent[]> {
+    const { data, error } = await this.client
+      .from("board_events")
+      .select("*")
+      .eq("board_session_id", sessionId)
+      .gte("sequence", from)
+      .lte("sequence", to)
+      .order("sequence", { ascending: true });
+    if (error) {
+      throw new Error("BOARD_EVENT_LOOKUP_FAILED");
+    }
+    return ((data ?? []) as BoardEventRow[]).map((row) => ({ ...row.payload, sequence: row.sequence })) as BoardEvent[];
   }
 
   private async listEventRows(sessionId: string): Promise<BoardEventRow[]> {
@@ -379,6 +482,10 @@ export class SupabaseSessionStore implements SessionStore {
     }
 
     return rows;
+  }
+
+  async getLatestSequence(sessionId: string): Promise<number> {
+    return (await this.getNextSequence(sessionId)) - 1;
   }
 
   private async getNextSequence(sessionId: string): Promise<number> {

@@ -214,7 +214,16 @@ function parseEdges(input: unknown): SemanticIntentParseResult<SemanticIntentEdg
     if (item.label !== undefined && (!label || CONTROL_CHARACTERS.test(label))) {
       return error("INVALID_CONTEXT", "Edge labels must be safe bounded strings.");
     }
-    edges.push({ from, to, ...(label ? { label } : {}) });
+    const occurrence = parseOptionalOrdinal(item.occurrence);
+    if (occurrence === false) {
+      return error("INVALID_CONTEXT", "Edge occurrence must be an integer between 1 and 1000.");
+    }
+    edges.push({
+      from,
+      to,
+      ...(label ? { label } : {}),
+      ...(occurrence ? { occurrence } : {}),
+    });
   }
   return { ok: true, value: edges };
 }

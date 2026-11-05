@@ -1,5 +1,10 @@
 # Gesture Annotation Mode Implementation Notes
 
+> **Historical implementation note.** Mid-air path-to-shape inference and the
+> left-hand duster described below are not the current Intent Canvas workflow.
+> See [Gesture Interaction Audit](./Gesture%20Interaction%20Audit.md) for the
+> supported production gesture vocabulary.
+
 ## Summary
 
 Gesture Annotation Mode pivots Airboard away from full mid-air handwriting. The gesture path is now treated as intent input, and the board commits clean annotation objects:

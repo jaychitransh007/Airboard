@@ -1,0 +1,154 @@
+{
+  "schemaVersion": "1.0",
+  "corpusVersion": "gesture-v1",
+  "createdAt": "2026-07-30",
+  "owner": "Airboard engineering",
+  "description": "Offline landmark replay corpus. Raw camera media is reference-only and is never embedded in this repository manifest.",
+  "rawMediaPolicy": "reference_only",
+  "requiredSlices": {
+    "minimumParticipants": 24,
+    "validRepetitionsPerGesturePerCoreCondition": 3,
+    "neutralMinutesPerParticipant": 10,
+    "shippedGestures": [
+      "manipulation_grab",
+      "navigation_pan_zoom",
+      "visibility_snap",
+      "voice_open_palm",
+      "hold_to_edit"
+    ],
+    "retiredGestures": [
+      "undo_swipe"
+    ],
+    "coreConditions": [
+      "standalone-normal-light",
+      "standalone-low-light",
+      "meet-bridge",
+      "minimum-device-frame-budget"
+    ],
+    "criticalFalseTriggerGestures": [
+      "undo_swipe",
+      "erase",
+      "visibility_snap",
+      "voice_open_palm"
+    ],
+    "qualitySlices": [
+      "core_lighting",
+      "low_light",
+      "tracking_loss",
+      "two_hand"
+    ]
+  },
+  "assetClassPolicies": {
+    "synthetic": {
+      "description": "Programmatically authored geometry with no human subject or source recording.",
+      "repositoryStorage": "allowed",
+      "consentRequirement": "not_applicable"
+    },
+    "derived": {
+      "description": "Landmarks or features derived from a consented recording; no image, video, or audio payload.",
+      "repositoryStorage": "deidentified_outputs_only",
+      "consentRequirement": "required_for_offline_evaluation",
+      "sourceRawMedia": "restricted_reference_only"
+    },
+    "restricted_raw_media": {
+      "description": "Identifiable source image/video/audio retained outside the repository under access control.",
+      "repositoryStorage": "forbidden",
+      "consentRequirement": "explicit_scope_required",
+      "manifestRepresentation": "external_reference_only"
+    }
+  },
+  "assets": [
+    {
+      "id": "synthetic-palm-grab-pointing-v1",
+      "assetClass": "synthetic",
+      "artifactType": "landmark_trace",
+      "repositoryPath": "packages/gesture-engine/test/fixtures/palm-grab-pointing.trace.json",
+      "contentType": "application/json",
+      "hash": {
+        "algorithm": "sha256",
+        "value": "4bbe10fa0325002415490befc21aec82db5c99930371111d460371d185e81a30"
+      },
+      "byteLength": 67413,
+      "privacy": {
+        "classification": "synthetic_non_personal",
+        "containsRawMedia": false,
+        "containsBiometricData": false
+      },
+      "consent": {
+        "status": "not_applicable",
+        "scope": [
+          "offline_gesture_evaluation",
+          "repository_distribution"
+        ],
+        "evidence": "Synthetic landmark geometry; no human subject or captured media."
+      },
+      "annotations": {
+        "expectedActions": [
+          {
+            "type": "palm_acquire",
+            "windowMs": {
+              "from": 850,
+              "to": 950
+            }
+          },
+          {
+            "type": "grab_acquire",
+            "windowMs": {
+              "from": 2050,
+              "to": 2150
+            }
+          },
+          {
+            "type": "palm_release",
+            "windowMs": {
+              "from": 2200,
+              "to": 2300
+            }
+          },
+          {
+            "type": "grab_release",
+            "windowMs": {
+              "from": 3250,
+              "to": 3350
+            }
+          }
+        ],
+        "negativeRanges": [
+          {
+            "label": "camera_pointing",
+            "fromMs": 3333,
+            "toMs": 4389,
+            "forbiddenOwners": [
+              "palm",
+              "grab"
+            ]
+          }
+        ],
+        "qualityGates": {
+          "maximumDuplicateActions": 0,
+          "maximumUnpairedActions": 0,
+          "maximumAcquireLatencyMs": {
+            "palm": 450,
+            "grab": 90
+          },
+          "maximumReleaseLatencyMs": {
+            "palm": 250,
+            "grab": 120
+          }
+        }
+      }
+    }
+  ],
+  "faultChecks": {
+    "schemaVersion": "1.0",
+    "seed": 8675309,
+    "faultsPerTrial": 4,
+    "trials": [
+      "hand_dropout",
+      "landmark_non_finite",
+      "timestamp_regression"
+    ],
+    "maximumDuplicateActions": 0,
+    "maximumUnpairedActions": 0
+  }
+}

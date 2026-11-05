@@ -75,14 +75,61 @@ export function apiTokenAllowed(
   return typeof query?.token === "string" && query.token === configuredToken;
 }
 
-/** Best-effort caller identity for rate limiting. */
-export function clientKey(request: {
+/** True only for an explicitly configured shared server token. */
+export function configuredApiTokenAllowed(
+  request: Parameters<typeof apiTokenAllowed>[0],
+  configuredToken: string | undefined,
+): boolean {
+  return Boolean(configuredToken && apiTokenAllowed(request, configuredToken));
+}
+
+type ClientRequestLike = {
   ip?: string;
   headers: Record<string, string | string[] | undefined>;
-}): string {
-  const forwarded = request.headers["x-forwarded-for"];
-  if (typeof forwarded === "string" && forwarded.length > 0) {
-    return forwarded.split(",")[0]?.trim() ?? "unknown";
+};
+
+/**
+ * Rate-limit identity. Authenticated callers are keyed on their profile so a
+ * single account cannot multiply its budget by rotating addresses (and users
+ * behind one NAT do not share a budget). Anonymous callers fall back to the
+ * network address from `clientIp`.
+ */
+export function clientKey(
+  request: ClientRequestLike,
+  options: { profileId?: string | null | undefined; trustedProxyHops?: number } = {},
+): string {
+  if (options.profileId) {
+    return `profile:${options.profileId}`;
+  }
+  return `ip:${clientIp(request, options.trustedProxyHops ?? 0)}`;
+}
+
+/**
+ * Caller address that the caller cannot choose.
+ *
+ * Proxies append to X-Forwarded-For; they do not strip what the client sent.
+ * Cloud Run's front end appends the real client IP after any client-supplied
+ * values, so the FIRST entry is attacker-controlled and only the last
+ * `trustedProxyHops` entries were written by infrastructure we trust. With N
+ * trusted hops the client address is the Nth entry from the right. With zero
+ * hops (local development, direct exposure) the socket address is the only
+ * trustworthy value.
+ *
+ * Fastify's own `trustProxy` is deliberately left off: enabling it would also
+ * make `request.hostname` honour a client-supplied X-Forwarded-Host, which the
+ * control plane's loopback check reads.
+ */
+export function clientIp(request: ClientRequestLike, trustedProxyHops: number): string {
+  if (trustedProxyHops > 0) {
+    const header = request.headers["x-forwarded-for"];
+    const forwarded = (Array.isArray(header) ? header.join(",") : header ?? "")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    const candidate = forwarded[forwarded.length - trustedProxyHops];
+    if (candidate) {
+      return candidate;
+    }
   }
   return request.ip ?? "unknown";
 }

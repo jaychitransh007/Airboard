@@ -52,10 +52,10 @@ fading ghost, never a board mutation.
 
 ### 2.3 Command channel: gesture-gated voice
 
-- **Push-to-talk pose:** palm held toward the camera (or pinch-hold — pick one after
-  prototyping; palm-to-camera is more distinguishable from grab/point in the current
-  classifier). While held, a mic ring renders at the cursor; speech is captured; release
-  (or trailing silence) finalizes the utterance. No wake word needed.
+- **Push-to-talk pose:** hold Airboard's landmark-defined open palm
+  still for about 0.4 seconds. While held, a mic ring renders at the cursor;
+  speech is captured; release (or trailing silence) finalizes the utterance.
+  No wake word is needed after the one-time Start Airo microphone action.
 - **Hold-to-edit (scoped commands):** grabbing an element and holding it still ~600ms
   puts it in a *scoped* state — mic ring attaches to the element, and utterances are
   parsed against a small edit grammar applied to that element: rename, retype ("make it
@@ -84,35 +84,46 @@ fading ghost, never a board mutation.
 
 ## 3. Gesture Vocabulary (v2)
 
-Deliberately small; every pose must be reliably separable in the current MediaPipe
-classifier before it ships.
+Deliberately small; every pose must be reliably separable in Airboard's
+HandLandmarker-backed pose and motion harness before it ships.
 
 | Gesture | Hands | Context | Action | Status |
 |---|---|---|---|---|
 | Open palm point | 1 | Canvas | Cursor / hover highlight | shipped |
 | Close hand (grab) on element | 1 | Canvas | Grab → move; reopen = drop | shipped |
 | Grab + hold still ~600ms | 1 | On element | **Scope element** → scoped voice edit | shipped |
-| Flat palm, held still | 1 (only tracked hand) | Anywhere | **Push-to-talk** (command mic) | shipped |
+| Open palm, held still ~400ms | 1 (only tracked hand) | Anywhere | **Push-to-talk** (command mic) | shipped |
 | Point + pinch on dock | 1 | Catalog dock | Open category / arm shape tool | shipped |
 | Two open palms, move together | 2 | Anywhere | **Pan** the canvas (bounded infinite plane) | shipped |
 | Two closed hands, spread/converge | 2 | Anywhere | **Zoom** (anchored at hand midpoint, 25–300%) | shipped |
-| Close hand on EMPTY canvas + drag | 1 | Select tool | **Lasso multi-select** (marquee) | shipped |
-| Grab a corner handle of the selection | 1 | Selected object | **Resize** (same as pointer handles) | shipped |
+| Close hand on EMPTY canvas + drag | 1 | Select tool | No action; gesture lasso removed until group actions have a complete product purpose | removed |
+| Grab a corner handle of the selection | 1 | Selected object | No camera action; use pointer handles or typed/voice resize | removed |
 | Point at A … point at B while speaking | 1 | With deixis | Resolves "this/that/here" | P1 |
 | Grab a ghost suggestion | 1 | On ghost | Accept suggestion | P1 |
 
-Separation model (2026-07-14, as built): **hand count is the first-level switch** —
+Canonical recognition architecture (2026-07-26, as built):
+`HandLandmarker.detectForVideo()` is the only camera inference path. It emits
+21 landmarks per hand. Airboard computes pose evidence from those landmarks,
+feeds it to temporal state machines for hold/motion/contact-release behavior,
+and arbitrates one owner per frame. The MediaPipe `GestureRecognizer` and its
+canned labels are not runtime inputs.
+
+Separation model (2026-07-30, as built): **hand count is the first-level switch** —
 two-hand navigation outranks and suppresses every single-hand gesture (object
-controller reset, palm gate suppressed); within two-hand, pose separates pan (open)
+controller reset, voice gate suppressed); within two-hand, pose separates pan (open)
 from zoom (closed) and a session never morphs between them (release-then-re-engage
 with debounce and flicker-rebase). Within one-hand, location separates the dock
 (screen-space hit test, wins over board objects) from the canvas, and pose separates
-point / grab / flat-palm; push-to-talk additionally requires being the only tracked
-hand. Mouse parity: ctrl/⌘+wheel zooms at the cursor, plain wheel pans; the viewport
+point / grab / Airboard-defined command pose. A still open palm opens the mic;
+lateral motion cancels that hold candidate and remains pointer movement.
+Runtime ownership is Navigation → Snap → Voice observation →
+Move/Place/Erase. Mouse parity: ctrl/⌘+wheel
+zooms at the cursor, plain wheel pans; the viewport
 resets when switching input modes.
 
-Explicitly **not** gestures (false-positive risk too high): undo, delete, clear. These
-stay voice ("undo", "delete this") and keyboard.
+Explicitly **not** gestures (false-positive risk too high): delete, clear, and
+Undo. Delete and clear stay voice/keyboard actions. Undo remains available
+through the toolbar, `Cmd/Ctrl+Z`, and the explicit “Airo, undo” command.
 
 ## 4. Shape Catalog (replaces the button stack)
 
@@ -174,7 +185,7 @@ stay voice ("undo", "delete this") and keyboard.
 ## 7. User Stories
 
 **Epic A — Command without ceremony**
-- As a presenter, I hold my palm up and say "add a payment service next to the API" and
+- As a presenter, I hold an open palm and say "add a payment service next to the API" and
   it appears — no wake word, no button, no confirmation.
 - As a presenter, I grab the ePay node, hold it, say "rename to Ledger API", and it's
   renamed the moment I finish speaking.
@@ -205,7 +216,7 @@ stay voice ("undo", "delete this") and keyboard.
 ## 8. Scope and Phasing
 
 **P0 — the augmented core (shipped 2026-07-12)**
-1. Gesture-gated push-to-talk (palm-to-camera) replacing per-line wake word; "Airo"
+1. Gesture-gated push-to-talk (open palm held still for ~400ms) replacing per-line wake word; "Airo"
    kept as fallback. — `packages/gesture-engine` (new pose + state), `realtimeSpeech.ts`
    (mic gating), `AirboardPrototype.tsx` (mic ring UI).
 2. Hold-to-edit scoped commands on grab-hold / selection. — gesture-engine hold

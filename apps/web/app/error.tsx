@@ -1,0 +1,32 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect } from "react";
+
+/** Last-resort boundary for any route below the root layout. */
+export default function RouteError({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  useEffect(() => {
+    console.error("Airboard route error", error);
+  }, [error]);
+  return (
+    <div className="product-loading" role="alert">
+      <strong>Something went wrong on this page.</strong>
+      <span>Try again. If it keeps happening, contact support and include the reference below.</span>
+      <span className="product-loading-actions">
+        <button className="button button-primary" type="button" onClick={reset}>
+          Try again
+        </button>
+        <Link className="button button-quiet" href="/">
+          Go to the home page
+        </Link>
+      </span>
+      {error.digest ? <small>Reference: {error.digest}</small> : null}
+    </div>
+  );
+}

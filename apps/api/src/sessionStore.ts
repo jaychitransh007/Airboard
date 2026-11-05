@@ -17,12 +17,19 @@ type SessionRecord = {
   participants: Map<string, Participant>;
   state: BoardState;
   nextSequence: number;
+  events: BoardEvent[];
 };
 
 export class InMemorySessionStore implements SessionStore {
   private readonly sessions = new Map<string, SessionRecord>();
 
-  constructor(private readonly options: { ownerGraceSeconds: number; localEntitlements: boolean }) {}
+  // A declared field rather than a parameter property, so Node's type
+  // stripping can load this module in tests.
+  private readonly options: { ownerGraceSeconds: number; localEntitlements: boolean };
+
+  constructor(options: { ownerGraceSeconds: number; localEntitlements: boolean }) {
+    this.options = options;
+  }
 
   startSession(input: StartSessionInput): {
     session: BoardSession;
@@ -65,6 +72,7 @@ export class InMemorySessionStore implements SessionStore {
       participants,
       state,
       nextSequence: 1,
+      events: [],
     });
 
     return { session, ownerParticipant };
@@ -184,7 +192,18 @@ export class InMemorySessionStore implements SessionStore {
     });
     record.state = state;
     record.nextSequence = sequence;
+    record.events.push(...sequenced);
     return sequenced;
+  }
+
+  getEventsInRange(sessionId: string, from: number, to: number): BoardEvent[] {
+    return this.requireSession(sessionId).events.filter(
+      (event) => (event.sequence ?? 0) >= from && (event.sequence ?? 0) <= to,
+    );
+  }
+
+  getLatestSequence(sessionId: string): number {
+    return this.requireSession(sessionId).events.at(-1)?.sequence ?? 0;
   }
 
   getState(sessionId: string): BoardState {

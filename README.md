@@ -4,7 +4,7 @@ Intent-driven diagram canvas for meetings, with typed, voice, pointer, and hand-
 
 ## Current Product Slice
 
-The current prototype is **Intent Canvas**: users describe a diagram change and it is applied instantly — by voice, gesture, or typed command — with no confirmation step. Undo is the safety net. To edit an existing element, grab it (or select it) and say what you want (e.g. "Airo, rename this to Payments"). Pointer and camera gestures are used for placement, selection, and precise object manipulation rather than mid-air freehand drawing.
+The current prototype is **Intent Canvas**: users describe a diagram change and it is applied instantly — by voice, gesture, or typed command — with no confirmation step. A finalized voice turn executes automatically; the collapsible translucent Airo panel on the right shows the live transcript, current system action, recent board-tool activity, and an optional typed composer. Undo is the safety net: use the toolbar, `Cmd/Ctrl+Z`, or say “Airo, undo”. To edit an existing element, grab it (or select it) and say what you want (e.g. "Airo, rename this to Payments"). Pointer and camera gestures are used for placement, selection, and precise object manipulation rather than mid-air freehand drawing.
 
 See [Intent Canvas Implementation Notes](Docs/Intent%20Canvas%20Implementation%20Notes.md) for the supported commands, interaction model, test path, and current browser/hardware limits.
 
@@ -19,6 +19,35 @@ The first implementation is local-first:
 5. Run the API/WebSocket service with `pnpm dev:api`.
 
 The local slice focuses on proving the Intent Canvas interaction before meeting-platform integration.
+
+## Screen and camera composition
+
+On the standalone surface, **Use screen** lets the user choose a screen or window as the live background. Airboard renders a light global dim plus local dark-glass plates behind diagram clusters, keeping slides readable without sacrificing neon contrast. There is no separate presentation wizard or clean-output mode: the regular canvas is the only standalone mode. Source selection is automatic—selected screen first, otherwise active camera, otherwise dark canvas. The selected screen is never uploaded by this flow, capture ends when the user stops it or the source ends, and studio recording uses the same unmirrored full-frame composition.
+
+Camera mode uses one fixed compositing contract everywhere: camera video at the bottom, a full-frame dark transparent scrim above it, and the diagram canvas on top. The visible video, scrim, hand landmarks, two-hand navigation, and hybrid controller share the same centered `object-fit: cover` geometry, so a cropped 16:9 camera remains aligned at every canvas aspect ratio. Airboard does not segment or redraw the presenter above diagram ink.
+
+A visual thumb–middle-finger snap hides or restores the diagram and scrim while leaving the camera or selected screen running. The same local action is available from the overflow menu, with `Shift+H`, and through “hide canvas” / “bring the diagram back” voice commands. Hidden diagrams suspend board-editing gestures and commands. Saved canvases can be renamed inline or from their action menu and moved to recoverable Trash; deletion saves the latest board state first.
+
+This browser flow is an audience-facing composite rather than an operating-system overlay. For the literal desktop experience, Airboard now also includes a native Electron shell in `apps/desktop`. It opens the same live board as a transparent, frameless, always-on-top window and passes mouse events through to arbitrary apps underneath.
+
+## Native desktop overlay
+
+Start the Airboard web surface and desktop shell in separate terminals:
+
+```sh
+pnpm dev:web
+pnpm dev:desktop
+```
+
+The native overlay starts in broadcast-safe click-through mode on the display containing the pointer. Use the Airboard tray/menu-bar item to change displays or quit. `Cmd/Ctrl+Shift+O` temporarily turns pointer control on so you can enable hands or Airo, type a command, undo, or change the dark-overlay strength; **Return to click-through** removes the setup HUD and gives mouse focus back to the app underneath. `Cmd/Ctrl+Shift+H` shows or hides Airboard.
+
+The desktop shell defaults to `http://127.0.0.1:3000`. Point it at a deployed Airboard web origin with `AIRBOARD_DESKTOP_URL=https://your-airboard-host pnpm dev:desktop`. The renderer bridge is sandboxed and exposes only overlay state, click-through, and hide operations.
+
+## Meet camera overlay
+
+Version 0.8.0 of the Meet extension removes the dedicated Airboard canvas from Meet. On meeting-code URLs the extension mounts a private 1280×720 engine offscreen, enables the neon overlay plus gesture-camera and Airo microphone inputs by default after affirmative media confirmation, and composites only the transparent diagram plane onto the outgoing Meet camera. If Meet already has a camera sender when setup finishes, Airboard upgrades that sender in place—no camera restart is required. Opening the legacy Meet add-on side panel closes it; opening an activity created by an older revision ends it. Settings, account controls, and six-step readiness diagnostics belong in the extension popup and standalone Airboard page rather than in the audience surface.
+
+The main-world hook still tracks the composited output through `RTCRtpSender` and reads outbound WebRTC stats. A remote participant must confirm the receiver-side image; use the evidence checklist in [Docs/Meet Camera Composite Verification.md](Docs/Meet%20Camera%20Composite%20Verification.md).
 
 ## Realtime Voice
 
@@ -83,7 +112,7 @@ If no supported semantic provider/key is configured, `GET /intent/config` report
 
 Every finalized command gets a `voiceTurnId` that links capture metadata, final STT text, wake classification, parser/grounding outcome, semantic input/output or failure, clarification, preview, final action, undo, and terminal outcome. Browser stages are appended with `POST /voice/trace`; a bounded local trace can be inspected with `GET /voice/trace/:voiceTurnId` using an allowed Origin header. Semantic server logs carry the same ID and provider request metadata.
 
-Raw microphone audio is never stored or accepted by the trace API. Trace payloads are size/depth bounded and reject audio blobs, credentials, tokens, secrets, and passwords. The current prototype keeps only a bounded in-memory diagnostic buffer; production deployment still needs authenticated trace access, configurable transcript retention, encryption, deletion/export, and access auditing.
+Raw microphone audio is never stored or accepted by the trace API. Trace payloads are size/depth bounded and reject audio blobs, credentials, tokens, secrets, and passwords. Authenticated deployments store sanitized, organization-scoped voice trace events and hard-delete them within 14 days; local API runs without Supabase retain only a bounded in-memory diagnostic buffer. Trace access, export, deletion, and auditing follow the authenticated commercial control-plane policies.
 
 ### Voice semantic evaluation
 
@@ -105,3 +134,13 @@ Airboard uses a separate local Supabase port range so it can run beside other lo
 - Mailpit: `http://127.0.0.1:56324`
 
 The API uses Supabase persistence when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are present. Without those variables, it falls back to the in-memory local store.
+
+## Commercial platform
+
+Airboard now includes the public acquisition site, Supabase-backed account and tenant bootstrap, invitation acceptance, three-day value-triggered trial, persistent/versioned boards, Stripe checkout/webhook/portal integration, organization administration, installation health, SAML/OIDC configuration, SCIM 2.0 provisioning, privacy requests, support intake, consent records, content-free product events, audit logs, request tracing and lifecycle jobs.
+
+The implemented routes, data contract, environment variables, acceptance test and honest external launch gates are documented in [Commercial Platform Runbook](Docs/Commercial%20Platform%20Runbook.md). Run the complete local control-plane journey with a local API and Supabase stack using:
+
+```sh
+pnpm smoke:commercial
+```

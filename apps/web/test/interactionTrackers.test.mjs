@@ -1,55 +1,96 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { PalmGateTracker } from "../src/features/board/palmGateTracker.ts";
 import { HoldToEditTracker } from "../src/features/board/holdToEditTracker.ts";
+import {
+  catalogIdForDockGestureHover,
+  chooseDockGestureTarget,
+  DockGestureActivationTracker,
+} from "../src/features/board/dockGestureActivation.ts";
 
 const P = { x: 0.5, y: 0.4 };
 
-test("palm gate engages only after the pose holds still for the debounce", () => {
-  const tracker = new PalmGateTracker();
-  const base = { score: 0.8, point: P, gateOpen: false, suppressed: false };
-  assert.equal(tracker.update({ ...base, timestampMs: 0 }), null, "first frame arms");
-  assert.equal(tracker.update({ ...base, timestampMs: 100 }), null, "too early");
-  assert.equal(tracker.update({ ...base, timestampMs: 300 }), "engage");
+test("catalog category hover maps to open without treating tools as categories", () => {
+  assert.equal(catalogIdForDockGestureHover("category:flow"), "flow");
+  assert.equal(catalogIdForDockGestureHover("category:system"), "system");
+  assert.equal(catalogIdForDockGestureHover("category:"), null);
+  assert.equal(catalogIdForDockGestureHover("tool:decision"), null);
+  assert.equal(catalogIdForDockGestureHover("select"), null);
+  assert.equal(catalogIdForDockGestureHover(null), null);
 });
 
-test("palm gate never engages while moving — drift re-arms the debounce", () => {
-  const tracker = new PalmGateTracker();
-  const base = { score: 0.8, gateOpen: false, suppressed: false };
-  tracker.update({ ...base, point: { x: 0.2, y: 0.4 }, timestampMs: 0 });
-  tracker.update({ ...base, point: { x: 0.4, y: 0.4 }, timestampMs: 150 }); // drift > radius
+test("a category close edge never activates or consumes the tool latch", () => {
+  const tracker = new DockGestureActivationTracker();
+  assert.equal(tracker.update("category:flow", "closing"), null);
+  assert.equal(tracker.update("category:flow", "closed"), null);
   assert.equal(
-    tracker.update({ ...base, point: { x: 0.4, y: 0.4 }, timestampMs: 300 }),
+    tracker.update("tool:decision", "closed"),
     null,
-    "clock restarted at the drift",
+    "moving a held close from category to tool cannot pick it up",
   );
-  assert.equal(tracker.update({ ...base, point: { x: 0.4, y: 0.4 }, timestampMs: 440 }), "engage");
+  tracker.update("tool:decision", "open");
+  tracker.update("tool:decision", "closing");
+  assert.equal(tracker.update("tool:decision", "closed"), "tool:decision");
 });
 
-test("palm gate release requires sustained sub-threshold score (hysteresis)", () => {
-  const tracker = new PalmGateTracker();
-  const open = { point: P, gateOpen: true, suppressed: false };
-  // In the hysteresis band: no release.
-  assert.equal(tracker.update({ ...open, score: 0.5, timestampMs: 0 }), null);
-  // Below release score, but not yet sustained.
-  assert.equal(tracker.update({ ...open, score: 0.2, timestampMs: 10 }), null);
-  assert.equal(tracker.update({ ...open, score: 0.2, timestampMs: 100 }), null);
-  // A strong pose frame cancels the countdown.
-  assert.equal(tracker.update({ ...open, score: 0.7, point: P, timestampMs: 150 }), null);
-  assert.equal(tracker.update({ ...open, score: 0.1, timestampMs: 200 }), null);
-  assert.equal(tracker.update({ ...open, score: 0.1, timestampMs: 460 }), "release");
-});
-
-test("palm gate is suppressed while another gate outranks it", () => {
-  const tracker = new PalmGateTracker();
-  const base = { score: 0.9, point: P, gateOpen: false, suppressed: true };
-  tracker.update({ ...base, timestampMs: 0 });
-  assert.equal(tracker.update({ ...base, timestampMs: 500 }), null, "suppressed");
+test("a tool must stay targeted from closing through closed and activates once", () => {
+  const tracker = new DockGestureActivationTracker();
+  assert.equal(tracker.update("tool:decision", "open"), null, "hover cannot select");
+  assert.equal(tracker.update("tool:decision", "closing"), null);
+  assert.equal(tracker.update("tool:process", "closed"), null, "target changed mid-close");
+  tracker.update("tool:decision", "open");
+  tracker.update("tool:decision", "closing");
+  assert.equal(tracker.update("tool:decision", "closed"), "tool:decision");
   assert.equal(
-    tracker.update({ ...base, suppressed: false, timestampMs: 600 }),
-    "engage",
-    "engages immediately once unsuppressed (candidate never dropped)",
+    tracker.update("tool:process", "closed"),
+    null,
+    "same close cannot activate a neighboring tool",
+  );
+});
+
+test("opening-to-closed jitter does not fabricate a second activation edge", () => {
+  const tracker = new DockGestureActivationTracker();
+  tracker.update("tool:decision", "open");
+  tracker.update("tool:decision", "closing");
+  assert.equal(tracker.update("tool:decision", "closed"), "tool:decision");
+  assert.equal(tracker.update("tool:process", "opening"), null);
+  assert.equal(tracker.update("tool:process", "closed"), null);
+  tracker.update("tool:process", "open");
+  tracker.update("tool:process", "closing");
+  assert.equal(tracker.update("tool:process", "closed"), "tool:process");
+});
+
+test("top-level dock controls retain the stable close activation contract", () => {
+  const tracker = new DockGestureActivationTracker();
+  tracker.update("select", "closing");
+  assert.equal(tracker.update("select", "closed"), "select");
+  tracker.update("eraser", "open");
+  tracker.update("eraser", "closing");
+  assert.equal(tracker.update("eraser", "closed"), "eraser");
+});
+
+test("dock choose uses padded hit areas and resolves overlap by nearest center", () => {
+  const targets = [
+    {
+      id: "flow",
+      bounds: { left: 0, top: 0, width: 40, height: 40 },
+    },
+    {
+      id: "system",
+      bounds: { left: 45, top: 0, width: 40, height: 40 },
+    },
+  ];
+  assert.equal(
+    chooseDockGestureTarget({ x: 43, y: 20 }, targets, 10),
+    "system",
+  );
+  assert.equal(
+    chooseDockGestureTarget(
+      { x: 20, y: 20 },
+      [{ ...targets[0], disabled: true }],
+      10,
+    ),
+    null,
   );
 });
 

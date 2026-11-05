@@ -1,8 +1,14 @@
 # Google Workspace Marketplace Draft Listing
 
 > **Purpose:** Exercise Airboard's Google Meet installation exactly as a customer would, without granting test users access to the Google Cloud project.  
-> **Status:** Public Trader App Configuration saved; Store Listing populated but not saved pending four native file-picker uploads.  
+> **Status:** Superseded by the Chrome camera-overlay distribution. Do not save, submit, or advertise this Marketplace draft.
 > **Last updated:** 2026-07-16
+
+> **Product decision (2026-07-19):** Airboard no longer asks users to launch a
+> Meet side panel or main-stage activity. The required product is the ordinary
+> outgoing camera tile with a private extension-owned renderer. This document
+> is retained only as historical evidence for the retired shared-stage pilot.
+> The active release runbook is `Docs/Chrome Web Store Release.md`.
 
 ## Distribution decision
 

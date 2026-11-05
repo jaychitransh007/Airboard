@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   parseLandmarkTrace,
   replayLandmarkTrace,
+  replayLandmarkTraceWithDiagnostics,
   segmentsAbove,
 } from "../dist/landmarkTrace.js";
 
@@ -44,4 +45,103 @@ test("parseLandmarkTrace rejects malformed traces", () => {
   assert.throws(() => parseLandmarkTrace(null));
   assert.throws(() => parseLandmarkTrace({ schemaVersion: "2.0", frames: [] }));
   assert.throws(() => parseLandmarkTrace({ schemaVersion: "1.0", frames: [{ t: "x", hands: [] }] }));
+});
+
+test("diagnostic replay reports production palm/grab actions and gate timing", async () => {
+  const trace = parseLandmarkTrace(JSON.parse(await readFile(FIXTURE, "utf8")));
+  const replay = replayLandmarkTraceWithDiagnostics(trace);
+
+  assert.equal(replay.summary.frameCount, trace.frames.length);
+  assert.equal(replay.summary.framesWithInvalidHands, 0);
+  assert.equal(replay.summary.nonMonotonicTimestampFrames, 0);
+  assert.deepEqual(
+    replay.actions.map((action) => action.type),
+    ["palm_acquire", "grab_acquire", "palm_release", "grab_release"],
+  );
+  assert.deepEqual(
+    replay.actions.map((action) => action.frameOwner),
+    ["palm", "grab", "grab", "grab"],
+  );
+
+  assert.equal(replay.metrics.duplicateActionCount, 0);
+  assert.equal(replay.metrics.unpairedActionCount, 0);
+  assert.equal(replay.metrics.palm.acquireCount, 1);
+  assert.equal(replay.metrics.palm.releaseCount, 1);
+  assert.equal(replay.metrics.grab.acquireCount, 1);
+  assert.equal(replay.metrics.grab.releaseCount, 1);
+  assert.ok(
+    replay.metrics.palm.acquireTiming.maxMs >= 400 &&
+      replay.metrics.palm.acquireTiming.maxMs < 450,
+  );
+  assert.ok(
+    replay.metrics.grab.acquireTiming.maxMs >= 55 &&
+      replay.metrics.grab.acquireTiming.maxMs < 90,
+  );
+  assert.ok(
+    replay.metrics.grab.releaseTiming.maxMs >= 80 &&
+      replay.metrics.grab.releaseTiming.maxMs < 120,
+  );
+
+  const grabOwnerFrame = replay.frames.find(
+    (frame) => frame.transition.owner?.to === "grab",
+  );
+  assert.ok(grabOwnerFrame);
+  assert.ok(grabOwnerFrame.suppression.palm.includes("owned_by_grab"));
+  assert.deepEqual(grabOwnerFrame.transition.grab, {
+    from: "idle",
+    to: "acquiring",
+  });
+});
+
+test("diagnostic replay fails individual bad frames closed without duplicate actions", async () => {
+  const trace = parseLandmarkTrace(JSON.parse(await readFile(FIXTURE, "utf8")));
+  const faulted = structuredClone(trace);
+  const corruptFrame = faulted.frames[40];
+  assert.ok(corruptFrame);
+  const corruptHand = corruptFrame.hands[0];
+  assert.ok(corruptHand);
+  corruptHand.landmarks[8] = [Number.NaN, 0.2, 0];
+
+  const regressedFrame = faulted.frames[50];
+  assert.ok(regressedFrame);
+  regressedFrame.t -= 200;
+
+  const replay = replayLandmarkTraceWithDiagnostics(faulted);
+  assert.equal(replay.summary.framesWithInvalidHands, 1);
+  assert.equal(replay.summary.nonMonotonicTimestampFrames, 1);
+  assert.equal(replay.frames[40]?.stages.validation.status, "degraded");
+  assert.ok(
+    replay.frames[40]?.stages.validation.codes.includes(
+      "hand_0:non_finite_landmark",
+    ),
+  );
+  assert.equal(replay.frames[50]?.stages.input.status, "degraded");
+  assert.ok(
+    replay.frames[50]?.stages.input.codes.includes("timestamp_regression"),
+  );
+  assert.equal(replay.metrics.duplicateActionCount, 0);
+  assert.equal(replay.metrics.unpairedActionCount, 0);
+  assert.deepEqual(
+    replay.actions.map((action) => action.type),
+    ["palm_acquire", "grab_acquire", "palm_release", "grab_release"],
+  );
+});
+
+test("diagnostic replay suppresses ambiguous multi-hand ownership", async () => {
+  const trace = parseLandmarkTrace(JSON.parse(await readFile(FIXTURE, "utf8")));
+  const oneFrame = structuredClone(trace.frames[0]);
+  assert.ok(oneFrame);
+  oneFrame.hands.push(structuredClone(oneFrame.hands[0]));
+
+  const replay = replayLandmarkTraceWithDiagnostics({
+    schemaVersion: "1.0",
+    frames: [oneFrame],
+  });
+  const frame = replay.frames[0];
+  assert.ok(frame);
+  assert.equal(frame.owner, "none");
+  assert.equal(frame.selectedHandIndex, null);
+  assert.deepEqual(frame.suppression.palm, ["multiple_hands"]);
+  assert.deepEqual(frame.suppression.grab, ["multiple_hands"]);
+  assert.equal(replay.actions.length, 0);
 });

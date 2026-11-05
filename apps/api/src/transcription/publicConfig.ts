@@ -6,5 +6,6 @@ export function publicTranscriptionConfig(config: TranscriptionRuntimeConfig) {
     provider: config.provider,
     defaultModel: config.defaultModel,
     allowedModels: config.allowedModels,
+    dynamicKeyterms: config.provider === "deepgram",
   };
 }

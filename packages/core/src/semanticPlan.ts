@@ -1,7 +1,7 @@
 import { AIRBOARD_SEMANTIC_NODE_CAPABILITIES } from "./semanticCapabilities.ts";
 import type { AnnotationNodeType } from "./types.ts";
 
-export const AIRBOARD_SEMANTIC_PLAN_CONTRACT_VERSION = "1.0" as const;
+export const AIRBOARD_SEMANTIC_PLAN_CONTRACT_VERSION = "1.1" as const;
 export const AIRBOARD_SEMANTIC_PLAN_TOOL_NAME = "propose_diagram_plan" as const;
 export const AIRBOARD_SEMANTIC_PLAN_MAX_ACTIONS = 12;
 
@@ -54,6 +54,19 @@ export type SemanticObjectReference =
   | { kind: "type_ordinal"; nodeType: AnnotationNodeType; ordinal: number }
   | { kind: "plan_handle"; handle: string };
 
+/**
+ * A connector is addressed semantically by its visible endpoints rather than
+ * by an internal stroke id. `occurrence` disambiguates parallel connectors
+ * after endpoint and optional label filtering.
+ */
+export type SemanticConnectionReference = {
+  kind: "connection";
+  from: SemanticObjectReference;
+  to: SemanticObjectReference;
+  label: string | null;
+  occurrence: number | null;
+};
+
 export type SemanticPlacement =
   | { kind: "auto" }
   | { kind: "pointer" }
@@ -81,6 +94,16 @@ export type SemanticConnectAction = {
   from: SemanticObjectReference;
   to: SemanticObjectReference;
   label: string | null;
+};
+export type SemanticReverseConnectionAction = {
+  type: "reverse_connection";
+  connection: SemanticConnectionReference;
+  /** New connector label. Null preserves the existing label. */
+  label: string | null;
+};
+export type SemanticDeleteConnectionAction = {
+  type: "delete_connection";
+  connection: SemanticConnectionReference;
 };
 export type SemanticBranchAction = {
   type: "branch";
@@ -138,6 +161,8 @@ export type SemanticCancelAction = { type: "cancel" };
 export type SemanticPlanAction =
   | SemanticCreateAction
   | SemanticConnectAction
+  | SemanticReverseConnectionAction
+  | SemanticDeleteConnectionAction
   | SemanticBranchAction
   | SemanticRenameAction
   | SemanticDeleteAction
@@ -288,6 +313,20 @@ export const AIRBOARD_SEMANTIC_PLAN_JSON_SCHEMA = {
         },
       ],
     },
+    connectionReference: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["connection"] },
+        from: { $ref: "#/$defs/objectReference" },
+        to: { $ref: "#/$defs/objectReference" },
+        label: nullableLabelSchema,
+        occurrence: {
+          anyOf: [{ type: "integer", minimum: 1, maximum: 20 }, { type: "null" }],
+        },
+      },
+      required: ["kind", "from", "to", "label", "occurrence"],
+      additionalProperties: false,
+    },
     branchEdge: {
       type: "object",
       properties: {
@@ -320,6 +359,25 @@ export const AIRBOARD_SEMANTIC_PLAN_JSON_SCHEMA = {
             label: nullableLabelSchema,
           },
           required: ["type", "from", "to", "label"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            type: { type: "string", enum: ["reverse_connection"] },
+            connection: { $ref: "#/$defs/connectionReference" },
+            label: nullableLabelSchema,
+          },
+          required: ["type", "connection", "label"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            type: { type: "string", enum: ["delete_connection"] },
+            connection: { $ref: "#/$defs/connectionReference" },
+          },
+          required: ["type", "connection"],
           additionalProperties: false,
         },
         {
@@ -529,6 +587,17 @@ function validateAction(value: unknown, path: string): SemanticPlanParseError | 
         if (referenceKey(value.from as SemanticObjectReference) === referenceKey(value.to as SemanticObjectReference)) return issue("inconsistent_plan", path, "A connection cannot use the same source and target reference.");
         return null;
       }
+    case "reverse_connection":
+      if (!isExactRecord(value, ["type", "connection", "label"])) return shape(path);
+      return (
+        validateConnectionReference(value.connection, `${path}.connection`) ??
+        (!validNullableText(value.label, 120)
+          ? issue("invalid_value", `${path}.label`, "Reversed connector label is invalid.")
+          : null)
+      );
+    case "delete_connection":
+      if (!isExactRecord(value, ["type", "connection"])) return shape(path);
+      return validateConnectionReference(value.connection, `${path}.connection`);
     case "branch": {
       if (!isExactRecord(value, ["type", "from", "branches"])) return shape(path);
       const fromIssue = validateReference(value.from, `${path}.from`);
@@ -600,6 +669,46 @@ function validateReference(value: unknown, path: string): SemanticPlanParseError
   }
 }
 
+function validateConnectionReference(
+  value: unknown,
+  path: string,
+): SemanticPlanParseError | null {
+  if (!isExactRecord(value, ["kind", "from", "to", "label", "occurrence"])) {
+    return shape(path);
+  }
+  if (value.kind !== "connection") {
+    return issue("invalid_value", `${path}.kind`, "Connector reference kind is invalid.");
+  }
+  const fieldIssue =
+    validateReference(value.from, `${path}.from`) ??
+    validateReference(value.to, `${path}.to`) ??
+    (!validNullableText(value.label, 120)
+      ? issue("invalid_value", `${path}.label`, "Connector reference label is invalid.")
+      : null);
+  if (fieldIssue) return fieldIssue;
+  if (
+    value.occurrence !== null &&
+    !validInteger(value.occurrence, 1, 20)
+  ) {
+    return issue(
+      "invalid_value",
+      `${path}.occurrence`,
+      "Connector occurrence must be null or an integer between 1 and 20.",
+    );
+  }
+  if (
+    referenceKey(value.from as SemanticObjectReference) ===
+    referenceKey(value.to as SemanticObjectReference)
+  ) {
+    return issue(
+      "inconsistent_plan",
+      path,
+      "A connector reference requires two different endpoint references.",
+    );
+  }
+  return null;
+}
+
 function validateReferences(value: unknown, path: string, minimum: number): SemanticPlanParseError | null {
   if (!Array.isArray(value) || value.length < minimum || value.length > 20) return issue("invalid_value", path, `Expected ${minimum} to 20 object references.`);
   for (let index = 0; index < value.length; index += 1) {
@@ -651,6 +760,9 @@ function referencesInAction(action: SemanticPlanAction): SemanticObjectReference
   switch (action.type) {
     case "create": return placementReferences(action.placement);
     case "connect": return [action.from, action.to];
+    case "reverse_connection":
+    case "delete_connection":
+      return [action.connection.from, action.connection.to];
     case "branch": return [action.from, ...action.branches.map(({ to }) => to)];
     case "rename": return [action.target];
     case "delete":

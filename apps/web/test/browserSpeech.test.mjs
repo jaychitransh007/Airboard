@@ -154,6 +154,23 @@ test("ignores ordinary speech that merely resembles a wake phrase", () => {
   assert.deepEqual(extractBrowserWakeCommands("the air outside feels cold"), []);
 });
 
+test("keeps Airboard entity mentions inside one narrative command", () => {
+  const narrative =
+    "User makes a request to Airboard, and, uh, then the authentication service gets fired, and, uh, then user lands to the Airboard page. So create a flow diagram for this.";
+
+  assert.deepEqual(classifyBrowserWakeTranscript(narrative), {
+    transcript: narrative,
+    wakeDetected: false,
+    wakePhrases: [],
+    commands: [],
+  });
+
+  const invoked = classifyBrowserWakeTranscript(`Airo, ${narrative}`);
+  assert.equal(invoked.wakeDetected, true);
+  assert.deepEqual(invoked.wakePhrases, ["Airo"]);
+  assert.deepEqual(invoked.commands.map(({ command }) => command), [narrative]);
+});
+
 test("continuous session emits only woken commands and carries a wake across results", async (t) => {
   const originalWindow = globalThis.window;
   const recognitions = [];

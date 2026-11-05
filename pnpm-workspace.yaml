@@ -4,3 +4,13 @@ packages:
 allowBuilds:
   esbuild: true
   sharp: true
+# Next.js still bundles PostCSS 8.4.31, which has published advisories; the
+# 8.5 line is a drop-in replacement. Remove once Next ships a fixed PostCSS.
+overrides:
+  "next>postcss": "^8.5.32"
+  # Within the ranges their dependents declare; these pin the patched releases
+  # (libvips/libheif/librsvg CVEs in sharp, URI-parsing advisories in fast-uri).
+  "sharp": "^0.35.5"
+  "fast-uri": "^3.1.7"
+  # Pulled in only by Electron's download helper (desktop app tooling).
+  "undici": "^7.30.1"

@@ -1,0 +1,6 @@
+# Reviewed false positives: notification template names (template_key) that the
+# generic-api-key rule mistakes for keys. Fingerprints are commit:file:rule:line.
+fde35ccede043ad0a425375cbcba3aa88c89160c:apps/api/src/controlPlaneRoutes.ts:generic-api-key:770
+fde35ccede043ad0a425375cbcba3aa88c89160c:apps/api/src/controlPlaneRoutes.ts:generic-api-key:778
+fde35ccede043ad0a425375cbcba3aa88c89160c:apps/api/src/controlPlaneRoutes.ts:generic-api-key:1916
+fde35ccede043ad0a425375cbcba3aa88c89160c:apps/api/src/controlPlaneRoutes.ts:generic-api-key:1920

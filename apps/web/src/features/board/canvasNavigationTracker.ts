@@ -63,6 +63,17 @@ export class CanvasNavigationTracker {
     return this.engagedMode !== null;
   }
 
+  /**
+   * True from the first unambiguous two-hand navigation frame through release.
+   *
+   * The engage debounce improves stability, but it must not leave a window in
+   * which either closed hand can acquire an object before zoom takes control.
+   * Callers reserve the hand stream while this is true, even before `engaged`.
+   */
+  get reserving(): boolean {
+    return this.candidateMode !== null || this.engagedMode !== null;
+  }
+
   get mode(): NavMode | null {
     return this.engagedMode;
   }

@@ -35,6 +35,7 @@ export type SemanticIntentEdgeSummary = {
   from: SemanticIntentObjectReferenceSummary;
   to: SemanticIntentObjectReferenceSummary;
   label?: string;
+  occurrence?: number;
 };
 
 export type SemanticIntentGlossaryEntry = {
@@ -99,6 +100,23 @@ export type SemanticIntentProviderResult = {
   model: string;
   metadata: SemanticIntentProviderMetadata;
 };
+
+/**
+ * HTTP orchestration result for a supported request whose complete desired
+ * relationship set is already present. This intentionally remains outside the
+ * SemanticPlan 1.1 contract, where a resolved plan must contain an action.
+ */
+export type SemanticIntentAlreadySatisfiedResult = {
+  outcome: "already_satisfied";
+  plan: null;
+  provider: string;
+  model: string;
+  metadata: SemanticIntentProviderMetadata;
+};
+
+export type SemanticIntentHttpResult =
+  | SemanticIntentProviderResult
+  | SemanticIntentAlreadySatisfiedResult;
 
 export type SemanticIntentProviderUsage = {
   inputTokens: number;

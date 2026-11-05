@@ -1,14 +1,28 @@
 import type {
   BoardEvent,
+  BoardSceneElement,
   BoardState,
   EraseAction,
   Stroke,
   StrokePoint,
 } from "./types.ts";
+import { BOARD_SCENE_VERSION } from "./types.ts";
+import {
+  applyBoardElementPatches,
+  boardSceneElementFromLegacyStroke,
+} from "./sceneElements.ts";
+import { isBoardSceneElement } from "./sceneValidation.ts";
+
+export type LegacyCompatibleBoardState = Omit<BoardState, "sceneVersion" | "elements"> & {
+  sceneVersion?: BoardState["sceneVersion"];
+  elements?: BoardState["elements"];
+};
 
 export function createInitialBoardState(boardId: string): BoardState {
   return {
     boardId,
+    sceneVersion: BOARD_SCENE_VERSION,
+    elements: {},
     strokes: {},
     activeStrokes: {},
     eraseActions: {},
@@ -26,6 +40,10 @@ export function reduceBoardEvents(
 }
 
 export function applyBoardEvent(state: BoardState, event: BoardEvent): BoardState {
+  // Snapshots produced before scene v2 do not have `elements`. Upgrade them at
+  // the reducer boundary so old persisted boards and old event logs remain
+  // immediately usable without a destructive database migration.
+  state = upgradeBoardStateToSceneVersion(state);
   const lastSequence = Math.max(state.lastSequence, event.sequence ?? state.lastSequence);
 
   switch (event.type) {
@@ -97,6 +115,14 @@ export function applyBoardEvent(state: BoardState, event: BoardEvent): BoardStat
           ...state.strokes,
           [event.strokeId]: committedStroke,
         },
+        elements: {
+          ...state.elements,
+          [event.strokeId]: boardSceneElementFromLegacyStroke(committedStroke, {
+            zIndex:
+              state.elements[event.strokeId]?.zIndex ?? nextElementZIndex(state.elements),
+            revision: (state.elements[event.strokeId]?.revision ?? 0) + 1,
+          }),
+        },
       };
     }
 
@@ -133,6 +159,7 @@ export function applyBoardEvent(state: BoardState, event: BoardEvent): BoardStat
           ...state.strokes,
           [event.strokeId]: updatedStroke,
         },
+        elements: updateLegacySceneElement(state.elements, updatedStroke),
       };
     }
 
@@ -167,6 +194,7 @@ export function applyBoardEvent(state: BoardState, event: BoardEvent): BoardStat
           ...state.strokes,
           [event.strokeId]: updatedStroke,
         },
+        elements: updateLegacySceneElement(state.elements, updatedStroke),
       };
     }
 
@@ -183,6 +211,12 @@ export function applyBoardEvent(state: BoardState, event: BoardEvent): BoardStat
           event.eraseAction.affectedStrokeIds,
           event.createdAt,
         ),
+        elements: markElementsStatus(
+          state.elements,
+          event.eraseAction.affectedStrokeIds,
+          "deleted",
+          event.createdAt,
+        ),
       };
     }
 
@@ -191,6 +225,12 @@ export function applyBoardEvent(state: BoardState, event: BoardEvent): BoardStat
         ...state,
         lastSequence,
         strokes: markStrokesDeleted(state.strokes, event.strokeIds, event.createdAt),
+        elements: markElementsStatus(
+          state.elements,
+          event.strokeIds,
+          "deleted",
+          event.createdAt,
+        ),
       };
     }
 
@@ -199,6 +239,12 @@ export function applyBoardEvent(state: BoardState, event: BoardEvent): BoardStat
         ...state,
         lastSequence,
         strokes: markStrokesRestored(state.strokes, event.strokeIds, event.createdAt),
+        elements: markElementsStatus(
+          state.elements,
+          event.strokeIds,
+          "active",
+          event.createdAt,
+        ),
       };
     }
 
@@ -208,9 +254,75 @@ export function applyBoardEvent(state: BoardState, event: BoardEvent): BoardStat
         lastSequence,
         clearedAt: event.createdAt,
         strokes: markStrokesDeleted(Object.values(state.strokes), undefined, event.createdAt),
+        elements: markElementsStatus(
+          state.elements,
+          undefined,
+          "deleted",
+          event.createdAt,
+        ),
         activeStrokes: {},
       };
     }
+
+    case "element.created": {
+      if (
+        !isBoardSceneElement(event.element) ||
+        state.elements[event.element.id]
+      ) {
+        return { ...state, lastSequence };
+      }
+      return {
+        ...state,
+        lastSequence,
+        elements: {
+          ...state.elements,
+          [event.element.id]: event.element,
+        },
+      };
+    }
+
+    case "element.patched": {
+      const element = state.elements[event.elementId];
+      if (!element || !Array.isArray(event.patches)) {
+        return { ...state, lastSequence };
+      }
+      const patched = applyBoardElementPatches(element, event.patches, event.createdAt);
+      if (patched === element) {
+        return { ...state, lastSequence };
+      }
+      return {
+        ...state,
+        lastSequence,
+        elements: {
+          ...state.elements,
+          [event.elementId]: patched,
+        },
+      };
+    }
+
+    case "element.deleted":
+      return {
+        ...state,
+        lastSequence,
+        elements: markElementsStatus(
+          state.elements,
+          [event.elementId],
+          "deleted",
+          event.createdAt,
+        ),
+      };
+
+    case "element.restored":
+      return {
+        ...state,
+        lastSequence,
+        elements: markElementsStatus(
+          state.elements,
+          [event.elementId],
+          "active",
+          event.createdAt,
+        ),
+      };
 
     case "cursor.moved": {
       return {
@@ -259,6 +371,36 @@ export function applyBoardEvent(state: BoardState, event: BoardEvent): BoardStat
       // stored sequence stays monotonic.
       return { ...state, lastSequence };
   }
+}
+
+/**
+ * Hydrates a v1 snapshot into the canonical v2 shape. Existing v2 elements win
+ * over adapted strokes with the same id, allowing a mixed event log during the
+ * compatibility window.
+ */
+export function upgradeBoardStateToSceneVersion(
+  input: BoardState | LegacyCompatibleBoardState,
+): BoardState {
+  const sourceElements = input.elements ?? {};
+  const elements = { ...sourceElements };
+  let zIndex = nextElementZIndex(elements);
+  for (const stroke of Object.values(input.strokes)) {
+    if (stroke.status === "active" || elements[stroke.id]) continue;
+    elements[stroke.id] = boardSceneElementFromLegacyStroke(stroke, { zIndex });
+    zIndex += 1;
+  }
+  if (
+    input.sceneVersion === BOARD_SCENE_VERSION &&
+    input.elements &&
+    Object.keys(elements).length === Object.keys(input.elements).length
+  ) {
+    return input as BoardState;
+  }
+  return {
+    ...input,
+    sceneVersion: BOARD_SCENE_VERSION,
+    elements,
+  };
 }
 
 export function createStroke(input: {
@@ -379,4 +521,54 @@ function markStrokesRestored(
         : stroke,
     ]),
   );
+}
+
+function nextElementZIndex(elements: Record<string, BoardSceneElement>): number {
+  return (
+    Object.values(elements).reduce(
+      (highest, element) => Math.max(highest, Number.isFinite(element.zIndex) ? element.zIndex : 0),
+      -1,
+    ) + 1
+  );
+}
+
+function updateLegacySceneElement(
+  elements: Record<string, BoardSceneElement>,
+  stroke: Stroke,
+): Record<string, BoardSceneElement> {
+  const existing = elements[stroke.id];
+  if (!existing?.legacyStrokeId) return elements;
+  return {
+    ...elements,
+    [stroke.id]: boardSceneElementFromLegacyStroke(stroke, {
+      zIndex: existing.zIndex,
+      revision: existing.revision + 1,
+    }),
+  };
+}
+
+function markElementsStatus(
+  elements: Record<string, BoardSceneElement>,
+  elementIds: readonly string[] | undefined,
+  status: BoardSceneElement["status"],
+  updatedAt: string,
+): Record<string, BoardSceneElement> {
+  const ids = new Set(elementIds ?? Object.keys(elements));
+  let changed = false;
+  const next = Object.fromEntries(
+    Object.entries(elements).map(([id, element]) => {
+      if (!ids.has(id) || element.status === status) return [id, element];
+      changed = true;
+      return [
+        id,
+        {
+          ...element,
+          status,
+          updatedAt,
+          revision: element.revision + 1,
+        } as BoardSceneElement,
+      ];
+    }),
+  );
+  return changed ? next : elements;
 }

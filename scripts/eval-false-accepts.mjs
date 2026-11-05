@@ -31,6 +31,11 @@ import { fileURLToPath } from "node:url";
 
 import { classifyBrowserWakeTranscript } from "../apps/web/src/features/board/browserSpeech.ts";
 import { parseIntentCanvasCommand } from "../apps/web/src/features/board/intentCanvasParser.ts";
+import { resolveIntentOperation } from "../apps/web/src/features/board/intentPipeline.ts";
+import {
+  applyDiagramCommand,
+  createInitialBoardState,
+} from "../packages/core/src/index.ts";
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = resolve(SCRIPT_DIRECTORY, "..");
@@ -59,8 +64,8 @@ async function main() {
     throw new Error(`${fixturePath} is not a meeting-negatives corpus with schemaVersion 1.0`);
   }
 
-  const wake = { activations: [], hard: [], soft: [] };
-  const gated = { hard: [], soft: [], clarifications: [] };
+  const wake = { activations: [], hard: [], soft: [], groundedMutations: [] };
+  const gated = { hard: [], soft: [], groundedMutations: [], clarifications: [] };
 
   for (const { id, text } of corpus.utterances) {
     // Channel A — wake router.
@@ -73,7 +78,13 @@ async function main() {
       if (parsed.status === "parsed") {
         const risk = classifyParsedRisk(parsed.command);
         if (risk === "hard") wake.hard.push({ id, command: routed.command, kind: parsed.command.kind });
-        if (risk === "soft") wake.soft.push({ id, command: routed.command, kind: parsed.command.kind });
+        if (risk === "soft") {
+          const item = { id, command: routed.command, kind: parsed.command.kind };
+          wake.soft.push(item);
+          if (wouldMutateAgainstTemptingBoard(parsed.command)) {
+            wake.groundedMutations.push(item);
+          }
+        }
       }
     }
 
@@ -84,7 +95,13 @@ async function main() {
     if (parsed.status === "parsed") {
       const risk = classifyParsedRisk(parsed.command);
       if (risk === "hard") gated.hard.push({ id, text, kind: parsed.command.kind });
-      if (risk === "soft") gated.soft.push({ id, text, kind: parsed.command.kind });
+      if (risk === "soft") {
+        const item = { id, text, kind: parsed.command.kind };
+        gated.soft.push(item);
+        if (wouldMutateAgainstTemptingBoard(parsed.command)) {
+          gated.groundedMutations.push(item);
+        }
+      }
     } else if (parsed.status === "clarification") {
       gated.clarifications.push({ id, text, issue: parsed.issue.code });
     }
@@ -98,34 +115,110 @@ async function main() {
   console.log(`  activations:          ${wake.activations.length}/${total}`);
   console.log(`  HARD false accepts:   ${wake.hard.length}/${total}`);
   console.log(`  soft (named-ref):     ${wake.soft.length}/${total}`);
+  console.log(`  grounded mutations:   ${wake.groundedMutations.length}/${total}`);
   printItems(wake.hard, (item) => `${item.id}: routed “${item.command}” → ${item.kind}`);
   printItems(wake.soft, (item) => `${item.id}: routed “${item.command}” → ${item.kind} (label-grounded)`);
+  printItems(
+    wake.groundedMutations,
+    (item) => `${item.id}: routed “${item.command}” would mutate a tempting board`,
+  );
 
   console.log("\nChannel B — open push-to-talk gate (worst case):");
   console.log(`  HARD false accepts:   ${gated.hard.length}/${total}`);
   console.log(`  soft (named-ref):     ${gated.soft.length}/${total}`);
+  console.log(`  grounded mutations:   ${gated.groundedMutations.length}/${total}`);
   console.log(`  clarification noise:  ${gated.clarifications.length}/${total}`);
   printItems(gated.hard, (item) => `${item.id}: “${item.text}” → ${item.kind}`);
   printItems(gated.soft, (item) => `${item.id}: “${item.text}” → ${item.kind} (label-grounded)`);
+  printItems(
+    gated.groundedMutations,
+    (item) => `${item.id}: “${item.text}” would mutate a tempting board`,
+  );
   printItems(
     gated.clarifications,
     (item) => `${item.id}: “${item.text}” → prompt (${item.issue})`,
     "  (noise, non-fatal)",
   );
 
-  const hardTotal = wake.hard.length + gated.hard.length;
+  const hardTotal =
+    wake.hard.length +
+    gated.hard.length +
+    wake.groundedMutations.length +
+    gated.groundedMutations.length;
   console.log(
-    `\nResult: ${hardTotal === 0 ? "PASS" : "FAIL"} — ${hardTotal} hard false accept(s); target is 0.`,
-  );
-  console.log(
-    "Note: soft accepts mutate only when a spoken label matches a real board object;",
-  );
-  console.log(
-    "they are tracked here so the corpus keeps them visible as the grammar evolves.",
+    `\nResult: ${hardTotal === 0 ? "PASS" : "FAIL"} — ${hardTotal} actionable false accept(s); target is 0.`,
   );
   if (hardTotal > 0) {
     process.exitCode = 1;
   }
+}
+
+function wouldMutateAgainstTemptingBoard(command) {
+  const references =
+    command.kind === "connect" || command.kind === "delete_connection"
+      ? [command.from, command.to]
+      : "target" in command
+        ? [command.target]
+        : [];
+  const labels = [
+    ...new Set(
+      references
+        .filter((reference) => reference?.kind === "named")
+        .map((reference) => reference.label),
+    ),
+  ];
+  if (labels.length === 0) return false;
+
+  let board = createInitialBoardState("false-accept-board");
+  const context = (index) => {
+    let eventIndex = 0;
+    return {
+      boardSessionId: "false-accept-board",
+      actorParticipantId: "eval",
+      userId: "eval",
+      createdAt: `2026-07-30T00:00:0${index}.000Z`,
+      eventIdFactory: () => `event-${index}-${++eventIndex}`,
+    };
+  };
+  const ids = new Map();
+  for (const [index, label] of labels.entries()) {
+    const nodeId = `tempting-${index}`;
+    ids.set(label, nodeId);
+    board = applyDiagramCommand(
+      board,
+      {
+        type: "node.create",
+        nodeId,
+        nodeType: "custom",
+        label,
+        center: { x: 120 + index * 240, y: 180 },
+      },
+      context(index),
+    ).state;
+  }
+  if (command.kind === "delete_connection" && labels.length >= 2) {
+    board = applyDiagramCommand(
+      board,
+      {
+        type: "nodes.connect",
+        connectorId: "tempting-connector",
+        fromId: ids.get(labels[0]),
+        toId: ids.get(labels[1]),
+      },
+      context(labels.length),
+    ).state;
+  }
+  const resolved = resolveIntentOperation(command, {
+    boardState: board,
+    pointer: { x: 450, y: 300 },
+    canvasWidth: 900,
+    canvasHeight: 600,
+    selectionIds: [],
+    primarySelectionId: null,
+    hoverStrokeId: null,
+    strokeColor: "#111111",
+  });
+  return !("error" in resolved) && resolved.commands.length > 0;
 }
 
 function classifyParsedRisk(command) {

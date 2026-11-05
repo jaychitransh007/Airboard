@@ -42,6 +42,7 @@ export type TranscriptionProviderEventHandler = (event: TranscriptionProviderEve
 
 export interface RealtimeTranscriptionSession {
   sendAudio(pcm16Frame: Uint8Array): void;
+  updateKeyterms(keyterms: string[]): void;
   stop(): void;
   abort(): void;
 }
@@ -66,6 +67,8 @@ export type TranscriptionRuntimeConfig = {
   eagerEotThreshold?: number;
   eotTimeoutMs: number;
   maxConcurrentStreams: number;
+  /** Per-account share of maxConcurrentStreams. */
+  maxStreamsPerProfile: number;
   maxSessionMs: number;
   maxAudioBytesPerSecond: number;
   apiKey?: string;
@@ -79,8 +82,14 @@ export type TranscriptionStartMessage = {
   keyterms?: string[];
 };
 
+export type TranscriptionConfigureMessage = {
+  type: "transcription.configure";
+  keyterms: string[];
+};
+
 export type TranscriptionControlMessage =
   | TranscriptionStartMessage
+  | TranscriptionConfigureMessage
   | { type: "transcription.stop" }
   | { type: "transcription.abort" };
 
@@ -103,6 +112,10 @@ export type TranscriptionServerMessage =
       provider: string;
       status: TranscriptionProviderStatus;
       requestId?: string;
+    }
+  | {
+      type: "transcription.configured";
+      keytermCount: number;
     }
   | {
       type: "transcription.error";

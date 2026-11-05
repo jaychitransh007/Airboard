@@ -89,8 +89,17 @@ export type StrokeAnnotation = {
   end?: AnnotationPoint;
   label?: string;
   nodeType?: AnnotationNodeType;
+  /** Catalog-backed shape identity; older clients continue to use nodeType. */
+  shapeKind?: ShapeKind;
   snappedStartStrokeId?: string;
   snappedEndStrokeId?: string;
+  /**
+   * Signed board-space lane displacement for parallel or reciprocal
+   * connectors. The renderer keeps the endpoints attached to their nodes and
+   * offsets the route body so sibling edges and their labels do not collapse
+   * onto one another.
+   */
+  routeOffset?: number;
   fillColor?: string;
   strokeColor?: string;
   opacity?: number;
@@ -214,8 +223,453 @@ export type CursorState = {
   updatedAt: string;
 };
 
+/** The current serialized scene format. Legacy stroke events remain readable. */
+export const BOARD_SCENE_VERSION = 2 as const;
+
+export type BoardSceneVersion = typeof BOARD_SCENE_VERSION;
+
+export type BoardElementKind =
+  | "drawing"
+  | "sticky"
+  | "shape"
+  | "connector"
+  | "text"
+  | "section"
+  | "table"
+  | "stamp"
+  | "media"
+  | "link_preview"
+  | "code_block"
+  | "mind_map_node";
+
+export type BoardElementStatus = "active" | "deleted";
+
+export type BoardJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | BoardJsonValue[]
+  | { [key: string]: BoardJsonValue };
+
+export type BoardElementTransform = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Clockwise board-space rotation in degrees. */
+  rotation: number;
+};
+
+export type BoardAttachment =
+  | {
+      kind: "element";
+      elementId: string;
+      anchor?: "top" | "right" | "bottom" | "left" | "center" | "auto";
+    }
+  | {
+      kind: "table_cell";
+      tableId: string;
+      cellId: string;
+    };
+
+export type RichTextMention = {
+  displayName: string;
+  participantId?: string;
+  userId?: string;
+};
+
+export type RichTextMark = {
+  bold?: true;
+  italic?: true;
+  strikethrough?: true;
+  inlineCode?: true;
+  color?: string;
+  link?: string;
+  mention?: RichTextMention;
+};
+
+export type RichTextRun = {
+  text: string;
+  marks?: RichTextMark;
+  /** Compatibility shorthand for editors that keep mentions beside marks. */
+  mention?: RichTextMention;
+};
+
+export type RichTextBlock = {
+  id?: string;
+  type:
+    | "paragraph"
+    | "heading"
+    | "unordered_list_item"
+    | "ordered_list_item"
+    | "blockquote"
+    | "code";
+  runs: RichTextRun[];
+  level?: 1 | 2 | 3 | 4 | 5 | 6;
+  indent?: number;
+  align?: "left" | "center" | "right";
+};
+
+/** Serializable rich text shared by text-bearing scene elements. */
+export type RichTextDocument = {
+  type: "doc";
+  blocks: RichTextBlock[];
+};
+
+export type ShapeKind =
+  // Basic
+  | "square"
+  | "ellipse"
+  | "diamond"
+  | "triangle"
+  | "downward-triangle"
+  | "rounded-rectangle"
+  | "pentagon"
+  | "octagon"
+  | "plus"
+  | "left-arrow"
+  | "right-arrow"
+  | "chevron"
+  | "star"
+  | "speech-bubble"
+  // Flowchart
+  | "right-parallelogram"
+  | "left-parallelogram"
+  | "cylinder"
+  | "horizontal-cylinder"
+  | "file"
+  | "folder"
+  | "document"
+  | "multiple-documents"
+  | "predefined-process"
+  | "shield"
+  | "trapezoid"
+  | "manual-input"
+  | "hexagon"
+  | "internal-storage"
+  | "or"
+  | "summing-junction"
+  // Advanced
+  | "activity"
+  | "archive"
+  | "authentication"
+  | "chat"
+  | "cloud"
+  | "computer"
+  | "database"
+  | "desktop"
+  | "email"
+  | "frontend"
+  | "instant"
+  | "location"
+  | "mobile"
+  | "package"
+  | "payment"
+  | "security"
+  | "send"
+  | "server"
+  | "service"
+  | "settings"
+  | "storage"
+  | "terminal"
+  | "user"
+  | "wallet"
+  | "web"
+  // Airboard
+  | "process"
+  | "terminator"
+  | "api"
+  | "queue";
+
+export type ConnectorPathKind = "straight" | "bent" | "curved";
+export type ConnectorEndpointKind =
+  | "none"
+  | "solid_arrow"
+  | "line_arrow"
+  | "triangle"
+  | "diamond";
+
+export type ConnectorBinding = {
+  elementId: string;
+  anchor?: "top" | "right" | "bottom" | "left" | "center" | "auto";
+};
+
+export type ConnectorEndpoint = {
+  point: AnnotationPoint;
+  binding?: ConnectorBinding;
+  decoration: ConnectorEndpointKind;
+};
+
+export type AssetReference = {
+  id: string;
+  boardId: string;
+  url: string;
+  mimeType: string;
+  sizeBytes: number;
+  fileName?: string;
+  width?: number;
+  height?: number;
+  durationMs?: number;
+  thumbnailUrl?: string;
+  posterUrl?: string;
+  createdAt?: string;
+};
+
+export type BoardElementBase<TKind extends BoardElementKind> = {
+  id: string;
+  boardId: string;
+  kind: TKind;
+  status: BoardElementStatus;
+  transform: BoardElementTransform;
+  zIndex: number;
+  locked: boolean;
+  visible: boolean;
+  creatorId?: string;
+  sectionId?: string;
+  attachment?: BoardAttachment;
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+  /** Set only when this element was adapted from the v1 stroke model. */
+  legacyStrokeId?: string;
+  metadata?: Record<string, BoardJsonValue>;
+};
+
+export type DrawingElement = BoardElementBase<"drawing"> & {
+  drawingKind: "marker" | "highlighter" | "washi";
+  points: StrokePoint[];
+  style: {
+    color: string;
+    thickness: number;
+    opacity: number;
+    straight: boolean;
+    patternAsset?: AssetReference;
+  };
+};
+
+export type StickyElement = BoardElementBase<"sticky"> & {
+  content: RichTextDocument;
+  layout: "square" | "rectangle";
+  color: string;
+  authorVisible: boolean;
+};
+
+export type ShapeStyle = {
+  fill: string;
+  fillOpacity: number;
+  stroke: string;
+  strokeOpacity: number;
+  strokeWidth: number;
+  strokeStyle: "solid" | "dashed" | "dotted";
+  textColor: string;
+  fontFamily?: string;
+  fontSize?: number;
+  textAlign?: "left" | "center" | "right";
+};
+
+export type ShapeElement = BoardElementBase<"shape"> & {
+  shapeKind: ShapeKind;
+  content: RichTextDocument;
+  style: ShapeStyle;
+};
+
+export type ConnectorElement = BoardElementBase<"connector"> & {
+  pathKind: ConnectorPathKind;
+  start: ConnectorEndpoint;
+  end: ConnectorEndpoint;
+  controlPoints: AnnotationPoint[];
+  label: RichTextDocument;
+  labelPosition: number;
+  style: {
+    color: string;
+    opacity: number;
+    thickness: "thin" | "thick";
+    strokeStyle: "solid" | "dashed" | "dotted";
+    labelBackground: "none" | "matching";
+  };
+};
+
+export type TextElement = BoardElementBase<"text"> & {
+  content: RichTextDocument;
+  mode: "point" | "area";
+  style: {
+    preset: "simple" | "bookish" | "technical" | "scribbled";
+    color: string;
+    fontFamily?: string;
+    fontSize: number;
+    align: "left" | "center" | "right";
+    verticalAlign: "top" | "middle" | "bottom";
+  };
+};
+
+export type SectionElement = BoardElementBase<"section"> & {
+  title: RichTextDocument;
+  titleVisible: boolean;
+  collapsed: boolean;
+  lockMode: "none" | "background" | "all";
+  memberIds: string[];
+  style: {
+    fill: string;
+    fillOpacity: number;
+    stroke: string;
+  };
+};
+
+export type TableCellStyle = {
+  fill: string;
+  textColor: string;
+  horizontalAlign: "left" | "center" | "right";
+  verticalAlign: "top" | "middle" | "bottom";
+};
+
+export type TableCell = {
+  id: string;
+  rowId: string;
+  columnId: string;
+  content: RichTextDocument;
+  style: TableCellStyle;
+  stampIds?: string[];
+};
+
+export type TableRow = {
+  id: string;
+  height: number;
+};
+
+export type TableColumn = {
+  id: string;
+  width: number;
+};
+
+export type TableMerge = {
+  id: string;
+  cellIds: string[];
+  anchorCellId: string;
+};
+
+export type TableElement = BoardElementBase<"table"> & {
+  rows: TableRow[];
+  columns: TableColumn[];
+  cells: Record<string, TableCell>;
+  merges: TableMerge[];
+};
+
+export type StampElement = BoardElementBase<"stamp"> & {
+  emoji: string;
+  label?: string;
+  faceAsset?: AssetReference;
+  authorId?: string;
+};
+
+export type MediaElement = BoardElementBase<"media"> & {
+  mediaKind: "image" | "gif" | "video";
+  asset: AssetReference;
+  altText: string;
+  crop: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    zoom: number;
+  };
+  playing: boolean;
+};
+
+export type LinkPreviewElement = BoardElementBase<"link_preview"> & {
+  url: string;
+  display: "card" | "embed" | "url";
+  layout: "horizontal" | "vertical";
+  title?: string;
+  description?: string;
+  siteName?: string;
+  imageUrl?: string;
+  iconUrl?: string;
+  embedUrl?: string;
+};
+
+export type CodeLanguage =
+  | "cpp"
+  | "css"
+  | "go"
+  | "graphql"
+  | "html"
+  | "javascript"
+  | "json"
+  | "kotlin"
+  | "python"
+  | "react"
+  | "ruby"
+  | "rust"
+  | "sql"
+  | "swift"
+  | "typescript";
+
+export type CodeBlockElement = BoardElementBase<"code_block"> & {
+  code: string;
+  language: CodeLanguage;
+  theme: "light" | "dark";
+};
+
+export type MindMapDirection = "left" | "right" | "up" | "down";
+
+export type MindMapRelation = {
+  parentId?: string;
+  childIds: string[];
+  direction: MindMapDirection;
+  connectorIds: string[];
+};
+
+export type MindMapNodeElement = BoardElementBase<"mind_map_node"> & {
+  content: RichTextDocument;
+  relation: MindMapRelation;
+  style: {
+    fill: string;
+    textColor: string;
+    lineColor: string;
+  };
+};
+
+export type BoardSceneElement =
+  | DrawingElement
+  | StickyElement
+  | ShapeElement
+  | ConnectorElement
+  | TextElement
+  | SectionElement
+  | TableElement
+  | StampElement
+  | MediaElement
+  | LinkPreviewElement
+  | CodeBlockElement
+  | MindMapNodeElement;
+
+export type BoardElementPatchPath = [string, ...(string | number)[]];
+
+/**
+ * Path and structure-specific operations prevent one editor from replacing a
+ * whole element when they only changed a style field, table cell, attachment,
+ * or mind-map relation.
+ */
+export type BoardElementPatchOperation =
+  | { op: "field.set"; path: BoardElementPatchPath; value: BoardJsonValue }
+  | { op: "field.unset"; path: BoardElementPatchPath }
+  | { op: "table.cell.patched"; cellId: string; patch: Partial<TableCell> }
+  | { op: "table.row.inserted"; index: number; row: TableRow; cells?: TableCell[] }
+  | { op: "table.row.deleted"; rowId: string }
+  | { op: "table.row.moved"; rowId: string; index: number }
+  | { op: "table.column.inserted"; index: number; column: TableColumn; cells?: TableCell[] }
+  | { op: "table.column.deleted"; columnId: string }
+  | { op: "table.column.moved"; columnId: string; index: number }
+  | { op: "table.cells.merged"; merge: TableMerge }
+  | { op: "table.cells.unmerged"; mergeId: string }
+  | { op: "attachment.changed"; attachment: BoardAttachment | null }
+  | { op: "mind_map.relation.changed"; relation: MindMapRelation };
+
 export type BoardState = {
   boardId: string;
+  sceneVersion: BoardSceneVersion;
+  elements: Record<string, BoardSceneElement>;
   strokes: Record<string, Stroke>;
   activeStrokes: Record<string, Stroke>;
   eraseActions: Record<string, EraseAction>;
@@ -319,6 +773,29 @@ export type PermissionChangedEvent = EventEnvelope & {
   allowParticipantDrawing: boolean;
 };
 
+export type ElementCreatedEvent = EventEnvelope & {
+  type: "element.created";
+  element: BoardSceneElement;
+};
+
+export type ElementPatchedEvent = EventEnvelope & {
+  type: "element.patched";
+  elementId: string;
+  patches: BoardElementPatchOperation[];
+  /** Informational revision observed by the author; path patches still merge. */
+  baseRevision?: number;
+};
+
+export type ElementDeletedEvent = EventEnvelope & {
+  type: "element.deleted";
+  elementId: string;
+};
+
+export type ElementRestoredEvent = EventEnvelope & {
+  type: "element.restored";
+  elementId: string;
+};
+
 export type BoardEvent =
   | StrokeStartedEvent
   | StrokePointAddedEvent
@@ -335,7 +812,11 @@ export type BoardEvent =
   | ParticipantJoinedEvent
   | ParticipantLeftEvent
   | OwnerPresenceChangedEvent
-  | PermissionChangedEvent;
+  | PermissionChangedEvent
+  | ElementCreatedEvent
+  | ElementPatchedEvent
+  | ElementDeletedEvent
+  | ElementRestoredEvent;
 
 export type AdapterCapabilities = {
   supportsMainStage: boolean;

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "1.0",
+  "corpusVersion": "audio-v1",
+  "language": "en",
+  "description": "Manifest and collection contract for audio-to-action evaluation. Identifiable audio is stored only in encrypted restricted storage and is resolved at run time through AIRBOARD_EVAL_MEDIA_ROOT.",
+  "storagePolicy": {
+    "rawMediaInGit": false,
+    "encryptedAtRest": true,
+    "restrictedAccess": true,
+    "ciArtifactUpload": false,
+    "customerContentAllowed": false,
+    "deletionKey": "participantId"
+  },
+  "requiredSlices": {
+    "minimumSpeakers": 24,
+    "minimumIndianEnglishSpeakers": 8,
+    "minimumAmbientHours": 30,
+    "microphones": ["laptop", "headset", "external"],
+    "distances": ["near", "normal", "far"],
+    "conditions": ["quiet", "meeting-noise", "overlap", "clipped", "cutoff"],
+    "lengths": ["1-3-words", "short", "medium", "near-500-character-limit"],
+    "surfaces": ["standalone", "meet-main-stage", "meet-side-panel"],
+    "channels": ["wake", "ptt", "scoped"],
+    "evaluationClasses": ["core", "narrative", "safety"],
+    "processingPaths": ["deterministic", "semantic", "no_route"],
+    "criticalTokenRoles": [
+      "wake_phrase",
+      "action",
+      "node_type",
+      "count",
+      "visible_label"
+    ]
+  },
+  "assets": [],
+  "collectionStatus": {
+    "state": "awaiting_consented_assets",
+    "note": "Do not replace this with fabricated participants. Release evaluation intentionally fails closed until consented, hashed assets are supplied outside Git."
+  }
+}

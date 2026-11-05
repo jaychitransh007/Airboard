@@ -1,5 +1,6 @@
 import type {
   TranscriptionControlMessage,
+  TranscriptionConfigureMessage,
   TranscriptionRuntimeConfig,
   TranscriptionSessionOptions,
   TranscriptionStartMessage,
@@ -11,6 +12,7 @@ const MAX_KEYTERM_LENGTH = 100;
 // Conservatively stay below Deepgram's aggregate 500-token keyterm budget
 // without coupling the provider-neutral API to a provider tokenizer.
 const MAX_KEYTERM_TOTAL_CHARACTERS = 1_000;
+const REQUIRED_DEFAULT_KEYTERM_HEAD_COUNT = 8;
 
 export type TranscriptionProtocolError = {
   code: string;
@@ -45,6 +47,25 @@ export function parseTranscriptionControlMessage(
   }
   if (decoded.type === "transcription.abort" || decoded.type === "abort") {
     return { ok: true, value: { type: "transcription.abort" } };
+  }
+  if (decoded.type === "transcription.configure" || decoded.type === "configure") {
+    const keytermsResult = parseKeyterms(decoded.keyterms);
+    if (!keytermsResult.ok) {
+      return keytermsResult;
+    }
+    if (!keytermsResult.value) {
+      return protocolError(
+        "INVALID_KEYTERMS",
+        "transcription.configure requires a complete keyterms array.",
+      );
+    }
+    return {
+      ok: true,
+      value: {
+        type: "transcription.configure",
+        keyterms: keytermsResult.value,
+      },
+    };
   }
 
   if (decoded.type !== "transcription.start" && decoded.type !== "start") {
@@ -101,16 +122,10 @@ export function resolveTranscriptionStart(
     );
   }
 
-  const mergedKeyterms = uniqueKeyterms([
-    ...config.defaultKeyterms,
-    ...(message.keyterms ?? []),
-  ]).slice(0, MAX_KEYTERMS);
-  if (totalKeytermCharacters(mergedKeyterms) > MAX_KEYTERM_TOTAL_CHARACTERS) {
-    return protocolError(
-      "KEYTERM_BUDGET_EXCEEDED",
-      "The combined transcription vocabulary is too large for a realtime session.",
-    );
-  }
+  const mergedKeyterms = resolveTranscriptionKeyterms(
+    message.keyterms ?? [],
+    config,
+  );
   return {
     ok: true,
     value: {
@@ -120,6 +135,46 @@ export function resolveTranscriptionStart(
       ...(message.language ? { language: message.language } : {}),
     },
   };
+}
+
+export function resolveTranscriptionConfigure(
+  message: TranscriptionConfigureMessage,
+  config: TranscriptionRuntimeConfig,
+): TranscriptionProtocolResult<string[]> {
+  return {
+    ok: true,
+    value: resolveTranscriptionKeyterms(message.keyterms, config),
+  };
+}
+
+/**
+ * Keeps the small server-owned wake-word head, then prioritizes the client's
+ * live board vocabulary over the static server tail. The merged list is fit
+ * rather than rejected when defaults and live labels together exceed Flux's
+ * provider-neutral budget.
+ */
+export function resolveTranscriptionKeyterms(
+  clientKeyterms: readonly string[],
+  config: Pick<TranscriptionRuntimeConfig, "defaultKeyterms">,
+): string[] {
+  const prioritized = uniqueKeyterms([
+    ...config.defaultKeyterms.slice(0, REQUIRED_DEFAULT_KEYTERM_HEAD_COUNT),
+    ...clientKeyterms,
+    ...config.defaultKeyterms.slice(REQUIRED_DEFAULT_KEYTERM_HEAD_COUNT),
+  ]);
+  const result: string[] = [];
+  let characters = 0;
+  for (const keyterm of prioritized) {
+    if (
+      result.length >= MAX_KEYTERMS ||
+      characters + keyterm.length > MAX_KEYTERM_TOTAL_CHARACTERS
+    ) {
+      continue;
+    }
+    result.push(keyterm);
+    characters += keyterm.length;
+  }
+  return result;
 }
 
 function parseKeyterms(value: unknown): TranscriptionProtocolResult<string[] | undefined> {

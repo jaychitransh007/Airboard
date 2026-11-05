@@ -2,18 +2,18 @@
 
 ## Summary
 
-Intent Canvas replaces mid-air freehand drawing as Airboard's primary diagram workflow. A user states the intended board change, reviews a clean semantic preview, and explicitly commits it. Pointer and camera gestures remain useful for indicating *where* and *which object*, while object geometry is generated and maintained by the diagram command layer.
+Intent Canvas replaces mid-air freehand drawing as Airboard's primary diagram workflow. A user states the intended board change and Airboard applies a valid command immediately as one undoable board transaction. Pointer and camera gestures remain useful for indicating *where* and *which object*, while object geometry is generated and maintained by the diagram command layer.
 
 ## Current Workflow
 
 1. Type one command in the Intent Canvas field, or press **Start Airo** once and leave wake-word listening armed.
-2. Press **Preview**. A valid command is resolved against the current pointer, focus, and selection, then every affected object is shown as a ghost. Destructive previews use red deletion marks.
-3. For typed commands, press **Apply**, press Enter again, or close the hand anywhere on the canvas to commit the pending command. Wake-word commands are applied automatically and remain undoable.
-4. Press **Cancel** or Escape to discard a pending preview. Use **Undo**, Cmd/Ctrl+Z, or the `undo` command to apply the command's compensating events.
+2. Submit the command. A valid command is resolved against the current pointer, focus, and selection and applied immediately.
+3. Use **Undo**, Cmd/Ctrl+Z, or the `undo` command to apply the command's compensating events.
+4. Press **Cancel** or Escape to dismiss a clarification or active interaction without mutating the board.
 
 Typed commands do not require a wake phrase. Airo's primary voice path captures mono microphone audio, converts it to 16 kHz PCM16 in 80 ms frames, and streams it through the Airboard API to the configured transcription adapter. The initial adapter uses Deepgram Flux with Airboard vocabulary supplied as keyterms. Partial transcripts update `Mic heard` in realtime; only a finalized end-of-turn transcript is allowed to enter the wake router and command pipeline. Ordinary conversation without **Airo** is never executed. Multiple wake commands are queued and applied in order.
 
-The keyterm context includes complete high-value command phrases, not only object nouns. The deterministic parser remains the first command stage. When it recognizes a command, the command follows the existing local preview/apply path without an LLM request. Any explicitly activated, non-empty parser failure can use semantic planning, except activation failures, empty commands, and unsupported counts. This covers acoustic fragments such as `add a q`, incomplete syntax, ambiguous node vocabulary, and narrative multi-object descriptions. A small audited acoustic-alias recovery remains a non-destructive final fallback; unrestricted fuzzy matching is deliberately avoided.
+The keyterm context includes complete high-value command phrases, not only object nouns. The deterministic parser remains the first command stage. When it recognizes a command, the command follows the immediate local command path without an LLM request. Any explicitly activated, non-empty parser failure can use semantic planning, except activation failures, empty commands, and unsupported counts. This covers acoustic fragments such as `add a q`, incomplete syntax, ambiguous node vocabulary, and narrative multi-object descriptions. A small audited acoustic-alias recovery remains a non-destructive final fallback; unrestricted fuzzy matching is deliberately avoided.
 
 The API exposes only an allowlisted provider/model configuration, and provider credentials never enter the browser. The sidebar shows the actual provider and model and can select another allowed model without a code change. Providers cannot change the model inside an already-open stream, so changing the dropdown closes the old session safely and, when Airo is active, automatically opens a fresh session using the selected model. Chrome Speech Recognition is retained only as an explicitly configured development fallback, not a silent fallback.
 
@@ -27,7 +27,7 @@ The fallback receives the transcript plus bounded, sanitized board context: sele
 - `clarification` with an ambiguity, missing-context, unsafe-combination, or oversized-plan issue; or
 - `unsupported` for non-board or unavailable operations.
 
-The LLM is a planner, not an executor. Its output cannot create arbitrary command objects or mutate state. The browser reparses every step with the deterministic grammar, applies each resolved step to a shadow board, and discards the entire plan if any step fails. Later steps can therefore reference named nodes created earlier without partially changing the real board. A valid plan becomes one preview, one explicit commit, and one undo transaction. Multi-step plans initially allow additive create/connect operations only. Invalid JSON, invalid schema, an unapproved model, provider failure, timeout, or a superseded response produces no board change.
+The LLM is a planner, not an executor. Its output cannot create arbitrary command objects or mutate state. The browser reparses every step with the deterministic grammar, applies each resolved step to a shadow board, and discards the entire plan if any step fails. Later steps can therefore reference named nodes created earlier without partially changing the real board. A valid plan becomes one atomic board transaction and one undo transaction. Invalid JSON, invalid schema, an unapproved model, provider failure, timeout, or a superseded response produces no board change.
 
 The API exposes `GET /intent/config` for the non-secret public configuration and `POST /intent/resolve` for interpretation. The resolve route is origin-restricted and applies the configured request timeout, transcript length, model allowlist, and concurrency limit. Configure the server with `AIRBOARD_INTENT_API_KEY` or the fallback `OPENAI_API_KEY`; never expose either through a `NEXT_PUBLIC_` variable. `OPENAI_RESPONSES_URL` can point the adapter at a compatible endpoint. If the provider or key is absent, config reports the feature unavailable, the client skips the network fallback, and deterministic commands continue to work.
 
@@ -39,7 +39,7 @@ The API exposes `GET /intent/config` for the non-secret public configuration and
 - Align two or more selected objects by edge or shared horizontal/vertical axis.
 - Distribute three or more selected objects horizontally or vertically.
 - Arrange two or more selected objects left-to-right, right-to-left, top-to-bottom, bottom-to-top, or in a grid.
-- Undo the last committed local change or cancel the pending command.
+- Undo the last committed local change or cancel a pending clarification or interaction.
 
 Examples:
 
@@ -85,8 +85,8 @@ Semantic placement is clamped to the unobstructed diagram region so nodes do not
 ## Manual Test Path
 
 1. Start the API with `DEEPGRAM_API_KEY` and either `AIRBOARD_INTENT_API_KEY` or `OPENAI_API_KEY` set, start the web app, and leave **Input Mode** on **Intent Canvas**. Confirm Status shows the expected voice engine/model rather than `not configured`.
-2. Type `Add a user on the left` and `Add an API on the right`, applying each preview.
-3. With nothing specially selected, preview/apply `Connect user with API` and confirm a bound arrow appears.
+2. Type `Add a user on the left` and `Add an API on the right`; confirm each command applies immediately and remains undoable.
+3. With nothing specially selected, submit `Connect user with API` and confirm a bound arrow appears.
 4. Repeat with `Connect database to payment share` using those visible labels.
 5. Type `Add a circle here` and confirm the result is an actual ellipse rather than a rectangular node.
 6. Multi-select objects and test rename, move, align, distribute, layout, delete, and duplicate commands.
@@ -94,7 +94,7 @@ Semantic placement is clamped to the unobstructed diagram region so nodes do not
 8. Enable hands, choose **Flow** from the dock, and confirm the translucent preview does not increase `Board > Visible strokes`. Close all four fingers, move the fist, and reopen it. Confirm `Object control` changes to `placing`, the preview follows the hand, and opening commits one visible object.
 9. With **Select** active, keep one open hand fully visible, move the area cursor over that committed object, close all four fingers briefly, move the fist, and reopen it. Confirm grab strength rises, a target stays latched, and the object follows responsively. Closing over empty space must report `no target`.
 10. Press **Start Airo** once, allow microphone access, then say `Airo, add a circle`, `Airo, add a user`, and `Airo, connect User to API`. Confirm partial words appear while speaking and each finalized command mutates the board exactly once. Confirm ordinary speech without a wake phrase is shown as `wake word not detected` and does not alter the board.
-11. Say `Airo, add a q` and confirm it becomes one Queue. Then say `Airo, create a diagram where a user, uh, makes an API request and the data is updated to the API`. Confirm a five-step User → API → Data Store plan appears as one preview and does not change **Visible strokes** until you press Apply or say `Airo, confirm`. Apply it, then press Undo once and confirm the entire plan is undone.
+11. Say `Airo, add a q` and confirm it becomes one Queue. Then say `Airo, create a diagram where a user, uh, makes an API request and the data is updated to the API`. Confirm the resolved User → API → Data Store plan applies exactly once, then press Undo once and confirm the entire plan is undone.
 12. While Airo is active, choose another allowed **Voice model**. Confirm the old transcription session stops, a fresh session starts automatically, and the UI reports the selected speech model as active. Then change **Intent model** and confirm the next disfluent command uses it without reconnecting Airo. Separately change `AIRBOARD_INTENT_MODEL` to another value in `AIRBOARD_INTENT_ALLOWED_MODELS`, restart the API, and confirm `GET /intent/config` reports the new server default.
 13. Remove only the semantic provider key and restart/reload. Confirm canonical typed and Airo commands still work through the deterministic parser while disfluent commands fail safely without mutation. Then stop the API or remove the Deepgram key and reload; confirm Airo transcription is disabled with an actionable message while typed commands remain available.
 

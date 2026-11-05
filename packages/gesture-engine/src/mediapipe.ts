@@ -7,14 +7,35 @@ export type MediaPipeHandTrackerOptions = {
   minHandDetectionConfidence?: number;
   minHandPresenceConfidence?: number;
   minTrackingConfidence?: number;
+  /** Test seam; production always uses the dynamically imported MediaPipe task. */
+  runtime?: MediaPipeHandTrackerRuntime;
+};
+
+export type MediaPipeHandTrackerRuntime = {
+  FilesetResolver: {
+    forVisionTasks(baseUrl: string): Promise<unknown>;
+  };
+  HandLandmarker: {
+    createFromOptions(
+      vision: unknown,
+      options: Record<string, unknown>,
+    ): Promise<unknown>;
+  };
 };
 
 export class MediaPipeHandTracker {
-  private constructor(private readonly handLandmarker: any) {}
+  private readonly handLandmarker: any;
+
+  private constructor(handLandmarker: any) {
+    this.handLandmarker = handLandmarker;
+  }
 
   static async create(options: MediaPipeHandTrackerOptions = {}): Promise<MediaPipeHandTracker> {
     installMediaPipeConsoleFilter();
-    const { FilesetResolver, HandLandmarker } = await import("@mediapipe/tasks-vision");
+    const runtime =
+      options.runtime ??
+      ((await import("@mediapipe/tasks-vision")) as unknown as MediaPipeHandTrackerRuntime);
+    const { FilesetResolver, HandLandmarker } = runtime;
     const vision = await FilesetResolver.forVisionTasks(
       options.wasmBaseUrl ?? "/vendor/mediapipe/wasm",
     );

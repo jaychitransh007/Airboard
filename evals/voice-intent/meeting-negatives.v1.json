@@ -4,7 +4,12 @@
   "utterances": [
     {
       "id": "standup-01",
-      "text": "yesterday I finished the payment flow and today I'm picking up the retry logic"
+      "text": "yesterday I finished the payment flow and today I'm picking up the retry logic",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["node:process"]
+      }
     },
     {
       "id": "standup-02",
@@ -16,11 +21,21 @@
     },
     {
       "id": "planning-01",
-      "text": "let's move the deadline to Thursday and see how it goes"
+      "text": "let's move the deadline to Thursday and see how it goes",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["action:move"]
+      }
     },
     {
       "id": "planning-02",
-      "text": "we should add that to the agenda for the next sprint"
+      "text": "we should add that to the agenda for the next sprint",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["action:create"]
+      }
     },
     {
       "id": "planning-03",
@@ -28,7 +43,12 @@
     },
     {
       "id": "planning-04",
-      "text": "let's circle back after lunch and finalize the estimates"
+      "text": "let's circle back after lunch and finalize the estimates",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["node:circle"]
+      }
     },
     {
       "id": "planning-05",
@@ -36,11 +56,21 @@
     },
     {
       "id": "planning-06",
-      "text": "let's cancel the Friday sync since half the team is out"
+      "text": "let's cancel the Friday sync since half the team is out",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["action:cancel"]
+      }
     },
     {
       "id": "planning-07",
-      "text": "we need to align on the pricing before the demo"
+      "text": "we need to align on the pricing before the demo",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["action:align"]
+      }
     },
     {
       "id": "planning-08",
@@ -48,11 +78,21 @@
     },
     {
       "id": "architecture-01",
-      "text": "so the user hits the payment API which writes to the ledger"
+      "text": "so the user hits the payment API which writes to the ledger",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["node:user", "node:api"]
+      }
     },
     {
       "id": "architecture-02",
-      "text": "the service talks to the database through the queue"
+      "text": "the service talks to the database through the queue",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["node:service", "node:database", "node:queue"]
+      }
     },
     {
       "id": "architecture-03",
@@ -60,7 +100,12 @@
     },
     {
       "id": "architecture-04",
-      "text": "we could connect with the billing team and reuse their service"
+      "text": "we could connect with the billing team and reuse their service",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["action:connect", "node:service"]
+      }
     },
     {
       "id": "architecture-05",
@@ -76,11 +121,21 @@
     },
     {
       "id": "architecture-08",
-      "text": "the decision was made above my pay grade honestly"
+      "text": "the decision was made above my pay grade honestly",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["node:decision"]
+      }
     },
     {
       "id": "chitchat-01",
-      "text": "did anyone note down what the customer said yesterday"
+      "text": "did anyone note down what the customer said yesterday",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["node:note"]
+      }
     },
     {
       "id": "chitchat-02",
@@ -100,7 +155,12 @@
     },
     {
       "id": "chitchat-06",
-      "text": "I'll copy everyone on the follow-up email"
+      "text": "I'll copy everyone on the follow-up email",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["action:duplicate"]
+      }
     },
     {
       "id": "chitchat-07",
@@ -112,11 +172,21 @@
     },
     {
       "id": "review-01",
-      "text": "please rename the branch before you merge it"
+      "text": "please rename the branch before you merge it",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["action:rename", "action:branch"]
+      }
     },
     {
       "id": "review-02",
-      "text": "delete the feature flag once the rollout completes"
+      "text": "delete the feature flag once the rollout completes",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["action:delete"]
+      }
     },
     {
       "id": "review-03",
@@ -128,7 +198,12 @@
     },
     {
       "id": "review-05",
-      "text": "undo is broken in the editor after the last update"
+      "text": "undo is broken in the editor after the last update",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["action:undo"]
+      }
     },
     {
       "id": "phonetic-01",
@@ -172,11 +247,21 @@
     },
     {
       "id": "shapes-01",
-      "text": "let's make a start on the budget"
+      "text": "let's make a start on the budget",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["node:terminator"]
+      }
     },
     {
       "id": "shapes-02",
-      "text": "please add your input on the proposal"
+      "text": "please add your input on the proposal",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["node:io"]
+      }
     },
     {
       "id": "shapes-03",
@@ -188,7 +273,12 @@
     },
     {
       "id": "shapes-05",
-      "text": "add the document to the shared drive"
+      "text": "add the document to the shared drive",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["node:document"]
+      }
     },
     {
       "id": "shapes-06",
@@ -200,11 +290,21 @@
     },
     {
       "id": "parity-01",
-      "text": "we should remove the connection between the two teams"
+      "text": "we should remove the connection between the two teams",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["action:delete"]
+      }
     },
     {
       "id": "parity-02",
-      "text": "disconnect the call from my end and rejoin"
+      "text": "disconnect the call from my end and rejoin",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["action:delete_connection", "node:terminator"]
+      }
     },
     {
       "id": "parity-03",
@@ -224,7 +324,48 @@
     },
     {
       "id": "parity-07",
-      "text": "select all the options that apply in the form"
+      "text": "select all the options that apply in the form",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["action:select"]
+      }
+    },
+    {
+      "id": "capability-reverse-connection",
+      "text": "the reverse connection proxy is still failing in staging",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["action:reverse_connection"]
+      }
+    },
+    {
+      "id": "capability-distribute",
+      "text": "please distribute the meeting minutes after this call",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["action:distribute"]
+      }
+    },
+    {
+      "id": "capability-layout",
+      "text": "the document layout changed after the export",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["action:layout", "node:document"]
+      }
+    },
+    {
+      "id": "capability-group-custom",
+      "text": "the customer group put the custom box on the legal agenda",
+      "capabilityEvidence": {
+        "provenance": "ambient-safety-runner",
+        "assertion": "/text",
+        "negative": ["action:group", "node:custom"]
+      }
     }
   ]
 }

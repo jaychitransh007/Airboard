@@ -1,19 +1,21 @@
 /**
  * Lightboard studio recorder.
  *
- * Records the composite a viewer sees — camera underlay (mirrored, cover-fit),
- * scrim, then the neon board canvas — into a WebM. The on-screen board is a
- * DOM stack (video + scrim div + transparent canvas), so a recording canvas
- * redraws the stack per animation frame and MediaRecorder captures that plus
- * the microphone. Everything is local: no upload, no server.
+ * Records the composite a viewer sees — camera or captured-screen underlay,
+ * scrim, then the neon board canvas — into a WebM. The on-screen board is a DOM
+ * stack (video + scrim div + transparent canvas), so a recording canvas redraws
+ * the stack per animation frame and MediaRecorder captures that plus the
+ * microphone. Everything is local: no upload, no server.
  */
 
 export type RecorderTheme = "classic" | "lightboard";
 
 export type LightboardRecorderInput = {
   boardCanvas: HTMLCanvasElement;
-  /** Present and playing only when the camera underlay is on. */
+  /** Present and playing only when a camera or captured-screen underlay is on. */
   underlayVideo: HTMLVideoElement | null;
+  /** Cameras are mirrored/cover-fit; screens are unmirrored/contain-fit. */
+  underlayMode?: "camera" | "screen";
   getScrimOpacity: () => number;
   getTheme: () => RecorderTheme;
   /** Longest output edge; the recording canvas keeps the board aspect. */
@@ -62,6 +64,19 @@ export function coverRect(
   return { x: (targetWidth - width) / 2, y: (targetHeight - height) / 2, width, height };
 }
 
+/** object-fit: contain geometry — the whole source remains visible. */
+export function containRect(
+  sourceWidth: number,
+  sourceHeight: number,
+  targetWidth: number,
+  targetHeight: number,
+): { x: number; y: number; width: number; height: number } {
+  const scale = Math.min(targetWidth / sourceWidth, targetHeight / sourceHeight);
+  const width = sourceWidth * scale;
+  const height = sourceHeight * scale;
+  return { x: (targetWidth - width) / 2, y: (targetHeight - height) / 2, width, height };
+}
+
 export function recordingFileName(now: Date): string {
   const pad = (value: number) => String(value).padStart(2, "0");
   return (
@@ -102,13 +117,21 @@ export async function startLightboardRecording(
 
     const video = input.underlayVideo;
     if (theme === "lightboard" && video && video.videoWidth > 0) {
-      const fit = coverRect(video.videoWidth, video.videoHeight, width, height);
-      context.save();
-      // The on-screen underlay is mirrored (selfie view); match it.
-      context.translate(width, 0);
-      context.scale(-1, 1);
-      context.drawImage(video, width - fit.x - fit.width, fit.y, fit.width, fit.height);
-      context.restore();
+      const mode = input.underlayMode ?? "camera";
+      const fit =
+        mode === "screen"
+          ? containRect(video.videoWidth, video.videoHeight, width, height)
+          : coverRect(video.videoWidth, video.videoHeight, width, height);
+      if (mode === "camera") {
+        context.save();
+        // The on-screen camera is mirrored (selfie view); match it.
+        context.translate(width, 0);
+        context.scale(-1, 1);
+        context.drawImage(video, width - fit.x - fit.width, fit.y, fit.width, fit.height);
+        context.restore();
+      } else {
+        context.drawImage(video, fit.x, fit.y, fit.width, fit.height);
+      }
       const scrim = Math.min(1, Math.max(0, input.getScrimOpacity()));
       if (scrim > 0) {
         context.fillStyle = `rgba(5, 8, 12, ${scrim})`;

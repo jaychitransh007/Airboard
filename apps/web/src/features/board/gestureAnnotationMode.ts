@@ -1,11 +1,14 @@
-import type {
-  AnnotationBounds,
-  AnnotationNodeType,
-  AnnotationPoint,
-  BoardState,
-  Stroke,
-  StrokeAnnotation,
-  StrokePoint,
+import {
+  nodeVisualDefaultSize,
+  nodeVisualCapability,
+  pointOnNodeBoundary,
+  type AnnotationBounds,
+  type AnnotationNodeType,
+  type AnnotationPoint,
+  type BoardState,
+  type Stroke,
+  type StrokeAnnotation,
+  type StrokePoint,
 } from "@airboard/core";
 
 export type AnnotationIntent =
@@ -48,6 +51,7 @@ type GestureMetrics = {
 type NodeCandidate = {
   strokeId: string;
   bounds: AnnotationBounds;
+  nodeType?: AnnotationNodeType;
 };
 
 export type ObjectDockTool =
@@ -98,10 +102,6 @@ export type AnnotationUpdate = {
 
 const MIN_OBJECT_SIZE_PX = 28;
 const NODE_SNAP_THRESHOLD_PX = 52;
-const DEFAULT_NODE_WIDTH = 144;
-const DEFAULT_NODE_HEIGHT = 72;
-const DEFAULT_SHAPE_WIDTH = 132;
-const DEFAULT_SHAPE_HEIGHT = 82;
 const DEFAULT_HIGHLIGHT_WIDTH = 168;
 const DEFAULT_HIGHLIGHT_HEIGHT = 26;
 const DEFAULT_ARROW_LENGTH = 148;
@@ -130,7 +130,7 @@ export function createObjectFromPlacement(input: {
     const bounds = nodeBoundsForType(nodeType, center);
     const label = defaultLabelForNodeType(nodeType);
     const annotation: StrokeAnnotation = {
-      type: "flow_node",
+      type: nodeType === "circle" ? "ellipse" : "flow_node",
       source: "gesture",
       confidence: 1,
       bounds,
@@ -149,47 +149,6 @@ export function createObjectFromPlacement(input: {
       thickness: 3,
       annotation,
       needsLabel: true,
-    });
-  }
-
-  if (input.tool === "circle") {
-    const bounds = centeredBounds(center, DEFAULT_SHAPE_WIDTH, DEFAULT_SHAPE_HEIGHT);
-    const annotation: StrokeAnnotation = {
-      type: "ellipse",
-      source: "gesture",
-      confidence: 1,
-      bounds,
-      strokeColor: input.color,
-    };
-    return buildResult({
-      intent: "circle",
-      confidence: 1,
-      points: buildAnnotationPoints(annotation, timestampMs),
-      color: input.color,
-      thickness: 3,
-      annotation,
-      needsLabel: false,
-    });
-  }
-
-  if (input.tool === "box") {
-    const bounds = centeredBounds(center, DEFAULT_SHAPE_WIDTH, DEFAULT_SHAPE_HEIGHT);
-    const annotation: StrokeAnnotation = {
-      type: "rectangle",
-      source: "gesture",
-      confidence: 1,
-      bounds,
-      strokeColor: input.color,
-      fillColor: "#ffffff",
-    };
-    return buildResult({
-      intent: "box",
-      confidence: 1,
-      points: buildAnnotationPoints(annotation, timestampMs),
-      color: input.color,
-      thickness: 3,
-      annotation,
-      needsLabel: false,
     });
   }
 
@@ -304,6 +263,13 @@ export function translateAnnotation(
       y: annotation.end.y + dy,
     };
   }
+  if (annotation.type === "connector" || annotation.type === "arrow") {
+    // Dragging the whole line is an explicit detach/reposition operation. Do
+    // not leave invisible snapped IDs behind after its geometry moves away.
+    delete updated.snappedStartStrokeId;
+    delete updated.snappedEndStrokeId;
+    delete updated.routeOffset;
+  }
   return updated;
 }
 
@@ -390,7 +356,7 @@ export function getBoundConnectorUpdates(input: {
     const connector = stroke.annotation;
     if (
       stroke.status !== "committed" ||
-      connector?.type !== "connector" ||
+      (connector?.type !== "connector" && connector?.type !== "arrow") ||
       !connector.start ||
       !connector.end
     ) {
@@ -412,9 +378,24 @@ export function getBoundConnectorUpdates(input: {
         : connector.snappedEndStrokeId
           ? input.boardState.strokes[connector.snappedEndStrokeId]?.annotation?.bounds
           : undefined;
+      const startNodeType = startMoved
+        ? input.boardState.strokes[input.nodeStrokeId]?.annotation?.nodeType
+        : connector.snappedStartStrokeId
+          ? input.boardState.strokes[connector.snappedStartStrokeId]?.annotation?.nodeType
+          : undefined;
+      const endNodeType = endMoved
+        ? input.boardState.strokes[input.nodeStrokeId]?.annotation?.nodeType
+        : connector.snappedEndStrokeId
+          ? input.boardState.strokes[connector.snappedEndStrokeId]?.annotation?.nodeType
+          : undefined;
 
       if (startBounds && endBounds) {
-        const endpoints = connectorEndpoints(startBounds, endBounds);
+        const endpoints = connectorEndpoints(
+          startBounds,
+          endBounds,
+          startNodeType,
+          endNodeType,
+        );
         annotation.start = endpoints.start;
         annotation.end = endpoints.end;
       } else {
@@ -422,10 +403,10 @@ export function getBoundConnectorUpdates(input: {
         // node's edge facing the fixed endpoint, rather than remapping it
         // proportionally inside the box (which drifts it across the node face).
         if (startMoved) {
-          annotation.start = pointOnBounds(nextBounds, connector.end);
+          annotation.start = pointOnNodeBoundary(nextBounds, startNodeType, connector.end);
         }
         if (endMoved) {
-          annotation.end = pointOnBounds(nextBounds, connector.start);
+          annotation.end = pointOnNodeBoundary(nextBounds, endNodeType, connector.start);
         }
       }
       changed = true;
@@ -472,12 +453,14 @@ export function updateLineEndpoint(input: {
     ...input.annotation,
   };
   const snapped =
-    input.annotation.type === "connector" &&
+    (input.annotation.type === "connector" || input.annotation.type === "arrow") &&
     input.boardState &&
     input.autoSnapConnectors !== false
       ? findNearestNode(input.boardState, input.point, NODE_SNAP_THRESHOLD_PX)
       : null;
-  const nextPoint = snapped ? snapPointToBounds(input.point, snapped.bounds) : pointOf(input.point);
+  const nextPoint = snapped
+    ? pointOnNodeBoundary(snapped.bounds, snapped.nodeType, input.point)
+    : pointOf(input.point);
 
   if (input.endpoint === "start") {
     updated.start = nextPoint;
@@ -594,8 +577,16 @@ export function createAnnotationFromGesture(input: {
         ? null
         : findNearestNode(input.boardState, end, NODE_SNAP_THRESHOLD_PX);
     if (startNode && endNode && startNode.strokeId !== endNode.strokeId) {
-      const snappedStart = snapPointToBounds(start, startNode.bounds);
-      const snappedEnd = snapPointToBounds(end, endNode.bounds);
+      const snappedStart = pointOnNodeBoundary(
+        startNode.bounds,
+        startNode.nodeType,
+        pointOf(start),
+      );
+      const snappedEnd = pointOnNodeBoundary(
+        endNode.bounds,
+        endNode.nodeType,
+        pointOf(end),
+      );
       return buildResult({
         intent: "connector",
         confidence: 0.82,
@@ -735,9 +726,11 @@ function nodeTypeForTool(tool: ObjectDockTool): AnnotationNodeType | null {
       return "document";
     case "note":
       return "note";
-    case "select":
     case "circle":
+      return "circle";
     case "box":
+      return "custom";
+    case "select":
     case "arrow":
     case "highlight":
     case "connector":
@@ -786,6 +779,8 @@ function nearestGridDelta(
 function connectorEndpoints(
   from: AnnotationBounds,
   to: AnnotationBounds,
+  fromNodeType?: AnnotationNodeType,
+  toNodeType?: AnnotationNodeType,
 ): { start: AnnotationPoint; end: AnnotationPoint } {
   const fromCenter = boundsCenter(from);
   const toCenter = boundsCenter(to);
@@ -796,8 +791,8 @@ function connectorEndpoints(
     };
   }
   return {
-    start: pointOnBounds(from, toCenter),
-    end: pointOnBounds(to, fromCenter),
+    start: pointOnNodeBoundary(from, fromNodeType, toCenter),
+    end: pointOnNodeBoundary(to, toNodeType, fromCenter),
   };
 }
 
@@ -805,27 +800,6 @@ function boundsCenter(bounds: AnnotationBounds): AnnotationPoint {
   return {
     x: bounds.x + bounds.width / 2,
     y: bounds.y + bounds.height / 2,
-  };
-}
-
-function pointOnBounds(bounds: AnnotationBounds, toward: AnnotationPoint): AnnotationPoint {
-  const center = boundsCenter(bounds);
-  const dx = toward.x - center.x;
-  const dy = toward.y - center.y;
-  // Degenerate case: the target point coincides with the node center. Without
-  // this guard scale becomes 1/0 = Infinity and center + 0*Infinity = NaN.
-  if (dx === 0 && dy === 0) {
-    return { x: bounds.x + bounds.width, y: center.y };
-  }
-  const scale =
-    1 /
-    Math.max(
-      Math.abs(dx) / Math.max(bounds.width / 2, 0.0001),
-      Math.abs(dy) / Math.max(bounds.height / 2, 0.0001),
-    );
-  return {
-    x: center.x + dx * scale,
-    y: center.y + dy * scale,
   };
 }
 
@@ -863,13 +837,21 @@ function snapConnectorAnnotation(annotation: StrokeAnnotation, boardState: Board
 
   const startNode = findNearestNode(boardState, annotation.start, NODE_SNAP_THRESHOLD_PX);
   if (startNode) {
-    annotation.start = snapPointToBounds(annotation.start, startNode.bounds);
+    annotation.start = pointOnNodeBoundary(
+      startNode.bounds,
+      startNode.nodeType,
+      annotation.start,
+    );
     annotation.snappedStartStrokeId = startNode.strokeId;
   }
 
   const endNode = findNearestNode(boardState, annotation.end, NODE_SNAP_THRESHOLD_PX);
   if (endNode) {
-    annotation.end = snapPointToBounds(annotation.end, endNode.bounds);
+    annotation.end = pointOnNodeBoundary(
+      endNode.bounds,
+      endNode.nodeType,
+      annotation.end,
+    );
     annotation.snappedEndStrokeId = endNode.strokeId;
   }
 }
@@ -947,6 +929,7 @@ function findNearestNode(
       nearest = {
         strokeId: stroke.id,
         bounds,
+        ...(stroke.annotation?.nodeType ? { nodeType: stroke.annotation.nodeType } : {}),
       };
     }
   }
@@ -963,26 +946,7 @@ function nodeBoundsForType(
   nodeType: AnnotationNodeType,
   center: AnnotationPoint,
 ): AnnotationBounds {
-  const width =
-    nodeType === "circle"
-      ? 120
-      : nodeType === "decision"
-        ? 122
-        : nodeType === "terminator"
-          ? 150
-          : nodeType === "io"
-            ? 152
-            : DEFAULT_NODE_WIDTH;
-  const height =
-    nodeType === "circle"
-      ? 120
-      : nodeType === "database" || nodeType === "decision"
-        ? 78
-        : nodeType === "terminator"
-          ? 58
-          : nodeType === "document"
-            ? 86
-            : DEFAULT_NODE_HEIGHT;
+  const { width, height } = nodeVisualDefaultSize(nodeType);
   return {
     x: center.x - width / 2,
     y: center.y - height / 2,
@@ -992,33 +956,7 @@ function nodeBoundsForType(
 }
 
 function defaultLabelForNodeType(nodeType: AnnotationNodeType): string {
-  switch (nodeType) {
-    case "service":
-      return "Service";
-    case "database":
-      return "Database";
-    case "queue":
-      return "Queue";
-    case "user":
-      return "User";
-    case "api":
-      return "API";
-    case "decision":
-      return "Decision";
-    case "terminator":
-      return "Start";
-    case "io":
-      return "Input";
-    case "document":
-      return "Document";
-    case "note":
-      return "Note";
-    case "circle":
-      return "Circle";
-    case "process":
-    case "custom":
-      return "";
-  }
+  return nodeVisualCapability(nodeType).defaultLabel;
 }
 
 function removeDuplicatePoints(points: readonly StrokePoint[]): StrokePoint[] {
@@ -1122,45 +1060,6 @@ function pointOf(pointLike: Pick<StrokePoint, "x" | "y">): AnnotationPoint {
     x: pointLike.x,
     y: pointLike.y,
   };
-}
-
-function snapPointToBounds(
-  pointLike: Pick<StrokePoint, "x" | "y">,
-  bounds: AnnotationBounds,
-): AnnotationPoint {
-  const clampedX = clamp(pointLike.x, bounds.x, bounds.x + bounds.width);
-  const clampedY = clamp(pointLike.y, bounds.y, bounds.y + bounds.height);
-  const inside =
-    pointLike.x >= bounds.x &&
-    pointLike.x <= bounds.x + bounds.width &&
-    pointLike.y >= bounds.y &&
-    pointLike.y <= bounds.y + bounds.height;
-
-  if (!inside) {
-    return {
-      x: clampedX,
-      y: clampedY,
-    };
-  }
-
-  const distances = [
-    { edge: "left", value: pointLike.x - bounds.x },
-    { edge: "right", value: bounds.x + bounds.width - pointLike.x },
-    { edge: "top", value: pointLike.y - bounds.y },
-    { edge: "bottom", value: bounds.y + bounds.height - pointLike.y },
-  ].sort((a, b) => a.value - b.value);
-  const closestEdge = distances[0]?.edge;
-
-  if (closestEdge === "left") {
-    return { x: bounds.x, y: pointLike.y };
-  }
-  if (closestEdge === "right") {
-    return { x: bounds.x + bounds.width, y: pointLike.y };
-  }
-  if (closestEdge === "top") {
-    return { x: pointLike.x, y: bounds.y };
-  }
-  return { x: pointLike.x, y: bounds.y + bounds.height };
 }
 
 function getPathLength(points: readonly StrokePoint[]): number {

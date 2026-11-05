@@ -1,4 +1,5 @@
 import { applyBoardEvent, reduceBoardEvents } from "./boardReducer.ts";
+import { nodeVisualDefaultSize, pointOnNodeBoundary } from "./nodeVisuals.ts";
 import type {
   AnnotationBounds,
   AnnotationNodeType,
@@ -37,6 +38,78 @@ export type ConnectNodesCommand = {
   label?: string;
   source?: AnnotationSource;
   style?: Pick<DiagramObjectStyle, "strokeColor" | "opacity" | "thickness">;
+};
+
+export type AttachConnectionCommand = {
+  type: "connection.attach";
+  /** Existing detached or partially-bound connector whose identity/style is preserved. */
+  connectorId: string;
+  fromId: string;
+  toId: string;
+  /** Omit to preserve the connector's current visible label. */
+  label?: string;
+};
+
+export const DEFAULT_CONNECTOR_ATTACHMENT_TOLERANCE = 6;
+
+export function connectorEndpointMatchesBinding(
+  state: BoardState,
+  annotation: StrokeAnnotation,
+  endpoint: "start" | "end",
+  tolerance = DEFAULT_CONNECTOR_ATTACHMENT_TOLERANCE,
+): boolean {
+  const boundId =
+    endpoint === "start"
+      ? annotation.snappedStartStrokeId
+      : annotation.snappedEndStrokeId;
+  const point = endpoint === "start" ? annotation.start : annotation.end;
+  if (!boundId || !point) return false;
+  const stroke = state.strokes[boundId] ?? state.activeStrokes[boundId];
+  const bounds = stroke?.annotation?.bounds;
+  if (!stroke || stroke.status === "deleted" || !bounds) return false;
+  const expected = pointOnNodeBoundary(
+    bounds,
+    stroke.annotation?.nodeType,
+    point,
+  );
+  return Math.hypot(point.x - expected.x, point.y - expected.y) <= tolerance;
+}
+
+/**
+ * True only when connector metadata and rendered endpoints agree. A connector
+ * can retain snapped IDs after a whole-line drag; treating those IDs alone as
+ * proof of attachment produces a visually detached, semantically "satisfied"
+ * edge.
+ */
+export function connectorGeometryMatchesBindings(
+  state: BoardState,
+  annotation: StrokeAnnotation,
+  fromId = annotation.snappedStartStrokeId,
+  toId = annotation.snappedEndStrokeId,
+  tolerance = DEFAULT_CONNECTOR_ATTACHMENT_TOLERANCE,
+): boolean {
+  if (
+    !fromId ||
+    !toId ||
+    annotation.snappedStartStrokeId !== fromId ||
+    annotation.snappedEndStrokeId !== toId ||
+    !annotation.start ||
+    !annotation.end ||
+    (annotation.type !== "connector" && annotation.type !== "arrow")
+  ) {
+    return false;
+  }
+  return (
+    connectorEndpointMatchesBinding(state, annotation, "start", tolerance) &&
+    connectorEndpointMatchesBinding(state, annotation, "end", tolerance)
+  );
+}
+
+export type ReverseConnectionCommand = {
+  type: "connection.reverse";
+  connectorId: string;
+  /** Omit to preserve the connector's existing label. */
+  label?: string;
 };
 
 export type MoveObjectsCommand = {
@@ -117,6 +190,8 @@ export type LayoutObjectsCommand = {
 export type DiagramCommand =
   | CreateNodeCommand
   | ConnectNodesCommand
+  | AttachConnectionCommand
+  | ReverseConnectionCommand
   | MoveObjectsCommand
   | ResizeObjectCommand
   | RenameObjectCommand
@@ -166,8 +241,6 @@ type EventPayload =
   | { type: "stroke.deleted"; strokeIds: string[] }
   | { type: "stroke.restored"; strokeIds: string[] };
 
-const DEFAULT_NODE_WIDTH = 160;
-const DEFAULT_NODE_HEIGHT = 80;
 const DEFAULT_GROUP_PADDING = 28;
 const DEFAULT_LAYOUT_GAP = 48;
 
@@ -188,6 +261,12 @@ export function planDiagramCommand(
       break;
     case "nodes.connect":
       planConnectNodes(planner, command);
+      break;
+    case "connection.attach":
+      planAttachConnection(planner, command);
+      break;
+    case "connection.reverse":
+      planReverseConnection(planner, command);
       break;
     case "objects.move":
       planMoveObjects(planner, command);
@@ -450,9 +529,16 @@ function planConnectNodes(planner: CommandPlanner, command: ConnectNodesCommand)
   if (command.fromId === command.toId) {
     throw new DiagramCommandError("nodes.connect requires two different objects");
   }
-  const from = requireBounds(planner.getStroke(command.fromId));
-  const to = requireBounds(planner.getStroke(command.toId));
-  const endpoints = connectorEndpoints(from, to);
+  const fromStroke = planner.getStroke(command.fromId);
+  const toStroke = planner.getStroke(command.toId);
+  const from = requireBounds(fromStroke);
+  const to = requireBounds(toStroke);
+  const endpoints = connectorEndpoints(
+    from,
+    to,
+    fromStroke.annotation?.nodeType,
+    toStroke.annotation?.nodeType,
+  );
   const id = planner.objectId(command.connectorId);
   const annotation: StrokeAnnotation = {
     type: "connector",
@@ -463,10 +549,157 @@ function planConnectNodes(planner: CommandPlanner, command: ConnectNodesCommand)
     snappedEndStrokeId: command.toId,
     strokeColor: command.style?.strokeColor ?? "#334155",
   };
+  const routeOffset = nextConnectorRouteOffset(
+    planner.state,
+    command.fromId,
+    command.toId,
+  );
+  if (routeOffset !== 0) annotation.routeOffset = routeOffset;
   if (command.label !== undefined) annotation.label = command.label;
   if (command.style?.opacity !== undefined) annotation.opacity = command.style.opacity;
   planner.createStroke(
     semanticStroke(planner, id, annotation, command.style?.thickness ?? 3),
+  );
+}
+
+function planAttachConnection(
+  planner: CommandPlanner,
+  command: AttachConnectionCommand,
+): void {
+  if (command.fromId === command.toId) {
+    throw new DiagramCommandError(
+      "connection.attach requires two different objects",
+    );
+  }
+  const connector = planner.getStroke(command.connectorId);
+  const annotation = connector.annotation;
+  if (
+    !annotation ||
+    (annotation.type !== "connector" && annotation.type !== "arrow") ||
+    !annotation.start ||
+    !annotation.end
+  ) {
+    throw new DiagramCommandError(
+      `connection.attach requires an existing line connector: ${command.connectorId}`,
+    );
+  }
+  for (const endpoint of ["start", "end"] as const) {
+    const existingEndpointId =
+      endpoint === "start"
+        ? annotation.snappedStartStrokeId
+        : annotation.snappedEndStrokeId;
+    const requestedEndpointId =
+      endpoint === "start" ? command.fromId : command.toId;
+    if (
+      existingEndpointId &&
+      existingEndpointId !== requestedEndpointId &&
+      connectorEndpointMatchesBinding(planner.state, annotation, endpoint)
+    ) {
+      throw new DiagramCommandError(
+        `connection.attach will not replace a geometrically attached endpoint: ${existingEndpointId}`,
+      );
+    }
+  }
+
+  const fromStroke = planner.getStroke(command.fromId);
+  const toStroke = planner.getStroke(command.toId);
+  const endpoints = connectorEndpoints(
+    requireBounds(fromStroke),
+    requireBounds(toStroke),
+    fromStroke.annotation?.nodeType,
+    toStroke.annotation?.nodeType,
+  );
+  const updated = cloneAnnotation(annotation);
+  updated.snappedStartStrokeId = command.fromId;
+  updated.snappedEndStrokeId = command.toId;
+  updated.start = endpoints.start;
+  updated.end = endpoints.end;
+  const routeOffset = nextConnectorRouteOffset(
+    planner.state,
+    command.fromId,
+    command.toId,
+    connector.id,
+  );
+  if (routeOffset === 0) {
+    delete updated.routeOffset;
+  } else {
+    updated.routeOffset = routeOffset;
+  }
+  if (command.label !== undefined) {
+    updated.label = command.label;
+  }
+  if (
+    annotation.snappedStartStrokeId === command.fromId &&
+    annotation.snappedEndStrokeId === command.toId &&
+    connectorGeometryMatchesBindings(
+      planner.state,
+      annotation,
+      command.fromId,
+      command.toId,
+    ) &&
+    (command.label === undefined || command.label === annotation.label)
+  ) {
+    return;
+  }
+  planner.updateAnnotation(
+    connector.id,
+    updated,
+    pointsForAnnotation(updated, planner.timestampMs),
+  );
+}
+
+function planReverseConnection(
+  planner: CommandPlanner,
+  command: ReverseConnectionCommand,
+): void {
+  const connector = planner.getStroke(command.connectorId);
+  const annotation = connector.annotation;
+  if (
+    !annotation ||
+    (annotation.type !== "connector" && annotation.type !== "arrow") ||
+    !annotation.snappedStartStrokeId ||
+    !annotation.snappedEndStrokeId
+  ) {
+    throw new DiagramCommandError(
+      `connection.reverse requires a snapped connector: ${command.connectorId}`,
+    );
+  }
+
+  const reversedFromId = annotation.snappedEndStrokeId;
+  const reversedToId = annotation.snappedStartStrokeId;
+  const reversedFromStroke = planner.getStroke(reversedFromId);
+  const reversedToStroke = planner.getStroke(reversedToId);
+  const reversedFrom = requireBounds(reversedFromStroke);
+  const reversedTo = requireBounds(reversedToStroke);
+  const endpoints = connectorEndpoints(
+    reversedFrom,
+    reversedTo,
+    reversedFromStroke.annotation?.nodeType,
+    reversedToStroke.annotation?.nodeType,
+  );
+  const updated = cloneAnnotation(annotation);
+  updated.snappedStartStrokeId = reversedFromId;
+  updated.snappedEndStrokeId = reversedToId;
+  updated.start = endpoints.start;
+  updated.end = endpoints.end;
+  const routeOffset = nextConnectorRouteOffset(
+    planner.state,
+    reversedFromId,
+    reversedToId,
+    connector.id,
+  );
+  if (routeOffset === 0) {
+    delete updated.routeOffset;
+  } else {
+    updated.routeOffset = routeOffset;
+  }
+  if (command.label !== undefined) {
+    updated.label = command.label;
+  }
+  planner.updateAnnotation(
+    connector.id,
+    updated,
+    pointsForAnnotation(updated, planner.timestampMs),
   );
 }
 
@@ -489,14 +722,35 @@ function planMoveObjects(planner: CommandPlanner, command: MoveObjectsCommand): 
     y: (command.to as AnnotationPoint).y - selectionBounds.y,
   };
   const changedNodes: string[] = [];
+  const movedIds = new Set(positioned.map((stroke) => stroke.id));
 
   for (const stroke of positioned) {
     const annotation = cloneAnnotation(stroke.annotation as StrokeAnnotation);
     translateAnnotation(annotation, delta.x, delta.y);
+    if (annotation.type === "connector" || annotation.type === "arrow") {
+      if (
+        annotation.snappedStartStrokeId &&
+        !movedIds.has(annotation.snappedStartStrokeId)
+      ) {
+        delete annotation.snappedStartStrokeId;
+      }
+      if (
+        annotation.snappedEndStrokeId &&
+        !movedIds.has(annotation.snappedEndStrokeId)
+      ) {
+        delete annotation.snappedEndStrokeId;
+      }
+      if (
+        !annotation.snappedStartStrokeId ||
+        !annotation.snappedEndStrokeId
+      ) {
+        delete annotation.routeOffset;
+      }
+    }
     planner.updateAnnotation(stroke.id, annotation, pointsForAnnotation(annotation, planner.timestampMs));
     if (annotation.bounds) changedNodes.push(stroke.id);
   }
-  syncAttachedConnectors(planner, changedNodes, new Set(positioned.map((stroke) => stroke.id)));
+  syncAttachedConnectors(planner, changedNodes, movedIds);
 }
 
 function planResizeObject(planner: CommandPlanner, command: ResizeObjectCommand): void {
@@ -583,7 +837,7 @@ function planDeleteObjects(planner: CommandPlanner, command: DeleteObjectsComman
     for (const stroke of activeSemanticStrokes(planner.state)) {
       const annotation = stroke.annotation;
       if (
-        annotation?.type === "connector" &&
+        (annotation?.type === "connector" || annotation?.type === "arrow") &&
         ((annotation.snappedStartStrokeId && ids.has(annotation.snappedStartStrokeId)) ||
           (annotation.snappedEndStrokeId && ids.has(annotation.snappedEndStrokeId)))
       ) {
@@ -739,7 +993,7 @@ function syncAttachedConnectors(
     const annotation = connector.annotation;
     if (
       !annotation ||
-      annotation.type !== "connector" ||
+      (annotation.type !== "connector" && annotation.type !== "arrow") ||
       explicitlyMovedIds.has(connector.id) ||
       (!changed.has(annotation.snappedStartStrokeId ?? "") &&
         !changed.has(annotation.snappedEndStrokeId ?? ""))
@@ -752,7 +1006,12 @@ function syncAttachedConnectors(
     const from = planner.getStroke(fromId);
     const to = planner.getStroke(toId);
     if (!from.annotation?.bounds || !to.annotation?.bounds) continue;
-    const endpoints = connectorEndpoints(from.annotation.bounds, to.annotation.bounds);
+    const endpoints = connectorEndpoints(
+      from.annotation.bounds,
+      to.annotation.bounds,
+      from.annotation.nodeType,
+      to.annotation.nodeType,
+    );
     const updated = cloneAnnotation(annotation);
     updated.start = endpoints.start;
     updated.end = endpoints.end;
@@ -832,6 +1091,8 @@ function diagramPoint(x: number, y: number, t: number): StrokePoint {
 function connectorEndpoints(
   from: AnnotationBounds,
   to: AnnotationBounds,
+  fromNodeType?: AnnotationNodeType,
+  toNodeType?: AnnotationNodeType,
 ): { start: AnnotationPoint; end: AnnotationPoint } {
   const fromCenter = centerOf(from);
   const toCenter = centerOf(to);
@@ -842,20 +1103,38 @@ function connectorEndpoints(
     };
   }
   return {
-    start: pointOnBounds(from, toCenter),
-    end: pointOnBounds(to, fromCenter),
+    start: pointOnNodeBoundary(from, fromNodeType, toCenter),
+    end: pointOnNodeBoundary(to, toNodeType, fromCenter),
   };
 }
 
-function pointOnBounds(bounds: AnnotationBounds, toward: AnnotationPoint): AnnotationPoint {
-  const center = centerOf(bounds);
-  const dx = toward.x - center.x;
-  const dy = toward.y - center.y;
-  const scale = 1 / Math.max(
-    Math.abs(dx) / Math.max(bounds.width / 2, 0.0001),
-    Math.abs(dy) / Math.max(bounds.height / 2, 0.0001),
-  );
-  return { x: center.x + dx * scale, y: center.y + dy * scale };
+function nextConnectorRouteOffset(
+  state: BoardState,
+  fromId: string,
+  toId: string,
+  excludedConnectorId?: string,
+): number {
+  const siblingCount = activeSemanticStrokes(state).filter((stroke) => {
+    if (stroke.id === excludedConnectorId) return false;
+    const annotation = stroke.annotation;
+    if (
+      (annotation?.type !== "connector" && annotation?.type !== "arrow") ||
+      !annotation.snappedStartStrokeId ||
+      !annotation.snappedEndStrokeId
+    ) {
+      return false;
+    }
+    return (
+      (annotation.snappedStartStrokeId === fromId &&
+        annotation.snappedEndStrokeId === toId) ||
+      (annotation.snappedStartStrokeId === toId &&
+        annotation.snappedEndStrokeId === fromId)
+    );
+  }).length;
+  if (siblingCount === 0) return 0;
+  const lane = Math.ceil(siblingCount / 2);
+  const direction = siblingCount % 2 === 1 ? 1 : -1;
+  return direction * lane * 72;
 }
 
 function translateAnnotation(annotation: StrokeAnnotation, dx: number, dy: number): void {
@@ -1045,12 +1324,7 @@ function boundsAroundCenter(
 }
 
 function defaultNodeSize(nodeType: AnnotationNodeType): { width: number; height: number } {
-  if (nodeType === "circle") return { width: 120, height: 120 };
-  if (nodeType === "decision") return { width: 120, height: 88 };
-  if (nodeType === "database") return { width: 144, height: 96 };
-  if (nodeType === "note") return { width: 176, height: 108 };
-  if (nodeType === "user") return { width: 128, height: 88 };
-  return { width: DEFAULT_NODE_WIDTH, height: DEFAULT_NODE_HEIGHT };
+  return nodeVisualDefaultSize(nodeType);
 }
 
 function centerOf(bounds: AnnotationBounds): AnnotationPoint {

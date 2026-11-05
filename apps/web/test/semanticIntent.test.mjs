@@ -94,7 +94,7 @@ const METADATA = {
 };
 
 const CREATE_DECISION_PLAN = {
-  version: "1.0",
+  version: "1.1",
   status: "resolved",
   issueCode: "none",
   clarificationQuestion: null,
@@ -152,6 +152,17 @@ test("routes parser failures but not safe deterministic commands to semantic pla
     true,
   );
   assert.equal(shouldUseSemanticIntentFallback(parseIntentCanvasCommand("add a queue", external)), false);
+  assert.equal(
+    shouldUseSemanticIntentFallback(parseIntentCanvasCommand("add 21 circles", external)),
+    true,
+  );
+  const airboardNarrative = parseIntentCanvasCommand(
+    "User makes a request to Airboard, and, uh, then the authentication service gets fired, and, uh, then user lands to the Airboard page. So create a flow diagram for this.",
+    external,
+  );
+  assert.equal(airboardNarrative.status, "unrecognized");
+  assert.equal(airboardNarrative.issue.code, "unknown_command");
+  assert.equal(shouldUseSemanticIntentFallback(airboardNarrative), true);
   assert.equal(shouldUseSemanticIntentFallback(parseIntentCanvasCommand("", external)), false);
 });
 
@@ -186,13 +197,38 @@ test("posts voice turn, rich board context, and clarification continuity", async
   assert.equal(body.voiceTurnId, "voice-turn-123");
   assert.deepEqual(body.context, CONTEXT);
   assert.equal(body.pendingClarification.missingSlots[0], "branch_label");
+  assert.equal(result.outcome, "plan");
   assert.deepEqual(result.plan, CREATE_DECISION_PLAN);
   assert.deepEqual(result.metadata, METADATA);
 });
 
+test("accepts the strict already-satisfied orchestration result", async () => {
+  const result = await resolveSemanticIntent(
+    {
+      apiBaseUrl: "http://localhost:4000",
+      voiceTurnId: "voice-turn-already-satisfied",
+      transcript:
+        "Planner receives additional context from Historical Data and Golden Dataset",
+      parserIssue: "unknown_command",
+      context: CONTEXT,
+    },
+    async () =>
+      jsonResponse({
+        outcome: "already_satisfied",
+        plan: null,
+        provider: "airboard-deterministic",
+        model: "existing-board-fan-in-v1",
+        metadata: { ...METADATA, usage: null },
+      }),
+  );
+  assert.equal(result.outcome, "already_satisfied");
+  assert.equal(result.plan, null);
+  assert.equal(result.provider, "airboard-deterministic");
+});
+
 test("accepts typed branch and named rename plans", async () => {
   const plan = {
-    version: "1.0",
+    version: "1.1",
     status: "resolved",
     issueCode: "none",
     clarificationQuestion: null,
@@ -229,7 +265,7 @@ test("accepts typed branch and named rename plans", async () => {
 
 test("accepts structured clarification plans", async () => {
   const plan = {
-    version: "1.0",
+    version: "1.1",
     status: "clarification",
     issueCode: "incomplete_request",
     clarificationQuestion: "What label should the second decision branch use?",
@@ -257,6 +293,8 @@ test("rejects malformed plans and provider metadata", async () => {
     { plan: { ...CREATE_DECISION_PLAN, extra: true }, provider: "openai", model: "gpt-5.6-terra", metadata: METADATA },
     { plan: CREATE_DECISION_PLAN, provider: "openai", model: "gpt-5.6-terra", metadata: { ...METADATA, totalLatencyMs: -1 } },
     { plan: CREATE_DECISION_PLAN, provider: "openai", model: "gpt-5.6-terra", metadata: { ...METADATA, secret: "no" } },
+    { outcome: "already_satisfied", plan: CREATE_DECISION_PLAN, provider: "airboard-deterministic", model: "existing-board-fan-in-v1", metadata: METADATA },
+    { outcome: "already_satisfied", plan: null, provider: "airboard-deterministic", model: "existing-board-fan-in-v1", metadata: METADATA, extra: true },
   ];
   for (const payload of malformed) {
     await assert.rejects(

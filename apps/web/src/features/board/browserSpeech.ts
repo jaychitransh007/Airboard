@@ -1,4 +1,5 @@
 import { AIRBOARD_SEMANTIC_TRANSCRIPTION_KEYTERMS } from "@airboard/core/semantic-capabilities";
+import { blockedMediaHelp } from "./mediaPermissionHelp.ts";
 
 export type BrowserSpeechCallbacks = {
   onStart?: () => void;
@@ -542,6 +543,16 @@ const WAKE_PHRASE_PATTERN =
 
 const PREFIX_ARROW_PATTERN = /^\s*(arrow)\b/iu;
 
+// A brand mention inside a diagram narrative is content, not activation.
+// Accept wake phrases where a person would address Airo: at the beginning of
+// a finalized turn, after a sentence boundary, or after a short conversational
+// lead-in such as "Hey," or "Please". Once explicitly addressed, a second
+// non-canonical ASR variant may still delimit an unpunctuated follow-up command
+// (legacy Chrome behavior). Canonical "Airboard" always requires address
+// position so labels such as "Airboard page" cannot split a semantic request.
+const WAKE_ADDRESS_LEAD_IN_PATTERN =
+  /^\s*(?:(?:hey(?:\s+there)?|hi|hello|okay|ok|please|uh|um|erm|ah|well|so|alright|right)(?:[\s,.:;!?\u2013\u2014-]+|$))*$/iu;
+
 function findWakePhrases(transcript: string): WakePhraseMatch[] {
   const matches: WakePhraseMatch[] = [];
   const arrowPrefix = PREFIX_ARROW_PATTERN.exec(transcript);
@@ -559,9 +570,33 @@ function findWakePhrases(transcript: string): WakePhraseMatch[] {
       continue;
     }
     const wakePhrase = match[0];
+    const followsAcceptedWake =
+      matches.length > 0 && !isCanonicalAirboardWake(wakePhrase);
+    if (
+      !isWakeAddressPosition(transcript, match.index) &&
+      !followsAcceptedWake
+    ) {
+      continue;
+    }
     matches.push({ wakePhrase, index: match.index, end: match.index + wakePhrase.length });
   }
   return matches.sort((left, right) => left.index - right.index);
+}
+
+function isCanonicalAirboardWake(wakePhrase: string): boolean {
+  return /^air\s*board$/iu.test(wakePhrase);
+}
+
+function isWakeAddressPosition(transcript: string, index: number): boolean {
+  const before = transcript.slice(0, index);
+  const boundaryIndex = Math.max(
+    before.lastIndexOf("."),
+    before.lastIndexOf("!"),
+    before.lastIndexOf("?"),
+    before.lastIndexOf("\n"),
+    before.lastIndexOf("\r"),
+  );
+  return WAKE_ADDRESS_LEAD_IN_PATTERN.test(before.slice(boundaryIndex + 1));
 }
 
 const MISHEARD_CREATE_PREFIX =
@@ -662,10 +697,20 @@ export function recoverAirboardVoiceCommand(
  * stay available. Label text keeps its original casing.
  */
 export function normalizeScopedVoiceUtterance(utterance: string): string {
-  const trimmed = utterance
+  let trimmed = utterance
     .replace(/^[\s,.:;!?–—-]+/u, "")
     .replace(/[\s,.;!?]+$/u, "")
     .trim();
+  for (let pass = 0; pass < 8; pass += 1) {
+    const next = trimmed
+      .replace(
+        /^(?:(?:uh|um|erm|ah|hmm|well|so|okay|ok|alright|right|please)(?:[\s,.:;!?–—-]+|$)|(?:can|could|would)\s+you(?:[\s,.:;!?–—-]+|$))/iu,
+        "",
+      )
+      .trim();
+    if (next === trimmed) break;
+    trimmed = next;
+  }
   if (!trimmed) {
     return utterance;
   }
@@ -697,7 +742,7 @@ export function normalizeScopedVoiceUtterance(utterance: string): string {
   }
 
   const move = new RegExp(
-    String.raw`^move(?:\s+${pronoun})?\s+(?:to\s+the\s+|the\s+)?(left|right|up|down)$`,
+    String.raw`^move(?:\s+${pronoun})?\s+(?:to\s+the\s+|the\s+)?(left|right|up|down|above|below)$`,
     "iu",
   ).exec(trimmed);
   if (move?.[1]) {
@@ -814,7 +859,7 @@ function describeContinuousSpeechError(error?: string, message?: string): string
 
 function describeSpeechError(error?: string, message?: string): string {
   if (error === "not-allowed" || error === "service-not-allowed") {
-    return "Microphone access is blocked. Allow it or type the command instead.";
+    return blockedMediaHelp("microphone", typeof navigator === "undefined" ? "" : navigator.userAgent);
   }
   if (error === "no-speech") {
     return "No command was heard. Try again or type it below.";

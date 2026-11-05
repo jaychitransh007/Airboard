@@ -130,6 +130,46 @@ test("connects named endpoints using to and with separators", () => {
   });
 });
 
+test("REGRESSION: parses one disconnected-line attachment before branch detection", () => {
+  const exact = parsed(
+    "Connect existing disconnected line to Client and Planner.",
+    { activationPolicy: "externally_activated" },
+  );
+  assert.deepEqual(exact.command, {
+    kind: "attach_connection",
+    from: { kind: "named", label: "Client", normalizedLabel: "client" },
+    to: { kind: "named", label: "Planner", normalizedLabel: "planner" },
+    endpointOrder: "undirected",
+    lineReference: "unique_existing",
+  });
+  assert.equal(exact.confidence.band, "high");
+
+  assert.deepEqual(
+    parsed("Attach the loose connector from Client to Planner", {
+      activationPolicy: "externally_activated",
+    }).command,
+    { ...exact.command, endpointOrder: "directed" },
+  );
+  assert.deepEqual(
+    parsed("Connect the existing disconnected line with Client and Planner", {
+      activationPolicy: "externally_activated",
+    }).command,
+    exact.command,
+  );
+  assert.equal(
+    parsed("Attach the selected loose line from Client to Planner", {
+      activationPolicy: "externally_activated",
+    }).command.lineReference,
+    "selected",
+  );
+  assert.equal(
+    parsed("Attach this loose line from Client to Planner", {
+      activationPolicy: "externally_activated",
+    }).command.lineReference,
+    "pointer",
+  );
+});
+
 test("connects named endpoints using and while preserving safe lookup text", () => {
   const result = parsed("Airboard, connect Orders API and Payment Share");
   assert.deepEqual(result.command, {
@@ -325,17 +365,31 @@ test("connectors are deletable by voice: between-form and disconnect-form", () =
   assert.equal(between.command.kind, "delete_connection");
   assert.equal(between.command.from.label, "API");
   assert.equal(between.command.to.label, "Database");
+  assert.equal(between.command.scope, "one");
+
+  const all = parsed("delete all connections between API and Database", {
+    activationPolicy: "externally_activated",
+  });
+  assert.equal(all.command.kind, "delete_connection");
+  assert.equal(all.command.scope, "all");
 
   const disconnect = parsed("disconnect this from that", {
     activationPolicy: "externally_activated",
   });
   assert.equal(disconnect.command.kind, "delete_connection");
   assert.equal(disconnect.command.from.pronoun, "this");
+  assert.equal(disconnect.command.scope, "one");
 
   const arrowForm = parsed("remove the arrow between User and API", {
     activationPolicy: "externally_activated",
   });
   assert.equal(arrowForm.command.kind, "delete_connection");
+
+  const meetingAdministration = parseIntentCanvasCommand(
+    "disconnect the call from my end and rejoin",
+    { activationPolicy: "externally_activated" },
+  );
+  assert.equal(meetingAdministration.status, "unrecognized");
 });
 
 test("resize by voice: selection and named targets, every dimension", () => {

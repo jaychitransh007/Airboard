@@ -3,10 +3,13 @@ import test from "node:test";
 
 import {
   boardPointFromScreen,
+  boundsFitViewport,
   clampViewport,
+  fitViewportToBounds,
   IDENTITY_VIEWPORT,
   panViewport,
   screenPointFromBoard,
+  unobscuredCanvasCenter,
   zoomViewport,
 } from "../src/features/board/boardViewport.ts";
 import { CanvasNavigationTracker } from "../src/features/board/canvasNavigationTracker.ts";
@@ -82,6 +85,12 @@ test("two open palms moving together pan after the engage debounce", () => {
 test("two closed hands spreading zoom around their midpoint", () => {
   const tracker = new CanvasNavigationTracker();
   tracker.update({ hands: [closed(400, 300), closed(500, 300)], timestampMs: 0 });
+  assert.equal(
+    tracker.reserving,
+    true,
+    "the first two-hand frame reserves input before zoom finishes debouncing",
+  );
+  assert.equal(tracker.engaged, false);
   tracker.update({ hands: [closed(400, 300), closed(500, 300)], timestampMs: 160 });
   const update = tracker.update({
     hands: [closed(350, 300), closed(550, 300)],
@@ -107,6 +116,7 @@ test("SEPARATION: one hand — or mixed poses — never navigates", () => {
     );
   }
   assert.equal(tracker.engaged, false);
+  assert.equal(tracker.reserving, false);
 });
 
 test("SEPARATION: pan never morphs into zoom — pose switch releases first", () => {
@@ -149,4 +159,44 @@ test("pose flicker freezes and rebases instead of jumping", () => {
     timestampMs: 250,
   });
   assert.deepEqual(update, { mode: "pan", dx: 10, dy: 0 });
+});
+
+test("fitting a diagram frames it beside the Airo panel without zooming in", () => {
+  const limits = { minScale: 0.25, maxScale: 3, worldExtent: 2_400, canvasWidth: 1_200, canvasHeight: 700 };
+  // A wide diagram shrinks to fit the 800px left visible by a 400px panel.
+  const wide = fitViewportToBounds({ x: -600, y: -100, width: 1_200, height: 200 }, limits, { rightInset: 400 });
+  assert.ok(wide.scale < 1);
+  const left = screenPointFromBoard(wide, { x: -600, y: 0 });
+  const right = screenPointFromBoard(wide, { x: 600, y: 0 });
+  assert.ok(left.x >= 48 - 0.01 && right.x <= 800 - 48 + 0.01);
+  assert.ok(Math.abs((left.x + right.x) / 2 - 400) < 0.01);
+  // A small diagram keeps its natural size, centred in the visible area.
+  const small = fitViewportToBounds({ x: 0, y: 0, width: 200, height: 100 }, limits, { rightInset: 400 });
+  assert.equal(small.scale, 1);
+  assert.deepEqual(screenPointFromBoard(small, { x: 100, y: 50 }), { x: 400, y: 350 });
+});
+
+
+test("a board laid out on a laptop is detected as partly off a phone screen", () => {
+  const diagram = { x: 0, y: 0, width: 900, height: 300 };
+  const laptop = { canvasWidth: 1_400, canvasHeight: 800 };
+  const phone = { canvasWidth: 360, canvasHeight: 640 };
+  assert.equal(boundsFitViewport(diagram, IDENTITY_VIEWPORT, laptop), true);
+  assert.equal(boundsFitViewport(diagram, IDENTITY_VIEWPORT, phone), false);
+  // A panel over the right edge hides what sits beneath it.
+  assert.equal(boundsFitViewport(diagram, IDENTITY_VIEWPORT, laptop, 600), false);
+  // Content above or left of the visible area counts as hidden too.
+  assert.equal(boundsFitViewport({ x: -40, y: 10, width: 100, height: 100 }, IDENTITY_VIEWPORT, laptop), false);
+});
+
+test("commands place new objects in the part of the canvas the Airo panel leaves visible", () => {
+  const canvas = { left: 0, top: 60, width: 1_200, height: 700 };
+  assert.deepEqual(unobscuredCanvasCenter(canvas, null), { x: 600, y: 350 });
+  // Side panel on a laptop: centre of the area left of it.
+  assert.deepEqual(unobscuredCanvasCenter(canvas, { left: 820, top: 78, width: 360, height: 660 }), { x: 410, y: 350 });
+  // Bottom sheet on a phone: centre of the area above it.
+  const phone = { left: 6, top: 64, width: 363, height: 740 };
+  assert.deepEqual(unobscuredCanvasCenter(phone, { left: 14, top: 344, width: 347, height: 452 }), { x: 181.5, y: 140 });
+  // A panel covering nearly everything still leaves a usable quarter.
+  assert.deepEqual(unobscuredCanvasCenter(canvas, { left: 20, top: 70, width: 1_180, height: 690 }), { x: 600, y: 87.5 });
 });

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:0;background:#f6f3ff;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#231b33;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f3ff;padding:32px 16px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border-radius:18px;padding:32px;">
+            <tr>
+              <td style="font-size:15px;font-weight:800;letter-spacing:-0.01em;color:#6942db;padding-bottom:24px;">Airboard</td>
+            </tr>
+            <tr>
+              <td style="font-size:24px;font-weight:800;letter-spacing:-0.02em;padding-bottom:12px;">Welcome to Airboard</td>
+            </tr>
+            <tr>
+              <td style="font-size:15px;line-height:1.55;color:#4a4158;padding-bottom:24px;">
+                Confirm {{ .Email }} to open your workspace. Open this on the same device and in the same browser where you signed up&mdash;the link works only there, and only once.
+              </td>
+            </tr>
+            <tr>
+              <td style="padding-bottom:24px;">
+                <a href="{{ .ConfirmationURL }}" style="display:inline-block;background:#7048df;color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:13px 22px;border-radius:12px;">Confirm and open Airboard</a>
+              </td>
+            </tr>
+            <tr>
+              <td style="font-size:13px;line-height:1.55;color:#7a7288;">
+                If the button doesn't work, paste this address into that browser:<br />
+                <a href="{{ .ConfirmationURL }}" style="color:#6942db;word-break:break-all;">{{ .ConfirmationURL }}</a>
+              </td>
+            </tr>
+            <tr>
+              <td style="font-size:13px;line-height:1.55;color:#7a7288;padding-top:20px;border-top:1px solid #eee9f7;">
+                Didn't sign up? You can ignore this email; no account is opened until the link is used.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

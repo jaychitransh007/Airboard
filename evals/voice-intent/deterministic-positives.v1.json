@@ -1,35 +1,676 @@
 {
   "schemaVersion": "1.0",
   "description": "Positive regression corpus for the deterministic Intent Canvas grammar. Every case was machine-verified against the parser at authoring time; the offline eval (pnpm eval:grammar) re-verifies on every CI run so grammar patches prove they broke nothing. Cases with scoped=true are first rewritten by normalizeScopedVoiceUtterance (the hold-to-edit path).",
+  "grammarGapContractVersion": "1.0",
+  "knownGapCount": 28,
   "knownGaps": [
-    "[create] Any leftover words after node-type/count/placement extraction silently become an inferred label: 'add a payment service here' parses with label 'payment', and 'add a circle up' parses with label 'up' because the bare-direction placement pattern accepts only left/right/above/below/over/under (not up/down, unlike move_selection which accepts up/down).",
-    "[create] Word-form counts stop at ten: 'add twelve circles here' parses as count 1 with label 'twelve' (the unknown count word falls into the inferred label) instead of count 12 or a rejection. Digit counts work up to 20 ('add 15 circles here' => count 15); 21+ digits are rejected with unsupported_count, but word counts eleven-twenty are never recognized.",
-    "[create] The 'custom' node type has no canonical term in its alias vocabulary ('add a custom here' is rejected with missing_node_type; you must say 'custom node', 'component', 'box', 'node', etc.), so custom nodes can never take the canonical exact_pattern confidence path (0.99) — they always parse via normalized_alias.",
-    "[create] 'the' is treated as a count word equal to 1 ('add the database here' parses as create count 1), same as 'a'/'an'.",
-    "[create] Placement anchors are limited to this/that/selected/the selection — a named anchor is not supported and leaks into the label: 'add a circle left of Billing' parses with default pointer placement and label 'left of Billing'; similarly 'add a queue next to this' yields label 'next to this'. These would create mislabeled nodes rather than being rejected.",
-    "[create] normalizeScopedVoiceUtterance passes create-family utterances through unchanged (its rewrites only target rename/delete/duplicate/move/connect while holding an element), so no scoped preprocessing is needed for this family.",
-    "[connect] Endpoint split uses the FIRST to/with/and separator (non-greedy), so a source name containing 'and' mis-splits: 'connect drag and drop to server' parses as from='drag', to='drop to server' instead of failing or treating 'drag and drop' as one name.",
-    "[connect] The branching guard rejects any 'to ... and ...' inside the endpoints as compound_command, so 'connect login to auth and audit' (a target name containing 'and') is rejected rather than parsed; but 'and' works fine as the sole separator when no 'to' precedes it ('connect database and payment service').",
-    "[connect] A second 'to' folds into the target name: 'connect send to queue to worker' parses as from='send', to named 'queue to worker'.",
-    "[connect] normalizeScopedVoiceUtterance rewrites 'connect that to X' into 'connect this to X', silently converting the spoken pronoun 'that' into deictic 'this' before parsing.",
-    "[connect] Unscoped 'connect this one to the queue' treats 'this one' as a NAMED reference (label 'this one'), not deictic - only bare 'this'/'that' are deictic; scoped normalization is required for 'this one' to become deictic.",
-    "[connect] The 'link' verb is listed in AIRBOARD_SEMANTIC_ACTION_CAPABILITIES connect terms but parseConnectCommand only accepts 'connect'; 'link user to api' returns unknown_command.",
-    "[connect] cleanLabel strips a trailing 'please' from connector labels, so 'connect user to api as calls please' yields label 'calls' (a connector genuinely labeled '... please' cannot be expressed unless quoted).",
-    "[connect] Leading 'the ' is stripped from named endpoints ('the api gateway' -> label 'api gateway'), and named endpoint labels preserve original casing while normalizedLabel lowercases.",
-    "[selection] Extra verified phrasings that also parse (kept out of the 40-case corpus only for size): 'change the label of Checkout to Checkout v2' (rename_object, label 'Checkout v2'), 'delete the selected items', 'duplicate selected', 'copy this' (scoped -> duplicate_selection), 'move selected above', 'nevermind', 'cancel', 'cancel the command', 'Cancel that.', 'undo', 'undo that', 'uh, please undo that', 'layout selected in bottom to top' (-> bottom_to_top), 'label that Gateway' and 'name this Invoice Service' (scoped -> rename_selection).",
-    "[selection] 'undo last change' (without 'the') is unrecognized: the undo pattern requires 'the last (action|change)' verbatim, so a very natural spoken phrasing falls through to unknown_command.",
-    "[selection] Deictic delete/duplicate are rejected unscoped: 'delete this' returns clarification missing_selection_target, while deictic rename works ('rename that to Done' parses to rename_object with a deictic target). Pronoun deletes only work via normalizeScopedVoiceUtterance, which rewrites them to 'delete selected'.",
-    "[selection] rename_object's lazy target capture splits at the FIRST ' to ': 'rename Send to Queue to Publish' parses as target 'Send' with label 'Queue to Publish', so objects whose labels contain the word 'to' cannot be addressed by name.",
-    "[selection] Ungrammatical 'move selected to up' parses (direction above): the optional 'to' in the move pattern combines freely with the up/down aliases intended for 'to the left/right'.",
-    "[selection] Scoped move only rewrites left/right/up/down: 'move it above' passes through normalizeScopedVoiceUtterance unchanged and then fails with missing_direction, even though unscoped 'move selected above' parses fine - above/below are second-class in the scoped grammar.",
-    "[selection] alignmentForToken maps 'horizontal'/'horizontally' through its default branch to {axis:'y', anchor:'center'} - correct today because the align regex constrains tokens, but any future token added to the regex silently becomes y-center alignment.",
-    "[selection] Layout filler words are fully optional: 'arrange selected grid' (no 'in a') parses to layout_selection grid.",
-    "[selection] 'rename selected to selected' parses to rename_selection with label 'selected' - the SELECTION_WORDS guard applies only to the rename target, not the new label.",
-    "[spoken] Trailing courtesy with a comma corrupts create labels: 'add a queue here, please' parses to create_node with a spurious label 'here,'. cleanText strips trailing .?! but not commas, so stripCourtesy's /\\s+please$/ removal leaves 'add a queue here,' — the trailing comma then defeats the /\\s+here$/ placement pattern, placement silently defaults to pointer, and the leftover 'here,' is kept as the node label. The comma-free form 'add a queue here please' parses cleanly (verified both against the real parser).",
-    "[spoken] The disfluency-stripping prefix list is broader than documented: 'right', 'now', and 'like' are also peeled as fillers (e.g. 'right, add a circle here' parses as create_node circle). Harmless for this corpus but worth knowing since 'right' is also a direction word.",
-    "[spoken] Unscoped 'move it left' is rejected with missing_direction because 'it' is not in SELECTION_WORDS — pronoun-targeted phrasing only works after normalizeScopedVoiceUtterance rewrites it to 'move selected left'. Scoped rewriting also does not strip disfluencies ('uh, rename to Cache' passes through normalizeScopedVoiceUtterance unchanged and then fails the rename grammar after courtesy stripping, since 'rename to Cache' has no target token), so scoped utterances with leading fillers fall through to clarification.",
-    "[spoken] Word-number counts stop at 'ten' in extractCount's regex; spoken 'eleven services' would treat 'eleven' as part of the node subject rather than a count (digits like '11' do parse). Not exercised in the corpus, only noted from reading extractCount.",
-    "[spoken] All 40 returned cases were verified against the real parser via /private/tmp/claude-501/-Users-mj-Projects-TheSigmaProject-Airboard/9f57fdd9-b24b-4209-ba69-85ea11d0d2a8/scratchpad/verify-spoken.mjs (wake cases parse via the wake path with default wake_word_required policy and activation.source === 'wake_word'; scoped cases were first passed through normalizeScopedVoiceUtterance)."
+    {
+      "id": "create-inferred-label-and-bare-direction",
+      "description": "A short modifier may be an inferred label, while spoken up/down are placement directions rather than accidental labels.",
+      "scenarios": [
+        {
+          "id": "gap-create-payment-service-label",
+          "text": "add a payment service here",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "create_node",
+            "nodeType": "service",
+            "label": "payment",
+            "placementDirection": "here"
+          }
+        },
+        {
+          "id": "gap-create-circle-up",
+          "text": "add a circle up",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "create_node",
+            "nodeType": "circle",
+            "placementDirection": "above",
+            "relativeToKind": "focus"
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-word-count-eleven-through-twenty",
+      "description": "Supported word-form counts through twenty must not leak into inferred labels.",
+      "scenarios": [
+        {
+          "id": "gap-create-twelve-circles",
+          "text": "add twelve circles here",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "create_node",
+            "nodeType": "circle",
+            "count": 12,
+            "placementDirection": "here"
+          }
+        },
+        {
+          "id": "gap-create-twenty-services",
+          "text": "create twenty services",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "create_node",
+            "nodeType": "service",
+            "count": 20
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-custom-canonical-term",
+      "description": "Bare custom is not a registered node alias, so it must enter semantic fallback instead of inventing a node type.",
+      "scenarios": [
+        {
+          "id": "gap-create-bare-custom-fallback",
+          "text": "add a custom here",
+          "expected": {
+            "outcome": "semantic_fallback",
+            "parserStatus": "clarification",
+            "issueCode": "missing_node_type"
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-definite-article-count",
+      "description": "The definite article is accepted as singular create syntax.",
+      "scenarios": [
+        {
+          "id": "gap-create-the-database",
+          "text": "add the database here",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "create_node",
+            "nodeType": "database",
+            "count": 1,
+            "placementDirection": "here"
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-named-placement-anchor",
+      "description": "Named or unsupported placement anchors require semantic grounding and must never become accidental labels.",
+      "scenarios": [
+        {
+          "id": "gap-create-left-of-named-anchor",
+          "text": "add a circle left of Billing",
+          "expected": {
+            "outcome": "semantic_fallback",
+            "parserStatus": "clarification",
+            "issueCode": "missing_label"
+          }
+        },
+        {
+          "id": "gap-create-next-to-anchor",
+          "text": "add a queue next to this",
+          "expected": {
+            "outcome": "semantic_fallback",
+            "parserStatus": "clarification",
+            "issueCode": "missing_label"
+          }
+        }
+      ]
+    },
+    {
+      "id": "scoped-create-pass-through",
+      "description": "Scoped create commands pass through preprocessing unchanged and use the normal create grammar.",
+      "scenarios": [
+        {
+          "id": "gap-scoped-create-pass-through",
+          "text": "add a circle here",
+          "scoped": true,
+          "expected": {
+            "outcome": "parsed",
+            "kind": "create_node",
+            "nodeType": "circle",
+            "placementDirection": "here",
+            "preparedText": "add a circle here"
+          }
+        }
+      ]
+    },
+    {
+      "id": "connect-conjunction-in-source",
+      "description": "A conjunction inside a possible source label is structurally ambiguous and must use semantic fallback rather than mis-splitting endpoints.",
+      "scenarios": [
+        {
+          "id": "gap-connect-source-containing-and",
+          "text": "connect drag and drop to server",
+          "expected": {
+            "outcome": "semantic_fallback",
+            "parserStatus": "clarification",
+            "issueCode": "compound_command"
+          }
+        }
+      ]
+    },
+    {
+      "id": "connect-branching-conjunction",
+      "description": "A to-and branching form remains semantic-only; the deterministic parser must not flatten it into one edge.",
+      "scenarios": [
+        {
+          "id": "gap-connect-branching-target",
+          "text": "connect login to auth and audit",
+          "expected": {
+            "outcome": "semantic_fallback",
+            "parserStatus": "clarification",
+            "issueCode": "compound_command"
+          }
+        }
+      ]
+    },
+    {
+      "id": "connect-multiple-to-separators",
+      "description": "Multiple possible endpoint separators are ambiguous and must use semantic fallback.",
+      "scenarios": [
+        {
+          "id": "gap-connect-second-to",
+          "text": "connect send to queue to worker",
+          "expected": {
+            "outcome": "semantic_fallback",
+            "parserStatus": "clarification",
+            "issueCode": "compound_command"
+          }
+        }
+      ]
+    },
+    {
+      "id": "scoped-connect-pronoun-normalization",
+      "description": "A scoped connection binds the held object as deictic this before parsing.",
+      "scenarios": [
+        {
+          "id": "gap-scoped-connect-that",
+          "text": "connect that to X",
+          "scoped": true,
+          "expected": {
+            "outcome": "parsed",
+            "kind": "connect",
+            "fromKind": "deictic",
+            "fromPronoun": "this",
+            "toKind": "named",
+            "toLabel": "X",
+            "preparedText": "connect this to X"
+          }
+        }
+      ]
+    },
+    {
+      "id": "connect-this-one-deictic",
+      "description": "The natural deictic phrase this one must resolve as this, never as a literal board label.",
+      "scenarios": [
+        {
+          "id": "gap-connect-this-one",
+          "text": "connect this one to the queue",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "connect",
+            "fromKind": "deictic",
+            "fromPronoun": "this",
+            "toKind": "named",
+            "toLabel": "queue"
+          }
+        }
+      ]
+    },
+    {
+      "id": "connect-link-semantic-alias",
+      "description": "Link is a supported semantic alias but intentionally not a deterministic verb, so it must invoke semantic fallback.",
+      "scenarios": [
+        {
+          "id": "gap-link-user-to-api",
+          "text": "link user to api",
+          "expected": {
+            "outcome": "semantic_fallback",
+            "parserStatus": "unrecognized",
+            "issueCode": "unknown_command"
+          }
+        }
+      ]
+    },
+    {
+      "id": "connector-label-trailing-courtesy",
+      "description": "Trailing courtesy is not part of a connector label.",
+      "scenarios": [
+        {
+          "id": "gap-connect-label-courtesy",
+          "text": "connect user to api as calls please",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "connect",
+            "fromLabel": "user",
+            "toLabel": "api",
+            "connectorLabel": "calls"
+          }
+        }
+      ]
+    },
+    {
+      "id": "connect-leading-articles-and-case",
+      "description": "Endpoint articles are stripped while display case and normalized lookup labels remain correct.",
+      "scenarios": [
+        {
+          "id": "gap-connect-leading-the",
+          "text": "connect the API Gateway to the Orders DB",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "connect",
+            "fromLabel": "API Gateway",
+            "fromNormalizedLabel": "api gateway",
+            "toLabel": "Orders DB",
+            "toNormalizedLabel": "orders db"
+          }
+        }
+      ]
+    },
+    {
+      "id": "selection-supported-phrasings",
+      "description": "The previously prose-only selection phrase inventory is executable through the production parser and scoped normalizer.",
+      "scenarios": [
+        {
+          "id": "gap-selection-change-label",
+          "text": "change the label of Checkout to Checkout v2",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "rename_object",
+            "targetKind": "named",
+            "targetLabel": "Checkout",
+            "label": "Checkout v2"
+          }
+        },
+        {
+          "id": "gap-selection-delete-items",
+          "text": "delete the selected items",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "delete_selection"
+          }
+        },
+        {
+          "id": "gap-selection-duplicate",
+          "text": "duplicate selected",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "duplicate_selection"
+          }
+        },
+        {
+          "id": "gap-selection-copy-this-scoped",
+          "text": "copy this",
+          "scoped": true,
+          "expected": {
+            "outcome": "parsed",
+            "kind": "duplicate_selection",
+            "preparedText": "duplicate selected"
+          }
+        },
+        {
+          "id": "gap-selection-move-above",
+          "text": "move selected above",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "move_selection",
+            "direction": "above"
+          }
+        },
+        {
+          "id": "gap-selection-nevermind",
+          "text": "nevermind",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "cancel"
+          }
+        },
+        {
+          "id": "gap-selection-cancel",
+          "text": "cancel",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "cancel"
+          }
+        },
+        {
+          "id": "gap-selection-cancel-command",
+          "text": "cancel the command",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "cancel"
+          }
+        },
+        {
+          "id": "gap-selection-cancel-that",
+          "text": "Cancel that.",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "cancel"
+          }
+        },
+        {
+          "id": "gap-selection-undo",
+          "text": "undo",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "undo"
+          }
+        },
+        {
+          "id": "gap-selection-undo-that",
+          "text": "undo that",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "undo"
+          }
+        },
+        {
+          "id": "gap-selection-disfluent-undo",
+          "text": "uh, please undo that",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "undo"
+          }
+        },
+        {
+          "id": "gap-selection-layout-bottom-to-top",
+          "text": "layout selected in bottom to top",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "layout_selection",
+            "layoutDirection": "bottom_to_top"
+          }
+        },
+        {
+          "id": "gap-selection-label-that-scoped",
+          "text": "label that Gateway",
+          "scoped": true,
+          "expected": {
+            "outcome": "parsed",
+            "kind": "rename_selection",
+            "label": "Gateway",
+            "preparedText": "rename selected to Gateway"
+          }
+        },
+        {
+          "id": "gap-selection-name-this-scoped",
+          "text": "name this Invoice Service",
+          "scoped": true,
+          "expected": {
+            "outcome": "parsed",
+            "kind": "rename_selection",
+            "label": "Invoice Service",
+            "preparedText": "rename selected to Invoice Service"
+          }
+        }
+      ]
+    },
+    {
+      "id": "selection-undo-last-change",
+      "description": "Undo last change is an unambiguous, supported undo command.",
+      "scenarios": [
+        {
+          "id": "gap-selection-undo-last-change",
+          "text": "undo last change",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "undo"
+          }
+        }
+      ]
+    },
+    {
+      "id": "selection-deictic-destructive-safety",
+      "description": "Unscoped destructive pronouns require semantic clarification; scoped pronouns bind to selection, while a non-destructive named rename remains supported.",
+      "scenarios": [
+        {
+          "id": "gap-selection-delete-this-unscoped",
+          "text": "delete this",
+          "expected": {
+            "outcome": "semantic_fallback",
+            "parserStatus": "clarification",
+            "issueCode": "missing_selection_target"
+          }
+        },
+        {
+          "id": "gap-selection-delete-this-scoped",
+          "text": "delete this",
+          "scoped": true,
+          "expected": {
+            "outcome": "parsed",
+            "kind": "delete_selection",
+            "preparedText": "delete selected"
+          }
+        },
+        {
+          "id": "gap-selection-rename-that",
+          "text": "rename that to Done",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "rename_object",
+            "targetKind": "deictic",
+            "targetPronoun": "that",
+            "label": "Done"
+          }
+        }
+      ]
+    },
+    {
+      "id": "selection-rename-multiple-to",
+      "description": "A rename with multiple possible to separators is ambiguous and must use semantic fallback rather than guessing the target.",
+      "scenarios": [
+        {
+          "id": "gap-selection-rename-multiple-to",
+          "text": "rename Send to Queue to Publish",
+          "expected": {
+            "outcome": "semantic_fallback",
+            "parserStatus": "clarification",
+            "issueCode": "missing_label"
+          }
+        }
+      ]
+    },
+    {
+      "id": "selection-move-to-up-alias",
+      "description": "The optional to filler and spoken up alias produce a move above.",
+      "scenarios": [
+        {
+          "id": "gap-selection-move-to-up",
+          "text": "move selected to up",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "move_selection",
+            "direction": "above"
+          }
+        }
+      ]
+    },
+    {
+      "id": "scoped-move-above-below",
+      "description": "Scoped movement accepts above and below alongside up and down.",
+      "scenarios": [
+        {
+          "id": "gap-scoped-move-above",
+          "text": "move it above",
+          "scoped": true,
+          "expected": {
+            "outcome": "parsed",
+            "kind": "move_selection",
+            "direction": "above",
+            "preparedText": "move selected above"
+          }
+        }
+      ]
+    },
+    {
+      "id": "selection-horizontal-alignment",
+      "description": "Horizontal alignment produces a shared row on the y axis.",
+      "scenarios": [
+        {
+          "id": "gap-selection-align-horizontal",
+          "text": "align selected horizontal",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "align_selection",
+            "alignmentAxis": "y",
+            "alignmentAnchor": "center"
+          }
+        }
+      ]
+    },
+    {
+      "id": "selection-layout-optional-fillers",
+      "description": "Grid layout remains valid without the optional in a filler.",
+      "scenarios": [
+        {
+          "id": "gap-selection-arrange-grid",
+          "text": "arrange selected grid",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "layout_selection",
+            "layoutDirection": "grid"
+          }
+        }
+      ]
+    },
+    {
+      "id": "selection-label-equals-selection-word",
+      "description": "Selection words are valid new labels after a selected target has been established.",
+      "scenarios": [
+        {
+          "id": "gap-selection-label-selected",
+          "text": "rename selected to selected",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "rename_selection",
+            "label": "selected"
+          }
+        }
+      ]
+    },
+    {
+      "id": "spoken-comma-before-courtesy",
+      "description": "A comma before trailing courtesy is stripped before placement parsing and must never become a node label.",
+      "scenarios": [
+        {
+          "id": "gap-spoken-comma-courtesy",
+          "text": "add a queue here, please",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "create_node",
+            "nodeType": "queue",
+            "count": 1,
+            "placementDirection": "here"
+          }
+        }
+      ]
+    },
+    {
+      "id": "spoken-disfluency-prefixes",
+      "description": "Right, now, and like are accepted as leading spoken fillers without consuming a placement direction.",
+      "scenarios": [
+        {
+          "id": "gap-spoken-right-filler",
+          "text": "right, add a circle here",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "create_node",
+            "nodeType": "circle",
+            "placementDirection": "here"
+          }
+        },
+        {
+          "id": "gap-spoken-now-filler",
+          "text": "now, add a circle here",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "create_node",
+            "nodeType": "circle",
+            "placementDirection": "here"
+          }
+        },
+        {
+          "id": "gap-spoken-like-filler",
+          "text": "like, add a circle here",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "create_node",
+            "nodeType": "circle",
+            "placementDirection": "here"
+          }
+        }
+      ]
+    },
+    {
+      "id": "spoken-pronoun-scope-and-fillers",
+      "description": "Unscoped it remains non-deterministic, while scoped preprocessing strips fillers and supplies the held selection target.",
+      "scenarios": [
+        {
+          "id": "gap-spoken-move-it-unscoped",
+          "text": "move it left",
+          "expected": {
+            "outcome": "semantic_fallback",
+            "parserStatus": "clarification",
+            "issueCode": "missing_direction"
+          }
+        },
+        {
+          "id": "gap-spoken-scoped-disfluent-rename",
+          "text": "uh, rename to Cache",
+          "scoped": true,
+          "expected": {
+            "outcome": "parsed",
+            "kind": "rename_selection",
+            "label": "Cache",
+            "preparedText": "rename selected to Cache"
+          }
+        }
+      ]
+    },
+    {
+      "id": "spoken-eleven-count",
+      "description": "The lower word-count boundary beyond ten is executed through the spoken parser path.",
+      "scenarios": [
+        {
+          "id": "gap-spoken-eleven-services",
+          "text": "add eleven services here",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "create_node",
+            "nodeType": "service",
+            "count": 11,
+            "placementDirection": "here"
+          }
+        }
+      ]
+    },
+    {
+      "id": "production-wake-and-scoped-routing",
+      "description": "Wake-addressed and scoped cases execute through their production preprocessing paths, not a scratch parser.",
+      "scenarios": [
+        {
+          "id": "gap-production-wake-route",
+          "text": "Airo, add a circle here",
+          "expected": {
+            "outcome": "parsed",
+            "kind": "create_node",
+            "nodeType": "circle",
+            "placementDirection": "here",
+            "activationSource": "wake_word"
+          }
+        },
+        {
+          "id": "gap-production-scoped-route",
+          "text": "copy this",
+          "scoped": true,
+          "expected": {
+            "outcome": "parsed",
+            "kind": "duplicate_selection",
+            "preparedText": "duplicate selected"
+          }
+        }
+      ]
+    }
   ],
   "cases": [
     {
@@ -1409,6 +2050,17 @@
       "text": "delete the connection between API and Database",
       "expected": {
         "kind": "delete_connection",
+        "scope": "one",
+        "fromKind": "named",
+        "toKind": "named"
+      }
+    },
+    {
+      "id": "parity-delete-all-connections",
+      "text": "delete all connections between API and Database",
+      "expected": {
+        "kind": "delete_connection",
+        "scope": "all",
         "fromKind": "named",
         "toKind": "named"
       }
@@ -1418,6 +2070,7 @@
       "text": "disconnect this from that",
       "expected": {
         "kind": "delete_connection",
+        "scope": "one",
         "fromKind": "deictic",
         "toKind": "deictic"
       }
@@ -1476,6 +2129,39 @@
       "text": "Airo, select all the nodes",
       "expected": {
         "kind": "select_all"
+      }
+    },
+    {
+      "id": "production-regression-attach-existing-disconnected-line",
+      "text": "Connect existing disconnected line to Client and Planner.",
+      "expected": {
+        "kind": "attach_connection",
+        "endpointOrder": "undirected",
+        "lineReference": "unique_existing",
+        "fromKind": "named",
+        "toKind": "named"
+      }
+    },
+    {
+      "id": "attach-loose-connector-from-to-paraphrase",
+      "text": "Attach the loose connector from Client to Planner",
+      "expected": {
+        "kind": "attach_connection",
+        "endpointOrder": "directed",
+        "lineReference": "unique_existing",
+        "fromKind": "named",
+        "toKind": "named"
+      }
+    },
+    {
+      "id": "production-regression-attach-existing-disconnected-line-with-endpoints",
+      "text": "Connect the existing disconnected line with Client and Planner",
+      "expected": {
+        "kind": "attach_connection",
+        "endpointOrder": "undirected",
+        "lineReference": "unique_existing",
+        "fromKind": "named",
+        "toKind": "named"
       }
     }
   ]
