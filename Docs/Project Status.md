@@ -8,16 +8,16 @@
 
 | Part | Where | Notes |
 | --- | --- | --- |
-| Web | Cloud Run `airboard-pilot-web`, revision `launch-47e7eb5` | `https://airboard-pilot-web-634900453473.asia-south1.run.app`; one instance, kept warm |
-| API | Cloud Run `airboard-pilot-api`, revision `launch-e8e1644` | Up to 3 instances, one kept warm; live boards are shared across instances |
+| Web | Cloud Run `airboard-pilot-web`, revision `launch-e9912d6` | `https://airboard-pilot-web-634900453473.asia-south1.run.app`; one instance, kept warm |
+| API | Cloud Run `airboard-pilot-api`, revision `launch-e9912d6` | Up to 3 instances, one kept warm; live boards are shared across instances |
 | Database and sign-in | Supabase `ujotgzjpkocuhtfrvbzu` (ap-south-1, Mumbai) | Every migration in `supabase/migrations` applied, the last `20261105150000` |
 | Google sign-in | Google Auth Platform in the pilot Google Cloud project | Consent screen "Airboard", published to every Google account; client "Airboard sign-in (Supabase)" |
 | Lifecycle jobs | Cloud Scheduler `airboard-lifecycle-hourly` | Alert on a failed run |
 
 - **Voice commands:** the built-in grammar handles exact phrasings instantly; anything else goes to OpenAI `gpt-5.6-luna`, the only allowed intent model since 5 November 2026, on OpenAI's priority tier (typically 1.7 s, the slowest 5% about 2.6 s).
 - **Health:** the API's `/ready` reports the database and `boardFanOut` (live boards across instances). Cloud Run restarts an instance that stops answering its health path (API `/health`, web `/favicon.ico`) for 90 seconds.
-- **Launch check:** `pnpm launch:check:deployed` checks the live revisions and passes **19 of 22**. The remaining blockers are a named release owner, a monitored support path and the commercial smoke test. The pilot signs people in with Google and sends no email, so it needs no email sender (decided 5 November 2026).
-- **Rollback:** the web to `launch-05c0281`; the API to `launch-db35e58` (prompt 2.10), `launch-fe9f36b` (prompt 2.9, standard tier) or `launch-05c0281` (prompt 2.8); both services to `launch-854858a` to restore the `gpt-5.4-mini` intent model (`AIRBOARD_RELEASE=launch-<hash> infra/cloud-run/release.sh promote web|api`).
+- **Launch check:** `pnpm launch:check:deployed` checks the live revisions and passes **21 of 22**; only the commercial smoke test remains, which matters once billing is on. The founder is the release owner and support owner, on `hellosigmascience@gmail.com`. The pilot signs people in with Google and sends no email, so it needs no email sender (decided 5 November 2026).
+- **Rollback:** the web to `launch-47e7eb5` (email sign-in shown) and the API to `launch-e8e1644`. Earlier API revisions restore older intent prompts.
 - **Code:** `main`. The working branch `codex/production-readiness` reached it on 5 November 2026 through these pull requests:
   - #1: launch hardening.
   - #11: Google sign-in.
@@ -25,7 +25,7 @@
   - #13: camera start.
   - #14: calmer board.
 
-  #16 (cleanup), #18 (dependency updates and docs), #21 (security, robustness, erasure and image hardening), #23 (CI gates) and #24 (Luna as the only intent model) followed. The API runs `launch-e8e1644` (intent prompt 2.11 on OpenAI's priority tier), which #28 merged to `main`. The web runs `launch-47e7eb5` (accessibility fixes), which is on `codex/production-readiness` and not yet merged to `main`.
+  #16 (cleanup), #18 (dependency updates and docs), #21 (security, robustness, erasure and image hardening), #23 (CI gates) and #24 (Luna as the only intent model) followed. Both services run `launch-e9912d6` (Google-only sign-in, copyable invite links), which is on `codex/production-readiness` and not yet merged to `main`.
 - **Image retention:** Artifact Registry keeps images tagged `live`, plus the 10 newest per image, and deletes anything older than 3 days. `release.sh promote` moves the `live` tag.
 
 ## Shipped in the launch hardening (November 2026)

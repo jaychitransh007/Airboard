@@ -4,16 +4,16 @@
   "gates": {
     "release-owner": {
       "description": "A named business and technical release owner accepts the controlled-pilot scope and stop-ship authority.",
-      "status": "pending",
+      "status": "verified",
       "owner": "Founder",
-      "evidence": "",
+      "evidence": "2026-11-05: the founder confirmed they are the controlled pilot's release owner on both the business and the technical side, which carries the stop-ship decision. Recorded in Docs/Release Readiness Backlog.md (2026-11-05).",
       "notes": "Name the accountable owner and record approval."
     },
     "support-path": {
       "description": "The published pilot inbox is monitored and has an escalation owner.",
-      "status": "pending",
+      "status": "verified",
       "owner": "Founder",
-      "evidence": "",
+      "evidence": "2026-11-05: the founder confirmed they monitor hellosigmascience@gmail.com and are its escalation owner. It is the address the support, status, accessibility and pilot pages and the sign-in messages publish (apps/web/app/[marketingSlug]/page.tsx, apps/web/src/features/pilot/PilotInfoPage.tsx, apps/web/src/features/product/magicLinkRequest.ts), and the lifecycle-failure alert notifies it.",
       "notes": "Verify hellosigmascience@gmail.com monitoring and response ownership."
     },
     "public-claims": {
@@ -55,14 +55,14 @@
       "description": "Production web, API, authentication, readiness, board save/export/delete and rollback smoke checks pass.",
       "status": "verified",
       "owner": "Engineering",
-      "evidence": "Docs/Release Readiness Backlog.md \u2014 2026-11-04 signed-in production smoke and 2026-11-05 rollback drill (web launch-a0d7ed4 \u2192 launch-a226e33 \u2192 launch-a0d7ed4).",
+      "evidence": "Docs/Release Readiness Backlog.md — 2026-11-04 signed-in production smoke and 2026-11-05 rollback drill (web launch-a0d7ed4 → launch-a226e33 → launch-a0d7ed4).",
       "notes": "2026-11-04 signed-in production pass in the browser (sign-in, board open, typed command, save, reload persistence, undo, two-tab conflict, Export PNG, Trash/restore, trial-ended state). 2026-11-05 rollback drill: web traffic moved to the previous revision launch-a226e33 in 5s (verified by its copy), pages served 200, then rolled forward to launch-a0d7ed4 in 4s; 16s on the previous revision in total. Every deploy since is staged at 0% on a tag, smoked, then promoted."
     },
     "lifecycle-schedule": {
       "description": "The authenticated lifecycle endpoint is scheduled, monitored and has a failed-run alert.",
       "status": "verified",
       "owner": "Engineering",
-      "evidence": "Docs/Release Readiness Backlog.md \u2014 2026-11-05 lifecycle schedule and failed-run alert: hourly Cloud Scheduler job, metric alert 'Airboard lifecycle run failed', and an alerted test failure whose email the user confirmed.",
+      "evidence": "Docs/Release Readiness Backlog.md — 2026-11-05 lifecycle schedule and failed-run alert: hourly Cloud Scheduler job, metric alert 'Airboard lifecycle run failed', and an alerted test failure whose email the user confirmed.",
       "notes": "2026-11-05: Cloud Scheduler job airboard-lifecycle-hourly (asia-south1, 0 * * * * UTC) POSTs /internal/lifecycle/run with the airboard-cron-secret bearer; manual and scheduler runs return 200. Since API launch-e0545e8, any failed lifecycle step returns 500 LIFECYCLE_STEP_FAILED. Alerting: log-based metric airboard_lifecycle_failed_runs counts scheduler attempts that finish at ERROR; the metric alert 'Airboard lifecycle run failed' (count > 0 per 60s) notifies hellosigmascience@gmail.com. The first alert, a log-match policy, never fired and was replaced (the Monitoring notification service agent also had to be created). Proof: a temporary wrong-bearer job failed at 19:38:26Z, the metric counted it, and the policy opened an incident at 19:42:17Z, seen on a temporary Pub/Sub channel then removed with the test job. The user confirmed the 19:42 UTC alert email arrived at hellosigmascience@gmail.com."
     },
     "legal-approval": {
