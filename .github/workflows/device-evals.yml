@@ -92,7 +92,7 @@ jobs:
       # source media from the persistent device runner.
       - name: Upload privacy-safe device reports
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: device-eval-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
