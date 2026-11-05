@@ -83,12 +83,17 @@ export function registerControlPlaneRoutes(
   config: ApiConfig,
   auth: AuthService,
 ): void {
-  server.get("/auth/config", async () => ({
-    supabaseEnabled: auth.enabled,
-    developmentAccessEnabled: config.localEntitlements,
-    readOnly: config.readOnly,
-    providers: await auth.providerAvailability(),
-  }));
+  server.get("/auth/config", async () => {
+    const providers = await auth.providerAvailability();
+    return {
+      supabaseEnabled: auth.enabled,
+      developmentAccessEnabled: config.localEntitlements,
+      readOnly: config.readOnly,
+      // Supabase only says sign-up is open; whether a link can reach anyone
+      // is this deployment's call.
+      providers: { ...providers, emailMagicLink: providers.emailMagicLink && config.emailSignInEnabled },
+    };
+  });
 
   server.get("/integrations/extension/compatibility", async () => ({
     bridge: CHROME_BRIDGE_MARKER,
@@ -1285,7 +1290,9 @@ function registerOrganizationRoutes(server: FastifyInstance, _config: ApiConfig,
         properties: { role },
       }),
     ]);
-    return reply.code(201).send({ invitationId: data.id, expiresAt });
+    // The pilot sends no email, so the inviting admin shares this link; the
+    // invitee still has to sign in as the invited address to accept it.
+    return reply.code(201).send({ invitationId: data.id, expiresAt, inviteUrl: `${_config.appUrl}/invite/${rawToken}` });
   });
 
   server.delete<{ Params: { invitationId: string } }>("/organization/invitations/:invitationId", async (request, reply) => {

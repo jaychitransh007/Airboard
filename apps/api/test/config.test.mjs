@@ -73,3 +73,12 @@ test("production refuses to start without Supabase instead of keeping boards in 
   assert.doesNotThrow(() => loadConfig({}));
 });
 
+test("email sign-in links are off in production unless switched on", () => {
+  const production = { NODE_ENV: "production", ...SUPABASE, AIRBOARD_SESSION_SIGNING_SECRET: "x".repeat(40), AIRBOARD_CHROME_EXTENSION_ENABLED: "false" };
+  assert.equal(loadConfig(production).emailSignInEnabled, false);
+  assert.equal(loadConfig({ ...production, AIRBOARD_EMAIL_SIGN_IN_ENABLED: "true" }).emailSignInEnabled, true);
+  // Local development keeps them; the local mailer captures every message.
+  assert.equal(loadConfig({}).emailSignInEnabled, true);
+  assert.equal(loadConfig({ AIRBOARD_EMAIL_SIGN_IN_ENABLED: "false" }).emailSignInEnabled, false);
+});
+

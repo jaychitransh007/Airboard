@@ -2920,6 +2920,7 @@ button:disabled {
 .admin-readiness h2, .policy-panel h2 { font-family: Georgia, "Times New Roman", serif; font-size: 27px; font-weight: 500; }
 .admin-readiness > div { border-color: rgba(54, 36, 91, 0.08); }
 .invite-row { grid-template-columns: minmax(220px, 1fr) 150px auto; max-width: 800px; padding: 10px; border: 1px solid rgba(54, 36, 91, 0.08); border-radius: 18px; background: rgba(255, 255, 255, 0.6); box-shadow: var(--air-shadow-soft); }
+.invite-link-row { grid-template-columns: minmax(220px, 1fr) auto; }
 .invite-row :is(input, select) { min-height: 44px; }
 .data-table { border: 1px solid rgba(54, 36, 91, 0.08); border-radius: 20px; background: rgba(255, 255, 255, 0.66); box-shadow: var(--air-shadow-soft); backdrop-filter: blur(18px); }
 .data-table > div { min-height: 64px; border-color: rgba(54, 36, 91, 0.07) !important; }

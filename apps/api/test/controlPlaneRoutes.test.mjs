@@ -266,13 +266,16 @@ function fakeAuth(client) {
     },
     hasRole: (account, roles) => roles.includes(account.role),
     forgetProfile() {},
+    async providerAvailability() {
+      return { google: true, microsoft: false, emailMagicLink: true };
+    },
     async activeEntitlement() {
       return { status: "active" };
     },
   };
 }
 
-async function buildApp(t, client) {
+async function buildApp(t, client, overrides = {}) {
   const server = Fastify();
   t.after(() => server.close());
   registerControlPlaneRoutes(
@@ -284,6 +287,7 @@ async function buildApp(t, client) {
       stripe: { enabled: false },
       chromeExtensionCompatibleVersions: [],
       chromeExtensionEnabled: false,
+      ...overrides,
     },
     fakeAuth(client),
   );
@@ -705,6 +709,33 @@ test("queued emails more than a day overdue are canceled instead of sent late", 
   const status = Object.fromEntries(client.tables.notification_jobs.map((job) => [job.id, job.status]));
   assert.deepEqual(status, { "job-old": "canceled", "job-due": "queued", "job-later": "queued" });
   assert.equal(client.tables.notification_jobs.find((job) => job.id === "job-old").last_error, "NOT_SENT_IN_TIME");
+});
+
+test("an invitation returns a link the admin can share; the API keeps only its hash", async (t) => {
+  const { createHash } = await import("node:crypto");
+  const client = createFakeSupabase({ organization_invitations: [], notification_jobs: [], audit_events: [], product_events: [] });
+  const server = await buildApp(t, client, { appUrl: "https://app.airboard.test" });
+  const response = await server.inject({
+    method: "POST",
+    url: "/organization/invitations",
+    headers: { authorization: "Bearer owner" },
+    payload: { email: "new@airboard.test", role: "member" },
+  });
+  assert.equal(response.statusCode, 201, response.body);
+  const token = /^https:\/\/app\.airboard\.test\/invite\/([0-9a-f-]{72})$/.exec(response.json().inviteUrl)?.[1];
+  assert.ok(token, response.json().inviteUrl);
+  const stored = client.tables.organization_invitations[0];
+  assert.equal(stored.token_hash, createHash("sha256").update(token).digest("hex"));
+  assert.equal(JSON.stringify(stored).includes(token), false);
+});
+
+test("email sign-in is offered only where this deployment switches it on", async (t) => {
+  const providers = async (emailSignInEnabled) => {
+    const server = await buildApp(t, createFakeSupabase({}), { emailSignInEnabled });
+    return (await server.inject({ method: "GET", url: "/auth/config" })).json().providers;
+  };
+  assert.deepEqual(await providers(false), { google: true, microsoft: false, emailMagicLink: false });
+  assert.deepEqual(await providers(true), { google: true, microsoft: false, emailMagicLink: true });
 });
 
 test("/me reports a pilot that ended instead of hiding it", () => {
