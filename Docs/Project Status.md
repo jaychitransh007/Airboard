@@ -16,7 +16,7 @@
 
 - **Voice commands:** the built-in grammar handles exact phrasings instantly; anything else goes to OpenAI `gpt-5.6-luna`, the only allowed intent model since 5 November 2026, on OpenAI's priority tier (typically 1.7 s, the slowest 5% about 2.6 s).
 - **Health:** the API's `/ready` reports the database and `boardFanOut` (live boards across instances). Cloud Run restarts an instance that stops answering its health path (API `/health`, web `/favicon.ico`) for 90 seconds.
-- **Launch check:** `pnpm launch:check:deployed` checks the live revisions and passes **19 of 23**.
+- **Launch check:** `pnpm launch:check:deployed` checks the live revisions and passes **19 of 22**. The remaining blockers are a named release owner, a monitored support path and the commercial smoke test. The pilot signs people in with Google and sends no email, so it needs no email sender (decided 5 November 2026).
 - **Rollback:** the web to `launch-05c0281`; the API to `launch-db35e58` (prompt 2.10), `launch-fe9f36b` (prompt 2.9, standard tier) or `launch-05c0281` (prompt 2.8); both services to `launch-854858a` to restore the `gpt-5.4-mini` intent model (`AIRBOARD_RELEASE=launch-<hash> infra/cloud-run/release.sh promote web|api`).
 - **Code:** `main`. The working branch `codex/production-readiness` reached it on 5 November 2026 through these pull requests:
   - #1: launch hardening.

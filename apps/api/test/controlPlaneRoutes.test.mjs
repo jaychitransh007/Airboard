@@ -689,6 +689,24 @@ test("workspace deletion is refused if the requester is no longer its owner", as
   );
 });
 
+test("queued emails more than a day overdue are canceled instead of sent late", async (t) => {
+  const tables = lifecycleTables();
+  const overdue = { id: "job-old", status: "queued", attempts: 0, template_key: "trial_welcome", recipient_email: "a@airboard.test", send_after: new Date(Date.now() - 2 * DAY).toISOString() };
+  const due = { id: "job-due", status: "queued", attempts: 0, template_key: "trial_welcome", recipient_email: "b@airboard.test", send_after: new Date(Date.now() - 60_000).toISOString() };
+  const later = { id: "job-later", status: "queued", attempts: 0, template_key: "trial_expired", recipient_email: "c@airboard.test", send_after: new Date(Date.now() + DAY).toISOString() };
+  tables.notification_jobs = [overdue, due, later];
+  const client = createFakeSupabase(tables);
+  const server = await buildApp(t, client);
+
+  const response = await runLifecycle(server);
+  assert.equal(response.statusCode, 200, response.body);
+  // No email provider is configured in this test, as in the pilot.
+  assert.deepEqual(response.json().notifications, { configured: false, sent: 0, failed: 0, expired: 1 });
+  const status = Object.fromEntries(client.tables.notification_jobs.map((job) => [job.id, job.status]));
+  assert.deepEqual(status, { "job-old": "canceled", "job-due": "queued", "job-later": "queued" });
+  assert.equal(client.tables.notification_jobs.find((job) => job.id === "job-old").last_error, "NOT_SENT_IN_TIME");
+});
+
 test("/me reports a pilot that ended instead of hiding it", () => {
   const expired = { status: "expired", valid_until: "2026-11-01T00:00:00.000Z" };
   const pending = { status: "pending", valid_until: "2026-11-02T00:00:00.000Z" };

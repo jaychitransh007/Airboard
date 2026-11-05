@@ -165,6 +165,11 @@ const baseConfiguration = [
   ["local-entitlements", "AIRBOARD_LOCAL_ENTITLEMENTS is disabled", () => env.AIRBOARD_LOCAL_ENTITLEMENTS === "false"],
   ["transcription", "Deepgram transcription is configured", () => present("DEEPGRAM_API_KEY")],
   ["semantic-intent", "OpenAI semantic fallback is configured", () => present("AIRBOARD_INTENT_API_KEY") || present("OPENAI_API_KEY")],
+];
+
+// The controlled pilot signs people in with Google and sends no lifecycle
+// email (decided 2026-11-05); every wider release needs an email sender.
+const emailConfiguration = [
   ["lifecycle-email", "Resend lifecycle email delivery and sender are configured", () => present("RESEND_API_KEY") && present("AIRBOARD_EMAIL_FROM")],
 ];
 
@@ -246,6 +251,7 @@ const inheritedScopes = {
 
 const configurationChecks = [
   ...baseConfiguration,
+  ...(scope === "controlled-pilot" ? [] : emailConfiguration),
   ...(scope === "paid-ga" ? paidConfiguration : []),
   ...(scope === "chrome-public" ? chromeConfiguration : []),
 ].map(([id, description, evaluate]) => ({
