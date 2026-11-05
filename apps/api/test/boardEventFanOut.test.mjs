@@ -111,6 +111,9 @@ test("events reach the other instances on a live board, never the sender, over a
   assert.match(hub.removed.at(-1), /^airboard:fan-out-probe:/);
   const refusing = supabaseFanOut({ ...hub.client(), channel: () => { throw new Error("NO_REALTIME"); } }, table);
   assert.equal(await refusing.probe(), "NO_REALTIME");
+  const denied = { on() { return this; }, subscribe(callback) { callback("CHANNEL_ERROR", new Error("Unauthorized")); return this; } };
+  const denying = supabaseFanOut({ ...hub.client(), channel: () => denied }, table);
+  assert.equal(await denying.probe(), "CHANNEL_ERROR: Unauthorized", "the server's reason is kept for the log");
 });
 
 test("an event too large for one message is sent as its sequence and loaded from the database", async () => {

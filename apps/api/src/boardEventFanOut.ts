@@ -13,7 +13,7 @@ export type BoardEventFanOut = {
   /** Receive a session's events from other instances; returns the stop function. */
   join(sessionId: string, deliver: (events: BoardEvent[]) => void): () => void;
   close(): Promise<void>;
-  /** Joins and leaves a throwaway channel; resolves to how the join went. */
+  /** Joins and leaves a throwaway channel; resolves to how the join went ("SUBSCRIBED", or the failure and its reason). */
   probe?(): Promise<string>;
 };
 
@@ -223,8 +223,8 @@ export function supabaseFanOut(
       sessions.clear();
       await Promise.all(channels.map((channel) => client.removeChannel(channel).catch(() => undefined)));
     },
-    // Proves at startup that this key may join private channels, so a
-    // misconfigured project shows in the logs before two instances disagree.
+    // Proves this key may join private channels, so a misconfigured project
+    // shows before two instances disagree.
     probe() {
       return new Promise<string>((resolve) => {
         let channel: FanOutChannel | undefined;
@@ -236,12 +236,12 @@ export function supabaseFanOut(
           if (channel) void client.removeChannel(channel).catch(() => undefined);
           resolve(status);
         };
-        timer = setTimeout(() => finish("TIMED_OUT"), 15_000);
+        timer = setTimeout(() => finish("TIMED_OUT"), 8_000);
         (timer as { unref?: () => void }).unref?.();
         try {
           channel = client.channel(`airboard:fan-out-probe:${randomUUID()}`, CHANNEL_OPTIONS);
-          channel.subscribe((status) => {
-            if (status !== "CLOSED") finish(status);
+          channel.subscribe((status, error) => {
+            if (status !== "CLOSED") finish(error ? `${status}: ${error.message}` : status);
           });
         } catch (error) {
           finish(error instanceof Error ? error.message : "ERROR");

@@ -99,12 +99,22 @@ export async function buildServer(
     );
     return room;
   };
-  server.addHook("onReady", async () => {
-    void fanOut.probe?.().then((status) => {
-      if (status === "SUBSCRIBED") server.log.info("board event fan-out ready");
-      else server.log.warn({ status }, "board event fan-out cannot join its channels");
-    });
-  });
+  // Whether this instance may join the channels live boards share. Checked
+  // inside a request (/ready), since Cloud Run throttles CPU between them; a
+  // pass is reused for 10 minutes and a failure retried after 30 seconds.
+  let fanOutCheck: { status: Promise<string>; at: number } | undefined;
+  const boardFanOutStatus = async (): Promise<"ready" | "unavailable" | "off"> => {
+    if (!fanOut.probe) return "off";
+    const age = fanOutCheck ? Date.now() - fanOutCheck.at : Infinity;
+    if (!fanOutCheck || age > 600_000 || (age > 30_000 && (await fanOutCheck.status) !== "SUBSCRIBED")) {
+      const status = fanOut.probe().then((result) => {
+        if (result !== "SUBSCRIBED") server.log.warn({ status: result }, "board event fan-out cannot join its channels");
+        return result;
+      });
+      fanOutCheck = { status, at: Date.now() };
+    }
+    return (await fanOutCheck.status) === "SUBSCRIBED" ? "ready" : "unavailable";
+  };
   server.addHook("onClose", async () => {
     await fanOut.close();
   });
@@ -209,6 +219,7 @@ export async function buildServer(
         billing: billingReady ? "configured" : "not_configured",
         transcription: Boolean(config.transcription.apiKey),
         semanticIntent: Boolean(config.semanticIntent.apiKey),
+        boardFanOut: await boardFanOutStatus(),
       },
     };
   });

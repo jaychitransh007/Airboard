@@ -564,7 +564,11 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - The owner-absence lock is safe across instances: a timer on one instance checks the session row, and owner heartbeats every 30 s mark it active well inside the 180 s grace period.
     - Rate limits stay per instance.
     - Browsers cannot listen in: the channels are private, the API joins them with its service key, and there is no `realtime.messages` policy for `anon` or `authenticated`.
-    - **Startup probe:** at startup the API joins and leaves a throwaway private channel. It logs `board event fan-out ready`, or `board event fan-out cannot join its channels` with the status.
+    - **Fan-out check in `/ready`:**
+      - `/ready` reports `dependencies.boardFanOut` as `ready`, `unavailable` or `off`. To get it, the instance joins and leaves a throwaway private channel.
+      - A pass is reused for 10 minutes. A failure is retried after 30 seconds and logged as `board event fan-out cannot join its channels`, with the server's reason.
+      - A fan-out failure does not change `ready`, because one instance still works.
+      - The check first ran at startup. On Cloud Run that reported `CHANNEL_ERROR` because CPU is throttled outside requests. The same key, Node 22 and the same client joined production's private channels from outside Cloud Run, so the check moved into a request.
     - `AIRBOARD_REALTIME_FANOUT=off` turns the fan-out off.
     - **Capacity:** one API instance uses one Realtime connection, and Supabase allows 100 channels per connection. Cloud Run concurrency is 80 sockets per instance, so an instance stays under that limit. Raising concurrency above 100 would need more connections.
     - **Verified:**
