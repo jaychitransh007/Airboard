@@ -6,7 +6,7 @@ categoryLabel: Using the board
 order: 8
 status: shipped
 audiences: ["everyone", "creators", "tutors"]
-lastVerified: 2026-07-30
+lastVerified: 2026-11-05
 sources: ["README.md", "apps/web/src/features/board/lightboardComposition.ts", "apps/web/src/features/board/screenUnderlay.ts", "apps/web/src/features/board/lightboardRecorder.ts"]
 ---
 
@@ -16,7 +16,7 @@ then active camera, then dark canvas.
 
 ## Use a screen
 
-1. Choose **Use screen**.
+1. Open the board menu (**•••**) and choose **Show a screen behind the board**.
 2. Select the screen or window in the browser picker.
 3. Confirm the intended source appears behind the diagram.
 4. Stop sharing from Airboard or the browser when finished.

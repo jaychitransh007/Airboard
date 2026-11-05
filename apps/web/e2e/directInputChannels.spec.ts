@@ -164,7 +164,9 @@ test("pointer, touchpad, and stylus streams ground to attributed final state", a
   await page.keyboard.press("q");
   expect((await objectPositions(page))[0]).toEqual(movedPointerPosition);
 
-  await page.getByRole("button", { name: "Open board settings" }).click();
+  await page.getByRole("button", { name: "More board actions" }).click();
+
+  await page.getByRole("menuitem", { name: "Board settings" }).click();
   await page.locator("#input-mode").selectOption("touchpad");
   await expect(
     page.getByText("Touchpad Writing - most reliable. Press and drag to draw."),

@@ -371,3 +371,52 @@
     backdrop-filter: none;
   }
 }
+
+/* The compact bar: identity, colours, order, duplicate, delete and More. */
+.compact .scroller {
+  gap: 5px;
+  min-height: 46px;
+  padding: 5px 6px;
+}
+
+.compact .kindLabel {
+  max-width: 72px;
+}
+
+.swatch {
+  position: relative;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--panel-border, #d8d8d1);
+  border-radius: 9px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.swatch:hover,
+.swatch:focus-within {
+  border-color: #b9a6f2;
+  box-shadow: 0 0 0 3px rgba(103, 66, 206, 0.12);
+}
+
+.swatch input {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.swatch input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.swatch input::-webkit-color-swatch {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+}

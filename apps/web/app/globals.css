@@ -3447,7 +3447,8 @@ button.screen-underlay-active {
 
 .canvas-topbar {
   position: relative;
-  z-index: 30;
+  /* Above the settings drawer (35), so the board menu opens over it. */
+  z-index: 40;
   min-height: 64px;
   padding: 8px 14px;
   border-color: rgba(40, 25, 62, 0.1);
@@ -3874,7 +3875,8 @@ button.screen-underlay-active {
   top: calc(100% + 10px);
   right: 0;
   display: grid;
-  width: 224px;
+  width: 268px;
+  max-width: calc(100vw - 24px);
   gap: 3px;
   padding: 7px;
   border: 1px solid rgba(52, 34, 83, 0.12);
@@ -3906,6 +3908,21 @@ button.screen-underlay-active {
 
 .canvas-more-menu button.danger {
   color: #c43232;
+}
+
+.canvas-more-menu button:disabled {
+  color: #a59cae;
+  cursor: default;
+}
+
+.canvas-more-menu button:disabled:hover {
+  background: transparent;
+}
+
+.canvas-more-separator {
+  height: 1px;
+  margin: 3px 6px;
+  background: rgba(52, 34, 83, 0.1);
 }
 
 .canvas-workspace {
@@ -3992,10 +4009,9 @@ button.screen-underlay-active {
   min-height: 92px;
 }
 
-/* Centre the dock between the canvas's left edge and the zoom controls, which
-   sit just left of the Airo panel (396px from the right, about 126px wide). */
+/* Centre the dock in the canvas left of the full Airo panel (396px). */
 .canvas-workspace.copilot-open .object-dock.catalog-dock {
-  left: calc((100% - 536px) / 2);
+  left: calc((100% - 396px) / 2);
 }
 
 .canvas-workspace.settings-open:not(.copilot-open) .object-dock.catalog-dock {
@@ -4082,7 +4098,14 @@ button.screen-underlay-active {
   color: #d7c9ff;
 }
 
-.canvas-copilot-header > button {
+.canvas-copilot-header > .canvas-copilot-header-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.canvas-copilot-header-actions > button {
   width: 30px;
   min-height: 30px;
   padding: 0;
@@ -4092,6 +4115,71 @@ button.screen-underlay-active {
   color: rgba(255, 255, 255, 0.78);
   font-size: 22px;
   line-height: 1;
+}
+
+.canvas-copilot-header-actions > .canvas-copilot-power,
+.canvas-copilot-header-actions > button[aria-label$="Airo panel"] {
+  font-size: 15px;
+}
+
+.canvas-copilot-power.on {
+  border-color: rgba(207, 191, 255, 0.5);
+  background: rgba(126, 91, 239, 0.5);
+  color: #fff;
+}
+
+/* While Airo listens the panel is a strip in the top-right corner: what it
+   heard, what it is doing, and one line to type into. */
+.canvas-copilot.canvas-copilot-slim {
+  bottom: auto;
+  width: min(320px, calc(100% - 36px));
+  padding-bottom: 10px;
+}
+
+.canvas-copilot-slim .canvas-copilot-header {
+  padding: 10px 10px 9px 12px;
+}
+
+.canvas-copilot-slim-heard,
+.canvas-copilot-slim-status {
+  margin: 0;
+  padding: 0 14px;
+}
+
+.canvas-copilot-slim-heard {
+  overflow: hidden;
+  padding-top: 10px;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 12px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-copilot-slim-status {
+  display: -webkit-box;
+  overflow: hidden;
+  padding-top: 3px;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 11px;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.canvas-copilot-slim .canvas-copilot-composer {
+  margin-top: 9px;
+  padding: 5px;
+}
+
+.canvas-copilot-slim .canvas-copilot-composer textarea {
+  min-height: 30px;
+  resize: none;
+}
+
+.canvas-copilot-slim .canvas-copilot-composer .primary {
+  min-height: 30px;
+  height: 30px;
 }
 
 .canvas-copilot-heard,
@@ -4341,50 +4429,30 @@ button.screen-underlay-active {
   box-shadow: 0 0 0 4px rgba(102, 224, 176, 0.12);
 }
 
-.canvas-zoom-controls {
-  position: absolute;
-  z-index: 11;
-  right: 22px;
-  bottom: 24px;
-  display: flex;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
-  background: rgba(31, 23, 43, 0.84);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
-  backdrop-filter: blur(16px);
-}
-
-.canvas-workspace.copilot-open .canvas-zoom-controls {
-  right: 396px;
-}
-
-.canvas-workspace.settings-open.copilot-open .canvas-zoom-controls {
-  display: none;
-}
-
-.canvas-zoom-controls button {
+/* Canvas zoom sits at the end of the tool dock. */
+.canvas-workspace .creation-toolbar .canvas-dock-zoom > button {
   min-width: 34px;
-  min-height: 36px;
-  padding: 0 9px;
-  border: 0;
-  border-radius: 0;
+  height: 42px;
+  min-height: 42px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 9px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.78);
+  color: #4d4853;
+  font-size: 17px;
 }
 
-.canvas-zoom-controls button + button {
-  border-left: 1px solid rgba(255, 255, 255, 0.09);
+.canvas-workspace .creation-toolbar .canvas-dock-zoom > button:hover {
+  border-color: rgba(112, 75, 229, 0.14);
+  background: #f0ebff;
+  color: #6942db;
 }
 
-.canvas-zoom-controls button:hover {
-  background: rgba(255, 255, 255, 0.09);
-  color: #fff;
-}
-
-.canvas-zoom-controls .canvas-zoom-value {
-  min-width: 56px;
-  font-size: 10px;
+.canvas-workspace .creation-toolbar .canvas-dock-zoom > .canvas-zoom-value {
+  min-width: 50px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 720;
 }
 
 .canvas-inspector {
@@ -4725,15 +4793,11 @@ button.screen-underlay-active {
     width: min(326px, calc(100% - 154px));
   }
 
-  .canvas-workspace.copilot-open .canvas-zoom-controls {
-    right: 354px;
-  }
-
 }
 
-/* Where the 537px tool dock no longer fits beside the open side panels, the
-   panels stop above the bottom row instead, and the dock and zoom controls
-   keep their closed-panel layout across the full width. Each breakpoint is
+/* Where the 675px tool dock (zoom included) no longer fits beside the open
+   side panels, the panels stop above the bottom row instead, and the dock
+   keeps its closed-panel layout across the full width. Each breakpoint is
    where the dock stops fitting beside that panel combination. */
 @media (max-width: 1120px) {
   .canvas-workspace.copilot-open .object-dock.catalog-dock {
@@ -4741,13 +4805,13 @@ button.screen-underlay-active {
   }
 }
 
-@media (max-width: 1300px) {
+@media (max-width: 1440px) {
   .canvas-workspace.settings-open.copilot-open .object-dock.catalog-dock {
     left: 50%;
   }
 }
 
-@media (max-width: 940px) {
+@media (max-width: 1080px) {
   .canvas-workspace.settings-open:not(.copilot-open) .object-dock.catalog-dock {
     left: 50%;
   }
@@ -4757,13 +4821,9 @@ button.screen-underlay-active {
   .canvas-workspace.copilot-open .canvas-copilot {
     bottom: 94px;
   }
-
-  .canvas-workspace.copilot-open .canvas-zoom-controls {
-    right: 22px;
-  }
 }
 
-@media (min-width: 701px) and (max-width: 1300px) {
+@media (min-width: 701px) and (max-width: 1440px) {
   .canvas-workspace.settings-open.copilot-open .canvas-copilot,
   .canvas-workspace.settings-open.copilot-open .canvas-inspector {
     bottom: 94px;
@@ -4817,11 +4877,8 @@ button.screen-underlay-active {
     gap: 2px;
   }
 
-  /* Undo and redo stay one tap away in the ••• menu, and phone browsers
-     cannot share a screen, so the top bar keeps only what fits. */
-  .canvas-toolbar [data-testid="toolbar-undo"],
-  .canvas-toolbar [data-testid="toolbar-redo"],
-  .canvas-toolbar [data-testid="screen-underlay-toggle"] {
+  /* Phone browsers cannot share a screen. */
+  .canvas-more-menu [data-testid="screen-underlay-toggle"] {
     display: none;
   }
 
@@ -4900,7 +4957,9 @@ button.screen-underlay-active {
     right: 10px;
   }
 
-  .canvas-zoom-controls {
+  /* Phones pinch to zoom; the dock keeps its width for tools. */
+  .canvas-workspace .object-dock.catalog-dock.creation-toolbar > .creation-toolbar-group.canvas-dock-zoom,
+  .canvas-workspace .object-dock.catalog-dock.creation-toolbar > .catalog-dock-divider:has(+ .canvas-dock-zoom) {
     display: none;
   }
 

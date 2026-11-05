@@ -6,7 +6,7 @@ categoryLabel: Using the board
 order: 7
 status: shipped
 audiences: ["everyone", "keyboard-only"]
-lastVerified: 2026-07-30
+lastVerified: 2026-11-05
 sources: ["apps/web/src/features/board/AirboardPrototype.tsx", "Docs/Touchpad Writing Mode Implementation Notes.md"]
 ---
 
@@ -35,8 +35,11 @@ canvas does not trap keyboard focus.
 ## Pointer workflow
 
 Choose a tool from the object dock, click or drag onto the board, and use
-selection controls to move or edit the object. Double-click a labelled object
-to edit it. Use the typed composer for fast multi-object changes.
+selection controls to move or edit the object. A small toolbar floats above the
+selected object with its colours, layer order, duplicate and delete; **More**
+shows every setting, such as exact size and rotation. Double-click a labelled
+object to edit it. Use the typed composer for fast multi-object changes. Zoom
+sits at the end of the object dock; click the percentage to reset it.
 
 ## Touchpad writing
 

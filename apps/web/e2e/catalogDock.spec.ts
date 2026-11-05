@@ -137,13 +137,14 @@ test("the creation toolbar exposes FigJam's four groups in the expected order", 
     await toolbar.locator(":scope > [role=group]").evaluateAll((groups) =>
       groups.map((group) => group.getAttribute("aria-label")),
     ),
-  ).toEqual(["Navigation", "Objects", "Tools", "Insert"]);
+  ).toEqual(["Navigation", "Objects", "Tools", "Insert", "Canvas zoom controls"]);
 
   const expectedButtons: Record<string, string[]> = {
     Navigation: ["Move, shortcut V", "Hand, shortcut H"],
     Objects: ["Draw", "Sticky note, shortcut S", "Shape", "Connector"],
     Tools: ["Text, shortcut T", "Section, shortcut ⇧S", "Table, shortcut ⇧T", "Stamp"],
     Insert: ["Insert"],
+    "Canvas zoom controls": ["Zoom out", "Reset canvas zoom", "Zoom in"],
   };
   for (const [groupName, labels] of Object.entries(expectedButtons)) {
     const group = toolbar.getByRole("group", { name: groupName });

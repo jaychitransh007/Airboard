@@ -1116,6 +1116,8 @@ export function AirboardPrototype({
   const catalogCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dockRef = useRef<HTMLDivElement | null>(null);
   const [copilotOpen, setCopilotOpen] = useState(true);
+  // Expanded by hand while Airo listens; otherwise the panel shrinks to a strip.
+  const [copilotExpanded, setCopilotExpanded] = useState(false);
   const copilotActivitySequenceRef = useRef(1);
   const [copilotActivity, setCopilotActivity] = useState<CopilotActivityEntry[]>([
     {
@@ -1243,6 +1245,35 @@ export function AirboardPrototype({
     // viewportRevision is the trigger: the viewport itself lives in a ref.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [viewportRevision],
+  );
+  // The selected element's box in the window, so its toolbar can float beside it.
+  const selectedTransform = selectedSceneElement?.transform;
+  const selectionAnchor = useMemo(
+    () => {
+      const canvas = canvasRef.current;
+      if (!selectedTransform || !canvas) return null;
+      const rect = canvas.getBoundingClientRect();
+      const { x, y, width, height } = selectedTransform;
+      const topLeft = screenPointFromBoard(boardViewportRef.current, { x, y });
+      const bottomRight = screenPointFromBoard(boardViewportRef.current, { x: x + width, y: y + height });
+      return {
+        left: rect.left + topLeft.x,
+        top: rect.top + topLeft.y,
+        right: rect.left + bottomRight.x,
+        bottom: rect.top + bottomRight.y,
+      };
+    },
+    // The transform's numbers and viewportRevision are the triggers; the
+    // viewport lives in a ref and the element is mutated in place.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      selectedSceneElement?.id,
+      selectedTransform?.x,
+      selectedTransform?.y,
+      selectedTransform?.width,
+      selectedTransform?.height,
+      viewportRevision,
+    ],
   );
   // Scene events live in a mutable board ref; reading this state makes their
   // contextual DOM controls update after patches without duplicating the board.
@@ -8359,8 +8390,19 @@ export function AirboardPrototype({
   const airoInputsActive =
     (airoVoiceAvailable || airoHandsAvailable) &&
     (speechArmed || cameraStatus === "active");
+  // A camera still starting counts as on, so the panel doesn't flip to full
+  // and back while hand tracking loads.
+  const airoEngaged =
+    airoInputsActive || cameraStatus === "starting" || cameraStatus === "tracker_loading";
+  const copilotMode: "closed" | "slim" | "full" = !copilotOpen
+    ? "closed"
+    : airoEngaged && !copilotExpanded
+      ? "slim"
+      : "full";
 
   const toggleAiroInputs = useCallback(() => {
+    // Turning Airo on starts from the strip; turning it off leaves the full panel.
+    setCopilotExpanded(false);
     if (airoInputsActive) {
       if (airoVoiceAvailable && speechArmed) {
         toggleVoiceInput();
@@ -10672,66 +10714,9 @@ export function AirboardPrototype({
                 </span>
               </div>
             </div>
+            {/* The top bar keeps Share and one menu; every other board action,
+                including Airo and settings, lives in that menu. */}
             <div className="toolbar canvas-toolbar">
-              <button
-                type="button"
-                className="toolbar-icon-button"
-                aria-label="Undo"
-                title="Undo (Ctrl/⌘ Z)"
-                data-testid="toolbar-undo"
-                onClick={() => undoLastAction("button")}
-              >
-                <span aria-hidden="true">↶</span>
-              </button>
-              <button
-                type="button"
-                className="toolbar-icon-button"
-                aria-label="Redo"
-                title="Redo (Ctrl/⌘ Shift Z)"
-                data-testid="toolbar-redo"
-                onClick={redoLastSceneAction}
-              >
-                <span aria-hidden="true">↷</span>
-              </button>
-              <button
-                type="button"
-                className={`toolbar-button${airoInputsActive ? " active" : ""}`}
-                disabled={cameraStatus === "starting" || cameraStatus === "tracker_loading"}
-                aria-label={
-                  airoInputsActive
-                    ? "Turn off Airo voice and hand tracking"
-                    : "Enable Airo voice and hand tracking"
-                }
-                onClick={toggleAiroInputs}
-              >
-                <span aria-hidden="true">✦</span>
-                <span>Airo</span>
-              </button>
-              <button
-                type="button"
-                className={`toolbar-button${screenUnderlayStatus === "active" ? " active" : ""}`}
-                data-testid="screen-underlay-toggle"
-                disabled={screenUnderlayStatus === "starting" || recordingState === "recording"}
-                aria-label={
-                  screenUnderlayStatus === "active"
-                    ? "Stop using the shared screen behind Airboard"
-                    : "Choose a screen or window to show behind Airboard"
-                }
-                onClick={() =>
-                  screenUnderlayStatus === "active"
-                    ? stopScreenUnderlay("Screen background stopped.")
-                    : void startScreenUnderlay()
-                }
-              >
-                <span aria-hidden="true">▣</span>
-                <span>
-                  {screenUnderlayStatus === "starting"
-                    ? "Choosing…"
-                    : screenUnderlayStatus === "active"
-                      ? "Stop screen"
-                      : "Use screen"}
-                  </span>
-              </button>
               <button
                 type="button"
                 className="toolbar-share-button"
@@ -10748,19 +10733,50 @@ export function AirboardPrototype({
               <div className="canvas-more">
                 <button
                   type="button"
-                  className={`toolbar-icon-button${moreMenuOpen ? " active" : ""}`}
+                  className={`toolbar-icon-button${moreMenuOpen || settingsOpen ? " active" : ""}`}
                   aria-label="More board actions"
                   aria-haspopup="menu"
                   aria-expanded={moreMenuOpen}
-                  onClick={() => {
-                    setMoreMenuOpen((value) => !value);
-                    setSettingsOpen(false);
-                  }}
+                  onClick={() => setMoreMenuOpen((value) => !value)}
                 >
                   <span aria-hidden="true">•••</span>
                 </button>
                 {moreMenuOpen ? (
                   <div ref={moreMenuRef} className="canvas-more-menu" role="menu" aria-label="Board actions">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={cameraStatus === "starting" || cameraStatus === "tracker_loading"}
+                      onClick={() => {
+                        toggleAiroInputs();
+                        setMoreMenuOpen(false);
+                      }}
+                    >
+                      <span aria-hidden="true">✦</span>
+                      {airoInputsActive ? "Turn off Airo voice and hands" : "Turn on Airo voice and hands"}
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      data-testid="screen-underlay-toggle"
+                      disabled={screenUnderlayStatus === "starting" || recordingState === "recording"}
+                      onClick={() => {
+                        setMoreMenuOpen(false);
+                        if (screenUnderlayStatus === "active") {
+                          stopScreenUnderlay("Screen background stopped.");
+                        } else {
+                          void startScreenUnderlay();
+                        }
+                      }}
+                    >
+                      <span aria-hidden="true">▣</span>
+                      {screenUnderlayStatus === "starting"
+                        ? "Choosing a screen…"
+                        : screenUnderlayStatus === "active"
+                          ? "Stop the screen behind the board"
+                          : "Show a screen behind the board"}
+                    </button>
+                    <div className="canvas-more-separator" role="separator" />
                     <button
                       type="button"
                       role="menuitem"
@@ -10828,6 +10844,19 @@ export function AirboardPrototype({
                       <span aria-hidden="true">⧉</span>
                       Copy image
                     </button>
+                    <div className="canvas-more-separator" role="separator" />
+                    <button
+                      type="button"
+                      role="menuitem"
+                      aria-controls="canvas-settings"
+                      onClick={() => {
+                        setSettingsOpen((value) => !value);
+                        setMoreMenuOpen(false);
+                      }}
+                    >
+                      <span aria-hidden="true">⚙</span>
+                      {settingsOpen ? "Close board settings" : "Board settings"}
+                    </button>
                     <Link
                       href="/help/using-the-board/commands"
                       target="_blank"
@@ -10857,19 +10886,6 @@ export function AirboardPrototype({
                   </div>
                 ) : null}
               </div>
-              <button
-                type="button"
-                className={`toolbar-icon-button${settingsOpen ? " active" : ""}`}
-                aria-label={settingsOpen ? "Close board settings" : "Open board settings"}
-                aria-expanded={settingsOpen}
-                aria-controls="canvas-settings"
-                onClick={() => {
-                  setSettingsOpen((value) => !value);
-                  setMoreMenuOpen(false);
-                }}
-              >
-                <span aria-hidden="true">⚙</span>
-              </button>
             </div>
           </>
         ) : (
@@ -10926,16 +10942,18 @@ export function AirboardPrototype({
       <div
         className={`content${standaloneEditor ? " canvas-workspace" : ""}${
           standaloneEditor && settingsOpen ? " settings-open" : ""
-        }${standaloneEditor && copilotOpen ? " copilot-open" : ""}`}
+        }${standaloneEditor && copilotMode === "full" ? " copilot-open" : ""}${
+          standaloneEditor && copilotMode === "slim" ? " copilot-slim" : ""
+        }`}
       >
         <section
           className={`board-area${boardTheme === "lightboard" ? " lightboard" : ""}`}
           aria-label="Airboard canvas"
         >
           {standaloneEditor && inputMode === "gesture" && !broadcastSafe ? (
-            copilotOpen ? (
+            copilotMode !== "closed" ? (
               <aside
-                className="canvas-copilot"
+                className={`canvas-copilot${copilotMode === "slim" ? " canvas-copilot-slim" : ""}`}
                 data-testid="canvas-copilot"
                 aria-label="Airo copilot"
               >
@@ -10944,59 +10962,113 @@ export function AirboardPrototype({
                     <span className="canvas-copilot-orbit" aria-hidden="true">✦</span>
                     <span>
                       <strong>Airo</strong>
-                      <small>{speechArmed ? "Listening continuously" : "Voice ready when started"}</small>
+                      <small>
+                        {speechArmed
+                          ? "Listening continuously"
+                          : cameraStatus === "active"
+                            ? "Watching for your hands"
+                            : "Off · turn on for voice and hands"}
+                      </small>
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    aria-label="Hide Airo copilot"
-                    onClick={() => setCopilotVisibility(false)}
-                  >
-                    ›
-                  </button>
+                  <div className="canvas-copilot-header-actions">
+                    <button
+                      type="button"
+                      className={`canvas-copilot-power${airoInputsActive ? " on" : ""}`}
+                      aria-pressed={airoInputsActive}
+                      disabled={cameraStatus === "starting" || cameraStatus === "tracker_loading"}
+                      aria-label={
+                        airoInputsActive
+                          ? "Turn off Airo voice and hand tracking"
+                          : "Enable Airo voice and hand tracking"
+                      }
+                      title={airoInputsActive ? "Turn off voice and hands" : "Turn on voice and hands"}
+                      onClick={toggleAiroInputs}
+                    >
+                      ⏻
+                    </button>
+                    {airoEngaged ? (
+                      <button
+                        type="button"
+                        aria-label={copilotMode === "slim" ? "Expand Airo panel" : "Shrink Airo panel"}
+                        title={copilotMode === "slim" ? "Show activity" : "Shrink"}
+                        onClick={() => setCopilotExpanded(copilotMode === "slim")}
+                      >
+                        {copilotMode === "slim" ? "⤢" : "⤡"}
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      aria-label="Hide Airo copilot"
+                      onClick={() => setCopilotVisibility(false)}
+                    >
+                      ›
+                    </button>
+                  </div>
                 </header>
 
-                <section className="canvas-copilot-heard" data-testid="copilot-transcript">
-                  <span>What I heard</span>
-                  <p>
-                    {speechHeardText
-                      ? `“${truncateSpeechTranscript(speechHeardText, 180)}”`
-                      : speechArmed
-                        ? "Listening for your next command…"
-                        : "Start Airo, then hold an open palm for 0.4 seconds and speak."}
-                  </p>
-                  <small className={`copilot-status ${speechRecognitionStatus}`}>
-                    {speechRecognitionLabel(speechRecognitionStatus)}
-                  </small>
-                </section>
+                {copilotMode === "slim" ? (
+                  // While Airo listens it stays out of the way: what it heard,
+                  // what it is doing, and one line to type into.
+                  <>
+                    <p className="canvas-copilot-slim-heard" data-testid="copilot-transcript">
+                      {speechHeardText
+                        ? `“${truncateSpeechTranscript(speechHeardText, 120)}”`
+                        : "Listening for your next command…"}
+                    </p>
+                    <p
+                      id="canvas-command-feedback"
+                      className="intent-feedback canvas-copilot-slim-status"
+                      aria-live="polite"
+                    >
+                      {commandFeedback}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <section className="canvas-copilot-heard" data-testid="copilot-transcript">
+                      <span>What I heard</span>
+                      <p>
+                        {speechHeardText
+                          ? `“${truncateSpeechTranscript(speechHeardText, 180)}”`
+                          : speechArmed
+                            ? "Listening for your next command…"
+                            : "Start Airo, then hold an open palm for 0.4 seconds and speak."}
+                      </p>
+                      <small className={`copilot-status ${speechRecognitionStatus}`}>
+                        {speechRecognitionLabel(speechRecognitionStatus)}
+                      </small>
+                    </section>
 
-                <section className="canvas-copilot-progress" aria-live="polite">
-                  <div className="canvas-copilot-section-title">
-                    <span>Activity</span>
-                    <small>What Airo is doing</small>
-                  </div>
-                  <ol data-testid="copilot-activity">
-                    {copilotActivity.map((entry) => (
-                      <li key={entry.id} className={entry.tone}>
-                        <span className="copilot-activity-source">{entry.source}</span>
-                        <div>
-                          <strong>{entry.title}</strong>
-                          <p>{entry.detail}</p>
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-                </section>
+                    <section className="canvas-copilot-progress" aria-live="polite">
+                      <div className="canvas-copilot-section-title">
+                        <span>Activity</span>
+                        <small>What Airo is doing</small>
+                      </div>
+                      <ol data-testid="copilot-activity">
+                        {copilotActivity.map((entry) => (
+                          <li key={entry.id} className={entry.tone}>
+                            <span className="copilot-activity-source">{entry.source}</span>
+                            <div>
+                              <strong>{entry.title}</strong>
+                              <p>{entry.detail}</p>
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
+                    </section>
 
-                <section className="canvas-copilot-current">
-                  <span>Current status</span>
-                  <p
-                    id="canvas-command-feedback"
-                    className="intent-feedback"
-                  >
-                    {commandFeedback}
-                  </p>
-                </section>
+                    <section className="canvas-copilot-current">
+                      <span>Current status</span>
+                      <p
+                        id="canvas-command-feedback"
+                        className="intent-feedback"
+                      >
+                        {commandFeedback}
+                      </p>
+                    </section>
+                  </>
+                )}
 
                 <form
                   className="canvas-copilot-composer"
@@ -11015,7 +11087,7 @@ export function AirboardPrototype({
                     ref={intentCommandInputRef}
                     data-testid="intent-command-input"
                     value={intentCommandText}
-                    rows={2}
+                    rows={copilotMode === "slim" ? 1 : 2}
                     onChange={(event) => {
                       semanticIntentRequestIdRef.current += 1;
                       if (speechRecognitionStatus === "interpreting") {
@@ -11047,10 +11119,12 @@ export function AirboardPrototype({
                     {speechRecognitionStatus === "interpreting" ? "…" : "↑"}
                   </button>
                 </form>
-                <footer className="canvas-copilot-hint">
-                  <span><strong>Undo:</strong> toolbar, Cmd/Ctrl+Z, or say “Airo, undo”</span>
-                  <span>Shift+Enter for a new line</span>
-                </footer>
+                {copilotMode === "full" ? (
+                  <footer className="canvas-copilot-hint">
+                    <span><strong>Undo:</strong> toolbar, Cmd/Ctrl+Z, or say “Airo, undo”</span>
+                    <span>Shift+Enter for a new line</span>
+                  </footer>
+                ) : null}
               </aside>
             ) : (
               <button
@@ -11068,54 +11142,6 @@ export function AirboardPrototype({
                 ) : null}
               </button>
             )
-          ) : null}
-          {standaloneEditor && inputMode === "gesture" && !broadcastSafe ? (
-            <div className="canvas-zoom-controls" aria-label="Canvas zoom controls">
-              <button
-                type="button"
-                aria-label="Zoom out"
-                onClick={() => {
-                  const canvas = canvasRef.current;
-                  if (!canvas) return;
-                  applyViewport(
-                    zoomViewport(
-                      boardViewportRef.current,
-                      0.8,
-                      { x: canvas.clientWidth / 2, y: canvas.clientHeight / 2 },
-                      currentViewportLimits(),
-                    ),
-                  );
-                }}
-              >
-                −
-              </button>
-              <button
-                type="button"
-                className="canvas-zoom-value"
-                aria-label="Reset canvas zoom"
-                onClick={() => applyViewport({ ...IDENTITY_VIEWPORT })}
-              >
-                {Math.round(viewportScale * 100)}%
-              </button>
-              <button
-                type="button"
-                aria-label="Zoom in"
-                onClick={() => {
-                  const canvas = canvasRef.current;
-                  if (!canvas) return;
-                  applyViewport(
-                    zoomViewport(
-                      boardViewportRef.current,
-                      1.25,
-                      { x: canvas.clientWidth / 2, y: canvas.clientHeight / 2 },
-                      currentViewportLimits(),
-                    ),
-                  );
-                }}
-              >
-                +
-              </button>
-            </div>
           ) : null}
           {boardTheme === "lightboard" &&
           surface === "standalone" &&
@@ -11240,6 +11266,7 @@ export function AirboardPrototype({
           {!broadcastSafe ? (
             <SceneContextToolbar
               selected={selectedSceneElement}
+              anchor={selectionAnchor}
               onPatch={(patches) => {
                 if (selectedElementId) patchSceneElement(selectedElementId, patches);
               }}
@@ -11264,6 +11291,59 @@ export function AirboardPrototype({
             <>
               <CreationToolbar
                 dockRef={dockRef}
+                trailing={
+                  standaloneEditor && !broadcastSafe ? (
+                    <div className="creation-toolbar-group canvas-dock-zoom" role="group" aria-label="Canvas zoom controls">
+                      <button
+                        type="button"
+                        data-toolbar-button="true"
+                        aria-label="Zoom out"
+                        onClick={() => {
+                          const canvas = canvasRef.current;
+                          if (!canvas) return;
+                          applyViewport(
+                            zoomViewport(
+                              boardViewportRef.current,
+                              0.8,
+                              { x: canvas.clientWidth / 2, y: canvas.clientHeight / 2 },
+                              currentViewportLimits(),
+                            ),
+                          );
+                        }}
+                      >
+                        −
+                      </button>
+                      <button
+                        type="button"
+                        data-toolbar-button="true"
+                        className="canvas-zoom-value"
+                        aria-label="Reset canvas zoom"
+                        onClick={() => applyViewport({ ...IDENTITY_VIEWPORT })}
+                      >
+                        {Math.round(viewportScale * 100)}%
+                      </button>
+                      <button
+                        type="button"
+                        data-toolbar-button="true"
+                        aria-label="Zoom in"
+                        onClick={() => {
+                          const canvas = canvasRef.current;
+                          if (!canvas) return;
+                          applyViewport(
+                            zoomViewport(
+                              boardViewportRef.current,
+                              1.25,
+                              { x: canvas.clientWidth / 2, y: canvas.clientHeight / 2 },
+                              currentViewportLimits(),
+                            ),
+                          );
+                        }}
+                      >
+                        +
+                      </button>
+                    </div>
+                  ) : null
+                }
                 activeTool={temporaryHandActive ? "hand" : activeCreationTool}
                 openPanel={openCatalogId}
                 gestureHover={dockGestureHover}

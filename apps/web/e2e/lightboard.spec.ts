@@ -28,7 +28,8 @@ async function openStandalone(page: Page) {
   if (await cookieChoice.isVisible()) await cookieChoice.click();
   // Advanced appearance and studio controls intentionally live in the
   // closed-by-default board settings drawer.
-  await page.getByRole("button", { name: "Open board settings" }).click();
+  await page.getByRole("button", { name: "More board actions" }).click();
+  await page.getByRole("menuitem", { name: "Board settings" }).click();
 }
 
 async function installFakeScreenCapture(page: Page) {
@@ -124,6 +125,8 @@ test("a selected screen becomes the unmirrored underlay and survives presentatio
 }) => {
   await installFakeScreenCapture(page);
   await openStandalone(page);
+
+  await page.getByRole("button", { name: "More board actions" }).click();
 
   await page.getByTestId("screen-underlay-toggle").click();
   await expect(page.getByLabel("Lightboard (neon) theme")).toBeChecked();
@@ -262,6 +265,7 @@ test("local contrast plates darken only diagram clusters over a shared screen", 
 }) => {
   await installFakeScreenCapture(page);
   await openStandalone(page);
+  await page.getByRole("button", { name: "More board actions" }).click();
   await page.getByTestId("screen-underlay-toggle").click();
 
   const input = page.getByTestId("intent-command-input");
@@ -346,7 +350,8 @@ test("theme choice survives a reload", async ({ page }) => {
   await openStandalone(page);
   await page.getByLabel("Lightboard (neon) theme").check();
   await page.reload();
-  await page.getByRole("button", { name: "Open board settings" }).click();
+  await page.getByRole("button", { name: "More board actions" }).click();
+  await page.getByRole("menuitem", { name: "Board settings" }).click();
   await expect(page.getByLabel("Lightboard (neon) theme")).toBeChecked();
   await expect(page.locator("section.board-area.lightboard")).toBeVisible();
 });

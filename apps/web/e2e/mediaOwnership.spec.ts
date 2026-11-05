@@ -100,7 +100,7 @@ test("delegated side panel stays compact and points at the shared board", async 
   expect(await page.evaluate(() => window.__gumCalls)).toBe(0);
 });
 
-test("standalone combines camera and voice into one Airo entry point", async ({ page }) => {
+test("standalone keeps a quiet top bar and one Airo entry point", async ({ page }) => {
   await spyOnGetUserMedia(page);
   await page.goto("/?testStandalone=1");
 
@@ -108,32 +108,34 @@ test("standalone combines camera and voice into one Airo entry point", async ({ 
   await expect(onboarding).toBeVisible();
   await onboarding.click();
 
+  // The top bar holds only Share and one menu.
   const toolbar = page.locator(".canvas-toolbar");
-  await expect(
-    toolbar.getByRole("button", { name: "Enable Airo voice and hand tracking" }),
-  ).toBeVisible();
-  await expect(toolbar.getByRole("button", { name: /Enable hand tracking/ })).toHaveCount(0);
-  await expect(toolbar.getByRole("button", { name: /Airo listening/ })).toHaveCount(0);
-
   const controlOrder = await toolbar
     .locator(":scope > button, :scope > .canvas-more > button")
     .evaluateAll((buttons) =>
       buttons.map((button) => button.getAttribute("aria-label") ?? button.textContent?.trim()),
     );
-  expect(controlOrder).toEqual([
+  expect(controlOrder).toEqual(["Share", "More board actions"]);
+
+  // Airo's single switch lives on the Airo panel: camera and voice together.
+  const copilot = page.getByTestId("canvas-copilot");
+  await expect(copilot.getByRole("button", { name: "Enable Airo voice and hand tracking" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Enable hand tracking/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Airo listening/ })).toHaveCount(0);
+
+  // Everything else is one menu away, and nothing captures until asked.
+  await toolbar.getByRole("button", { name: "More board actions" }).click();
+  for (const action of [
+    "Turn on Airo voice and hands",
+    "Show a screen behind the board",
     "Undo",
     "Redo",
-    "Enable Airo voice and hand tracking",
-    "Choose a screen or window to show behind Airboard",
-    "Share",
-    "More board actions",
-    "Open board settings",
-  ]);
-
-  await toolbar.getByRole("button", { name: "More board actions" }).click();
-  await expect(page.getByRole("menuitem", { name: "Undo" })).toBeVisible();
-  await expect(page.getByRole("menuitem", { name: "Hide diagram" })).toBeVisible();
-  await expect(page.getByRole("menuitem", { name: "Export PNG" })).toBeVisible();
+    "Hide diagram",
+    "Export PNG",
+    "Board settings",
+  ]) {
+    await expect(page.getByRole("menuitem", { name: action })).toBeVisible();
+  }
   for (const removedAction of [
     "Rename canvas",
     "Clear board",
@@ -143,33 +145,16 @@ test("standalone combines camera and voice into one Airo entry point", async ({ 
   ]) {
     await expect(page.getByRole("menuitem", { name: removedAction })).toHaveCount(0);
   }
-  await toolbar.getByRole("button", { name: "More board actions" }).click();
+  await page.getByRole("menuitem", { name: "Board settings" }).click();
+  await expect(page.locator("#canvas-settings")).toBeVisible();
+  expect(await page.evaluate(() => window.__gumCalls)).toBe(0);
 
-  // Compact view keeps the same four controls visible instead of hiding
-  // whichever actions happen to occupy particular child positions. Undo and
-  // redo stay in the ••• menu, and phone browsers cannot share a screen, so
-  // those leave the top bar.
+  // Phones keep the same two controls; they cannot share a screen.
   await page.setViewportSize({ width: 375, height: 812 });
-  for (const controlName of [
-    "Enable Airo voice and hand tracking",
-    "Share",
-    "More board actions",
-    "Open board settings",
-  ]) {
-    await expect(toolbar.getByRole("button", { name: controlName })).toBeVisible();
-  }
-  for (const controlName of ["Undo", "Redo", "Choose a screen or window to show behind Airboard"]) {
-    await expect(toolbar.getByRole("button", { name: controlName, exact: true })).toBeHidden();
-  }
+  await expect(toolbar.getByRole("button", { name: "Share" })).toBeVisible();
   await toolbar.getByRole("button", { name: "More board actions" }).click();
   await expect(page.getByRole("menuitem", { name: "Undo" })).toBeVisible();
-  await toolbar.getByRole("button", { name: "More board actions" }).click();
-  const toolbarBounds = await toolbar.boundingBox();
-  expect(toolbarBounds).not.toBeNull();
-  expect(toolbarBounds!.x + toolbarBounds!.width).toBeLessThanOrEqual(375);
-
-  // Nothing auto-starts capture; media remains user-initiated on standalone.
-  expect(await page.evaluate(() => window.__gumCalls)).toBe(0);
+  await expect(page.getByTestId("screen-underlay-toggle")).toBeHidden();
 });
 
 test("standalone resumes a previously enabled camera when site permission is already granted", async ({
