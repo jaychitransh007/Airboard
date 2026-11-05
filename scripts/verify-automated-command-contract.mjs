@@ -50,7 +50,7 @@ const runtimeSources = await Promise.all([
 const runtimeSourceCorpus = runtimeSources.join("\n");
 
 const required = [
-  [board, 'className="canvas-copilot"', "right-side copilot"],
+  [board, 'data-testid="canvas-copilot"', "right-side copilot"],
   [board, 'data-testid="copilot-transcript"', "live transcript surface"],
   [board, "voiceRouter.noteSpeechActivity()", "interim speech gate claim"],
   [
