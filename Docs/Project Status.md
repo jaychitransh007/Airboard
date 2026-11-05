@@ -9,14 +9,14 @@
 | Part | Where | Notes |
 | --- | --- | --- |
 | Web | Cloud Run `airboard-pilot-web`, revision `launch-d8446ea` | `https://airboard-pilot-web-634900453473.asia-south1.run.app`; one instance, kept warm |
-| API | Cloud Run `airboard-pilot-api`, revision `launch-87aec6f` | Up to 3 instances, one kept warm; live boards are shared across instances |
+| API | Cloud Run `airboard-pilot-api`, revision `launch-3e17071` | Up to 3 instances, one kept warm; live boards are shared across instances |
 | Database and sign-in | Supabase `ujotgzjpkocuhtfrvbzu` (ap-south-1, Mumbai) | Every migration in `supabase/migrations` applied, the last `20261105140000` |
 | Google sign-in | Google Auth Platform in the pilot Google Cloud project | Consent screen "Airboard", published to every Google account; client "Airboard sign-in (Supabase)" |
 | Lifecycle jobs | Cloud Scheduler `airboard-lifecycle-hourly` | Alert on a failed run |
 
 - **Health:** the API's `/ready` reports the database and `boardFanOut` (live boards across instances).
 - **Launch check:** `pnpm launch:check:deployed` checks the live revisions and passes **19 of 23**.
-- **Rollback:** web to `launch-6c4ca43`, API to `launch-34df218` (`AIRBOARD_RELEASE=launch-<hash> infra/cloud-run/release.sh promote web|api`).
+- **Rollback:** web to `launch-6c4ca43`, API to `launch-87aec6f` (`AIRBOARD_RELEASE=launch-<hash> infra/cloud-run/release.sh promote web|api`).
 - **Code:** `main`. The working branch `codex/production-readiness` reached it on 5 November 2026 through these pull requests:
   - #1: launch hardening.
   - #11: Google sign-in.
@@ -24,7 +24,8 @@
   - #13: camera start.
   - #14: calmer board.
 
-  The live API matches `main`'s code. The live web is the branch's cleanup commit `d8446ea`, which reaches `main` at the next merge.
+  #16 (cleanup) and #18 (dependency updates and docs) followed. The live API matches `main` exactly (`launch-3e17071`). The live web (`launch-d8446ea`) predates #18's dependency updates (React 19.3, MediaPipe 1.2) and re-checked help pages.
+- **Image retention:** Artifact Registry keeps images tagged `live`, plus the 10 newest per image, and deletes anything older than 3 days. `release.sh promote` moves the `live` tag.
 
 ## Shipped in the launch hardening (November 2026)
 
@@ -68,9 +69,6 @@
 ### Housekeeping (owner)
 
 - Sign in once on the live site with **Continue with Google**: the first real end-to-end test of Google sign-in. Then confirm your boards came across to Mumbai.
-- Review Dependabot's 9 update pull requests:
-  - #2 to #6 are routine (GitHub Actions versions and 12 minor or patch packages).
-  - #7 (MediaPipe 1.2, which drives gestures), #8 (React Hooks lint 7), #9 (Electron 45) and #10 (Node types 26) are major upgrades that each need testing.
 - Delete the unused Seoul secret `airboard-supabase-secret-key` in Secret Manager.
 - Keep the API on the legacy service-role key. In testing, the new `sb_secret_` key failed to join the private Realtime channels that live boards use.
 
