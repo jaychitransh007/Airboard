@@ -431,3 +431,19 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - `/sessions/start` still inserts the session and then its owner participant in two steps; one database function would make it a single round trip.
     - The canvas starts its live session only after it mounts. Starting it together with the board load would hide about three more round trips.
     - Locally, the Supabase CLI's default PostgREST v14.3 failed every board save (42703 on the `or=` access filter). Fixed by `writeAccessibleBoard` in the entry above. A worktree still gets production's versions only after copying `rest-version`, `postgres-version` and `gotrue-version` from the main checkout's `supabase/.temp/`.
+- **2026-11-05** — Faster board open and version-proof board writes deployed:
+  - **Deployed** (merge commit `6cdeed8`, which brings in the faster board open and `a9c9439`, the board-write fix): `airboard-pilot-api-launch-6cdeed8` and `airboard-pilot-web-launch-6cdeed8` at 100%. No migration.
+  - **Tagged smoke before promotion:**
+    - API health and ready 200.
+    - `/me` refuses no token, a malformed token and a forged HS256 token (401).
+    - Preflights carry `Access-Control-Max-Age: 600`.
+    - 8 web pages 200.
+    - With the owner's real session from the production page, the tagged API returned `/me` (personal workspace, trial activated, entitlement trialing), the 5 boards and a board. The session's tokens are ES256, so they are checked locally.
+  - **On production after promotion:**
+    - Opening a board runs `/me`, the preflight and the board load in parallel.
+    - Warm, the board loaded in about 0.8 s and the live session was ready in about 1.75 s, against about 9.3 s on `launch-1217615`. The first open on fresh instances took about 2.75 s.
+    - A metadata save that re-sent the board's own title returned 200 through `writeAccessibleBoard`, with the title and version unchanged.
+    - **Share** offers **Copy live link**.
+    - The new API revision logged no errors besides the smoke's own 401s.
+  - Rollback: API and web `launch-1217615`.
+  - The API (Mumbai) and Supabase (Seoul) are still in different regions; co-locating them is the remaining large latency win.
