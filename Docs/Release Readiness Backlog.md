@@ -623,3 +623,15 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - Google accepts the client and opens its sign-in page.
     - The live `/login` shows the button.
     - The owner's first Google sign-in is the end-to-end test.
+- **2026-11-05** — Faster camera start (commit `f33b2cb`):
+  - **Finding:** the owner saw a long wait before Chrome's camera prompt. Airboard asks for the camera in the same tick as the click, from both the Airo button and Settings; this was measured in Playwright. The wait before the prompt is inside Chrome or macOS: opening the camera, finding devices such as Continuity Camera or virtual cameras, or another app holding the camera.
+  - **Fix:**
+    - Hand tracking (a 3.3 MB compressed engine plus a 7.8 MB model on a first visit) used to download only after the camera was granted. It now loads while the browser asks, and a tracker nobody adopts is closed when it arrives.
+    - If the browser takes more than 1.5 s to answer, Settings and the Airo panel explain the prompt and where to look.
+  - **Measured:** with a simulated 4 s prompt, the tracker files finished at +0.5 s and hands were on 0.6 s after the camera answered.
+  - **Tests:** web 384. Full e2e: 56 passed, 2 skipped. The known stylus flake failed once under parallel load and passed 4 of 4 alone and in a full rerun.
+  - **Deployed with `infra/cloud-run/release.sh`** (its first real run): web `airboard-pilot-web-launch-f33b2cb` at 100%. The API is unchanged at `launch-87aec6f`.
+    - **Tagged smoke:** revision max 1 and no revision minimum. 7 pages returned 200. The bundles carry the camera message and reference only Mumbai and the production API.
+    - **Production:** the pages and API `/ready` pass, and the new revision logged no errors.
+    - **Rollback:** web to `launch-6d2bb10`.
+  - **Release script:** `promote` now prints only the serving revision. The services still carry old tagged revisions (24 web, 16 API) that stay reachable at their own addresses.
