@@ -1,0 +1,577 @@
+{
+ "title": "Checkout flow",
+ "updatedAt": "2026-11-05T12:00:00.000Z",
+ "expiresAt": null,
+ "state": {
+  "boardId": "semantic-eval-board",
+  "sceneVersion": 2,
+  "elements": {
+   "seed-node-1": {
+    "id": "seed-node-1",
+    "boardId": "semantic-eval-board",
+    "transform": {
+     "x": 84,
+     "y": 160,
+     "width": 152,
+     "height": 80,
+     "rotation": 0
+    },
+    "status": "active",
+    "zIndex": 0,
+    "locked": false,
+    "visible": true,
+    "creatorId": "semantic-eval-user",
+    "createdAt": "2026-07-30T00:00:00.000Z",
+    "updatedAt": "2026-07-30T00:00:00.000Z",
+    "revision": 1,
+    "legacyStrokeId": "seed-node-1",
+    "kind": "shape",
+    "shapeKind": "user",
+    "content": {
+     "type": "doc",
+     "blocks": [
+      {
+       "id": "seed-node-1:content",
+       "type": "paragraph",
+       "runs": [
+        {
+         "text": "Shopper"
+        }
+       ]
+      }
+     ]
+    },
+    "style": {
+     "fill": "#f8fafc",
+     "fillOpacity": 1,
+     "stroke": "#2563eb",
+     "strokeOpacity": 1,
+     "strokeWidth": 3,
+     "strokeStyle": "solid",
+     "textColor": "#111827",
+     "textAlign": "center"
+    }
+   },
+   "seed-node-2": {
+    "id": "seed-node-2",
+    "boardId": "semantic-eval-board",
+    "transform": {
+     "x": 344,
+     "y": 160,
+     "width": 152,
+     "height": 80,
+     "rotation": 0
+    },
+    "status": "active",
+    "zIndex": 1,
+    "locked": false,
+    "visible": true,
+    "creatorId": "semantic-eval-user",
+    "createdAt": "2026-07-30T00:00:00.000Z",
+    "updatedAt": "2026-07-30T00:00:00.000Z",
+    "revision": 1,
+    "legacyStrokeId": "seed-node-2",
+    "kind": "shape",
+    "shapeKind": "api",
+    "content": {
+     "type": "doc",
+     "blocks": [
+      {
+       "id": "seed-node-2:content",
+       "type": "paragraph",
+       "runs": [
+        {
+         "text": "Checkout API"
+        }
+       ]
+      }
+     ]
+    },
+    "style": {
+     "fill": "#f8fafc",
+     "fillOpacity": 1,
+     "stroke": "#2563eb",
+     "strokeOpacity": 1,
+     "strokeWidth": 3,
+     "strokeStyle": "solid",
+     "textColor": "#111827",
+     "textAlign": "center"
+    }
+   },
+   "seed-node-3": {
+    "id": "seed-node-3",
+    "boardId": "semantic-eval-board",
+    "transform": {
+     "x": 604,
+     "y": 160,
+     "width": 152,
+     "height": 80,
+     "rotation": 0
+    },
+    "status": "active",
+    "zIndex": 2,
+    "locked": false,
+    "visible": true,
+    "creatorId": "semantic-eval-user",
+    "createdAt": "2026-07-30T00:00:00.000Z",
+    "updatedAt": "2026-07-30T00:00:00.000Z",
+    "revision": 1,
+    "legacyStrokeId": "seed-node-3",
+    "kind": "shape",
+    "shapeKind": "database",
+    "content": {
+     "type": "doc",
+     "blocks": [
+      {
+       "id": "seed-node-3:content",
+       "type": "paragraph",
+       "runs": [
+        {
+         "text": "Orders DB"
+        }
+       ]
+      }
+     ]
+    },
+    "style": {
+     "fill": "#f8fafc",
+     "fillOpacity": 1,
+     "stroke": "#2563eb",
+     "strokeOpacity": 1,
+     "strokeWidth": 3,
+     "strokeStyle": "solid",
+     "textColor": "#111827",
+     "textAlign": "center"
+    }
+   },
+   "seed-edge-1": {
+    "id": "seed-edge-1",
+    "boardId": "semantic-eval-board",
+    "transform": {
+     "x": 194.82181818181817,
+     "y": 200,
+     "width": 149.17818181818183,
+     "height": 1,
+     "rotation": 0
+    },
+    "status": "active",
+    "zIndex": 3,
+    "locked": false,
+    "visible": true,
+    "creatorId": "semantic-eval-user",
+    "createdAt": "2026-07-30T00:00:00.000Z",
+    "updatedAt": "2026-07-30T00:00:00.000Z",
+    "revision": 1,
+    "legacyStrokeId": "seed-edge-1",
+    "kind": "connector",
+    "pathKind": "bent",
+    "start": {
+     "point": {
+      "x": 194.82181818181817,
+      "y": 200
+     },
+     "decoration": "none",
+     "binding": {
+      "elementId": "seed-node-1",
+      "anchor": "auto"
+     }
+    },
+    "end": {
+     "point": {
+      "x": 344,
+      "y": 200
+     },
+     "decoration": "solid_arrow",
+     "binding": {
+      "elementId": "seed-node-2",
+      "anchor": "auto"
+     }
+    },
+    "controlPoints": [],
+    "label": {
+     "type": "doc",
+     "blocks": [
+      {
+       "id": "seed-edge-1:label",
+       "type": "paragraph",
+       "runs": [
+        {
+         "text": "orders"
+        }
+       ]
+      }
+     ]
+    },
+    "labelPosition": 0.5,
+    "style": {
+     "color": "#334155",
+     "opacity": 1,
+     "thickness": "thin",
+     "strokeStyle": "solid",
+     "labelBackground": "none"
+    }
+   },
+   "seed-edge-2": {
+    "id": "seed-edge-2",
+    "boardId": "semantic-eval-board",
+    "transform": {
+     "x": 496,
+     "y": 200,
+     "width": 108,
+     "height": 1,
+     "rotation": 0
+    },
+    "status": "active",
+    "zIndex": 4,
+    "locked": false,
+    "visible": true,
+    "creatorId": "semantic-eval-user",
+    "createdAt": "2026-07-30T00:00:00.000Z",
+    "updatedAt": "2026-07-30T00:00:00.000Z",
+    "revision": 1,
+    "legacyStrokeId": "seed-edge-2",
+    "kind": "connector",
+    "pathKind": "bent",
+    "start": {
+     "point": {
+      "x": 496,
+      "y": 200
+     },
+     "decoration": "none",
+     "binding": {
+      "elementId": "seed-node-2",
+      "anchor": "auto"
+     }
+    },
+    "end": {
+     "point": {
+      "x": 604,
+      "y": 200
+     },
+     "decoration": "solid_arrow",
+     "binding": {
+      "elementId": "seed-node-3",
+      "anchor": "auto"
+     }
+    },
+    "controlPoints": [],
+    "label": {
+     "type": "doc",
+     "blocks": [
+      {
+       "id": "seed-edge-2:label",
+       "type": "paragraph",
+       "runs": [
+        {
+         "text": "writes"
+        }
+       ]
+      }
+     ]
+    },
+    "labelPosition": 0.5,
+    "style": {
+     "color": "#334155",
+     "opacity": 1,
+     "thickness": "thin",
+     "strokeStyle": "solid",
+     "labelBackground": "none"
+    }
+   }
+  },
+  "strokes": {
+   "seed-node-1": {
+    "id": "seed-node-1",
+    "boardId": "semantic-eval-board",
+    "userId": "semantic-eval-user",
+    "tool": "marker",
+    "color": "#2563eb",
+    "thickness": 3,
+    "points": [
+     {
+      "x": 84,
+      "y": 160,
+      "t": 1785369600000,
+      "inputSource": "pointer",
+      "trackingSource": "manual"
+     },
+     {
+      "x": 236,
+      "y": 160,
+      "t": 1785369600001,
+      "inputSource": "pointer",
+      "trackingSource": "manual"
+     },
+     {
+      "x": 236,
+      "y": 240,
+      "t": 1785369600002,
+      "inputSource": "pointer",
+      "trackingSource": "manual"
+     },
+     {
+      "x": 84,
+      "y": 240,
+      "t": 1785369600003,
+      "inputSource": "pointer",
+      "trackingSource": "manual"
+     },
+     {
+      "x": 84,
+      "y": 160,
+      "t": 1785369600004,
+      "inputSource": "pointer",
+      "trackingSource": "manual"
+     }
+    ],
+    "createdAt": "2026-07-30T00:00:00.000Z",
+    "updatedAt": "2026-07-30T00:00:00.000Z",
+    "status": "committed",
+    "annotation": {
+     "type": "flow_node",
+     "source": "voice",
+     "bounds": {
+      "x": 84,
+      "y": 160,
+      "width": 152,
+      "height": 80
+     },
+     "nodeType": "user",
+     "strokeColor": "#2563eb",
+     "fillColor": "#f8fafc",
+     "label": "Shopper"
+    },
+    "inputSource": "pointer",
+    "trackingSource": "manual",
+    "committedAt": "2026-07-30T00:00:00.000Z"
+   },
+   "seed-node-2": {
+    "id": "seed-node-2",
+    "boardId": "semantic-eval-board",
+    "userId": "semantic-eval-user",
+    "tool": "marker",
+    "color": "#2563eb",
+    "thickness": 3,
+    "points": [
+     {
+      "x": 344,
+      "y": 160,
+      "t": 1785369600000,
+      "inputSource": "pointer",
+      "trackingSource": "manual"
+     },
+     {
+      "x": 496,
+      "y": 160,
+      "t": 1785369600001,
+      "inputSource": "pointer",
+      "trackingSource": "manual"
+     },
+     {
+      "x": 496,
+      "y": 240,
+      "t": 1785369600002,
+      "inputSource": "pointer",
+      "trackingSource": "manual"
+     },
+     {
+      "x": 344,
+      "y": 240,
+      "t": 1785369600003,
+      "inputSource": "pointer",
+      "trackingSource": "manual"
+     },
+     {
+      "x": 344,
+      "y": 160,
+      "t": 1785369600004,
+      "inputSource": "pointer",
+      "trackingSource": "manual"
+     }
+    ],
+    "createdAt": "2026-07-30T00:00:00.000Z",
+    "updatedAt": "2026-07-30T00:00:00.000Z",
+    "status": "committed",
+    "annotation": {
+     "type": "flow_node",
+     "source": "voice",
+     "bounds": {
+      "x": 344,
+      "y": 160,
+      "width": 152,
+      "height": 80
+     },
+     "nodeType": "api",
+     "strokeColor": "#2563eb",
+     "fillColor": "#f8fafc",
+     "label": "Checkout API"
+    },
+    "inputSource": "pointer",
+    "trackingSource": "manual",
+    "committedAt": "2026-07-30T00:00:00.000Z"
+   },
+   "seed-node-3": {
+    "id": "seed-node-3",
+    "boardId": "semantic-eval-board",
+    "userId": "semantic-eval-user",
+    "tool": "marker",
+    "color": "#2563eb",
+    "thickness": 3,
+    "points": [
+     {
+      "x": 604,
+      "y": 160,
+      "t": 1785369600000,
+      "inputSource": "pointer",
+      "trackingSource": "manual"
+     },
+     {
+      "x": 756,
+      "y": 160,
+      "t": 1785369600001,
+      "inputSource": "pointer",
+      "trackingSource": "manual"
+     },
+     {
+      "x": 756,
+      "y": 240,
+      "t": 1785369600002,
+      "inputSource": "pointer",
+      "trackingSource": "manual"
+     },
+     {
+      "x": 604,
+      "y": 240,
+      "t": 1785369600003,
+      "inputSource": "pointer",
+      "trackingSource": "manual"
+     },
+     {
+      "x": 604,
+      "y": 160,
+      "t": 1785369600004,
+      "inputSource": "pointer",
+      "trackingSource": "manual"
+     }
+    ],
+    "createdAt": "2026-07-30T00:00:00.000Z",
+    "updatedAt": "2026-07-30T00:00:00.000Z",
+    "status": "committed",
+    "annotation": {
+     "type": "flow_node",
+     "source": "voice",
+     "bounds": {
+      "x": 604,
+      "y": 160,
+      "width": 152,
+      "height": 80
+     },
+     "nodeType": "database",
+     "strokeColor": "#2563eb",
+     "fillColor": "#f8fafc",
+     "label": "Orders DB"
+    },
+    "inputSource": "pointer",
+    "trackingSource": "manual",
+    "committedAt": "2026-07-30T00:00:00.000Z"
+   },
+   "seed-edge-1": {
+    "id": "seed-edge-1",
+    "boardId": "semantic-eval-board",
+    "userId": "semantic-eval-user",
+    "tool": "marker",
+    "color": "#334155",
+    "thickness": 3,
+    "points": [
+     {
+      "x": 194.82181818181817,
+      "y": 200,
+      "t": 1785369600000,
+      "inputSource": "pointer",
+      "trackingSource": "manual"
+     },
+     {
+      "x": 344,
+      "y": 200,
+      "t": 1785369600001,
+      "inputSource": "pointer",
+      "trackingSource": "manual"
+     }
+    ],
+    "createdAt": "2026-07-30T00:00:00.000Z",
+    "updatedAt": "2026-07-30T00:00:00.000Z",
+    "status": "committed",
+    "annotation": {
+     "type": "connector",
+     "source": "voice",
+     "start": {
+      "x": 194.82181818181817,
+      "y": 200
+     },
+     "end": {
+      "x": 344,
+      "y": 200
+     },
+     "snappedStartStrokeId": "seed-node-1",
+     "snappedEndStrokeId": "seed-node-2",
+     "strokeColor": "#334155",
+     "label": "orders"
+    },
+    "inputSource": "pointer",
+    "trackingSource": "manual",
+    "committedAt": "2026-07-30T00:00:00.000Z"
+   },
+   "seed-edge-2": {
+    "id": "seed-edge-2",
+    "boardId": "semantic-eval-board",
+    "userId": "semantic-eval-user",
+    "tool": "marker",
+    "color": "#334155",
+    "thickness": 3,
+    "points": [
+     {
+      "x": 496,
+      "y": 200,
+      "t": 1785369600000,
+      "inputSource": "pointer",
+      "trackingSource": "manual"
+     },
+     {
+      "x": 604,
+      "y": 200,
+      "t": 1785369600001,
+      "inputSource": "pointer",
+      "trackingSource": "manual"
+     }
+    ],
+    "createdAt": "2026-07-30T00:00:00.000Z",
+    "updatedAt": "2026-07-30T00:00:00.000Z",
+    "status": "committed",
+    "annotation": {
+     "type": "connector",
+     "source": "voice",
+     "start": {
+      "x": 496,
+      "y": 200
+     },
+     "end": {
+      "x": 604,
+      "y": 200
+     },
+     "snappedStartStrokeId": "seed-node-2",
+     "snappedEndStrokeId": "seed-node-3",
+     "strokeColor": "#334155",
+     "label": "writes"
+    },
+    "inputSource": "pointer",
+    "trackingSource": "manual",
+    "committedAt": "2026-07-30T00:00:00.000Z"
+   }
+  },
+  "activeStrokes": {},
+  "eraseActions": {},
+  "participants": {},
+  "cursors": {},
+  "lastSequence": 0
+ }
+}

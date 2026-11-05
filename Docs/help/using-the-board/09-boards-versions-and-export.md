@@ -6,8 +6,8 @@ categoryLabel: Using the board
 order: 9
 status: shipped
 audiences: ["everyone"]
-lastVerified: 2026-11-05
-sources: ["apps/web/src/features/product/BoardsPage.tsx", "apps/web/src/features/board/boardExport.ts", "packages/core/src/boardPreview.ts", "apps/web/src/features/board/boardLifecycle.ts", "apps/web/src/features/board/ShareDialog.tsx", "apps/web/src/features/product/LiveBoardJoin.tsx", "apps/api/src/controlPlaneRoutes.ts"]
+lastVerified: 2026-11-06
+sources: ["apps/web/src/features/product/BoardsPage.tsx", "apps/web/src/features/board/boardExport.ts", "packages/core/src/boardPreview.ts", "apps/web/src/features/board/boardLifecycle.ts", "apps/web/src/features/board/ShareDialog.tsx", "apps/web/src/features/board/ViewLinksSection.tsx", "apps/web/src/features/share/SharedBoardView.tsx", "apps/web/src/features/product/LiveBoardJoin.tsx", "apps/api/src/controlPlaneRoutes.ts", "apps/api/src/boardShareRoutes.ts"]
 ---
 
 Airboard stores persistent boards and versioned board state in your workspace.
@@ -48,6 +48,13 @@ Choose **Share** in the board header.
   under **Shared** for every member, and **Copy board link** gives members a
   link to the saved board. Only the person who made the board can change this.
   Boards in a personal workspace stay private.
+- **Anyone with the link can view.** The board's owner chooses how long a link
+  lasts (7 days, 30 days, or until it is turned off) and chooses **Create
+  view-only link**. People who open it see the saved board without an account;
+  they can move around and zoom, but not edit, and they never see who joined
+  your live sessions. Copy the link straight away: Airboard shows each link only
+  once. **Turn off** stops a link immediately. A board in Trash cannot be
+  opened through its links.
 - **Send a picture.** **Download PNG** saves the board as an image.
 
 Anyone with a live link can edit while it works, so share it only with the

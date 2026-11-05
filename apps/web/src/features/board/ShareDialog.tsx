@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useModalFocus } from "../../platform/modalFocus";
 import { LIVE_LINK_HOURS, type LiveStartFailure } from "./shareLinks";
+import { ViewLinksSection, type ViewLinkControls } from "./ViewLinksSection";
 
 export type BoardVisibility = "private" | "organization" | "link";
 
@@ -16,6 +17,8 @@ export type BoardShareAccess = {
   workspaceName: string;
   boardLink: string;
   onChange: (visibility: "private" | "organization") => Promise<void>;
+  /** View-only links anyone can open; created by the board's owner. */
+  viewLinks?: ViewLinkControls;
 };
 
 type CopyTarget = "live" | "board";
@@ -234,6 +237,8 @@ export function ShareDialog({
             )}
           </section>
         ) : null}
+
+        {access?.viewLinks ? <ViewLinksSection controls={access.viewLinks} canCreate={access.canChange} /> : null}
 
         <section className="share-dialog-section" aria-labelledby="share-picture-title">
           <h3 id="share-picture-title">Send a picture</h3>

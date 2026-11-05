@@ -6154,3 +6154,23 @@ button:disabled {
   margin: 0 auto 28px;
   text-align: center;
 }
+
+/* A board opened through a view-only link (/s/<token>). */
+.shared-board { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100vh; height: 100dvh; background: #f7f6fb; color: var(--product-ink); }
+.shared-board-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; padding: 12px 20px; border-bottom: 1px solid var(--product-border); background: #fff; }
+.shared-board-title { display: flex; flex: 1 1 220px; align-items: center; gap: 10px; min-width: 0; }
+.shared-board-title h1 { overflow: hidden; margin: 0; font-size: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.shared-board-badge { flex: none; padding: 4px 8px; border-radius: 99px; background: #eee9ff; color: #5b3fb5; font-size: 11px; font-weight: 800; }
+.shared-board-zoom { display: flex; gap: 6px; }
+.shared-board-zoom button { min-width: 40px; min-height: 40px; border: 1px solid var(--product-border); border-radius: 10px; background: #fff; font-weight: 750; }
+.shared-board-canvas { display: block; width: 100%; height: 100%; background: #fff; cursor: grab; touch-action: none; }
+.shared-board-canvas:active { cursor: grabbing; }
+.shared-board-message { display: block; height: auto; max-width: 640px; margin: 0 auto; padding: 40px 20px; background: none; }
+.shared-board-message h1 { margin: 32px 0 8px; font-size: 28px; }
+.share-dialog-lifetime { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; }
+.share-dialog-lifetime select { min-height: 36px; padding: 0 8px; border: 1px solid var(--product-border); border-radius: 8px; background: #fff; }
+.share-dialog-links { display: grid; gap: 6px; margin: 10px 0 0; padding: 0; list-style: none; }
+.share-dialog-links li { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; }
+/* Live regions stay mounted while empty so screen readers announce the next message. */
+.share-dialog-note:empty { position: absolute; width: 1px; height: 1px; margin: 0; padding: 0; overflow: hidden; border: 0; clip-path: inset(50%); }
+

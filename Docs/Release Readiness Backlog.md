@@ -85,7 +85,7 @@ These are fixable in the repo and each would make a public "supported product" c
 | RGB-026 | No index on `product_events.profile_id` or `audit_events.actor_profile_id` | Done 2026-11-05 | Engineering | Reported | export/erasure full-scans the two highest-volume tables | Add indexes in a migration. |
 | RGB-027 | `delete_workspace` erases the whole org; account deletion orphans non-default personal orgs | Done 2026-11-05 | Engineering | Reported | `supabase/migrations` account-operations | Verify & correct the deletion/ownership graph. |
 | RGB-028 | Migrations not cleanly re-runnable (create policy / add constraint / drop function lack guards) | Partly done 2026-11-05: new migrations are checked; the 30 statements in applied migrations stay as written | Engineering | Verified | `supabase/migrations/*` | Add `if not exists` / `drop … if exists` guards. |
-| RGB-029 | `board_shares` (hashed share tokens) is schema-only; no code creates or resolves share links | Partly done 2026-11-05: `board_shares` table unused | Engineering / Product | Verified | migration defines table; no producer/consumer in code | Wire share-link flow or drop the table; ensure no UI advertises sharing that doesn't work. |
+| RGB-029 | `board_shares` (hashed share tokens) is schema-only; no code creates or resolves share links | Done 2026-11-06 (not deployed) | Engineering / Product | Verified | migration defines table; no producer/consumer in code | Wire share-link flow or drop the table; ensure no UI advertises sharing that doesn't work. |
 
 ### Packaging / images
 | ID | Title | Status | Owner | Verification | Evidence | Recommendation |
@@ -858,3 +858,20 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - **Decision:** `hellosigmascience@gmail.com` carries customer help and support mail only, so no outage, error or latency alerts are set up.
   - **Removed:** the earlier Cloud Monitoring policy "Airboard lifecycle run failed" is deleted; the project has no alert policies. Its email notification channel remains unused. The log-based metric `airboard_lifecycle_failed_runs` still counts failed runs.
   - **Launch gate:** the controlled-pilot `lifecycle-schedule` gate now asks for a scheduled, authenticated job whose failed runs are logged. Alerting on them belongs to the standalone-GA `monitoring-alerts` gate. Checked: the job is enabled, and the 16:00, 17:00 and 18:00 UTC runs on 2026-11-05 returned 200. `pnpm launch:check:deployed` still reports READY, 21 of 21.
+- **2026-11-06** — RGB-029: view-only share links (on `codex/production-readiness`; not yet deployed):
+  - **API (`apps/api/src/boardShareRoutes.ts`):** the board's owner lists, creates and turns off links at `/boards/:id/share-links`.
+    - Links last 7 days by default, or 30 days, or until turned off; a board holds at most 20 live links.
+    - Each token is 32 random bytes; only its SHA-256 hash is stored in `board_shares`, so a link is shown once. Creating and turning off a link are audited.
+    - `GET /shared-boards/:token` opens the saved board without an account, rate-limited to 120 requests a minute per caller and sent with `no-store` and `noindex`. It strips live-session participants (their names), cursors and half-drawn strokes. Expired, turned-off, unknown and deleted boards all answer 404.
+    - Pictures load through `/shared-boards/:token/assets/:id/content` and only for that board. No migration was needed: the table already existed.
+  - **Viewer (`/s/<token>`):**
+    - It renders the board with the production renderer: drag to move, scroll or the buttons to zoom, **Fit** to frame everything.
+    - The words on the board are listed for screen readers. The page is not indexed and sends no referrer.
+    - A link that no longer works says so.
+  - **Share dialog:** a new "Anyone with the link can view" section lets the owner pick how long the link lasts, create it, copy it once, and turn off any active link. Other members are told only the board's creator can make links.
+  - **Tests:**
+    - API: create, list, revoke, only the owner, hashes only, participant names stripped, expiry, Trash, unknown tokens, the asset boundary and the 20-link cap.
+    - Unit: state, fit bounds and picture routing.
+    - Browser, against a board built by the production diagram commands: the canvas paints, the screen-reader text, no editing controls, the turned-off message and zero WCAG 2.2 AA violations.
+    - The dialog section is not covered by a browser test, because the test harness has no saved board.
+  - **Help:** "Boards, versions, and export" describes view-only links.
