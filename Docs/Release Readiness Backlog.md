@@ -472,3 +472,31 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - Resend SMTP. Until then, sign-in emails reach only Aura organization members.
     - ~~Deleting the Seoul project `ljqxegqdfhqcmkbivldr`.~~ Done by the owner on 2026-11-05.
     - The unused secret `airboard-supabase-secret-key` can be deleted.
+- **2026-11-05** — Hardening for the pilot launch (commit `3c85863`):
+  - **Launch check:** `pnpm launch:check:deployed` reads the serving Cloud Run revisions, their Secret Manager values (in memory, never printed) and the web image's Cloud Build substitutions, instead of the local `.env`. The board-socket check derives `wss://` from the API URL; nothing reads `AIRBOARD_WS_URL`. Against production it reports **19/23**. The four left are real: lifecycle email (Resend), release owner, support path and commercial smoke.
+  - **Graceful shutdown (RGB-003):** on SIGTERM the API closes board sockets with 1012, so clients reconnect to the new instance, lets in-flight requests finish, and exits within 8 s (`apps/api/src/shutdown.ts`).
+  - **Outbound timeouts (RGB-005):** Resend 10 s (a failed send is retried in 15 minutes), Stripe 15 s, Supabase auth settings 5 s.
+  - **Accessibility (part of RGB-006):**
+    - Share and the board and library dialogs keep Tab inside, close on Escape and return focus to where it was (`useModalFocus`).
+    - The marketing, app and help shells start with a "Skip to content" link.
+  - **Dependencies:**
+    - Next 15.5.29, Fastify 5.12.8 and sharp 0.35.5.
+    - `pnpm-workspace.yaml` overrides PostCSS under Next (8.4.31 → 8.5.32) and pins the patched `sharp` and `fast-uri` releases within their declared ranges.
+    - Production audit: 0 vulnerabilities, from 3 critical and 24 high. The remaining dev-only findings are Electron in the unshipped desktop app.
+  - **CI:**
+    - ESLint with a bug-only rule set (React Hooks rules plus core correctness rules; vendored MediaPipe excluded).
+    - The repository script tests (182).
+    - `pnpm audit --prod --audit-level=high`.
+    - A gitleaks scan of full history. Four reviewed false positives, notification template names, are ignored by fingerprint in `.gitleaksignore`.
+    - Dependabot for npm and GitHub Actions.
+  - **Deployed:** `airboard-pilot-api-launch-3c85863` and `airboard-pilot-web-launch-3c85863` at 100%, each with **one warm instance** (`min-instances=1`, max stays 1) to avoid cold starts. Mumbai settings and secret are unchanged.
+    - **Smoke:**
+      - readiness passed against Mumbai;
+      - missing and forged tokens got 401;
+      - the preflight max-age is 600;
+      - 7 web pages returned 200, with the skip link present;
+      - the bundles reference only Mumbai;
+      - neither revision logged errors;
+      - on production, the first Tab lands on the skip link.
+    - **Rollback:** `mumbai-fff6d97` (both services). Earlier revisions point at the deleted Seoul project.
+  - **Tests:** API 129, web 376, all packages pass, and the full e2e suite (53 passed, 2 skipped) includes two new keyboard tests.
