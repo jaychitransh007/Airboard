@@ -13,6 +13,16 @@ import {
 import {
   delegateSemanticMetamorphicLive,
 } from "./eval-semantic-metamorphic.mjs";
+import {
+  SEMANTIC_NEGATIVE_DEFAULT_MODEL,
+  SEMANTIC_NEGATIVE_RECORD_COMMAND,
+  compareWithKnownFalseAccepts,
+  readKnownFalseAccepts,
+  readSemanticNegativeRecordings,
+  recordSemanticNegativeAnswers,
+  replaySemanticNegativeAnswers,
+  writeSemanticNegativeRecordings,
+} from "./lib/semantic-negative-replay.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_SOURCE = resolve(
@@ -132,6 +142,19 @@ export async function main(args = process.argv.slice(2)) {
   console.log(
     `Airboard semantic ambient negatives: ${corpus.cases.length} fallback cases, all require unsupported/not_board_command and zero actions`,
   );
+  if (options.record) {
+    const recordings = await recordSemanticNegativeAnswers(corpus, {
+      apiKey: process.env.AIRBOARD_INTENT_API_KEY || process.env.OPENAI_API_KEY,
+      model: options.model ?? SEMANTIC_NEGATIVE_DEFAULT_MODEL,
+      log: (line) => console.log(`  ${line}`),
+    });
+    await writeSemanticNegativeRecordings(recordings, options.recordings);
+    console.log(`Recorded ${recordings.answers.length} answers from ${recordings.model}`);
+    return replay(corpus, recordings, options.known);
+  }
+  if (options.replay) {
+    return replay(corpus, await readSemanticNegativeRecordings(options.recordings), options.known);
+  }
   if (!options.live) {
     console.log("Result: VALID (offline validation only)");
     return 0;
@@ -148,6 +171,35 @@ export async function main(args = process.argv.slice(2)) {
     replayCommand: semanticNegativeReplayCommand(options),
   });
   return result.exitCode;
+}
+
+/**
+ * The offline false-accept gate: recorded provider answers for every ambient
+ * case go back through the production API and browser code. Each case must
+ * stay quiet unless the reviewed known list names it with the same outcome,
+ * and a changed prompt, tool, model or request fails until the answers are
+ * re-recorded, so the gate never passes on stale evidence.
+ */
+async function replay(corpus, recordings, knownPath) {
+  const result = await replaySemanticNegativeAnswers(corpus, recordings);
+  const known = await readKnownFalseAccepts(knownPath);
+  const problems = compareWithKnownFalseAccepts(result, known);
+  for (const problem of problems) console.log(`FAIL ${problem}`);
+  if (result.stale.length > 0) {
+    console.log(
+      `STALE ${result.stale.length} of ${result.results.length} recordings: the prompt, tool, model or request changed since ${recordings.recordedAt}. Re-record with: ${SEMANTIC_NEGATIVE_RECORD_COMMAND}`,
+    );
+  }
+  if (result.unknown.length > 0) {
+    console.log(`UNKNOWN recordings for cases no longer in the corpus: ${result.unknown.join(", ")}`);
+  }
+  const counts = {};
+  for (const { outcome } of result.results) counts[outcome] = (counts[outcome] ?? 0) + 1;
+  const passed = problems.length === 0 && result.stale.length === 0 && result.unknown.length === 0;
+  console.log(
+    `Replay of ${result.results.length} recorded ${recordings.model} answers: ${Object.entries(counts).map(([outcome, count]) => `${count} ${outcome}`).join(", ")}. Known list: ${known.cases.length}. Result: ${passed ? "PASS" : "FAIL"}`,
+  );
+  return passed ? 0 : 1;
 }
 
 function semanticNegativeReplayCommand(options) {
@@ -174,12 +226,20 @@ function shellQuote(value) {
 }
 
 function parseArguments(args) {
-  const options = { live: false, attempts: 1, caseIds: [] };
+  const options = { live: false, replay: false, record: false, attempts: 1, caseIds: [] };
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === "--validate-only") continue;
     if (argument === "--live") {
       options.live = true;
+      continue;
+    }
+    if (argument === "--replay") {
+      options.replay = true;
+      continue;
+    }
+    if (argument === "--record") {
+      options.record = true;
       continue;
     }
     const [name, inlineValue] = argument.split("=", 2);
@@ -192,10 +252,15 @@ function parseArguments(args) {
     else if (name === "--timeout-ms") options.timeoutMs = bounded(value, name, 100, 120_000);
     else if (name === "--attempts") options.attempts = bounded(value, name, 1, 20);
     else if (name === "--case") options.caseIds.push(value);
+    else if (name === "--recordings") options.recordings = resolve(process.cwd(), value);
+    else if (name === "--known") options.known = resolve(process.cwd(), value);
     else throw new Error(`Unknown argument: ${name}`);
   }
   if (!options.live && (options.attempts !== 1 || options.caseIds.length > 0)) {
     throw new Error("--attempts and --case require --live");
+  }
+  if ([options.live, options.replay, options.record].filter(Boolean).length > 1) {
+    throw new Error("Choose one of --live, --replay and --record");
   }
   return options;
 }

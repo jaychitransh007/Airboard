@@ -1,0 +1,908 @@
+{
+  "schemaVersion": "airboard-semantic-negative-recordings.v1",
+  "description": "One live provider answer per ambient meeting case, replayed offline by eval-semantic-negatives.mjs --replay.",
+  "recordedAt": "2026-11-05T14:37:17.853Z",
+  "model": "gpt-5.4-mini",
+  "answers": [
+    {
+      "caseId": "ambient-standup-01",
+      "requestHash": "sha256:30bf5fc19a62c7f73e0204541199d0d85b2e9d71d3b3be25e650c00ca9f084ba",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"resolved\",\"issueCode\":\"none\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[{\"type\":\"rename\",\"target\":{\"kind\":\"visible_label\",\"label\":\"Payment API\",\"occurrence\":1},\"label\":\"Retry Logic\"},{\"type\":\"connect\",\"from\":{\"kind\":\"visible_label\",\"label\":\"Payment API\",\"occurrence\":1},\"to\":{\"kind\":\"visible_label\",\"label\":\"Billing Service\",\"occurrence\":1},\"label\":\"retries\"}]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-standup-02",
+      "requestHash": "sha256:dffc0557cccef28614ee30b34a09ad956ae5074d9600bd5c27a2cac96fccbd05",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-standup-03",
+      "requestHash": "sha256:6eeb745bda6a8b9bf2a55c7717c808f7872fc99e721da045bea5b9a4f9901e8e",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-planning-01",
+      "requestHash": "sha256:8429504c7fd85fa5db315826f0fdc6bf35a661623d8d46b69cd10fe328344d80",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-planning-02",
+      "requestHash": "sha256:04b36de6c6ed61edc5efa1d4eb68420192760ebb78dab8b524eb1a0309bd0cdd",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-planning-03",
+      "requestHash": "sha256:71bd89216109a59789d07b4e5434f2ffe2e3e9c004fd92552d186edb4f61e1b0",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-planning-04",
+      "requestHash": "sha256:bf1f47179043eb21b2195b146923adb82668d402d75d07468a9b300e7e115584",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-planning-05",
+      "requestHash": "sha256:bb963162980d3ddffbca795ab047b0d118d9cc12ea99b614196942f39c101622",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-planning-06",
+      "requestHash": "sha256:99e988bc2e93b2409c84eeb3802803e815c457bcfd76b76b6f06b7aabcd4d604",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-planning-07",
+      "requestHash": "sha256:a15b0942955f6f2a278fed7d2bc739019d3e834f40015cec88332e4dcb325eb0",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-planning-08",
+      "requestHash": "sha256:bb919c1faef9ba0f5eed8f8a786a69989a46b10f6cfade458f94bb07e4f991f6",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-architecture-01",
+      "requestHash": "sha256:3a18c01c9fdf7dfb84e4d2525d439b45a6decfbb057fdefb2953109364145812",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"resolved\",\"issueCode\":\"none\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[{\"type\":\"connect\",\"from\":{\"kind\":\"visible_label\",\"label\":\"User\",\"occurrence\":1},\"to\":{\"kind\":\"visible_label\",\"label\":\"Payment API\",\"occurrence\":1},\"label\":\"hits\"},{\"type\":\"connect\",\"from\":{\"kind\":\"visible_label\",\"label\":\"Payment API\",\"occurrence\":1},\"to\":{\"kind\":\"visible_label\",\"label\":\"Ledger Database\",\"occurrence\":1},\"label\":\"writes to\"}]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-architecture-02",
+      "requestHash": "sha256:667ba8fc447958d3742d1fbd807287e4ece894e60d00f2c00be55be8b691f721",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"resolved\",\"issueCode\":\"none\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[{\"type\":\"connect\",\"from\":{\"kind\":\"visible_label\",\"label\":\"Billing Service\",\"occurrence\":1},\"to\":{\"kind\":\"visible_label\",\"label\":\"Orders Queue\",\"occurrence\":1},\"label\":\"talks to\"},{\"type\":\"connect\",\"from\":{\"kind\":\"visible_label\",\"label\":\"Orders Queue\",\"occurrence\":1},\"to\":{\"kind\":\"visible_label\",\"label\":\"Ledger Database\",\"occurrence\":1},\"label\":\"talks to\"}]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-architecture-03",
+      "requestHash": "sha256:a80b8780da64878615ed864cacf13d85d5aec214d05778bacb6496e460024df3",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"clarification\",\"issueCode\":\"missing_context\",\"clarificationQuestion\":\"Which existing object should the gateway be?\",\"missingSlots\":[\"object_reference\"],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-architecture-04",
+      "requestHash": "sha256:93b1db243df241afdc64c72f1289547f4746b92c465bb4cebf332d29f3c34e8d",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"resolved\",\"issueCode\":\"none\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[{\"type\":\"connect\",\"from\":{\"kind\":\"visible_label\",\"label\":\"Billing Service\",\"occurrence\":1},\"to\":{\"kind\":\"visible_label\",\"label\":\"Orders Queue\",\"occurrence\":1},\"label\":\"connect with\"}]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-architecture-05",
+      "requestHash": "sha256:7c58f4272aeb56a51d9c6b9b542520e5f82d4409b1c0e233293c0ccd6bca06ad",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"resolved\",\"issueCode\":\"none\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[{\"type\":\"reverse_connection\",\"connection\":{\"kind\":\"connection\",\"from\":{\"kind\":\"visible_label\",\"label\":\"User\",\"occurrence\":1},\"to\":{\"kind\":\"visible_label\",\"label\":\"Payment API\",\"occurrence\":1},\"label\":\"requests\",\"occurrence\":null},\"label\":null}]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-architecture-06",
+      "requestHash": "sha256:decdfd55056534f171d761e6ae8b8333215b08f3747a5b024802385dbb1e0a4d",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"resolved\",\"issueCode\":\"none\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[{\"type\":\"create\",\"nodeType\":\"queue\",\"label\":\"Workers Queue\",\"handle\":\"workers_queue\",\"placement\":{\"kind\":\"auto\"}}]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-architecture-07",
+      "requestHash": "sha256:bb12c4b622be7d6531762d394966b2303b37c8f5de59f41bcd5904c8e2a8d420",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-architecture-08",
+      "requestHash": "sha256:aa6e1181967ddb85ca2a1a1c22d74f302a9cbbd0970d02dab467425d9f140541",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"resolved\",\"issueCode\":\"none\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[{\"type\":\"select\",\"targets\":[{\"kind\":\"visible_label\",\"label\":\"Release Decision\",\"occurrence\":1}],\"mode\":\"replace\"}]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-chitchat-01",
+      "requestHash": "sha256:5eb8345f392f7d3a2ce2f9467717088c175b66a3f26c036d532628ef8d4e2fe3",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-chitchat-02",
+      "requestHash": "sha256:59f95b04c3c40d5dad33f805b0ec272f9b01d678301d0f37d6c624bb250e1ee4",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-chitchat-03",
+      "requestHash": "sha256:035682a54465f40f497fd98017b105aaf2a9d711fa853ddb46e9b096dfd6829a",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-chitchat-04",
+      "requestHash": "sha256:246d774f061f9721ced09cdb396f2c383eed5ec75c3444d19b49c0d672f26086",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-chitchat-05",
+      "requestHash": "sha256:a3f557cb97d27971557d8999418b55d4091a0ce5033007c0ae6be67258fbac40",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-chitchat-06",
+      "requestHash": "sha256:6000b0e6df7e1aab6cb46339098c3ee436bfc2a37ce0ffabfd59eff8df211bcc",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-chitchat-07",
+      "requestHash": "sha256:6de4cc4e38bf14a2fd5e3a20280d9b9f8a273728b190735fc849bc25d2ffa861",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-chitchat-08",
+      "requestHash": "sha256:0b362688a73dd31e29b73326ea0ff5c86960e595b72196e232c6fc8e6c2f2114",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-review-01",
+      "requestHash": "sha256:b29a7d998c6958b47b27e63d0c99e1679ccfabbdd9c356960c4840b7398b064c",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"clarification\",\"issueCode\":\"missing_label\",\"clarificationQuestion\":\"What should the branch be renamed to?\",\"missingSlots\":[\"label\"],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-review-02",
+      "requestHash": "sha256:35b4b191abf31d0ab0aa599955147b9998a60ad13bf7514809417cc1b3be6dfd",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"clarification\",\"issueCode\":\"missing_selection\",\"clarificationQuestion\":\"Which feature flag object should be deleted?\",\"missingSlots\":[\"selection\"],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-review-03",
+      "requestHash": "sha256:eccf659ffb1258c613e85ce59f28b50545b48ba7b06c6328cfb66cca1c1c5a0c",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"clarification\",\"issueCode\":\"missing_context\",\"clarificationQuestion\":\"Which object should be moved into the environment file, and where should it go?\",\"missingSlots\":[\"object_reference\",\"placement\"],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-review-04",
+      "requestHash": "sha256:00ad9bbefbd5916f333159186ff4c7767ab93392f0bd05c3282e779cf707728f",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-review-05",
+      "requestHash": "sha256:82066874d636c928af00ba2600c3a60ee83cdbad95eac6486dd1cd9605d8d018",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-phonetic-01",
+      "requestHash": "sha256:eaf7d46ebcb57be8222b84b031220c20ea44e2736a77c1e5bb515c0830624b88",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-phonetic-02",
+      "requestHash": "sha256:411b5fd3a64cf332f7fb64c259dfb63fbe23bdeeb4db1b20d4bdaecba99d7a57",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-phonetic-03",
+      "requestHash": "sha256:9868cbf92b23e58dad346d56c8acb83480be4a084f7ac62976a89544c4241c46",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-phonetic-04",
+      "requestHash": "sha256:f08849a509d0ee23fb89f9335486d50c5c9dabdf110587f97bb8b917e9eb3e98",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"clarification\",\"issueCode\":\"missing_context\",\"clarificationQuestion\":\"Which object in the second paragraph should be fixed, and what should the correction be?\",\"missingSlots\":[\"object_reference\",\"label\"],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-imperative-01",
+      "requestHash": "sha256:c42159df237da0bcaeaa0e714ddf99f0ca4c5aebb2c688e8a09fdba34ce287ed",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"resolved\",\"issueCode\":\"none\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[{\"type\":\"create\",\"nodeType\":\"note\",\"label\":\"Legal response due by Friday\",\"handle\":\"legal_response_note\",\"placement\":{\"kind\":\"canvas_region\",\"region\":\"center\"}}]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-imperative-02",
+      "requestHash": "sha256:b2c6f045dc68a7d5a4c0b280667f69db7632fd25ea9f947076ab0b2806b5d726",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"clarification\",\"issueCode\":\"missing_selection\",\"clarificationQuestion\":\"Which ticket shape should I create: note, document, custom box, or another type?\",\"missingSlots\":[\"node_type\"],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-imperative-03",
+      "requestHash": "sha256:d9ca687f7290b4596aa6519540886cda5bf0014fafc30c98caf39b749672170f",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"clarification\",\"issueCode\":\"missing_selection\",\"clarificationQuestion\":\"Which object should I add Priya to?\",\"missingSlots\":[\"selection\"],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-imperative-04",
+      "requestHash": "sha256:64328ce0199fd278bd07ee99985893238a46bf6815356dd7378f788190ed768b",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"clarification\",\"issueCode\":\"missing_source\",\"clarificationQuestion\":\"What object should be placed before the discount expires?\",\"missingSlots\":[\"source\"],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-imperative-05",
+      "requestHash": "sha256:f13d989b53595fe219c3e7b3623bb597b0c139bc7d5a6ace7cbea738b2511eae",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"clarification\",\"issueCode\":\"missing_selection\",\"clarificationQuestion\":\"Which slide/object should I insert it after: Revenue one or another visible object?\",\"missingSlots\":[\"selection\"],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-imperative-06",
+      "requestHash": "sha256:e2c8945edce6657b9987e16dcbd462dce2ad0e2bbcc8995f25dd6c553d3cbba8",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-shapes-01",
+      "requestHash": "sha256:440d2580f3af4e3c6ed100bccfe8122a71b62f2e60482ff8d3ff8b27ac5f8a80",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-shapes-02",
+      "requestHash": "sha256:0818742b4b2b01eb483a192baf7a9c69b31e3f8875c123001443844a5de277d4",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"clarification\",\"issueCode\":\"missing_label\",\"clarificationQuestion\":\"What label should I put on the new object or connector?\",\"missingSlots\":[\"label\"],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-shapes-03",
+      "requestHash": "sha256:349837afd0460c3a3fcc9c71f804944ae8c57a5dcdf92ed3a00ab14c3d95ebee",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-shapes-04",
+      "requestHash": "sha256:811e967218ef9b2cab5a39ffdf01417c0a2761c33389b06e090fb5c8b98b6244",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"resolved\",\"issueCode\":\"none\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[{\"type\":\"create\",\"nodeType\":\"document\",\"label\":\"Decision\",\"handle\":\"decision_doc\",\"placement\":{\"kind\":\"relative\",\"anchor\":{\"kind\":\"visible_label\",\"label\":\"Release Decision\",\"occurrence\":1},\"direction\":\"below\"}},{\"type\":\"connect\",\"from\":{\"kind\":\"visible_label\",\"label\":\"Release Decision\",\"occurrence\":1},\"to\":{\"kind\":\"plan_handle\",\"handle\":\"decision_doc\"},\"label\":\"documented in\"}]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-shapes-05",
+      "requestHash": "sha256:7365019935abdaf3544a8e16676eeb852b0cea2c9c3758af4ce0ec53416e45b5",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"clarification\",\"issueCode\":\"missing_label\",\"clarificationQuestion\":\"What label should the document have, or do you want me to use the existing Shared Document?\",\"missingSlots\":[\"label\"],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-shapes-06",
+      "requestHash": "sha256:be4c5459a41052a15afcbdbb2785c998e4c4d791865825d586db9e2957a54b0b",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-shapes-07",
+      "requestHash": "sha256:75681224443bf98ab7031ca999c868f5d440000276f335431e12a7813408beb9",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"clarification\",\"issueCode\":\"missing_label\",\"clarificationQuestion\":\"What should be the label for the end terminator?\",\"missingSlots\":[\"label\"],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-parity-01",
+      "requestHash": "sha256:f5084d32cbbc49724f55dcd370accf4784ee9f1fc7b9ec70ce00656d518ef495",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"clarification\",\"issueCode\":\"ambiguous_reference\",\"clarificationQuestion\":\"Which connection should be removed: the one between User and Payment API, Payment API and Ledger Database, or Billing Service and Orders Queue?\",\"missingSlots\":[\"object_reference\"],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-parity-02",
+      "requestHash": "sha256:eb76e87ae78dd00a046cff7bd85e48ac2b9ccac12af398335cc8bc9ffb2f9d37",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-parity-03",
+      "requestHash": "sha256:98ec111dfc0784b5ac2c53155f73968647e3ea398b34268c3e6a24ffda7dfc98",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-parity-04",
+      "requestHash": "sha256:6cc0b2967ecf1e63f3767fe9e3a5053b88e6f5db785adc3de92f9a200c5d7fc8",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-parity-05",
+      "requestHash": "sha256:4d9722cb6fa8bccc5856f8156f9755f14759a1ac5a676007d76019ad7b1492b3",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-parity-06",
+      "requestHash": "sha256:f86c3595c46aa623c854b54aca638120cb54403be6798dc0f6661ca576406b39",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"unsupported_operation\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-parity-07",
+      "requestHash": "sha256:1742136593473310d2b21f42b920c3866fb39f50cf4c89a495a4943c0abd3f78",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-capability-reverse-connection",
+      "requestHash": "sha256:a8e74335c69dae7b9072ed6cd94e7d4f64722b5323002f2130185f9dc6469524",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-capability-distribute",
+      "requestHash": "sha256:8071e7108565d877f6c069322de401ea65f59a32768bfd1e8319be52d57bedd8",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"clarification\",\"issueCode\":\"missing_source\",\"clarificationQuestion\":\"Which object should the meeting minutes be distributed from?\",\"missingSlots\":[\"source\",\"distribution_axis\"],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-capability-layout",
+      "requestHash": "sha256:1f97a7029090001e86db9b3ad69b59f5093e3c6d007403a34457c1a18af16e6c",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"unsupported\",\"issueCode\":\"not_board_command\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[]}"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "ambient-capability-group-custom",
+      "requestHash": "sha256:86734bd87cc54fa124bf4d4b3d274586ff4521dacc39c551c04b7b3a4650a39c",
+      "response": {
+        "status": "completed",
+        "model": "gpt-5.4-mini-2026-03-17",
+        "output": [
+          {
+            "type": "function_call",
+            "name": "propose_diagram_plan",
+            "arguments": "{\"version\":\"1.1\",\"status\":\"resolved\",\"issueCode\":\"none\",\"clarificationQuestion\":null,\"missingSlots\":[],\"actions\":[{\"type\":\"rename\",\"target\":{\"kind\":\"visible_label\",\"label\":\"Legacy Box\",\"occurrence\":1},\"label\":\"Legal Agenda\"},{\"type\":\"move\",\"targets\":[{\"kind\":\"visible_label\",\"label\":\"Legal Agenda\",\"occurrence\":1}],\"placement\":{\"kind\":\"canvas_region\",\"region\":\"center\"}}]}"
+          }
+        ]
+      }
+    }
+  ]
+}

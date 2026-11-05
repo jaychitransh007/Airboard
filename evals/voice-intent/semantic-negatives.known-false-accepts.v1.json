@@ -1,0 +1,132 @@
+{
+  "schemaVersion": "airboard-semantic-negative-known.v1",
+  "description": "Meeting talk the production model (gpt-5.4-mini) does not leave alone, recorded 2026-11-05. scripts/eval-semantic-negatives.mjs --replay fails on any case not listed here with its outcome, so this list may only shrink unless a reviewed change adds to it. Tracked as RGB-013 in Docs/Release Readiness Backlog.md.",
+  "model": "gpt-5.4-mini",
+  "cases": [
+    {
+      "caseId": "ambient-architecture-01",
+      "outcome": "changes_board",
+      "answer": "resolved/none: connect hits, connect writes to"
+    },
+    {
+      "caseId": "ambient-architecture-02",
+      "outcome": "changes_board",
+      "answer": "resolved/none: connect talks to, connect talks to"
+    },
+    {
+      "caseId": "ambient-architecture-04",
+      "outcome": "changes_board",
+      "answer": "resolved/none: connect connect with"
+    },
+    {
+      "caseId": "ambient-architecture-05",
+      "outcome": "changes_board",
+      "answer": "resolved/none: reverse_connection"
+    },
+    {
+      "caseId": "ambient-architecture-06",
+      "outcome": "changes_board",
+      "answer": "resolved/none: create Workers Queue"
+    },
+    {
+      "caseId": "ambient-imperative-01",
+      "outcome": "changes_board",
+      "answer": "resolved/none: create Legal response due by Friday"
+    },
+    {
+      "caseId": "ambient-shapes-04",
+      "outcome": "changes_board",
+      "answer": "resolved/none: create Decision, connect documented in"
+    },
+    {
+      "caseId": "ambient-capability-group-custom",
+      "outcome": "changes_board",
+      "answer": "resolved/none: rename Legal Agenda, move"
+    },
+    {
+      "caseId": "ambient-standup-01",
+      "outcome": "acts",
+      "answer": "resolved/none: rename, connect"
+    },
+    {
+      "caseId": "ambient-architecture-08",
+      "outcome": "acts",
+      "answer": "resolved/none: select"
+    },
+    {
+      "caseId": "ambient-architecture-03",
+      "outcome": "asks_clarification",
+      "answer": "clarification/missing_context"
+    },
+    {
+      "caseId": "ambient-review-01",
+      "outcome": "asks_clarification",
+      "answer": "clarification/missing_label"
+    },
+    {
+      "caseId": "ambient-review-02",
+      "outcome": "asks_clarification",
+      "answer": "clarification/missing_selection"
+    },
+    {
+      "caseId": "ambient-review-03",
+      "outcome": "asks_clarification",
+      "answer": "clarification/missing_context"
+    },
+    {
+      "caseId": "ambient-phonetic-04",
+      "outcome": "asks_clarification",
+      "answer": "clarification/missing_context"
+    },
+    {
+      "caseId": "ambient-imperative-02",
+      "outcome": "asks_clarification",
+      "answer": "clarification/missing_selection"
+    },
+    {
+      "caseId": "ambient-imperative-03",
+      "outcome": "asks_clarification",
+      "answer": "clarification/missing_selection"
+    },
+    {
+      "caseId": "ambient-imperative-04",
+      "outcome": "asks_clarification",
+      "answer": "clarification/missing_source"
+    },
+    {
+      "caseId": "ambient-imperative-05",
+      "outcome": "asks_clarification",
+      "answer": "clarification/missing_selection"
+    },
+    {
+      "caseId": "ambient-shapes-02",
+      "outcome": "asks_clarification",
+      "answer": "clarification/missing_label"
+    },
+    {
+      "caseId": "ambient-shapes-05",
+      "outcome": "asks_clarification",
+      "answer": "clarification/missing_label"
+    },
+    {
+      "caseId": "ambient-shapes-07",
+      "outcome": "asks_clarification",
+      "answer": "clarification/missing_label"
+    },
+    {
+      "caseId": "ambient-parity-01",
+      "outcome": "asks_clarification",
+      "answer": "clarification/ambiguous_reference"
+    },
+    {
+      "caseId": "ambient-capability-distribute",
+      "outcome": "asks_clarification",
+      "answer": "clarification/missing_source"
+    },
+    {
+      "caseId": "ambient-parity-06",
+      "outcome": "wrong_issue",
+      "answer": "unsupported/unsupported_operation"
+    }
+  ]
+}

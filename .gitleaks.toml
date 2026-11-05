@@ -1,0 +1,10 @@
+# gitleaks loads this from the repository root (CI: the Secret scan job).
+[extend]
+useDefault = true
+
+# Release names such as `api:launch-3e17071` (an image and its tag) appear in
+# deploy records; generic-api-key mistakes them for keys.
+[[allowlists]]
+description = "Container image release tags"
+regexTarget = "match"
+regexes = ['''\b(api|web):launch-[0-9a-f]{7}\b''']
