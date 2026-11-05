@@ -5,6 +5,7 @@ import Link from "next/link";
 import { airboardApi } from "../../platform/api";
 import { useAirboardAuth } from "../../platform/auth";
 import { MarketingPage } from "./PublicShell";
+import { FormStatus } from "./FormStatus";
 
 export function SupportPage() {
   const auth = useAirboardAuth(); const [subject, setSubject] = useState(""); const [message, setMessage] = useState(""); const [result, setResult] = useState<string | null>(null); const [busy, setBusy] = useState(false);
@@ -46,7 +47,7 @@ export function SupportPage() {
           <button className="button button-primary" disabled={busy}>
             {busy ? "Creating…" : "Create support request"}
           </button>
-          {result ? <p className="form-message">{result}</p> : null}
+          <FormStatus message={result} />
         </form>
       ) : (
         <div className="content-cta">

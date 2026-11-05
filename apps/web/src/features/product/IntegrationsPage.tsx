@@ -22,6 +22,7 @@ import {
   selectChromeMeetExtensionTransportId,
   selectChromeMeetInstallation,
 } from "./chromeMeetInstallationSelection";
+import { FormStatus } from "./FormStatus";
 
 type Installation = {
   id: string;
@@ -270,7 +271,7 @@ export function IntegrationsPage() {
           <button className="button button-primary" disabled={busy} onClick={() => void revokeInstallation()}>{busy ? "Revoking…" : "Revoke installation"}</button>
         </section>
       ) : null}
-      {status ? <p className="form-message" role="status">{status}</p> : null}
+      <FormStatus message={status} />
 
       <section className="meet-integration-console">
         <div className="integration-console-head">

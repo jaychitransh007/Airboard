@@ -6,7 +6,7 @@ export function PublicShell({ children }: { children: ReactNode }) {
     <div className="marketing-shell">
       <a className="skip-link" href="#main-content">Skip to content</a>
       <header className="marketing-header">
-        <Link className="marketing-brand" href="/" aria-label="Airboard home">
+        <Link className="marketing-brand" href="/">
           <span className="brand-orbit" aria-hidden="true" />
           Airboard
           <small className="release-stage">Controlled pilot</small>

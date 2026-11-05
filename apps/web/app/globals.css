@@ -750,11 +750,11 @@ a { color: inherit; }
 .surface-node-a { top: 35px; left: 34px; }.surface-node-b { right: 45px; bottom: 28px; }
 .surface-visual i { position: absolute; top: 78px; left: 112px; width: calc(100% - 175px); height: 58px; border-top: 2px solid currentColor; border-right: 2px solid currentColor; border-radius: 0 22px 0 0; opacity: .58; transform: rotate(6deg); }
 .surface-kicker { display: flex; gap: 9px; margin: 0 0 17px; font-size: 11px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
-.surface-kicker span { opacity: .58; }
+.surface-kicker span { opacity: .78; }
 .surface-card h3 { margin: 0 0 14px; font-family: Georgia,serif; font-size: clamp(28px,2.55vw,37px); font-weight: 500; letter-spacing: -.038em; line-height: 1.06; }
 .surface-card > p:not(.surface-kicker) { margin: 0; color: inherit; line-height: 1.62; opacity: .72; }
 .surface-tags { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 20px; }
-.surface-tags span { padding: 6px 9px; border: 1px solid currentColor; border-radius: 99px; font-size: 9px; font-weight: 800; letter-spacing: .05em; opacity: .68; text-transform: uppercase; }
+.surface-tags span { padding: 6px 9px; border: 1px solid currentColor; border-radius: 99px; font-size: 9px; font-weight: 800; letter-spacing: .05em; opacity: .78; text-transform: uppercase; }
 .surface-card > a { margin-top: auto; padding-top: 28px; color: inherit; font-size: 12px; font-weight: 850; text-decoration: none; }
 .surface-card > a:hover { text-decoration: underline; text-underline-offset: 4px; }
 
@@ -2927,6 +2927,8 @@ button:disabled {
 .data-table button { background: rgba(255, 255, 255, 0.76); }
 
 .form-message, .form-warning { border-radius: 15px; }
+/* FormStatus keeps an empty live region mounted; take it out of the layout until it has text. */
+.form-message:empty, .form-warning:empty { position: absolute; width: 1px; height: 1px; margin: 0; padding: 0; overflow: hidden; border: 0; clip-path: inset(50%); }
 .form-message { border: 1px solid rgba(118, 87, 235, 0.14); background: rgba(237, 231, 255, 0.67); color: #57438d; }
 .form-warning { border-color: rgba(255, 141, 120, 0.32); background: rgba(255, 235, 225, 0.75); color: #8f4638; }
 .cookie-banner { border-color: rgba(54, 36, 91, 0.1); border-radius: 20px; background: rgba(255, 255, 255, 0.86); box-shadow: var(--air-shadow); backdrop-filter: blur(24px); }
@@ -5035,7 +5037,7 @@ button:disabled {
   padding: 4px 6px;
   border-radius: 99px;
   background: #eeeaf6;
-  color: #766b87;
+  color: #685d7a;
   font-size: 8px;
   font-weight: 850;
   text-transform: uppercase;
@@ -5073,8 +5075,8 @@ button:disabled {
 }
 
 .help-support-cta .button {
-  border-color: #8a68e5;
-  background: #8a68e5;
+  border-color: var(--product-lavender);
+  background: var(--product-lavender);
   color: #fff;
 }
 
@@ -5462,7 +5464,7 @@ button:disabled {
 
 .help-neighbors small {
   margin-bottom: 5px;
-  color: #837792;
+  color: #685d7a;
   font-size: 9px;
   font-weight: 850;
   text-transform: uppercase;
@@ -5519,7 +5521,7 @@ button:disabled {
 }
 
 .help-on-this-page > div span {
-  color: #81768d;
+  color: #685d7a;
 }
 
 .help-on-this-page > div a {

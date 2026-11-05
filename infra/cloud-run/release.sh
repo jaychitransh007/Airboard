@@ -2,17 +2,21 @@
 # Builds, stages and promotes the pilot's two Cloud Run services.
 #
 #   infra/cloud-run/release.sh build            # API and web images for HEAD
+#   infra/cloud-run/release.sh migrate          # apply pending database migrations
 #   infra/cloud-run/release.sh stage api|web    # new revision: no traffic, own tagged URL
 #   infra/cloud-run/release.sh promote api|web  # send all traffic to that revision
 #
 # The release is named launch-<short commit of HEAD>; set AIRBOARD_RELEASE to
 # stage or promote another one (a rollback is `AIRBOARD_RELEASE=launch-<hash>
 # release.sh promote api`). Smoke a staged revision on its tagged URL before
-# promoting it, and apply migrations (`supabase db push`) before promoting an
-# API that needs them. DRY_RUN=1 prints the commands instead of running them.
+# promoting it. `stage api` refuses while the pilot database lacks a migration
+# in supabase/migrations, so run `migrate` first. Migrations are not rolled
+# back, so each one must keep working with the API it replaces.
+# DRY_RUN=1 prints the commands instead of running them.
 #
 # Needs gcloud signed in to the pilot project and the Supabase CLI signed in
-# (the web build reads the project's publishable key, which is public).
+# and linked to the pilot database (the web build reads the project's
+# publishable key, which is public).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -43,6 +47,42 @@ service_for() {
     api | web) echo "airboard-pilot-$1" ;;
     *) echo "usage: $0 stage|promote api|web" >&2; exit 2 ;;
   esac
+}
+
+# Prints each migration file the pilot database has not applied, one per line.
+pending_migrations() {
+  local linked
+  linked=$(cat supabase/.temp/project-ref 2>/dev/null || true)
+  if [[ $linked != "$SUPABASE_REF" ]]; then
+    echo "The Supabase CLI is linked to '${linked:-nothing}', not the pilot database $SUPABASE_REF." >&2
+    echo "Run: supabase link --project-ref $SUPABASE_REF" >&2
+    exit 1
+  fi
+  local output
+  if ! output=$(supabase db push --dry-run 2>&1); then
+    echo "$output" >&2
+    echo "Could not compare supabase/migrations with the pilot database." >&2
+    exit 1
+  fi
+  grep -oE '[0-9]{14}_[A-Za-z0-9_]+\.sql' <<<"$output" || true
+}
+
+migrate() {
+  local pending
+  pending=$(pending_migrations)
+  if [[ -z $pending ]]; then
+    echo "The pilot database has every migration in supabase/migrations."
+    return
+  fi
+  echo "Applying to the pilot database $SUPABASE_REF:"
+  sed 's/^/  /' <<<"$pending"
+  run supabase db push --yes
+  [[ -n ${DRY_RUN:-} ]] && return
+  if [[ -n $(pending_migrations) ]]; then
+    echo "Migrations are still pending after the push." >&2
+    exit 1
+  fi
+  echo "The pilot database has every migration in supabase/migrations."
 }
 
 build() {
@@ -79,6 +119,19 @@ build() {
 stage() {
   local service
   service=$(service_for "$1")
+  # The API reads tables and columns that migrations add; staging it ahead of
+  # them can fail at runtime. AIRBOARD_SKIP_MIGRATION_CHECK=1 is for when the
+  # database cannot be reached and the release is known not to need one.
+  if [[ $1 == api && -z ${AIRBOARD_SKIP_MIGRATION_CHECK:-} ]]; then
+    local pending
+    pending=$(pending_migrations)
+    if [[ -n $pending ]]; then
+      echo "The pilot database lacks migrations that this API may need:" >&2
+      sed 's/^/  /' <<<"$pending" >&2
+      echo "Apply them first: $0 migrate" >&2
+      exit 1
+    fi
+  fi
   # The API shares live boards across instances (board event fan-out), so it
   # may scale out; the web stays on one. The services keep a minimum of one
   # warm instance at the service level, which applies only to revisions
@@ -119,7 +172,8 @@ promote() {
 
 case ${1:-} in
   build) build ;;
+  migrate) migrate ;;
   stage) stage "${2:-}" ;;
   promote) promote "${2:-}" ;;
-  *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

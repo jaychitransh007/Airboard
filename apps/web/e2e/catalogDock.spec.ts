@@ -144,7 +144,7 @@ test("the creation toolbar exposes FigJam's four groups in the expected order", 
     Objects: ["Draw", "Sticky note, shortcut S", "Shape", "Connector"],
     Tools: ["Text, shortcut T", "Section, shortcut ⇧S", "Table, shortcut ⇧T", "Stamp"],
     Insert: ["Insert"],
-    "Canvas zoom controls": ["Zoom out", "Reset canvas zoom", "Zoom in"],
+    "Canvas zoom controls": ["Zoom out", "100%, reset canvas zoom", "Zoom in"],
   };
   for (const [groupName, labels] of Object.entries(expectedButtons)) {
     const group = toolbar.getByRole("group", { name: groupName });
