@@ -141,6 +141,8 @@ export type SemanticIntentRuntimeConfig = {
   allowedModels: string[];
   endpoint: string;
   reasoningEffort: "none" | "minimal" | "low" | "medium";
+  /** OpenAI processing tier; priority answers faster at a higher token price. */
+  serviceTier: "auto" | "default" | "flex" | "priority";
   timeoutMs: number;
   maxConcurrentRequests: number;
   maxTranscriptCharacters: number;

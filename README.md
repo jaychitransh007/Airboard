@@ -90,7 +90,7 @@ The OpenAI Responses adapter requires one strict `propose_diagram_plan` function
 
 Clarifications are conversational. For example, `connect the decision to user one and user two with yes and…` produces a focused question instead of guessing, and the next Airo turn completes the pending request.
 
-The first server adapter uses the OpenAI Responses API. It uses `gpt-5.6-luna`, the only allowed model, with reasoning effort `none`. On 2026-11-05 Luna planned 34 of the 38 real-command cases correctly, against 26 for `gpt-5.4-mini`, and changed the board for 3 of 60 meeting-talk cases, against 10. The default model and its allowlist are runtime configuration, so other models can still be evaluated without code changes. Intent Canvas also exposes a separate **Intent model** selector; changing it affects the next unclear command immediately and does not restart the microphone stream:
+The first server adapter uses the OpenAI Responses API. It uses `gpt-5.6-luna`, the only allowed model, with reasoning effort `none` on OpenAI's priority tier (`AIRBOARD_INTENT_SERVICE_TIER`), which cut the slowest 5% of answers from about 4 s to 2.4 s. On 2026-11-05 Luna planned 34 of the 38 real-command cases correctly, against 26 for `gpt-5.4-mini`, and changed the board for 3 of 60 meeting-talk cases, against 10. The default model and its allowlist are runtime configuration, so other models can still be evaluated without code changes. Intent Canvas also exposes a separate **Intent model** selector; changing it affects the next unclear command immediately and does not restart the microphone stream:
 
 ```sh
 AIRBOARD_INTENT_PROVIDER=openai \

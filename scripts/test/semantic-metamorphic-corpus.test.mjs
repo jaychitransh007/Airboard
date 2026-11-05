@@ -56,8 +56,8 @@ test("metamorphic expansion is deterministic and exceeds 600 stable scenarios", 
   });
 
   assert.deepEqual(first, second);
-  assert.equal(source.semanticPromptVersion, "2.9");
-  assert.equal(first.metamorphic.semanticPromptVersion, "2.9");
+  assert.equal(source.semanticPromptVersion, "2.10");
+  assert.equal(first.metamorphic.semanticPromptVersion, "2.10");
   assert.ok(first.cases.length >= SEMANTIC_METAMORPHIC_MIN_SCENARIOS);
   const nonPendingCases = source.cases.filter(
     ({ pendingClarification }) => pendingClarification === undefined,

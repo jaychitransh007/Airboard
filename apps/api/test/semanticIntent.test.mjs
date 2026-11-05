@@ -51,6 +51,7 @@ const runtimeConfig = {
   allowedModels: ["gpt-5.6-terra", "gpt-5.6-luna"],
   endpoint: "https://api.openai.test/v1/responses",
   reasoningEffort: "none",
+  serviceTier: "priority",
   timeoutMs: 5_000,
   maxConcurrentRequests: 8,
   maxTranscriptCharacters: 500,
@@ -113,6 +114,9 @@ test("loads bounded planner configuration without exposing credentials", () => {
   assert.equal(config.defaultModel, "gpt-5.6-luna");
   assert.deepEqual(config.allowedModels, ["gpt-5.6-luna"]);
   assert.equal(config.reasoningEffort, "none");
+  assert.equal(config.serviceTier, "priority");
+  assert.equal(loadSemanticIntentConfig({ AIRBOARD_INTENT_SERVICE_TIER: "default" }).serviceTier, "default");
+  assert.throws(() => loadSemanticIntentConfig({ AIRBOARD_INTENT_SERVICE_TIER: "fastest" }), /AIRBOARD_INTENT_SERVICE_TIER/);
   assert.equal(config.timeoutMs, 5_000);
   assert.equal(config.apiKey, "server-only-secret");
 
@@ -279,6 +283,10 @@ test("uses one required strict Responses function tool and captures provider met
   assert.equal(payload.model, "gpt-5.6-terra");
   assert.equal(payload.store, false);
   assert.equal(payload.parallel_tool_calls, false);
+  // Speed: the priority tier and a day-long shared cache of the fixed prefix.
+  assert.equal(payload.service_tier, "priority");
+  assert.equal(payload.prompt_cache_key, "airboard-semantic-intent");
+  assert.equal(payload.prompt_cache_retention, "24h");
   assert.deepEqual(payload.tool_choice, {
     type: "function",
     name: AIRBOARD_SEMANTIC_PLAN_TOOL_NAME,
@@ -315,7 +323,7 @@ test("uses one required strict Responses function tool and captures provider met
   assert.match(payload.instructions, /Golden Dataset to Planner/i);
   assert.match(payload.instructions, /create no Schema Data node/i);
   const modelInput = JSON.parse(payload.input);
-  assert.equal(AIRBOARD_SEMANTIC_INTENT_PROMPT_VERSION, "2.9");
+  assert.equal(AIRBOARD_SEMANTIC_INTENT_PROMPT_VERSION, "2.10");
   assert.equal(
     modelInput.semanticPlanContractVersion,
     AIRBOARD_SEMANTIC_PLAN_CONTRACT_VERSION,
