@@ -500,7 +500,7 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
       - on production, the first Tab lands on the skip link.
     - **Rollback:** `mumbai-fff6d97` (both services). Earlier revisions point at the deleted Seoul project.
   - **Tests:** API 129, web 376, all packages pass, and the full e2e suite (53 passed, 2 skipped) includes two new keyboard tests.
-- **2026-11-05** — Remaining engineering items (built and tested, not deployed):
+- **2026-11-05** — Remaining engineering items:
   - **Hook dependency review (all 28 warnings):**
     - **Real bugs fixed:**
       - Airo's AI interpretation and voice diagnostics kept a stale sign-in token after the hourly refresh, so they would fail after an hour on one board.
@@ -524,3 +524,20 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - The app's embedded browser pane denies clipboard writes, so this was verified in Playwright with clipboard permission.
   - **Landing demo:** a CSS-only loop (`IdeaDemo`) on the landing page and `/demo`, where a typed sentence becomes a connected diagram. With reduced motion it shows the finished board. "See an idea move" scrolls to it.
   - **Tests:** API 131, web 384, core 64, scripts 182; lint and typecheck clean; the full e2e suite (56 passed, 2 skipped) includes new tests for the board menu keyboard, Copy image and Export PDF. One stylus e2e test failed once under 5 parallel workers and passed 4/4 alone and in a full rerun.
+  - **Deployed** (commit `34df218`): `airboard-pilot-api-launch-34df218` and `airboard-pilot-web-launch-34df218` at 100%. No migration.
+    - **Tagged smoke:**
+      - Mumbai settings and secret kept, read-only off;
+      - readiness passed against Mumbai;
+      - `/boards?preview=1` and `/sessions/start` refuse signed-out callers;
+      - 7 web pages returned 200;
+      - the landing page and `/demo` carry the demo, and help lists Export PDF;
+      - the bundles carry Export PDF, Copy image and library previews and search, and reference only Mumbai.
+    - **Production:** readiness passes; the deployed launch check reads the new revisions at 19/23; the new API revision logged no errors.
+    - **Graceful shutdown seen in production:** the outgoing `launch-3c85863` API instance logged `shutting down` on SIGTERM at 08:05:16 UTC.
+    - **Warm instances fixed:**
+      - Revision-level `min-instances=1` (from `3c85863`) kept tagged, no-traffic revisions running and billed, per Cloud Run's docs.
+      - Both services now use a **service-level minimum of 1** (`gcloud run services update --min=1`), which only applies to revisions receiving traffic.
+      - The `launch-3c85863-*` tags were removed.
+      - Deploys now stage with `--min-instances=default`.
+      - `launch-34df218` still carries a revision-level minimum, so remove its tag after the next promotion.
+    - **Rollback:** both services to `launch-3c85863` (untagged; route with `--to-revisions`).
