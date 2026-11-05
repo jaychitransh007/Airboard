@@ -57,7 +57,7 @@ These are fixable in the repo and each would make a public "supported product" c
 | RGB-011 | No linter anywhere (no ESLint config/script/CI step) | Done 2026-11-05 | Engineering | Verified | `.github/workflows/ci.yml`; no ESLint in any `package.json` | Add ESLint + a CI lint gate. |
 | RGB-012 | No dependency-vulnerability audit, secret scanning, or dependabot/CodeQL in CI | Done 2026-11-05 | Engineering / Security | Verified | `.github/workflows/ci.yml` | Add `pnpm audit`/OSV, secret scan (e.g. gitleaks), and Dependabot/CodeQL. |
 | RGB-013 | Semantic (LLM) voice false-accept path not covered by any CI gate | Done 2026-11-05 | Engineering | Reported | Only deterministic grammar/false-accept evals gate CI | Add an offline semantic false-accept gate (or document the exclusion). |
-| RGB-038 | The production intent model acts on meeting talk: `gpt-5.4-mini` changed the board for 8–10 of 60 ambient cases and asked a question for 12–14 | Partly done 2026-11-05: Luna changes the board for 1 of 60 but asks a question for 20 | Engineering / Product | Verified | `evals/voice-intent/semantic-negatives.known-false-accepts.v1.json` | Tighten the prompt until the known list is empty, starting with the questions Luna asks about meeting talk. |
+| RGB-038 | The production intent model acts on meeting talk: `gpt-5.4-mini` changed the board for 8–10 of 60 ambient cases and asked a question for 12–14 | Partly done 2026-11-05: prompt 2.9 leaves 55 of 60 quiet; 3 still get a question | Engineering / Product | Verified | `evals/voice-intent/semantic-negatives.known-false-accepts.v1.json` | Keep tightening the prompt until the known list is empty, without losing real commands. |
 | RGB-014 | New `catalogDock` E2E is uncommitted & never run; CI can't show E2E is a required merge check | Done 2026-11-05 | Engineering | Verified | `apps/web/e2e/catalogDock.spec.ts` (uncommitted, +235 lines); Playwright not in the fast verify path | Run it before committing the dock diff; make the E2E job a required check on the release branch. |
 
 ### Security hardening (mediums)
@@ -798,3 +798,17 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - **Rollback:** both services to `launch-854858a`. That API revision keeps its own settings, so rolling back also restores `gpt-5.4-mini`.
   - **Not verified in production:** a signed-in voice command through Luna (needs a real sign-in). The same code and model passed 34 of 38 real commands locally.
   - **Local setup:** `.env` must name an allowed model, so a local `AIRBOARD_INTENT_MODEL=gpt-5.6-terra` now stops the API from starting; the repository's `.env` was moved to Luna.
+- **2026-11-05** — Intent prompt 2.9: Luna leaves meeting talk alone (on `codex/production-readiness`; not yet deployed):
+  - **What changed:** the prompt used to say every transcript was captured "only after diagram-command mode was activated", gave one example of non-board speech, and told the model to ask whenever a detail was missing. It now tells the model that people keep talking to each other while Airo listens, and asks it to decide first whether the speech is meant for the board. That holds when it addresses Airo, uses editing language on objects that are on the board, or states a new relationship between objects named by their visible labels. Editing verbs on things that are not on the board (tickets, invites, branches, slides), generic type words in conversation, reports and suggestions, descriptions of how a system works, and figures of speech ("make a note that…") are `not_board_command`. Questions are only for clear board commands, and a request about another document is `not_board_command` rather than `unsupported_operation`. Answers to Airo's own question skip the test.
+  - **Result with Luna, against the 2.8 baseline:**
+
+    | | 2.8 | 2.9 |
+    | --- | --- | --- |
+    | Meeting talk left alone (of 60) | 30 | 53–55 |
+    | Meeting talk that changes the board | 1–3 | 0 |
+    | Meeting talk that gets a question | 20 | 3–4 |
+    | Real commands right (of 38) | 35 | 33–35 |
+
+    Real-command misses stayed within the 2.8 range. The two dialogue cases ("…with yes and", then "No.") passed 8 of 10 runs each way.
+  - **CI:** the replay is re-recorded with prompt 2.9, and the known list shrank from 30 to 5: 3 questions about system talk or a document, and 2 requests about another document reported as `unsupported_operation`.
+  - **Deploy:** the prompt lives in the API, so it reaches users only with an API release.
