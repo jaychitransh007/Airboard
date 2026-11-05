@@ -309,6 +309,18 @@ max_frequency = "5s"
 # Use an external OAuth provider. The full list of providers are: `apple`, `azure`, `bitbucket`,
 # `discord`, `facebook`, `github`, `gitlab`, `google`, `keycloak`, `linkedin_oidc`, `notion`, `twitch`,
 # `twitter`, `x`, `slack`, `spotify`, `workos`, `zoom`.
+# "Continue with Google" for everyone; the app shows the button whenever this
+# is on. The OAuth client lives in the pilot Google Cloud project (Google Auth
+# Platform, web application, redirect URI
+# https://ujotgzjpkocuhtfrvbzu.supabase.co/auth/v1/callback). Its ID and secret
+# come from .env (the CLI reads it), never from this file. Without them the
+# local stack still starts, but local Google sign-in will not complete.
+[auth.external.google]
+enabled = true
+client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
+skip_nonce_check = false
+
 [auth.external.apple]
 enabled = false
 client_id = ""

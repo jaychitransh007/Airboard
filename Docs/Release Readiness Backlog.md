@@ -605,3 +605,21 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - It sends all traffic to a named revision.
     - `AIRBOARD_RELEASE` picks another release (rollback). `DRY_RUN=1` prints the commands instead of running them.
   - **`Docs/Project Status.md`:** what is live, what shipped, what is left with owners, and how to release.
+- **2026-11-05** — Google sign-in for everyone:
+  - **Google Auth Platform** (pilot project):
+    - The consent screen is now "Airboard" (it read "sigma-fit"). It has home, privacy and terms links on the live site.
+    - The authorized domains are the Supabase project and the web host.
+    - The developer contact was misspelled and is corrected.
+    - Publishing status is **In production** for External users. It asks for no sensitive scopes, so it needs no Google verification.
+    - The web client "Airboard sign-in (Supabase)" redirects to `https://ujotgzjpkocuhtfrvbzu.supabase.co/auth/v1/callback`.
+  - **Supabase:**
+    - `[auth.external.google]` in `supabase/config.toml` reads its client ID and secret from `.env` (`SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID`, `SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET`).
+    - `supabase config push` changed only the Google provider, as previewed.
+    - The secret was pasted into `.env` by the owner and never printed or committed.
+  - **App:** no code change. The login page reads Supabase's providers and now shows "Continue with Google". New accounts get their Google name and avatar through the existing profile trigger.
+  - **Verified without signing in:**
+    - Production auth settings list `google` and `email`.
+    - `/auth/v1/authorize?provider=google` sends people to Google with the new client, the Supabase callback and the `email profile` scope.
+    - Google accepts the client and opens its sign-in page.
+    - The live `/login` shows the button.
+    - The owner's first Google sign-in is the end-to-end test.
