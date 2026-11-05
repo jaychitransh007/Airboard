@@ -12,3 +12,5 @@ overrides:
   # (libvips/libheif/librsvg CVEs in sharp, URI-parsing advisories in fast-uri).
   "sharp": "^0.35.5"
   "fast-uri": "^3.1.7"
+  # Pulled in only by Electron's download helper (desktop app tooling).
+  "undici": "^7.30.1"

@@ -128,28 +128,27 @@ export class SupabaseSessionStore implements SessionStore {
       throw new Error(scope.denial);
     }
 
-    const now = new Date();
-    const sessionInsert = {
-      owner_user_id: profile.id,
-      provider: input.provider,
-      status: "active",
-      allow_participant_drawing: input.allowParticipantDrawing,
-      owner_last_seen_at: now.toISOString(),
-      expires_at: new Date(now.getTime() + 6 * 60 * 60 * 1000).toISOString(),
-      ...(input.organizationId ? { organization_id: input.organizationId } : {}),
-      ...(scope.workspaceId ? { workspace_id: scope.workspaceId } : {}),
-      ...(input.boardId ? { board_id: input.boardId } : {}),
-      ...(input.providerMeetingId ? { provider_meeting_id: input.providerMeetingId } : {}),
-      ...(input.title ? { title: input.title } : { title: "Airboard" }),
-    };
-    const sessionRow = await this.insertSingle<BoardSessionRow>("board_sessions", sessionInsert);
-    const ownerParticipantRow = await this.insertSingle<ParticipantRow>("participants", {
-      board_session_id: sessionRow.id,
-      user_id: profile.id,
-      display_name: profile.display_name || "Owner",
-      role: "owner",
-      input_enabled: true,
-    });
+    // One round trip: the session and its owner participant are created
+    // together (migration 20261105140000_start_board_session_rpc).
+    const { data: started, error: startError } = await this.client
+      .rpc("start_board_session", {
+        p_owner_user_id: profile.id,
+        p_provider: input.provider,
+        p_allow_participant_drawing: input.allowParticipantDrawing,
+        p_owner_display_name: profile.display_name || "Owner",
+        p_organization_id: input.organizationId ?? null,
+        p_workspace_id: scope.workspaceId,
+        p_board_id: input.boardId ?? null,
+        p_provider_meeting_id: input.providerMeetingId ?? null,
+        p_title: input.title ?? null,
+      })
+      .single();
+    const startedRow = started as { session: BoardSessionRow; participant: ParticipantRow } | null;
+    if (startError || !startedRow?.session || !startedRow.participant) {
+      throw new Error(startError?.message ?? "SESSION_START_FAILED");
+    }
+    const sessionRow = startedRow.session;
+    const ownerParticipantRow = startedRow.participant;
 
     return {
       session: mapSession(sessionRow),
@@ -443,6 +442,20 @@ export class SupabaseSessionStore implements SessionStore {
     return ((data ?? []) as ParticipantRow[]).map(mapParticipant);
   }
 
+  async getEventsInRange(sessionId: string, from: number, to: number): Promise<BoardEvent[]> {
+    const { data, error } = await this.client
+      .from("board_events")
+      .select("*")
+      .eq("board_session_id", sessionId)
+      .gte("sequence", from)
+      .lte("sequence", to)
+      .order("sequence", { ascending: true });
+    if (error) {
+      throw new Error("BOARD_EVENT_LOOKUP_FAILED");
+    }
+    return ((data ?? []) as BoardEventRow[]).map((row) => ({ ...row.payload, sequence: row.sequence })) as BoardEvent[];
+  }
+
   private async listEventRows(sessionId: string): Promise<BoardEventRow[]> {
     // PostgREST caps a single response at [api] max_rows (1000 by default), so
     // an unpaginated select silently truncates a long session's history and
@@ -469,6 +482,10 @@ export class SupabaseSessionStore implements SessionStore {
     }
 
     return rows;
+  }
+
+  async getLatestSequence(sessionId: string): Promise<number> {
+    return (await this.getNextSequence(sessionId)) - 1;
   }
 
   private async getNextSequence(sessionId: string): Promise<number> {

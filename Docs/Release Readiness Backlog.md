@@ -541,3 +541,40 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
       - Deploys now stage with `--min-instances=default`.
       - `launch-34df218` still carries a revision-level minimum, so remove its tag after the next promotion.
     - **Rollback:** both services to `launch-3c85863` (untagged; route with `--to-revisions`).
+- **2026-11-05** — Engineering leftovers:
+  - **Desktop tooling:** Electron 43.1.1 → 43.8.7, which clears every Electron advisory. `pnpm-workspace.yaml` pins `undici` ^7.30.1, used only by Electron's download helper. The full audit (dev included) has 0 high and 0 critical. One moderate is left: `minimatch` under typescript-eslint, which needs a major upgrade.
+  - **One-step session start:**
+    - Migration `20261105140000_start_board_session_rpc.sql` adds `start_board_session`, which inserts the live session and its owner participant in one transaction. This saves a round trip on every board open, and a session can no longer exist without its owner.
+    - Only `service_role` may call it; `anon` and `authenticated` cannot.
+    - Access checks stay in the API.
+    - The migration must be applied before the API revision that calls it.
+  - **Live boards across API instances (RGB-007):**
+    - Each instance relays an accepted event to its own sockets first, then publishes it on a private Supabase Realtime channel for that session (`airboard:board-session:<id>`, `self: false`).
+    - Other instances holding sockets for the session relay it to theirs (`apps/api/src/boardEventFanOut.ts`).
+    - An instance joins the channel when the first socket for a session arrives and leaves it with the last.
+    - Events are batched under 900 KB per message. An event too large for one message goes as its sequence number, and receivers read it from `board_events`.
+    - **Nothing lost or doubled:**
+      - Broadcast is best effort, so each instance keeps a per-session mark: every sequence up to it has reached its sockets.
+      - The mark is read before the channel joins.
+      - On every join and rejoin (a Realtime reconnect), the instance reads anything newer from `board_events`.
+      - A message that skips past the mark has the gap read first.
+      - Anything at or below the mark is never relayed again.
+    - Before the channel has joined, or from an instance with no socket on that board, events go over HTTP: `httpSend`, falling back to `send()` on Realtime servers older than v2.97 (the local CLI runs v2.73.2).
+    - The database stays the record. The `(board_session_id, sequence)` unique constraint already ordered concurrent writers.
+    - The owner-absence lock is safe across instances: a timer on one instance checks the session row, and owner heartbeats every 30 s mark it active well inside the 180 s grace period.
+    - Rate limits stay per instance.
+    - Browsers cannot listen in: the channels are private, the API joins them with its service key, and there is no `realtime.messages` policy for `anon` or `authenticated`.
+    - **Startup probe:** at startup the API joins and leaves a throwaway private channel. It logs `board event fan-out ready`, or `board event fan-out cannot join its channels` with the status.
+    - `AIRBOARD_REALTIME_FANOUT=off` turns the fan-out off.
+    - **Capacity:** one API instance uses one Realtime connection, and Supabase allows 100 channels per connection. Cloud Run concurrency is 80 sockets per instance, so an instance stays under that limit. Raising concurrency above 100 would need more connections.
+    - **Verified:**
+      - Unit tests with a fake Realtime hub, including dropped messages, a rejoin and late duplicates.
+      - A test with two real API servers sharing one store, where the owner's edit on one reaches a guest connected to the other, once and without an echo.
+      - Against local Supabase Realtime: cross-instance delivery, no echo, delivery from an instance that never joined, a public-key browser refused (`CHANNEL_ERROR`), and the probe passing with both the legacy service-role JWT and the new `sb_secret_` key.
+      - The Supabase store against the local database: session start through `start_board_session`, then the range and latest-sequence reads.
+  - **Warm instances:** the `launch-34df218-*` tags were removed, so that revision's own minimum stops applying once it leaves traffic.
+  - **Tests:**
+    - API 135 and scripts 182.
+    - Lint, typecheck, docs, the PR evals, the production audit and the build are clean.
+    - The full e2e suite: 56 passed, 2 skipped.
+  - **Not yet deployed:** the migration must reach production before the API that calls `start_board_session`. The API then stages with `--max-instances=3`.

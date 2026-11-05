@@ -36,6 +36,13 @@ function createFakeSupabase(tables, options = {}) {
     from(table) {
       return new FakeQuery(fakeClient, table);
     },
+    // The database functions the API calls, emulated over the same tables.
+    rpc(name, args) {
+      const handler = FAKE_RPC[name];
+      assert.ok(handler, `unexpected rpc ${name}`);
+      const run = () => handler(fakeClient.tables, args);
+      return { single: () => Promise.resolve().then(run) };
+    },
     storage: {
       from(bucket) {
         return {
@@ -60,6 +67,38 @@ function createFakeSupabase(tables, options = {}) {
   };
   return fakeClient;
 }
+
+const FAKE_RPC = {
+  // Mirrors supabase/migrations/20261105140000_start_board_session_rpc.sql.
+  start_board_session(tables, args) {
+    const now = new Date().toISOString();
+    const session = {
+      id: crypto.randomUUID(),
+      owner_user_id: args.p_owner_user_id,
+      provider: args.p_provider,
+      status: "active",
+      allow_participant_drawing: args.p_allow_participant_drawing,
+      owner_last_seen_at: now,
+      expires_at: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
+      organization_id: args.p_organization_id,
+      workspace_id: args.p_workspace_id,
+      board_id: args.p_board_id,
+      provider_meeting_id: args.p_provider_meeting_id,
+      title: args.p_title || "Airboard",
+    };
+    const participant = {
+      id: crypto.randomUUID(),
+      board_session_id: session.id,
+      user_id: args.p_owner_user_id,
+      display_name: args.p_owner_display_name || "Owner",
+      role: "owner",
+      input_enabled: true,
+    };
+    (tables.board_sessions ??= []).push(session);
+    (tables.participants ??= []).push(participant);
+    return { data: { session, participant }, error: null };
+  },
+};
 
 class FakeQuery {
   constructor(client, table) {

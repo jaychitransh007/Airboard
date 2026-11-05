@@ -12,6 +12,6 @@
     "test": "node --test"
   },
   "devDependencies": {
-    "electron": "43.1.1"
+    "electron": "43.8.7"
   }
 }

@@ -13,6 +13,8 @@ export type ApiConfig = {
   localEntitlements: boolean;
   /** Refuse every change with 503 MAINTENANCE (AIRBOARD_READ_ONLY=true), e.g. while the database moves. */
   readOnly: boolean;
+  /** Share live-board events across API instances through Supabase Realtime (AIRBOARD_REALTIME_FANOUT, on unless "off"). */
+  realtimeFanOut: boolean;
   chromeExtensionEnabled: boolean;
   /** Exact reviewed Chrome Web Store package ID; required when enabled in production. */
   chromeExtensionId?: string;
@@ -97,6 +99,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ownerGraceSeconds: Number(env.AIRBOARD_OWNER_GRACE_SECONDS ?? 180),
     localEntitlements: !isProduction && env.AIRBOARD_LOCAL_ENTITLEMENTS !== "false",
     readOnly: env.AIRBOARD_READ_ONLY === "true",
+    realtimeFanOut: env.AIRBOARD_REALTIME_FANOUT !== "off",
     chromeExtensionEnabled,
     ...(chromeExtensionId ? { chromeExtensionId } : {}),
     chromeExtensionCompatibleVersions,

@@ -18,6 +18,7 @@ import { clientKey, createRateLimiter } from "./security";
 import { validateSessionStartBody } from "./sessionStartValidation";
 import { registerSemanticIntentRoutes } from "./semanticIntent/routes";
 import { createSessionStore } from "./storeFactory";
+import type { SessionStore } from "./store";
 import { registerTranscriptionRoutes } from "./transcription/routes";
 import { VoiceTraceBuffer } from "./voiceTrace/buffer";
 import { registerVoiceTraceRoutes } from "./voiceTrace/routes";
@@ -25,6 +26,7 @@ import { AuthService } from "./auth";
 import { registerControlPlaneRoutes } from "./controlPlaneRoutes";
 import { bearerToken, issueSignedToken, verifySignedToken } from "./signedTokens";
 import { AIRBOARD_CORS_MAX_AGE_SECONDS, AIRBOARD_CORS_METHODS } from "./cors";
+import { singleInstanceFanOut, supabaseFanOut, type BoardEventFanOut, type FanOutClient } from "./boardEventFanOut";
 import { registerReadOnlyGuard } from "./readOnly";
 import { redactSensitiveRequestUrl } from "./requestLogging";
 import {
@@ -44,7 +46,10 @@ type RoomClient = {
 // have no mutation path today, so this TTL does NOT propagate permission changes.
 const AUTH_CACHE_TTL_MS = 1000;
 
-export async function buildServer(config: ApiConfig) {
+export async function buildServer(
+  config: ApiConfig,
+  dependencies: { store?: SessionStore; fanOut?: BoardEventFanOut } = {},
+) {
   const server = Fastify({
     logger: {
       serializers: {
@@ -68,9 +73,47 @@ export async function buildServer(config: ApiConfig) {
       },
     },
   });
-  const store = createSessionStore(config);
+  const store = dependencies.store ?? createSessionStore(config);
   const auth = new AuthService(config);
   const rooms = new Map<string, Set<RoomClient>>();
+  // Other API instances may hold sockets for the same session (Cloud Run can
+  // run several); their accepted events arrive through the fan-out.
+  const fanOut: BoardEventFanOut =
+    dependencies.fanOut ??
+    (auth.client && config.realtimeFanOut
+      ? supabaseFanOut(auth.client as unknown as FanOutClient, {
+          loadEvents: async (sessionId, from, to) => store.getEventsInRange(sessionId, from, to),
+          latestSequence: async (sessionId) => store.getLatestSequence(sessionId),
+          onError: (error, context) => server.log.warn({ err: error, context }, "board event fan-out failed"),
+        })
+      : singleInstanceFanOut);
+  const roomFanOutLeave = new Map<string, () => void>();
+  const openRoom = (sessionId: string) => {
+    const room = new Set<RoomClient>();
+    rooms.set(sessionId, room);
+    roomFanOutLeave.set(
+      sessionId,
+      fanOut.join(sessionId, (events) => {
+        for (const event of events) broadcast(room, { type: "board.event", event });
+      }),
+    );
+    return room;
+  };
+  server.addHook("onReady", async () => {
+    void fanOut.probe?.().then((status) => {
+      if (status === "SUBSCRIBED") server.log.info("board event fan-out ready");
+      else server.log.warn({ status }, "board event fan-out cannot join its channels");
+    });
+  });
+  server.addHook("onClose", async () => {
+    await fanOut.close();
+  });
+  const closeRoomIfEmpty = (sessionId: string, room: Set<RoomClient>) => {
+    if (room.size > 0 || rooms.get(sessionId) !== room) return;
+    rooms.delete(sessionId);
+    roomFanOutLeave.get(sessionId)?.();
+    roomFanOutLeave.delete(sessionId);
+  };
   // At most one pending owner-absence lock timer per session, so repeated owner
   // disconnects (flapping) cannot pile up timers.
   const ownerLockTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -466,9 +509,8 @@ export async function buildServer(config: ApiConfig) {
         return;
       }
 
-      const room = rooms.get(boardSessionId) ?? new Set<RoomClient>();
+      const room = rooms.get(boardSessionId) ?? openRoom(boardSessionId);
       room.add(client);
-      rooms.set(boardSessionId, room);
       try {
         socket.send(
           JSON.stringify({
@@ -478,6 +520,7 @@ export async function buildServer(config: ApiConfig) {
         );
       } catch {
         room.delete(client);
+        closeRoomIfEmpty(boardSessionId, room);
         socket.close(1011, "INITIALIZATION_FAILED");
         return;
       }
@@ -594,6 +637,7 @@ export async function buildServer(config: ApiConfig) {
         for (const event of events) {
           broadcast(room, { type: "board.event", event });
         }
+        fanOut.publish(boardSessionId, events);
       });
 
       socket.on("close", () => {
@@ -611,9 +655,7 @@ export async function buildServer(config: ApiConfig) {
           })();
           scheduleOwnerAbsenceLock();
         }
-        if (room.size === 0) {
-          rooms.delete(boardSessionId);
-        }
+        closeRoomIfEmpty(boardSessionId, room);
       });
     })();
   });

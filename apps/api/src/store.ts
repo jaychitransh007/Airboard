@@ -47,4 +47,8 @@ export type SessionStore = {
   appendEvents(sessionId: string, events: BoardEvent[]): BoardEvent[] | Promise<BoardEvent[]>;
   getState(sessionId: string): BoardState | Promise<BoardState>;
   getSession(sessionId: string): BoardSession | Promise<BoardSession>;
+  /** Stored events with sequence from..to inclusive, in order. */
+  getEventsInRange(sessionId: string, from: number, to: number): BoardEvent[] | Promise<BoardEvent[]>;
+  /** The highest stored sequence, or 0 before the first event. */
+  getLatestSequence(sessionId: string): number | Promise<number>;
 };
