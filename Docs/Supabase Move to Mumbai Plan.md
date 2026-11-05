@@ -1,6 +1,6 @@
 # Moving Airboard's Supabase to Mumbai — plan
 
-Status: **done 2026-11-05.** Production runs on the Mumbai project. The Seoul project is untouched and waits for the owner to delete it. Written 2026-11-05.
+Status: **done 2026-11-05.** Production runs on the Mumbai project. The owner deleted the Seoul project the same day. Written 2026-11-05.
 
 ## What happened on 2026-11-05
 
@@ -29,11 +29,12 @@ The owner asked to finish the move the same day, since there was no pilot traffi
    - `.env` has `SUPABASE_DB_PASSWORD` for Mumbai and `SUPABASE_DB_PASSWORD_SEOUL` for the old project.
    - The launch evidence names the Mumbai project, and the local copies of the dump were deleted.
 
-**Rollback** (only sensible before anything new is written in Mumbai): route API traffic to `airboard-pilot-api-launch-513185f` and web traffic to `airboard-pilot-web-launch-513185f`. Both still point at Seoul.
+**Rollback to Seoul is no longer possible:** the owner deleted `ljqxegqdfhqcmkbivldr` on 2026-11-05. Every revision older than `mumbai-fff6d97` points at that deleted project, so none of them is a valid rollback target. Roll back only to Mumbai revisions.
 
 **Still open:**
 - Resend SMTP on the owner's domain. Until then, sign-in emails reach only Aura organization members, at most 2 an hour.
-- Deleting the Seoul project. The owner does this; the agent isn't allowed to delete data.
+- ~~Deleting the Seoul project.~~ Done by the owner on 2026-11-05 (`supabase projects delete`).
+- The old Secret Manager secret `airboard-supabase-secret-key` (Seoul `service_role` key) is no longer used and can be deleted by the owner.
 
 **New project:** `ujotgzjpkocuhtfrvbzu` ("Airboard"), in the Aura organization,
 region ap-south-1 (Mumbai), Micro compute, Postgres 17.11. Created 2026-11-05

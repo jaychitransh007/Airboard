@@ -467,7 +467,8 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - There were no storage files to copy.
   - **Live:** API `airboard-pilot-api-mumbai-fff6d97` (the `launch-513185f` image; `SUPABASE_URL` set to Mumbai; secret `airboard-supabase-secret-key-mumbai:1`) and web `airboard-pilot-web-mumbai-fff6d97` (built with Mumbai's URL and publishable key).
   - **Checks:** readiness against the Mumbai database passes, the lifecycle run returns 200, and read-only is off.
-  - **Rollback:** both services to `launch-513185f`, which still point at Seoul.
+  - **Rollback:** Mumbai revisions only. The owner deleted the Seoul project the same day, so every earlier revision points at a project that no longer exists.
   - **Open:**
     - Resend SMTP. Until then, sign-in emails reach only Aura organization members.
-    - Deleting the Seoul project `ljqxegqdfhqcmkbivldr`. The owner does this.
+    - ~~Deleting the Seoul project `ljqxegqdfhqcmkbivldr`.~~ Done by the owner on 2026-11-05.
+    - The unused secret `airboard-supabase-secret-key` can be deleted.
