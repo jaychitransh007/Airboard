@@ -232,6 +232,14 @@ export function loadSemanticIntentConfig(
     ["none", "minimal", "low", "medium"] as const,
     "AIRBOARD_INTENT_REASONING_EFFORT",
   );
+  // Priority cut Luna's p95 from about 4.0 s to 2.4 s on the real-command
+  // corpus (2026-11-05); voice commands wait on this call.
+  const serviceTier = parseChoice(
+    env.AIRBOARD_INTENT_SERVICE_TIER,
+    "priority",
+    ["auto", "default", "flex", "priority"] as const,
+    "AIRBOARD_INTENT_SERVICE_TIER",
+  );
   const apiKey = (env.AIRBOARD_INTENT_API_KEY ?? env.OPENAI_API_KEY)?.trim();
 
   return {
@@ -240,6 +248,7 @@ export function loadSemanticIntentConfig(
     allowedModels,
     endpoint,
     reasoningEffort,
+    serviceTier,
     timeoutMs: parseNumber(
       env.AIRBOARD_INTENT_TIMEOUT_MS,
       5_000,

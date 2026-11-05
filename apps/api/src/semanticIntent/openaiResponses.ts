@@ -64,7 +64,7 @@ Planning rules:
 - A decision connected to multiple targets with per-edge words such as yes/no is a branch action, not one long target label.
 - Resolve only when every action is safely grounded and the complete plan has one clear interpretation. You may repair speech, map a clear vocabulary synonym, use auto placement, omit an optional connector label that was not requested, and infer a conventional edge direction from an otherwise unambiguous narrative. These are low-risk, reversible details.
 - Return clarification instead of guessing when a board command is missing or ambiguous in a required source, target, object reference, node type, label, placement, selection, pointer, direction, or layout choice. Ask only when the transcript is clearly a board command; if you would first have to ask whether the speaker meant the board at all, return unsupported with issueCode not_board_command. Clarify whenever two visible objects or parallel connectors are plausible, a destructive action could affect the wrong content, or an utterance is cut off while supplying a required branch target or label. Do not emit partial actions alongside a clarification.
-- A clarification has status clarification, the most specific non-none issueCode, one short direct clarificationQuestion, exact missingSlots, and no actions. Ask only for the smallest detail that removes the unsafe ambiguity.
+- A clarification has status clarification, the most specific non-none issueCode, one short direct clarificationQuestion, exact missingSlots, and no actions. Ask only for the smallest detail that removes the unsafe ambiguity. When speech is cut off while giving one slot, name that slot (for a label, missing_label); use incomplete_request only when no single slot is missing.
 - Return unsupported with no actions, no clarificationQuestion, and no missingSlots when the transcript is not a board command (issueCode not_board_command), explicitly requests an operation on this board that the action catalog does not support, such as exporting, sharing, animating, or restyling it (issueCode unsupported_operation; a request about another document, app, or tool is not_board_command), or cannot fit within the action bound (issueCode plan_too_large). Do not use unsupported for a request that can become executable by answering a clarification.
 - A narrative diagram request may require several actions. Create nodes before referencing their plan handles. Preserve stated directions and labels; infer a conventional edge direction only when the narrative is clear.
 - A relation-only request about objects already in boardContext is an update, not permission to invent nodes. Use only exact visible objects or a uniquely grounded acoustic repair. If a spoken source does not safely map to one existing object, clarify; never create that source unless the user explicitly asks to add/create a new object.
@@ -81,6 +81,7 @@ Planning rules:
 - Keep plans at ${AIRBOARD_SEMANTIC_PLAN_MAX_ACTIONS} actions or fewer. A resolved plan has at least one action, issueCode none, no clarificationQuestion, and no missingSlots. Clarification and unsupported plans have no actions.
 - pendingClarification, when supplied, is authoritative prior dialogue. Treat the current transcript as the literal answer to the listed missingSlots and complete the prior request when enough information is now present. If the answer is still insufficient or ambiguous, return a narrower clarification rather than guessing.
 - In clarification_answer dialogue mode, words such as "yes" and "no" can be literal node or edge labels. They are not confirmation or cancellation commands. Emit cancel or undo only when explicitMetaCommand says so.
+- When Airo asked for a missing label, the answer is that label even when it is a single word such as "no", "yes", or "maybe": combine it with pendingClarification.previousTranscript and resolve the original request. Do not ask for the same slot again.
 - projectGlossary is authoritative project-specific terminology. It does not override the safe action schema.
 
 Supported node vocabulary (canonical type followed by common speech):
@@ -205,6 +206,12 @@ export class OpenAiResponsesSemanticIntentProvider implements SemanticIntentProv
           reasoning: { effort: this.config.reasoningEffort },
           max_output_tokens: 2_000,
           store: false,
+          service_tier: this.config.serviceTier,
+          // The instructions and tool are a fixed ~7,500-token prefix. Pilot
+          // traffic is sparse, so keep it cached for a day and route every
+          // instance's requests to the same cache.
+          prompt_cache_key: "airboard-semantic-intent",
+          prompt_cache_retention: "24h",
         }),
         ...(signal ? { signal } : {}),
       });
