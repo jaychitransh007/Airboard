@@ -363,3 +363,11 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - Layouts checked at 375, 768 and 1280px.
     - A waitlist request landed in `support_requests`.
     - Web 365/365 and API 115/115 tests pass, and every package typechecks. The e2e suite was not run (no Playwright browser installed).
+  - **Deployed** (commit `0f6ab46`): `airboard-pilot-api-launch-0f6ab46` and `airboard-pilot-web-launch-0f6ab46` at 100%. No migration.
+    - Tagged smoke before promotion: API health 200 and an unauthenticated visibility change 401; 9 web pages 200; favicon, SVG and Apple icons served and linked; `/live/...` is `noindex`; the home page forwards `?error=` to the callback (307). The bundles carry the Share dialog, guest status, live-link problem pages, Notify me, the personal-workspace admin page and the phone bottom sheet.
+    - On production, a bad live link reaches the API (401 `VALID_JOIN_TOKEN_REQUIRED`, CORS allowed) and shows "This live link has expired". The owner's 5 boards load, and a board opens with **Share**.
+    - Rollback: API `launch-e0545e8`, web `launch-a0d7ed4`.
+  - **Found after deploy:** the owner's production account cannot start a live session (`/sessions/start` 403 `OWNER_ENTITLEMENT_REQUIRED`). Every session start in the logs back to 2026-11-04 failed the same way, so this predates the deploy.
+    - Cause: the account has no active or trialing entitlement. The trial-expiry step of the hourly lifecycle job likely ended it; the production database was not read to confirm.
+    - New pilots are unaffected: opening a first board activates a 30-day trial, and live sessions start.
+    - The product hides an ended pilot. **Share** says the live server could not be reached, and **Billing** says the pilot "starts when you open your first board", because `/me` drops expired entitlements. New boards are refused too (`POST /boards` requires an entitlement).
