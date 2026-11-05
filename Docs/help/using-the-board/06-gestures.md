@@ -6,7 +6,7 @@ categoryLabel: Using the board
 order: 6
 status: shipped
 audiences: ["everyone"]
-lastVerified: 2026-07-30
+lastVerified: 2026-11-05
 sources: ["Docs/Gesture Interaction Audit.md", "apps/web/src/features/board/AirboardPrototype.tsx", "packages/gesture-engine/src/hybridGestureController.ts"]
 ---
 
@@ -46,7 +46,7 @@ the intended targets, then reopen.
 Hold one open palm still, without sideways motion, for about 0.4 seconds to
 open push-to-talk. Lower or relax it when finished.
 
-Camera motion does not trigger Undo. Use the board toolbar, press
+Camera motion does not trigger Undo. Use the board menu (**•••**), press
 `Cmd/Ctrl+Z`, or say “Airo, undo.”
 
 ## Pan, zoom, and hide

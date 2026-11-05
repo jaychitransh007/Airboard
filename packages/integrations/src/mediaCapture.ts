@@ -44,27 +44,3 @@ export function resolveMediaCaptureCapability(input: {
     return "companion-only";
   }
 }
-
-/**
- * DOM probe for the current frame. Safe during server rendering (reports
- * "companion-only"; embedded surfaces re-evaluate after mount).
- */
-export function probeMediaCaptureCapability(): MediaCaptureCapability {
-  if (typeof window === "undefined" || typeof document === "undefined") {
-    return "companion-only";
-  }
-  const doc = document as Document & {
-    permissionsPolicy?: PermissionsPolicyLike;
-    featurePolicy?: PermissionsPolicyLike;
-  };
-  let isTopLevel = false;
-  try {
-    isTopLevel = window.self === window.top;
-  } catch {
-    isTopLevel = false;
-  }
-  return resolveMediaCaptureCapability({
-    isTopLevel,
-    policy: doc.permissionsPolicy ?? doc.featurePolicy,
-  });
-}

@@ -214,13 +214,6 @@ export const BOARD_SHAPE_CATALOG = [
   ...AIRBOARD_SHAPE_CATALOG,
 ] as const;
 
-export const SHAPE_CATALOG_BY_CATEGORY = {
-  basic: BASIC_SHAPE_CATALOG,
-  flowchart: FLOWCHART_SHAPE_CATALOG,
-  advanced: ADVANCED_SHAPE_CATALOG,
-  airboard: AIRBOARD_SHAPE_CATALOG,
-} as const satisfies Record<ShapeCatalogCategory, readonly ShapeCatalogEntry[]>;
-
 const normalizedAliases = new Map<string, CatalogShapeKind>();
 for (const entry of BOARD_SHAPE_CATALOG) {
   for (const term of [entry.kind, entry.name, ...entry.aliases]) {

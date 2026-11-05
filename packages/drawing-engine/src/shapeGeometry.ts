@@ -1,5 +1,4 @@
 import {
-  isCatalogShapeKind,
   type AnnotationBounds,
   type AnnotationPoint,
   type CatalogShapeKind,
@@ -357,10 +356,6 @@ export function pointOnCatalogShapeBoundary(
     else outside = midpoint;
   }
   return inside;
-}
-
-export function shapeKindFromUnknown(value: unknown): CatalogShapeKind | null {
-  return isCatalogShapeKind(value) ? value : null;
 }
 
 function drawShapeBody(

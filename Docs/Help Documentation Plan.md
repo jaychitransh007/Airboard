@@ -217,7 +217,7 @@ Interaction Audit is current as of 30 July 2026.
 
 Scope confirmed as full `ONB-008` + `ONB-014`. Both are P0 in the Gesture
 Interaction Audit backlog and NOT STARTED in the
-[Public Beta checklist](./Public%20Beta%20Readiness%20and%20Platform%20Onboarding%20Checklist.md):
+[Public Beta checklist](./archive/Public%20Beta%20Readiness%20and%20Platform%20Onboarding%20Checklist.md):
 
 > **ONB-008** — The user practices choose, move, place, erase, snap, pan,
 > and zoom; sees pose/contact/release quality and conflict explanations;

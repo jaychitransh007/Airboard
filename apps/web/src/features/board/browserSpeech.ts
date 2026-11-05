@@ -69,18 +69,6 @@ export type AirboardVoiceCommandRecovery = {
   basis: "constrained_asr_alias";
 };
 
-export const BROWSER_SPEECH_WAKE_PHRASES = [
-  "Airo",
-  "Airoh",
-  "Aero",
-  "Air O",
-  "Air Oh",
-  "Air Row",
-  "Airboard",
-  "Air board",
-  "Arrow",
-] as const;
-
 export const AIRBOARD_TRANSCRIPTION_KEYTERMS = [
   "Airo",
   "Airboard",
@@ -149,70 +137,6 @@ export function supportsBrowserSpeech(): boolean {
   }
   const speechWindow = window as SpeechWindow;
   return Boolean(speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition);
-}
-
-export function createBrowserSpeechSession(
-  callbacks: BrowserSpeechCallbacks,
-  language = "en-US",
-): BrowserSpeechSession | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  const speechWindow = window as SpeechWindow;
-  const Recognition = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
-  if (!Recognition) {
-    return null;
-  }
-
-  const recognition = new Recognition();
-  recognition.continuous = false;
-  recognition.interimResults = true;
-  recognition.lang = language;
-  recognition.maxAlternatives = 1;
-  recognition.onstart = () => callbacks.onStart?.();
-  recognition.onresult = (event) => {
-    const results = event.results;
-    if (!results) {
-      return;
-    }
-
-    let interim = "";
-    let final = "";
-    const startIndex = event.resultIndex ?? 0;
-    for (let index = startIndex; index < results.length; index += 1) {
-      const result = results[index];
-      if (!result) {
-        continue;
-      }
-      const transcript = result?.[0]?.transcript?.trim();
-      if (!transcript) {
-        continue;
-      }
-      if (result.isFinal) {
-        final = `${final} ${transcript}`.trim();
-      } else {
-        interim = `${interim} ${transcript}`.trim();
-      }
-    }
-
-    if (interim) {
-      callbacks.onInterim?.(interim);
-    }
-    if (final) {
-      callbacks.onFinal(final);
-    }
-  };
-  recognition.onerror = (event) => {
-    callbacks.onError?.(describeSpeechError(event.error, event.message));
-  };
-  recognition.onend = () => callbacks.onEnd?.();
-
-  return {
-    start: () => recognition.start(),
-    stop: () => recognition.stop(),
-    abort: () => recognition.abort(),
-  };
 }
 
 /**

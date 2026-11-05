@@ -300,66 +300,6 @@ function createBridge(env: MeetMediaBridgeEnv): MeetMediaBridge {
 }
 
 /**
- * Rebuilds a live microphone MediaStream from bridged audio chunks so the
- * realtime speech session can consume it exactly like a local microphone.
- * Calling stop() on the returned stream's track (which the speech session
- * does on teardown) also stops the bridge capture on the Meet page.
- */
-export async function createBridgedMicStream(bridge: MeetMediaBridge): Promise<MediaStream> {
-  type AudioContextCtor = new () => AudioContext;
-  const Ctor: AudioContextCtor | undefined =
-    (window as { AudioContext?: AudioContextCtor; webkitAudioContext?: AudioContextCtor })
-      .AudioContext ??
-    (window as { webkitAudioContext?: AudioContextCtor }).webkitAudioContext;
-  if (!Ctor) {
-    throw new Error("Web Audio is unavailable in this browser.");
-  }
-  const context = new Ctor();
-  const destination = context.createMediaStreamDestination();
-  let nextTime = 0;
-  let torndown = false;
-
-  const session = await bridge.startAudio({
-    onChunk: (samples, sampleRate) => {
-      if (torndown) {
-        return;
-      }
-      // Schedule chunks back-to-back; the context resamples as needed.
-      const buffer = context.createBuffer(1, samples.length, sampleRate);
-      buffer.copyToChannel(samples, 0);
-      const source = context.createBufferSource();
-      source.buffer = buffer;
-      source.connect(destination);
-      const lead = context.currentTime + 0.02;
-      if (nextTime < lead) {
-        nextTime = lead;
-      }
-      source.start(nextTime);
-      nextTime += buffer.duration;
-    },
-    onEnded: () => {
-      teardown();
-    },
-  });
-
-  const [track] = destination.stream.getAudioTracks();
-  const originalStop = track ? track.stop.bind(track) : null;
-  const teardown = () => {
-    if (torndown) {
-      return;
-    }
-    torndown = true;
-    session.stop();
-    originalStop?.();
-    void context.close().catch(() => {});
-  };
-  if (track) {
-    track.stop = teardown;
-  }
-  return destination.stream;
-}
-
-/**
  * Browser wrapper: probes through the immediate parent. In the Marketplace
  * add-on that parent is Meet itself; in the Chrome camera-overlay product it
  * is engine.html, which relays to Meet and reports sanitized compositor state

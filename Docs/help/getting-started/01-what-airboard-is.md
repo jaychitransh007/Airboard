@@ -6,7 +6,7 @@ categoryLabel: Getting started
 order: 1
 status: shipped
 audiences: ["everyone"]
-lastVerified: 2026-07-30
+lastVerified: 2026-11-05
 sources: ["README.md", "apps/web/src/features/board/AirboardPrototype.tsx", "apps/web/src/features/product/Dashboard.tsx"]
 ---
 
@@ -26,7 +26,7 @@ preview integration that composites the diagram into your meeting camera.
 ## How changes are applied
 
 Airboard applies valid commands immediately. There is no Preview or Apply step.
-Undo is the safety net: use the toolbar, press `Cmd/Ctrl+Z`, or say
+Undo is the safety net: use the board menu (**•••**), press `Cmd/Ctrl+Z`, or say
 “Airo, undo.”
 
 If Airboard cannot safely understand or ground a command, it rejects the

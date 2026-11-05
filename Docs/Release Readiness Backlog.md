@@ -657,3 +657,40 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - **Tagged smoke:** revision max 1 and no revision minimum. 7 pages returned 200. The bundles carry the strip, dock zoom and menu changes and reference only Mumbai. The screen help article shows the new wording.
     - **Production:** the pages and API `/ready` pass, and the new revision logged no errors.
     - **Rollback:** web to `launch-f33b2cb`.
+- **2026-11-05** — Old revision addresses removed:
+  - **Removed:** 24 web and 15 API tags from earlier deploys (`gcloud run services update-traffic --remove-tags`), including pre-hardening builds and builds that pointed at the deleted Seoul project.
+  - **Kept:** only the serving revisions' tags, `launch-6c4ca43-web` and `launch-87aec6f-api`.
+  - **Unchanged:**
+    - Traffic stays at 100% on those revisions.
+    - The services keep a minimum of 1 instance; the maximum is 1 for the web and 3 for the API.
+    - The revisions themselves remain, so rollbacks still work with `--to-revisions` (or `AIRBOARD_RELEASE=launch-<hash> infra/cloud-run/release.sh promote …`).
+  - **Checked:** sampled old addresses now return 404, and production web and API `/ready` pass.
+- **2026-11-05** — Cleanup. An import graph, an export scan, a CSS-class scan and an asset scan flagged these; a review of the docs, scripts and config confirmed the rest.
+  - **Dead code removed:**
+    - `meetActivityState.ts` and its test: production never used it.
+    - The barrel `scripts/lib/interaction-eval.mjs`: nothing imported it.
+    - 12 unused exports, including `createAnnotationFromGesture`, `createPaletteNode`, `createBrowserSpeechSession`, `createBridgedMicStream` and `probeMediaCaptureCapability`.
+    - The 23 helpers that only those exports used. `gestureAnnotationMode.ts` went from 1,207 to 772 lines.
+    - The API's unused `tsx` dev dependency.
+  - **Dead CSS removed:**
+    - 175 rules for 43 classes that no source uses, plus dead selectors trimmed from 17 more rules. `globals.css` went from 6,600 to 6,152 lines. Every class still in use keeps its styles.
+    - The shape toolbar's old beside-the-panel offsets.
+    - Phones now keep the full-width element bar; the floating position is for wider screens, covered by a new e2e test.
+  - **Assets and infra:**
+    - The retired `gesture_recognizer.task`, 8 MB that shipped in every web image. The command contract still forbids loading it.
+    - `infra/docker-compose.yml`: Redis, which nothing uses.
+    - The retired Meet add-on's `infra/google-meet/pilot-deployment.json`.
+  - **Wrong text fixed:**
+    - The extension popup said a "3-day trial" that started on the first composite. It now says the one-month pilot starts when the first board opens, which matches the API.
+    - README: the trial length, the screen background, the Airo strip and Undo's place.
+    - Help 01, 06 and 15: Undo is in the ••• menu, and how to turn Airo on.
+    - The migration evidence now lists all 16 migrations.
+    - The Chrome Web Store doc's trial length.
+    - The voice architecture's "preview and confirm" step; changes apply immediately.
+    - The Mumbai move doc is cut to its record plus the read-only switch, with no Seoul-as-current text.
+  - **Archived:** 9 superseded docs went to `Docs/archive/` with an index: the July MVP plan and PRD, the add-on designs and spike, the removed modes and the old readiness reviews.
+  - **Local:**
+    - The merged speed-branch worktree and branch were removed.
+    - `.claude/` is now git-ignored.
+    - Old build output (`apps/web/.next-production`), a stray root `.next/` and the 0.7.0 extension zip were deleted. About 1.2 GB freed.
+  - **Left for decisions:** retiring the Meet add-on code (routes, adapter and SDK, which the test harness still exercises), a status column and separate change log for this backlog, and an Artifact Registry cleanup policy.

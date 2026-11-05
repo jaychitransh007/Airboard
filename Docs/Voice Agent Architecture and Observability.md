@@ -8,7 +8,7 @@
 4. The planner receives a bounded graph snapshot, project glossary, and pending clarification state.
 5. OpenAI must call the strict `propose_diagram_plan` function once.
 6. Airboard validates the typed plan, resolves references without exposing internal IDs, and applies it to a shadow board.
-7. The user reviews one atomic preview. Multi-action or destructive changes require confirmation and remain undoable.
+7. The plan applies immediately as one atomic change, with no preview or confirmation step; Undo reverts it in one step.
 
 The capability registry in `packages/core/src/semanticCapabilities.ts` is the source for the palette, default labels, speech keyterms, deterministic aliases, and planner vocabulary. The typed contract and validator live in `packages/core/src/semanticPlan.ts`.
 
