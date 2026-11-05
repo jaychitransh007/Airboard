@@ -24,13 +24,13 @@ const PAGES = [
   "/login",
   "/signup",
   "/pricing",
-  "/use-cases",
+  "/use-cases/product-teams",
   "/integrations",
   "/status",
   "/support",
   "/contact-sales",
   "/help",
-  "/help/getting-started/first-board",
+  "/help/getting-started/your-first-board",
   "/help/integrations/google-meet",
 ];
 

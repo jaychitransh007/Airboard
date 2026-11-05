@@ -2370,7 +2370,8 @@ button:disabled {
   box-shadow: 0 16px 60px rgba(20, 31, 28, 0.24);
 }
 .cookie-banner div { flex: 1; }
-.cookie-banner p { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+/* Darker than --muted: the translucent banner takes on the page behind it. */
+.cookie-banner p { margin: 4px 0 0; color: #4a524a; font-size: 13px; line-height: 1.45; }
 .cookie-banner .button-primary { border-color: var(--product-lavender); background: var(--product-lavender); color: white; }
 .cookie-banner .button-primary:hover { border-color: var(--product-lavender-dark); background: var(--product-lavender-dark); }
 .form-honeypot { position: absolute !important; left: -10000px !important; width: 1px !important; height: 1px !important; overflow: hidden !important; }
