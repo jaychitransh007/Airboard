@@ -241,6 +241,7 @@ import type {
   WheelEvent as ReactWheelEvent,
 } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useModalFocus } from "../../platform/modalFocus";
 import {
   finalizeTouchpadStroke,
   getTouchpadModeConfig,
@@ -1125,6 +1126,14 @@ export function AirboardPrototype({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteStatus, setDeleteStatus] = useState<"idle" | "deleting" | "error">("idle");
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deleteDialogRef = useRef<HTMLElement | null>(null);
+  // Escape cancels like the Cancel button, except while the move is under way.
+  useModalFocus(deleteDialogRef, deleteDialogOpen, () => {
+    if (deleteStatus === "deleting") return;
+    setDeleteDialogOpen(false);
+    setDeleteStatus("idle");
+    setDeleteError(null);
+  });
   const titleCancelPendingRef = useRef(false);
   const titleCommitInFlightRef = useRef(false);
   const [clearArmed, setClearArmed] = useState(false);
@@ -8546,7 +8555,7 @@ export function AirboardPrototype({
     setSpeechEngine("loading");
     setSpeechSupported(false);
 
-    const useExplicitBrowserFallback = (reason: string) => {
+    const tryExplicitBrowserFallback = (reason: string) => {
       if (BROWSER_SPEECH_FALLBACK_ENABLED && supportsBrowserSpeech()) {
         setSpeechEngine("browser-fallback");
         setSpeechSupported(true);
@@ -8585,7 +8594,7 @@ export function AirboardPrototype({
         const reason = config.available
           ? "This browser cannot stream microphone audio."
           : "Realtime voice is not configured on the Airboard API.";
-        if (useExplicitBrowserFallback(reason)) {
+        if (tryExplicitBrowserFallback(reason)) {
           return;
         }
         setSpeechEngine("unavailable");
@@ -8599,7 +8608,7 @@ export function AirboardPrototype({
           return;
         }
         const reason = "The realtime transcription service is unreachable.";
-        if (useExplicitBrowserFallback(reason)) {
+        if (tryExplicitBrowserFallback(reason)) {
           return;
         }
         setSpeechEngine("unavailable");
@@ -10442,6 +10451,8 @@ export function AirboardPrototype({
       {deleteDialogOpen ? (
         <div className="board-lifecycle-backdrop">
           <section
+            ref={deleteDialogRef}
+            tabIndex={-1}
             className="board-lifecycle-dialog"
             role="dialog"
             aria-modal="true"

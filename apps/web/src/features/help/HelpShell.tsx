@@ -5,6 +5,7 @@ import { HelpHeaderAction } from "./HelpHeaderAction";
 export function HelpShell({ children }: { children: ReactNode }) {
   return (
     <div className="help-shell">
+      <a className="skip-link" href="#main-content">Skip to content</a>
       <header className="help-header">
         <Link className="help-brand" href="/" aria-label="Airboard home">
           <span className="brand-orbit" aria-hidden="true" />
@@ -18,7 +19,7 @@ export function HelpShell({ children }: { children: ReactNode }) {
         </nav>
         <HelpHeaderAction />
       </header>
-      <main>{children}</main>
+      <main id="main-content" tabIndex={-1}>{children}</main>
       <footer className="help-footer">
         <div>
           <strong>Airboard Help Center</strong>

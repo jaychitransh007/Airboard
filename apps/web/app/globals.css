@@ -6290,3 +6290,31 @@ button.screen-underlay-active {
 .maintenance-banner strong {
   font-weight: 750;
 }
+
+/* Keyboard users can jump past the header and navigation. Hidden until it
+   receives focus, then shown at the top left. */
+.skip-link {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 90;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: #231b33;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+  transform: translateY(-200%);
+}
+
+.skip-link:focus,
+.skip-link:focus-visible {
+  transform: none;
+  outline: 3px solid #7048df;
+  outline-offset: 2px;
+}
+
+#main-content:focus {
+  outline: none;
+}

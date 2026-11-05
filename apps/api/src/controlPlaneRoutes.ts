@@ -2366,6 +2366,8 @@ async function deliverNotifications(config: ApiConfig, auth: AuthService) {
           subject: message.subject,
           html: message.html,
         }),
+        // A stalled send fails like any other and the job is retried later.
+        signal: AbortSignal.timeout(10_000),
       });
       if (!response.ok) throw new Error(`RESEND_${response.status}`);
       const result = (await response.json()) as { id?: string };
@@ -2526,6 +2528,7 @@ async function stripeRequest(config: ApiConfig, path: string, body: URLSearchPar
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body,
+    signal: AbortSignal.timeout(15_000),
   });
 }
 

@@ -53,6 +53,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const mainNav = personal ? MAIN_NAV : [MAIN_NAV[0], MAIN_NAV[1], SHARED_NAV, ...MAIN_NAV.slice(2)];
   return (
     <div className={`app-shell${isBoardWorkspace ? " board-app-shell" : ""}`}>
+      <a className="skip-link" href="#main-content">Skip to content</a>
       <MaintenanceBanner />
       {!isBoardWorkspace ? <aside className="app-sidebar">
         <Link className="app-brand" href="/app"><span className="brand-orbit" />Airboard</Link>
@@ -87,7 +88,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </aside> : null}
       <div className="app-main">
-        <main className="app-content">{children}</main>
+        <main id="main-content" className="app-content" tabIndex={-1}>{children}</main>
       </div>
       {!isBoardWorkspace ? <nav className="app-mobile-nav" aria-label="Airboard mobile navigation">
         {[...mainNav.slice(0, 4), ["/help", "Help", "?"] as const].map(([href, label, glyph]) => (

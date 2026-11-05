@@ -113,6 +113,7 @@ export class AuthService {
     try {
       const response = await fetch(`${this.config.supabaseUrl}/auth/v1/settings`, {
         headers: { apikey: this.config.supabaseServiceRoleKey },
+        signal: AbortSignal.timeout(5_000),
       });
       if (!response.ok) throw new Error(`AUTH_SETTINGS_${response.status}`);
       const settings = (await response.json()) as {

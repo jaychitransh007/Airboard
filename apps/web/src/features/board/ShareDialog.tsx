@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useModalFocus } from "../../platform/modalFocus";
 import { LIVE_LINK_HOURS, type LiveStartFailure } from "./shareLinks";
 
 export type BoardVisibility = "private" | "organization" | "link";
@@ -56,6 +57,10 @@ export function ShareDialog({
       if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
     };
   }, [onClose]);
+  // The effect above already put focus on "Copy live link"; this adds the
+  // Tab trap and hands focus back to the Share button on close.
+  const dialogRef = useRef<HTMLElement | null>(null);
+  useModalFocus(dialogRef, true);
 
   const copy = async (target: CopyTarget, text: string) => {
     try {
@@ -91,6 +96,8 @@ export function ShareDialog({
       }}
     >
       <section
+        ref={dialogRef}
+        tabIndex={-1}
         className="board-lifecycle-dialog share-dialog"
         role="dialog"
         aria-modal="true"

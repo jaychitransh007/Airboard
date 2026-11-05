@@ -119,3 +119,41 @@ test("Chrome launch configuration rejects oversized, mismatched, and unsafe orig
   });
   assert.equal(configurationCheck(malformedStoreReport, "chrome-store-url")?.passed, false);
 });
+
+test("the board socket URL follows the API URL unless AIRBOARD_WS_URL overrides it", () => {
+  const derived = launchReport({ AIRBOARD_WS_URL: undefined });
+  assert.equal(configurationCheck(derived, "websocket-url").passed, true);
+  const local = launchReport({ AIRBOARD_WS_URL: undefined, NEXT_PUBLIC_AIRBOARD_API_URL: "http://localhost:4000" });
+  assert.equal(configurationCheck(local, "websocket-url").passed, false);
+});
+
+test("deployed mode reads the serving API settings, its secrets and the web build values", async () => {
+  const { environmentFromDeployment } = await import("../lib/deployed-env.mjs");
+  const secretsRead = [];
+  const env = environmentFromDeployment({
+    apiEnv: [
+      { name: "AIRBOARD_APP_URL", value: "https://app.airboard.example" },
+      { name: "AIRBOARD_CRON_SECRET", valueFrom: { secretKeyRef: { name: "cron", key: "latest" } } },
+    ],
+    webSubstitutions: {
+      _AIRBOARD_API_URL: "https://api.airboard.example",
+      _SUPABASE_URL: "https://project.supabase.co",
+      _CHROME_WEB_STORE_URL: "",
+    },
+    apiDockerfile: "FROM node AS builder\nENV NODE_ENV=development\nFROM node AS runtime\nENV NODE_ENV=production\n",
+    readSecret: (name, key) => {
+      secretsRead.push(`${name}:${key}`);
+      return "a-cron-secret-longer-than-thirty-two-characters";
+    },
+  });
+  assert.equal(env.AIRBOARD_APP_URL, "https://app.airboard.example");
+  assert.equal(env.AIRBOARD_CRON_SECRET, "a-cron-secret-longer-than-thirty-two-characters");
+  assert.deepEqual(secretsRead, ["cron:latest"]);
+  assert.equal(env.NEXT_PUBLIC_AIRBOARD_API_URL, "https://api.airboard.example");
+  assert.equal(env.NEXT_PUBLIC_SUPABASE_URL, "https://project.supabase.co");
+  assert.equal("NEXT_PUBLIC_CHROME_WEB_STORE_URL" in env, false, "empty build values stay unset");
+  // Only the runtime stage of the Dockerfile counts.
+  assert.equal(env.NODE_ENV, "production");
+  const builderOnly = environmentFromDeployment({ apiEnv: [], apiDockerfile: "FROM node\nENV NODE_ENV=production\nFROM node\n", readSecret: () => "" });
+  assert.equal(builderOnly.NODE_ENV, undefined);
+});

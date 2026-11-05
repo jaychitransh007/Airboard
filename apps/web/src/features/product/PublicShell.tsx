@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 export function PublicShell({ children }: { children: ReactNode }) {
   return (
     <div className="marketing-shell">
+      <a className="skip-link" href="#main-content">Skip to content</a>
       <header className="marketing-header">
         <Link className="marketing-brand" href="/" aria-label="Airboard home">
           <span className="brand-orbit" aria-hidden="true" />
@@ -21,7 +22,7 @@ export function PublicShell({ children }: { children: ReactNode }) {
           <Link className="button button-primary" href="/signup">Join pilot</Link>
         </div>
       </header>
-      <main>{children}</main>
+      <main id="main-content" tabIndex={-1}>{children}</main>
       <footer className="marketing-footer">
         <div>
           <strong>Airboard</strong>

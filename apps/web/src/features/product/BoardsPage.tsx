@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { airboardApi } from "../../platform/api";
 import { useAirboardAuth } from "../../platform/auth";
+import { useModalFocus } from "../../platform/modalFocus";
 import { validateBoardTitle } from "../board/boardLifecycle";
 
 type Board = {
@@ -52,6 +53,8 @@ export function BoardsPage() {
     setAction(null);
     setActionError(null);
   };
+  const actionDialogRef = useRef<HTMLElement | null>(null);
+  useModalFocus(actionDialogRef, action !== null, closeAction);
 
   const renameBoard = async () => {
     if (!auth.accessToken || action?.kind !== "rename" || actionBusy) return;
@@ -238,6 +241,8 @@ export function BoardsPage() {
       {action ? (
         <div className="board-lifecycle-backdrop">
           <section
+            ref={actionDialogRef}
+            tabIndex={-1}
             className="board-lifecycle-dialog"
             role="dialog"
             aria-modal="true"

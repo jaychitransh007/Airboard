@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { normalizeChromeWebStoreUrlForExtension } from "./lib/chrome-deployment-compatibility.mjs";
+import { loadDeployedEnvironment } from "./lib/deployed-env.mjs";
 
 const supportedScopes = new Set([
   "controlled-pilot",
@@ -12,6 +13,11 @@ const supportedScopes = new Set([
 const scopeArgument = process.argv.find((argument) => argument.startsWith("--scope="));
 const evidencePathArgument = process.argv.find((argument) => argument.startsWith("--evidence="));
 const jsonOutput = process.argv.includes("--json");
+const argumentValue = (name, fallback) =>
+  process.argv.find((argument) => argument.startsWith(`--${name}=`))?.slice(name.length + 3) || fallback;
+// --deployed checks the live Cloud Run services instead of this machine's
+// environment, which is what the configuration gates are really about.
+const deployed = process.argv.includes("--deployed");
 const evidencePath = resolve(
   process.cwd(),
   evidencePathArgument?.slice("--evidence=".length) || "ops/launch-evidence.json",
@@ -31,7 +37,29 @@ if (!supportedScopes.has(scope)) {
   process.exit(2);
 }
 
-const env = process.env;
+let env = process.env;
+let configurationSource = "this machine's environment (.env)";
+if (deployed) {
+  const project = argumentValue("project", process.env.AIRBOARD_GCP_PROJECT);
+  if (!project) {
+    console.error("--deployed needs --project=<Google Cloud project ID>.");
+    process.exit(2);
+  }
+  try {
+    const live = loadDeployedEnvironment({
+      project,
+      region: argumentValue("region", "asia-south1"),
+      apiService: argumentValue("api-service", "airboard-pilot-api"),
+      webService: argumentValue("web-service", "airboard-pilot-web"),
+      root: process.cwd(),
+    });
+    env = live.env;
+    configurationSource = live.source;
+  } catch (error) {
+    console.error(`Deployed configuration could not be read: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(2);
+  }
+}
 const present = (name) => Boolean(env[name]?.trim());
 const isHttps = (name) => {
   try {
@@ -40,17 +68,30 @@ const isHttps = (name) => {
     return false;
   }
 };
-const isWss = (name) => {
+// The web opens its board socket on the API's own host (boardSync.ts turns
+// https into wss), so the socket URL follows NEXT_PUBLIC_AIRBOARD_API_URL
+// unless AIRBOARD_WS_URL overrides it.
+const websocketUrl = () => {
+  if (env.AIRBOARD_WS_URL?.trim()) return env.AIRBOARD_WS_URL.trim();
   try {
-    return new URL(env[name] ?? "").protocol === "wss:";
+    const url = new URL("/ws", env.NEXT_PUBLIC_AIRBOARD_API_URL ?? "");
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    return url.toString();
+  } catch {
+    return "";
+  }
+};
+const nonLocal = (value) => {
+  try {
+    return !["localhost", "127.0.0.1", "::1"].includes(new URL(value ?? "").hostname);
   } catch {
     return false;
   }
 };
-const nonLocalUrl = (name) => {
+const nonLocalUrl = (name) => nonLocal(env[name]);
+const isWssUrl = (value) => {
   try {
-    const hostname = new URL(env[name] ?? "").hostname;
-    return !["localhost", "127.0.0.1", "::1"].includes(hostname);
+    return new URL(value).protocol === "wss:";
   } catch {
     return false;
   }
@@ -111,7 +152,10 @@ const baseConfiguration = [
   ["node-production", "NODE_ENV is production", () => env.NODE_ENV === "production"],
   ["app-url", "AIRBOARD_APP_URL is a non-local HTTPS URL", () => isHttps("AIRBOARD_APP_URL") && nonLocalUrl("AIRBOARD_APP_URL")],
   ["api-url", "NEXT_PUBLIC_AIRBOARD_API_URL is a non-local HTTPS URL", () => isHttps("NEXT_PUBLIC_AIRBOARD_API_URL") && nonLocalUrl("NEXT_PUBLIC_AIRBOARD_API_URL")],
-  ["websocket-url", "AIRBOARD_WS_URL is a non-local WSS URL", () => isWss("AIRBOARD_WS_URL") && nonLocalUrl("AIRBOARD_WS_URL")],
+  ["websocket-url", "The board socket URL (from NEXT_PUBLIC_AIRBOARD_API_URL, or AIRBOARD_WS_URL) is a non-local WSS URL", () => {
+    const url = websocketUrl();
+    return isWssUrl(url) && nonLocal(url);
+  }],
   ["cors", "AIRBOARD_ALLOWED_ORIGINS explicitly includes AIRBOARD_APP_URL without local origins or wildcard", () => present("AIRBOARD_ALLOWED_ORIGINS") && allowedOriginsIncludeApp()],
   ["supabase-server", "Supabase server URL and service role key are production values", () => nonLocalUrl("SUPABASE_URL") && present("SUPABASE_SERVICE_ROLE_KEY")],
   ["supabase-browser", "Supabase browser URL and anonymous key are production values", () => nonLocalUrl("NEXT_PUBLIC_SUPABASE_URL") && present("NEXT_PUBLIC_SUPABASE_ANON_KEY")],
@@ -231,6 +275,7 @@ const checks = [...configurationChecks, ...evidenceChecks];
 const blockers = checks.filter((check) => !check.passed);
 const report = {
   scope,
+  configurationSource,
   evidencePath,
   ready: blockers.length === 0,
   checkedAt: new Date().toISOString(),
@@ -246,6 +291,7 @@ if (jsonOutput) {
   console.log(JSON.stringify(report, null, 2));
 } else {
   console.log(`Airboard launch gate: ${scope}`);
+  console.log(`Configuration: ${configurationSource}`);
   console.log(`Result: ${report.ready ? "READY" : "NOT READY"} (${report.summary.passed}/${report.summary.total} checks passed)`);
   for (const check of checks) {
     console.log(`${check.passed ? "PASS" : "BLOCK"} [${check.type}] ${check.id} — ${check.description}`);

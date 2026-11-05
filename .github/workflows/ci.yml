@@ -33,8 +33,20 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: Lint
+        run: pnpm lint
+
       - name: Unit tests
         run: pnpm test
+
+      # Repository scripts (launch check, eval tooling) have their own tests.
+      - name: Script tests
+        run: pnpm test:scripts
+
+      # Only shipped dependencies; the unreleased desktop app's Electron
+      # toolchain is dev-only and tracked separately.
+      - name: Dependency audit (production)
+        run: pnpm audit --prod --audit-level=high
 
       - name: Help documentation
         run: pnpm docs:check
@@ -76,3 +88,19 @@ jobs:
 
       - name: Run E2E tests
         run: pnpm --filter @airboard/web e2e
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The repository is public, so every commit is scanned. Reviewed false
+      # positives are listed by fingerprint in .gitleaksignore.
+      - name: Scan history with gitleaks
+        run: >-
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.28.0
+          git /repo --redact --no-banner --gitleaks-ignore-path=/repo/.gitleaksignore
