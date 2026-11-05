@@ -17,7 +17,14 @@
 - **Health:** the API's `/ready` reports the database and `boardFanOut` (live boards across instances).
 - **Launch check:** `pnpm launch:check:deployed` checks the live revisions and passes **19 of 23**.
 - **Rollback:** web to `launch-f33b2cb`, API to `launch-34df218` (`AIRBOARD_RELEASE=launch-<hash> infra/cloud-run/release.sh promote web|api`).
-- **Code:** `main`. Pull requests #1 (launch hardening) and #11 (Google sign-in) merged the working branch `codex/production-readiness` into it on 5 November 2026. The live API matches its code. The live web is the branch's `6c4ca43` (decluttered board), which `main` gets when the branch is next merged.
+- **Code:** `main`. The working branch `codex/production-readiness` reached it on 5 November 2026 through these pull requests:
+  - #1: launch hardening.
+  - #11: Google sign-in.
+  - #12: status update.
+  - #13: camera start.
+  - #14: calmer board.
+
+  Both live revisions match `main`'s code.
 
 ## Shipped in the launch hardening (November 2026)
 
