@@ -791,3 +791,10 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - **Contract fix:** a lone `current_selection` reference now satisfies align (2+), distribute (3+) and layout (2+). The corpus expects that form, but the parser rejected it, so neither model could pass those cases: Luna's plans were refused outright. The board still checks the selection size when it runs the step. Both the API and the browser parse plans with this code, so both need the release.
   - **Chatter replay:** re-recorded with Luna. It changes the board for 1 case ("make a note that we owe legal a response by Friday"), asks a question for 20, gives the wrong reason for 7, has 2 answers rejected and stays quiet for 30. The known list now holds those 30.
   - **Latency:** neither model meets the eval's 2.5 s end-to-action p95 gate: Luna 3.5 s, Mini 3.1 s on the real-command run.
+- **2026-11-05** — `launch-05c0281` deployed to the pilot (commit `05c0281`):
+  - **API:** `airboard-pilot-api-launch-05c0281` at 100%, deployed with `AIRBOARD_INTENT_MODEL=gpt-5.6-luna` and `AIRBOARD_INTENT_ALLOWED_MODELS=gpt-5.6-luna`. Production `/intent/config` reports Luna as the only model, `/ready` passes and intent without sign-in returns 401. The revision logged no errors.
+  - **Web:** `airboard-pilot-web-launch-05c0281` at 100%, so the browser also accepts a lone `current_selection`. Six paths returned 200, and the bundle references only Mumbai.
+  - **Tags:** the `live` image tags moved to `launch-05c0281`, and the `launch-854858a` Cloud Run tags were removed.
+  - **Rollback:** both services to `launch-854858a`. That API revision keeps its own settings, so rolling back also restores `gpt-5.4-mini`.
+  - **Not verified in production:** a signed-in voice command through Luna (needs a real sign-in). The same code and model passed 34 of 38 real commands locally.
+  - **Local setup:** `.env` must name an allowed model, so a local `AIRBOARD_INTENT_MODEL=gpt-5.6-terra` now stops the API from starting; the repository's `.env` was moved to Luna.
