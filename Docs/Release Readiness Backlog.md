@@ -414,10 +414,14 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     | Server change only, +130 ms, replayed requests | 20 | 921 ms | 1,368 ms |
     | After, +130 ms, in the browser | 13 | 347 ms | 764 ms |
 
-  - **Production estimate:** the path to the canvas drops from 20 Supabase round trips in a row to 2, and to the live session from 28 to 5. The 8 seconds seen on production fit about 270 ms per round trip. At that rate the canvas should mount about 0.7 s after the page's JavaScript starts, and the live session should follow at about 1.5 s, down from about 6 s and 8 s. Page download and hydration are unchanged. After 10 idle minutes, the first request fetches the signing key again, which costs one more round trip.
+  - **Production estimate:** production request logs (1,127 successful requests, 2026-11-03 to 2026-11-05) put each Supabase round trip at about 180–225 ms. The routes that make 4 in a row take 760–900 ms at the median and about 710 ms at best, and `/sessions/start` (8–9 in a row) took 1.6 s. CORS preflights take 2 ms on the server, so they cost only the browser's round trip.
+    - API time on the path to the canvas: about 4.1 s (5 calls in a row) before, about 0.4 s after.
+    - API time on the path to the live session: about 5.7 s before, about 1 s after.
+    - Page download, hydration and the browser's own round trips come on top. They are unchanged, apart from fewer preflights.
+    - After 10 idle minutes, the first request fetches the signing key again, which costs one more round trip.
   - Web 373/373 and API 125/125 tests pass (new: local token checks, the shared and dropped sign-in, membership choice, the board-open order, parallel session-start reads, the preflight max age), and every package typechecks.
   - **Still open:**
-    - The database and the API sit in different regions, so each remaining round trip still costs about 130–270 ms. Running the API in asia-northeast3 (Seoul), or moving Supabase to ap-south-1 (Mumbai), would bring each one down to a few milliseconds.
+    - The database and the API sit in different regions, so each remaining round trip still costs about 180–225 ms. Running the API in asia-northeast3 (Seoul), or moving Supabase to ap-south-1 (Mumbai), would bring each one down to a few milliseconds.
     - `/sessions/start` still inserts the session and then its owner participant in two steps; one database function would make it a single round trip.
     - The canvas starts its live session only after it mounts. Starting it together with the board load would hide about three more round trips.
-    - Locally, PostgREST v14.3 (Supabase CLI 2.75) fails every board save. A PATCH with the `or=` access filter and `select` returns 42703, which the API reports as `BOARD_SAVE_FAILED`. Production saves worked after `7be667a`, but a PostgREST upgrade of the hosted project would break them.
+    - Locally, the Supabase CLI's default PostgREST v14.3 fails every board save. A PATCH with the `or=` access filter and `select` returns 42703, which the API reports as `BOARD_SAVE_FAILED`. Production runs v14.5, which handles it. A worktree gets production's versions only after copying `rest-version`, `postgres-version` and `gotrue-version` from the main checkout's `supabase/.temp/`.
