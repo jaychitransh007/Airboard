@@ -16,7 +16,7 @@
 - **Health:** the API's `/ready` reports the database and `boardFanOut` (live boards across instances).
 - **Launch check:** `pnpm launch:check:deployed` checks the live revisions and passes **19 of 23**.
 - **Rollback:** both services to `launch-34df218` (`AIRBOARD_RELEASE=launch-34df218 infra/cloud-run/release.sh promote api|web`).
-- **Code:** branch `codex/production-readiness`, pull request #1. CI is green, but it is not yet merged into `main`. The live revisions match the branch's code.
+- **Code:** `main`, after pull request #1 merged `codex/production-readiness` on 5 November 2026. The live revisions match its code.
 
 ## Shipped in the launch hardening (November 2026)
 
@@ -52,7 +52,6 @@
 
 ### Housekeeping (owner)
 
-- Merge pull request #1 into `main`.
 - Sign in once to confirm your boards came across to Mumbai.
 - Delete the unused Seoul secret `airboard-supabase-secret-key` in Secret Manager.
 - Keep the API on the legacy service-role key. In testing, the new `sb_secret_` key failed to join the private Realtime channels that live boards use.
