@@ -200,11 +200,13 @@ const evidenceByScope = {
     "privacy-retention",
     "database-migrations",
     "automated-regression",
-    "commercial-smoke",
     "deployment-smoke",
     "lifecycle-schedule",
   ],
   "standalone-ga": [
+    // Needs a disposable account on the release database; the founder moved
+    // it out of the controlled pilot on 2026-11-05.
+    "commercial-smoke",
     "legal-approval",
     "subprocessor-review",
     "threat-model",

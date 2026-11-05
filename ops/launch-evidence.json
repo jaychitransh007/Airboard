@@ -49,7 +49,7 @@
       "status": "pending",
       "owner": "Engineering",
       "evidence": "",
-      "notes": "Run pnpm smoke:commercial against a disposable release organization."
+      "notes": "Required from standalone GA (moved out of the controlled pilot on 2026-11-05). Run pnpm smoke:commercial against a disposable release organization."
     },
     "deployment-smoke": {
       "description": "Production web, API, authentication, readiness, board save/export/delete and rollback smoke checks pass.",
