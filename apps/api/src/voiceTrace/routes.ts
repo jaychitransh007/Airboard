@@ -1,12 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import type { ApiConfig } from "../config";
 import { VoiceTraceBuffer } from "./buffer";
-import { clientKey, createRateLimiter } from "../security";
+import { clientKey, configuredApiTokenAllowed, createRateLimiter, originAllowed } from "../security";
 import { computeVoiceMetrics } from "./metrics";
 import { parseVoiceTraceAppend, parseVoiceTurnId } from "./protocol";
 import { redactDiagnosticData, redactVoiceTraceContent } from "./redaction";
 import type { AuthService } from "../auth";
-import { configuredApiTokenAllowed } from "../security";
 
 export function registerVoiceTraceRoutes(
   server: FastifyInstance,
@@ -151,6 +150,3 @@ async function diagnosticAccessAllowed(
   );
 }
 
-function originAllowed(origin: string | undefined, allowedOrigins: string[]): boolean {
-  return Boolean(origin && (allowedOrigins.includes("*") || allowedOrigins.includes(origin)));
-}

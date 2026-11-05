@@ -596,3 +596,67 @@ test("does not open a provider websocket when microphone access fails", async ()
   ]);
   assert.deepEqual(endReasons, ["error"]);
 });
+
+test("a signed-in session exchanges its token for a ticket and keeps the token out of the socket URL", async () => {
+  const socket = new FakeSocket();
+  const media = createMediaStreamHarness();
+  const audio = createWorkletAudioHarness();
+  const exchanged = [];
+  const opened = [];
+  const session = createRealtimeSpeechSession(
+    { onFinal() {} },
+    { apiBaseUrl: "https://api.example.com", accessToken: "sign-in-jwt" },
+    {
+      fetchTranscriptionTicket: async (apiBaseUrl, accessToken) => {
+        exchanged.push([apiBaseUrl, accessToken]);
+        return "one-minute-ticket";
+      },
+      createWebSocket: (url) => {
+        opened.push(url);
+        return socket;
+      },
+      getUserMedia: async () => media.stream,
+      createAudioContext: () => audio.context,
+      createAudioWorkletNode: () => audio.worklet,
+      createAudioWorkletModuleUrl: () => "blob:test",
+      revokeAudioWorkletModuleUrl() {},
+    },
+  );
+
+  session.start();
+  for (let i = 0; i < 5 && opened.length === 0; i += 1) await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(exchanged, [["https://api.example.com", "sign-in-jwt"]]);
+  assert.deepEqual(opened, ["wss://api.example.com/transcription/ws?ticket=one-minute-ticket"]);
+  assert.equal(opened[0].includes("sign-in-jwt"), false);
+  assert.equal(session.url, "wss://api.example.com/transcription/ws", "the reported URL carries no credential");
+  session.abort();
+});
+
+test("a refused ticket reports the same message as a refused socket", async () => {
+  const media = createMediaStreamHarness();
+  const audio = createWorkletAudioHarness();
+  const errors = [];
+  const { TranscriptionTicketError } = await import("../src/features/board/realtimeSpeech.ts");
+  const session = createRealtimeSpeechSession(
+    { onFinal() {}, onError: (message, code) => errors.push({ message, code }) },
+    { apiBaseUrl: "https://api.example.com", accessToken: "sign-in-jwt" },
+    {
+      fetchTranscriptionTicket: async () => {
+        throw new TranscriptionTicketError("ACTIVE_ENTITLEMENT_REQUIRED");
+      },
+      createWebSocket: () => {
+        throw new Error("no socket should open");
+      },
+      getUserMedia: async () => media.stream,
+      createAudioContext: () => audio.context,
+      createAudioWorkletNode: () => audio.worklet,
+      createAudioWorkletModuleUrl: () => "blob:test",
+      revokeAudioWorkletModuleUrl() {},
+    },
+  );
+  session.start();
+  for (let i = 0; i < 5 && errors.length === 0; i += 1) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].code, "ACTIVE_ENTITLEMENT_REQUIRED");
+  assert.match(errors[0].message, /pilot access has ended/);
+});

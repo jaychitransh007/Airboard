@@ -30,6 +30,14 @@ export type ApiConfig = {
     intentPerMinute: number;
     sessionStartPerMinute: number;
     voiceTracePerMinute: number;
+    /** Board socket connections per caller address. */
+    boardConnectionsPerMinute: number;
+    /** `/sessions/:id/state` and `/heartbeat` calls per caller address. */
+    boardReadsPerMinute: number;
+    /** Voice-transcription socket connections per caller address. */
+    transcriptionConnectionsPerMinute: number;
+    /** Board events one socket may send in 10 seconds (drawing sends one per pointer move). */
+    boardEventsPerTenSeconds: number;
   };
   supabaseUrl?: string;
   supabaseServiceRoleKey?: string;
@@ -87,6 +95,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       );
     }
   }
+  // Without Supabase the API would quietly keep boards in memory and lose
+  // them on every restart, so production refuses to start instead.
+  if (isProduction && (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY)) {
+    throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required in production.");
+  }
+  if (isProduction && allowedOrigins.includes("*")) {
+    throw new Error("AIRBOARD_ALLOWED_ORIGINS must list exact origins in production; `*` is not supported.");
+  }
   const sessionSigningSecret =
     env.AIRBOARD_SESSION_SIGNING_SECRET?.trim() || "airboard-local-development-signing-key";
   if (isProduction && sessionSigningSecret === "airboard-local-development-signing-key") {
@@ -137,6 +153,34 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
         1,
         100_000,
         "AIRBOARD_RATE_LIMIT_VOICE_TRACE_PER_MINUTE",
+      ),
+      boardConnectionsPerMinute: parseNumber(
+        env.AIRBOARD_RATE_LIMIT_BOARD_CONNECTIONS_PER_MINUTE,
+        120,
+        1,
+        100_000,
+        "AIRBOARD_RATE_LIMIT_BOARD_CONNECTIONS_PER_MINUTE",
+      ),
+      boardReadsPerMinute: parseNumber(
+        env.AIRBOARD_RATE_LIMIT_BOARD_READS_PER_MINUTE,
+        300,
+        1,
+        100_000,
+        "AIRBOARD_RATE_LIMIT_BOARD_READS_PER_MINUTE",
+      ),
+      transcriptionConnectionsPerMinute: parseNumber(
+        env.AIRBOARD_RATE_LIMIT_TRANSCRIPTION_CONNECTIONS_PER_MINUTE,
+        60,
+        1,
+        100_000,
+        "AIRBOARD_RATE_LIMIT_TRANSCRIPTION_CONNECTIONS_PER_MINUTE",
+      ),
+      boardEventsPerTenSeconds: parseNumber(
+        env.AIRBOARD_RATE_LIMIT_BOARD_EVENTS_PER_10_SECONDS,
+        5_000,
+        10,
+        1_000_000,
+        "AIRBOARD_RATE_LIMIT_BOARD_EVENTS_PER_10_SECONDS",
       ),
     },
     ...(env.SUPABASE_URL ? { supabaseUrl: env.SUPABASE_URL } : {}),

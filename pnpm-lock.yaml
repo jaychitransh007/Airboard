@@ -41,9 +41,6 @@ importers:
       '@supabase/supabase-js':
         specifier: ^2.118.0
         version: 2.118.0
-      esbuild:
-        specifier: ^0.28.2
-        version: 0.28.2
       fastify:
         specifier: ^5.12.8
         version: 5.12.8
@@ -63,6 +60,9 @@ importers:
       '@types/ws':
         specifier: ^8.18.2
         version: 8.18.2
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
 
   apps/desktop:
     devDependencies:

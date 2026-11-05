@@ -8,12 +8,13 @@ import type { VoiceTraceData, VoiceTraceValue } from "../voiceTrace/types";
 import { createSemanticIntentProvider } from "./factory";
 import { AIRBOARD_SEMANTIC_INTENT_PROMPT_VERSION } from "./openaiResponses";
 import {
+  isSemanticIntentProviderOutage,
   mapSemanticIntentProviderError,
   SemanticIntentProviderError,
 } from "./providerError";
 import { parseSemanticIntentRequest } from "./protocol";
 import { publicSemanticIntentConfig } from "./publicConfig";
-import { clientKey, createRateLimiter } from "../security";
+import { clientKey, configuredApiTokenAllowed, createCircuitBreaker, createRateLimiter, originAllowed } from "../security";
 import type {
   SemanticIntentHttpResult,
   SemanticIntentProviderMetadata,
@@ -21,7 +22,6 @@ import type {
   SemanticIntentRequest,
 } from "./types";
 import type { AuthService } from "../auth";
-import { configuredApiTokenAllowed } from "../security";
 
 const DETERMINISTIC_SEMANTIC_PROVIDER = "airboard-deterministic";
 const EXISTING_BOARD_FAN_IN_MODEL = "existing-board-fan-in-v1";
@@ -34,6 +34,7 @@ export function registerSemanticIntentRoutes(
 ): void {
   const provider = createSemanticIntentProvider(config.semanticIntent);
   let activeRequests = 0;
+  const breaker = createCircuitBreaker({ failureThreshold: 3, cooldownMs: 30_000 });
   const rateLimiter = createRateLimiter({
     windowMs: 60_000,
     max: config.rateLimits.intentPerMinute,
@@ -159,12 +160,20 @@ export function registerSemanticIntentRoutes(
     if (activeRequests >= config.semanticIntent.maxConcurrentRequests) {
       return reply.code(429).send({ error: "SEMANTIC_INTENT_CAPACITY_REACHED" });
     }
+    // During a provider outage, answer at once; the app falls back to its
+    // built-in command grammar.
+    const breakerWaitMs = breaker.retryAfterMs();
+    if (breakerWaitMs !== null) {
+      reply.header("Retry-After", Math.max(1, Math.ceil(breakerWaitMs / 1_000)));
+      return reply.code(503).send({ error: "SEMANTIC_INTENT_UNAVAILABLE", retryAfterMs: breakerWaitMs });
+    }
 
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), config.semanticIntent.timeoutMs);
     activeRequests += 1;
     try {
       const resolution = await provider.resolve(parsed.value, model, abortController.signal);
+      breaker.recordSuccess();
       const result: SemanticIntentProviderResult = {
         plan: resolution.plan,
         provider: provider.id,
@@ -194,6 +203,8 @@ export function registerSemanticIntentRoutes(
             })
           : caught;
       const mapped = mapSemanticIntentProviderError(normalizedError);
+      if (isSemanticIntentProviderOutage(normalizedError)) breaker.recordFailure();
+      else breaker.recordSuccess();
       const providerError =
         normalizedError instanceof SemanticIntentProviderError ? normalizedError : null;
       const failureLog = {
@@ -280,6 +291,3 @@ function semanticPlanSummary(plan: SemanticIntentProviderResult["plan"]): Record
   };
 }
 
-function originAllowed(origin: string | undefined, allowedOrigins: string[]): boolean {
-  return Boolean(origin && (allowedOrigins.includes("*") || allowedOrigins.includes(origin)));
-}

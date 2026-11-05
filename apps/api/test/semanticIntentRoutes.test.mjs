@@ -380,3 +380,46 @@ test("intent rate limits follow the profile, not a spoofable forwarded address",
   // A different account behind the same address keeps its own budget.
   assert.equal((await send("b", "1.1.1.1, 9.9.9.9")).statusCode, 200);
 });
+
+test("a provider outage trips the breaker so later commands fail fast", async (t) => {
+  const { createServer } = await import("node:http");
+  let providerCalls = 0;
+  const provider = createServer((_request, response) => {
+    providerCalls += 1;
+    response.writeHead(500, { "content-type": "application/json" });
+    response.end(JSON.stringify({ error: { code: "server_error" } }));
+  });
+  await new Promise((resolve) => provider.listen(0, "127.0.0.1", resolve));
+  t.after(() => provider.close());
+
+  const server = Fastify();
+  t.after(() => server.close());
+  const config = makeConfig();
+  registerSemanticIntentRoutes(server, {
+    ...config,
+    semanticIntent: {
+      ...config.semanticIntent,
+      provider: "openai",
+      apiKey: "test-key",
+      endpoint: `http://127.0.0.1:${provider.address().port}/v1/responses`,
+    },
+  });
+  const send = () =>
+    server.inject({
+      method: "POST",
+      url: "/intent/resolve",
+      headers: { origin },
+      payload: requestBody("make the planner talk to the dataset"),
+    });
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    assert.equal((await send()).json().error, "SEMANTIC_INTENT_PROVIDER_UNAVAILABLE");
+  }
+  assert.equal(providerCalls, 3);
+
+  const fastFail = await send();
+  assert.equal(fastFail.statusCode, 503);
+  assert.equal(fastFail.json().error, "SEMANTIC_INTENT_UNAVAILABLE");
+  assert.ok(Number(fastFail.headers["retry-after"]) > 0);
+  assert.equal(providerCalls, 3, "the provider is not called while the breaker is open");
+});

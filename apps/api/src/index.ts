@@ -1,10 +1,10 @@
 import { loadConfig } from "./config";
 import { buildServer } from "./server";
-import { registerGracefulShutdown } from "./shutdown";
+import { registerCrashHandlers, registerGracefulShutdown } from "./shutdown";
 
 const config = loadConfig();
 const server = await buildServer(config);
-registerGracefulShutdown(server);
+registerCrashHandlers(server, registerGracefulShutdown(server));
 
 await server.listen({
   host: config.host,

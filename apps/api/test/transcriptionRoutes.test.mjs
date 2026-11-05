@@ -56,7 +56,7 @@ const fakeProvider = {
   },
 };
 
-async function startServer(t, { auth, transcription = {} } = {}) {
+async function startServer(t, { auth, transcription = {}, provider = fakeProvider } = {}) {
   const server = Fastify();
   t.after(() => server.close());
   await server.register(websocket);
@@ -66,6 +66,7 @@ async function startServer(t, { auth, transcription = {} } = {}) {
       allowedOrigins: [origin],
       localEntitlements: false,
       apiToken: "operator-secret",
+      sessionSigningSecret: "test-session-signing-secret-at-least-32-bytes",
       transcription: {
         ...loadTranscriptionConfig({}),
         maxConcurrentStreams: 10,
@@ -74,7 +75,7 @@ async function startServer(t, { auth, transcription = {} } = {}) {
       },
     },
     auth,
-    { provider: fakeProvider },
+    { provider },
   );
   await server.listen({ port: 0, host: "127.0.0.1" });
   const { port } = server.server.address();
@@ -183,4 +184,65 @@ test("the global stream cap still answers with the capacity code", { timeout: 5_
   assert.equal((await blocked.nextMessage("transcription.error")).code, "TRANSCRIPTION_CAPACITY_REACHED");
   holder.socket.close();
   blocked.socket.close();
+});
+
+test("a one-minute ticket opens the socket, so the sign-in token never goes in a URL", { timeout: 5_000 }, async (t) => {
+  const url = await startServer(t, { auth: fakeAuth({ entitledOrganizations: ["org-paid"] }) });
+  const api = url.replace("ws://", "http://").replace("/transcription/ws", "");
+  const ticketFor = (user) =>
+    fetch(`${api}/transcription/ticket`, {
+      method: "POST",
+      headers: user ? { authorization: `Bearer user:${user}` } : {},
+    });
+
+  // No ticket without a signed-in, entitled account.
+  assert.equal((await ticketFor()).status, 401);
+  const unentitled = await ticketFor("fresh");
+  assert.equal(unentitled.status, 403);
+  assert.equal((await unentitled.json()).error, "ACTIVE_ENTITLEMENT_REQUIRED");
+
+  const issued = await (await ticketFor("paid")).json();
+  assert.equal(issued.expiresInSeconds, 60);
+  const withTicket = connect(`${url}?ticket=${encodeURIComponent(issued.ticket)}`);
+  withTicket.start();
+  assert.equal((await withTicket.nextMessage("transcription.ready")).provider, "fake");
+
+  // A forged ticket is refused like a missing sign-in.
+  const forged = connect(`${url}?ticket=forged.ticket`);
+  assert.deepEqual(await forged.closed, { code: 1008, reason: "Airboard authentication required" });
+
+  // Tickets still count against the account's stream share.
+  const second = connect(`${url}?ticket=${encodeURIComponent((await (await ticketFor("paid")).json()).ticket)}`);
+  second.start();
+  await second.nextMessage("transcription.ready");
+  const third = connect(`${url}?ticket=${encodeURIComponent((await (await ticketFor("paid")).json()).ticket)}`);
+  third.start();
+  assert.equal((await third.nextMessage("transcription.error")).code, "TRANSCRIPTION_PROFILE_LIMIT");
+  for (const client of [withTicket, second, third]) client.socket.close();
+});
+
+test("repeated provider failures make later starts fail fast", { timeout: 5_000 }, async (t) => {
+  let opens = 0;
+  const downProvider = {
+    id: "down",
+    async open() {
+      opens += 1;
+      throw new Error("Deepgram unreachable");
+    },
+  };
+  const url = await startServer(t, { auth: fakeAuth({ entitledOrganizations: ["org-a"] }), provider: downProvider });
+  const startOnce = async () => {
+    const client = connect(url, "a");
+    client.start();
+    const error = await client.nextMessage("transcription.error");
+    client.socket.close();
+    return error;
+  };
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    assert.equal((await startOnce()).message, "Deepgram unreachable");
+  }
+  const fastFail = await startOnce();
+  assert.equal(fastFail.code, "TRANSCRIPTION_PROVIDER_UNAVAILABLE");
+  assert.match(fastFail.message, /Try again shortly/);
+  assert.equal(opens, 3, "the provider is not dialled while the breaker is open");
 });

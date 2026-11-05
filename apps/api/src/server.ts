@@ -11,10 +11,10 @@ import {
   type Participant,
   type ParticipantRole,
 } from "@airboard/core";
-import Fastify from "fastify";
+import Fastify, { type FastifyRequest } from "fastify";
 import type { WebSocket } from "ws";
 import type { ApiConfig } from "./config";
-import { clientKey, createRateLimiter } from "./security";
+import { clientKey, createEventBudget, createRateLimiter, secretsMatch } from "./security";
 import { validateSessionStartBody } from "./sessionStartValidation";
 import { registerSemanticIntentRoutes } from "./semanticIntent/routes";
 import { createSessionStore } from "./storeFactory";
@@ -45,6 +45,10 @@ type RoomClient = {
 // a store round-trip each time. Note: participant role and session drawing policy
 // have no mutation path today, so this TTL does NOT propagate permission changes.
 const AUTH_CACHE_TTL_MS = 1000;
+/** Largest socket message accepted; a compound board batch is a few hundred KB. */
+const MAX_SOCKET_MESSAGE_BYTES = 1024 * 1024;
+/** Most events one board batch may carry; compound commands stay far below. */
+const MAX_EVENTS_PER_BATCH = 500;
 
 export async function buildServer(
   config: ApiConfig,
@@ -173,11 +177,23 @@ export async function buildServer(
       }
     },
   );
-  await server.register(websocket);
+  // The largest legitimate message is a compound board batch of a few
+  // hundred KB; audio frames are far smaller.
+  await server.register(websocket, { options: { maxPayload: MAX_SOCKET_MESSAGE_BYTES } });
   const sessionStartLimiter = createRateLimiter({
     windowMs: 60_000,
     max: config.rateLimits.sessionStartPerMinute,
   });
+  const boardConnectionLimiter = createRateLimiter({
+    windowMs: 60_000,
+    max: config.rateLimits.boardConnectionsPerMinute,
+  });
+  const boardReadLimiter = createRateLimiter({
+    windowMs: 60_000,
+    max: config.rateLimits.boardReadsPerMinute,
+  });
+  const callerKey = (request: FastifyRequest) =>
+    clientKey(request, { trustedProxyHops: config.trustedProxyHops });
   registerTranscriptionRoutes(server, config, auth);
   registerSemanticIntentRoutes(server, config, voiceTraceBuffer, auth);
   registerVoiceTraceRoutes(server, config, voiceTraceBuffer, auth);
@@ -197,11 +213,12 @@ export async function buildServer(
       config.stripe.teamPriceId,
     );
     if (!auth.client) {
-      return {
+      // Only local development runs without a database; anything else is not ready.
+      return reply.code(config.localEntitlements ? 200 : 503).send({
         ready: config.localEntitlements,
         service: "airboard-api",
         dependencies: { database: "not_configured", billing: billingReady ? "configured" : "not_configured" },
-      };
+      });
     }
     const { error } = await auth.client.from("profiles").select("id", { head: true, count: "exact" }).limit(1);
     if (error) {
@@ -226,7 +243,7 @@ export async function buildServer(
 
   server.get("/metrics", async (request, reply) => {
     const expected = config.cronSecret ?? config.apiToken;
-    if (!expected || bearerToken(request.headers) !== expected) return reply.code(401).send({ error: "METRICS_AUTH_REQUIRED" });
+    if (!secretsMatch(bearerToken(request.headers), expected)) return reply.code(401).send({ error: "METRICS_AUTH_REQUIRED" });
     const lines = ["# HELP airboard_http_requests_total HTTP requests by route and status class.", "# TYPE airboard_http_requests_total counter", "# HELP airboard_http_request_duration_ms_total Cumulative HTTP request duration.", "# TYPE airboard_http_request_duration_ms_total counter"];
     for (const [key, value] of requestMetrics) {
       const [method, route, status] = key.split(" ");
@@ -350,6 +367,9 @@ export async function buildServer(
     Params: { sessionId: string };
     Body: { realtimeTicket: string };
   }>("/sessions/:sessionId/heartbeat", async (request, reply) => {
+    if (!boardReadLimiter.allow(callerKey(request))) {
+      return reply.code(429).send({ error: "RATE_LIMITED" });
+    }
     const ticket = verifySignedToken(
       config.sessionSigningSecret,
       request.body.realtimeTicket,
@@ -371,6 +391,9 @@ export async function buildServer(
     Params: { sessionId: string };
     Querystring: { ticket?: string };
   }>("/sessions/:sessionId/state", async (request, reply) => {
+    if (!boardReadLimiter.allow(callerKey(request))) {
+      return reply.code(429).send({ error: "RATE_LIMITED" });
+    }
     const ticket = request.query.ticket
       ? verifySignedToken(config.sessionSigningSecret, request.query.ticket, "realtime")
       : null;
@@ -389,6 +412,11 @@ export async function buildServer(
   });
 
   server.get("/ws", { websocket: true }, (socket, request) => {
+    if (!boardConnectionLimiter.allow(callerKey(request))) {
+      socket.close(1013, "RATE_LIMITED");
+      return;
+    }
+    const eventLimiter = createEventBudget({ windowMs: 10_000, max: config.rateLimits.boardEventsPerTenSeconds });
     // Board events are writes, so live boards pause with everything else.
     if (config.readOnly) {
       try {
@@ -553,6 +581,23 @@ export async function buildServer(
           return;
         }
         if (incoming.length === 0) {
+          return;
+        }
+        // A batch is one atomic append; anything larger than a compound
+        // command could produce is refused, and a socket sending far faster
+        // than drawing does is refused until it slows down.
+        const refusal =
+          incoming.length > MAX_EVENTS_PER_BATCH
+            ? "BATCH_TOO_LARGE"
+            : !eventLimiter.allowMany(incoming.length)
+              ? "RATE_LIMITED"
+              : null;
+        if (refusal) {
+          try {
+            socket.send(JSON.stringify({ type: "event.rejected", reason: refusal, eventId: (incoming[0] as { id?: string }).id }));
+          } catch {
+            // best effort
+          }
           return;
         }
 

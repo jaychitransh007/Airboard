@@ -1,4 +1,6 @@
-FROM node:22-bookworm-slim AS builder
+# Base images are pinned by digest (Dependabot proposes updates). Cloud Run
+# ignores Docker HEALTHCHECK; release.sh sets its startup and liveness probes.
+FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS builder
 
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
@@ -44,7 +46,7 @@ RUN node -e "const id=process.env.NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_ID||''; 
 RUN node -e "const value=(process.env.NEXT_PUBLIC_CHROME_WEB_STORE_URL||'').trim(); if(value){ const id=process.env.NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_ID||''; let url; try{url=new URL(value)}catch{throw new Error('NEXT_PUBLIC_CHROME_WEB_STORE_URL must be a valid URL')} const parts=url.pathname.split('/').filter(Boolean); const listed=parts.at(-1)||''; if(url.origin!=='https://chromewebstore.google.com'||url.username||url.password||parts[0]!=='detail'||(parts.length!==2&&parts.length!==3)||!/^([a-p]{32})$/.test(listed)||listed!==id) throw new Error('NEXT_PUBLIC_CHROME_WEB_STORE_URL must be the detail page for NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_ID'); }"
 RUN pnpm --filter @airboard/web build
 
-FROM node:22-bookworm-slim AS runtime
+FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS runtime
 ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
 WORKDIR /app

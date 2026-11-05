@@ -19,3 +19,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  # The Cloud Run base images are pinned by digest; this keeps the digest
+  # current. Node stays on 22 until the runtime moves deliberately.
+  - package-ecosystem: docker
+    directory: /infra/cloud-run
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]

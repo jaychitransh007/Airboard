@@ -8,15 +8,15 @@
 
 | Part | Where | Notes |
 | --- | --- | --- |
-| Web | Cloud Run `airboard-pilot-web`, revision `launch-3e17071` | `https://airboard-pilot-web-634900453473.asia-south1.run.app`; one instance, kept warm |
-| API | Cloud Run `airboard-pilot-api`, revision `launch-3e17071` | Up to 3 instances, one kept warm; live boards are shared across instances |
-| Database and sign-in | Supabase `ujotgzjpkocuhtfrvbzu` (ap-south-1, Mumbai) | Every migration in `supabase/migrations` applied, the last `20261105140000` |
+| Web | Cloud Run `airboard-pilot-web`, revision `launch-854858a` | `https://airboard-pilot-web-634900453473.asia-south1.run.app`; one instance, kept warm |
+| API | Cloud Run `airboard-pilot-api`, revision `launch-854858a` | Up to 3 instances, one kept warm; live boards are shared across instances |
+| Database and sign-in | Supabase `ujotgzjpkocuhtfrvbzu` (ap-south-1, Mumbai) | Every migration in `supabase/migrations` applied, the last `20261105150000` |
 | Google sign-in | Google Auth Platform in the pilot Google Cloud project | Consent screen "Airboard", published to every Google account; client "Airboard sign-in (Supabase)" |
 | Lifecycle jobs | Cloud Scheduler `airboard-lifecycle-hourly` | Alert on a failed run |
 
-- **Health:** the API's `/ready` reports the database and `boardFanOut` (live boards across instances).
+- **Health:** the API's `/ready` reports the database and `boardFanOut` (live boards across instances). Cloud Run restarts an instance that stops answering its health path (API `/health`, web `/favicon.ico`) for 90 seconds.
 - **Launch check:** `pnpm launch:check:deployed` checks the live revisions and passes **19 of 23**.
-- **Rollback:** web to `launch-d8446ea`, API to `launch-87aec6f` (`AIRBOARD_RELEASE=launch-<hash> infra/cloud-run/release.sh promote web|api`).
+- **Rollback:** both to `launch-3e17071` (`AIRBOARD_RELEASE=launch-<hash> infra/cloud-run/release.sh promote web|api`).
 - **Code:** `main`. The working branch `codex/production-readiness` reached it on 5 November 2026 through these pull requests:
   - #1: launch hardening.
   - #11: Google sign-in.
@@ -24,7 +24,7 @@
   - #13: camera start.
   - #14: calmer board.
 
-  #16 (cleanup) and #18 (dependency updates and docs) followed. Both live revisions are `launch-3e17071` and match `main` exactly.
+  #16 (cleanup) and #18 (dependency updates and docs) followed. Both live revisions are `launch-854858a`, the hardening commit on `codex/production-readiness`, which is not yet merged to `main`.
 - **Image retention:** Artifact Registry keeps images tagged `live`, plus the 10 newest per image, and deletes anything older than 3 days. `release.sh promote` moves the `live` tag.
 
 ## Shipped in the launch hardening (November 2026)

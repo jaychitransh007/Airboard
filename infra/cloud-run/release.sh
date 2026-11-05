@@ -83,11 +83,16 @@ stage() {
   # may scale out; the web stays on one. The services keep a minimum of one
   # warm instance at the service level, which applies only to revisions
   # serving traffic, so staged revisions don't hold idle instances.
-  local max=1
-  [[ $1 == api ]] && max=3
+  local max=1 health=/favicon.ico
+  [[ $1 == api ]] && max=3 health=/health
+  # A revision counts as started only once it answers HTTP, and an instance
+  # that stops answering for 90 seconds is restarted.
   run gcloud run deploy "$service" --project="$PROJECT" --region="$REGION" \
     --image="$REGISTRY/$1:$RELEASE" --revision-suffix="$RELEASE" --tag="$RELEASE-$1" \
-    --no-traffic --min-instances=default --max-instances="$max" --quiet
+    --no-traffic --min-instances=default --max-instances="$max" \
+    --startup-probe="httpGet.path=$health,periodSeconds=2,timeoutSeconds=2,failureThreshold=30" \
+    --liveness-probe="httpGet.path=$health,periodSeconds=30,timeoutSeconds=5,failureThreshold=3" \
+    --quiet
   echo "Staged at https://$RELEASE-$1---$service-efs77okmmq-el.a.run.app"
 }
 

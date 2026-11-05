@@ -3,21 +3,26 @@ import test from "node:test";
 
 import { loadConfig } from "../src/config.ts";
 
+const SUPABASE = { SUPABASE_URL: "https://project.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "service-role-key" };
+
 test("Chrome integration has an explicit emergency kill switch", () => {
   assert.equal(loadConfig({}).chromeExtensionEnabled, true);
   assert.equal(loadConfig({ AIRBOARD_CHROME_EXTENSION_ENABLED: "true" }).chromeExtensionEnabled, true);
   assert.equal(loadConfig({ AIRBOARD_CHROME_EXTENSION_ENABLED: "false" }).chromeExtensionEnabled, false);
   assert.equal(loadConfig({
     NODE_ENV: "production",
+    ...SUPABASE,
     AIRBOARD_SESSION_SIGNING_SECRET: "a-production-signing-secret-longer-than-32-bytes",
   }).chromeExtensionEnabled, false, "a missing production switch fails closed");
   assert.throws(() => loadConfig({
     NODE_ENV: "production",
+    ...SUPABASE,
     AIRBOARD_SESSION_SIGNING_SECRET: "a-production-signing-secret-longer-than-32-bytes",
     AIRBOARD_CHROME_EXTENSION_ENABLED: "true",
   }), /AIRBOARD_CHROME_EXTENSION_ID is required/);
   const enabledProduction = loadConfig({
     NODE_ENV: "production",
+    ...SUPABASE,
     AIRBOARD_SESSION_SIGNING_SECRET: "a-production-signing-secret-longer-than-32-bytes",
     AIRBOARD_CHROME_EXTENSION_ENABLED: "true",
     AIRBOARD_CHROME_EXTENSION_ID: "abcdefghijklmnopabcdefghijklmnop",
@@ -40,6 +45,7 @@ test("Chrome integration has an explicit emergency kill switch", () => {
   ]) {
     assert.throws(() => loadConfig({
       NODE_ENV: "production",
+      ...SUPABASE,
       AIRBOARD_SESSION_SIGNING_SECRET: "a-production-signing-secret-longer-than-32-bytes",
       AIRBOARD_CHROME_EXTENSION_ENABLED: "true",
       AIRBOARD_CHROME_EXTENSION_ID: "abcdefghijklmnopabcdefghijklmnop",
@@ -51,3 +57,19 @@ test("Chrome integration has an explicit emergency kill switch", () => {
     AIRBOARD_CHROME_EXTENSION_ID: "not-a-chrome-id",
   }), /32-character Chrome extension ID/);
 });
+
+test("production refuses a wildcard allowed origin", () => {
+  const production = { NODE_ENV: "production", ...SUPABASE, AIRBOARD_SESSION_SIGNING_SECRET: "x".repeat(40), AIRBOARD_CHROME_EXTENSION_ENABLED: "false" };
+  assert.throws(() => loadConfig({ ...production, AIRBOARD_ALLOWED_ORIGINS: "*" }), /exact origins/);
+  assert.doesNotThrow(() => loadConfig({ ...production, AIRBOARD_ALLOWED_ORIGINS: "https://app.example" }));
+});
+
+test("production refuses to start without Supabase instead of keeping boards in memory", () => {
+  const production = { NODE_ENV: "production", AIRBOARD_SESSION_SIGNING_SECRET: "x".repeat(40), AIRBOARD_CHROME_EXTENSION_ENABLED: "false" };
+  assert.throws(() => loadConfig(production), /SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required/);
+  assert.throws(() => loadConfig({ ...production, SUPABASE_URL: "https://project.supabase.co" }), /required in production/);
+  assert.doesNotThrow(() => loadConfig({ ...production, ...SUPABASE }));
+  // Local development keeps the in-memory store.
+  assert.doesNotThrow(() => loadConfig({}));
+});
+

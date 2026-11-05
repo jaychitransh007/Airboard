@@ -6,6 +6,89 @@
  * exposed beyond localhost.
  */
 
+import { createHash, timingSafeEqual } from "node:crypto";
+
+/**
+ * Compares a presented secret with the configured one in constant time.
+ * Both sides are hashed first, so neither the content nor the length of the
+ * configured secret leaks through response timing.
+ */
+/**
+ * Whether a browser origin may open the API's sockets and media endpoints.
+ * Exact matches only, like the REST CORS layer: `*` is not a wildcard
+ * (production refuses it at startup).
+ */
+export function originAllowed(origin: string | undefined, allowedOrigins: readonly string[]): boolean {
+  return Boolean(origin && allowedOrigins.includes(origin));
+}
+
+/**
+ * A token bucket for one connection: up to `max` events at once, refilling
+ * at `max` per `windowMs`. Constant memory however fast events arrive.
+ */
+export function createEventBudget(options: { windowMs: number; max: number }): {
+  allowMany: (count: number, now?: number) => boolean;
+} {
+  const ratePerMs = options.max / options.windowMs;
+  let tokens = options.max;
+  let updatedAt: number | null = null;
+  return {
+    allowMany(count, now = Date.now()) {
+      if (updatedAt !== null) tokens = Math.min(options.max, tokens + (now - updatedAt) * ratePerMs);
+      updatedAt = now;
+      if (count > tokens) return false;
+      tokens -= count;
+      return true;
+    },
+  };
+}
+
+/**
+ * Stops calling a provider that is down. After `failureThreshold` outages in
+ * a row it answers "unavailable" at once for `cooldownMs`, so an outage does
+ * not hold every request open until its timeout; then one trial call decides.
+ */
+export function createCircuitBreaker(options: { failureThreshold: number; cooldownMs: number }) {
+  let failures = 0;
+  let openedAt: number | null = null;
+  // When the half-open trial began; a trial that never reports back expires
+  // after one cooldown so the breaker cannot stay stuck.
+  let trialStartedAt: number | null = null;
+  return {
+    /** Null when a call may go ahead; otherwise how long until the next trial. */
+    retryAfterMs(now = Date.now()): number | null {
+      if (openedAt === null) return null;
+      const remaining = openedAt + options.cooldownMs - now;
+      if (remaining > 0) return remaining;
+      if (trialStartedAt !== null && now - trialStartedAt < options.cooldownMs) return 1_000;
+      trialStartedAt = now;
+      return null;
+    },
+    /** The provider answered (even with a refusal): it is up. */
+    recordSuccess() {
+      failures = 0;
+      openedAt = null;
+      trialStartedAt = null;
+    },
+    /** The provider timed out, was unreachable or could not serve. */
+    recordFailure(now = Date.now()) {
+      trialStartedAt = null;
+      failures += 1;
+      if (openedAt !== null || failures >= options.failureThreshold) openedAt = now;
+    },
+    /** The caller gave up before an answer; neither outcome counts. */
+    abandon() {
+      trialStartedAt = null;
+    },
+  };
+}
+
+export function secretsMatch(provided: string | null | undefined, expected: string | null | undefined): boolean {
+  if (!provided || !expected) return false;
+  const digest = (value: string) => createHash("sha256").update(value).digest();
+  return timingSafeEqual(digest(provided), digest(expected));
+}
+
 export type RateLimiter = {
   /** True when the caller identified by `key` is within its budget. */
   allow: (key: string, now?: number) => boolean;
@@ -68,11 +151,11 @@ export function apiTokenAllowed(
     return true;
   }
   const header = request.headers.authorization;
-  if (typeof header === "string" && header === `Bearer ${configuredToken}`) {
+  if (typeof header === "string" && secretsMatch(header, `Bearer ${configuredToken}`)) {
     return true;
   }
   const query = request.query as Record<string, unknown> | undefined;
-  return typeof query?.token === "string" && query.token === configuredToken;
+  return typeof query?.token === "string" && secretsMatch(query.token, configuredToken);
 }
 
 /** True only for an explicitly configured shared server token. */
