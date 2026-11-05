@@ -97,8 +97,9 @@ promote() {
   # Traffic is pinned to named revisions, so a deploy alone never moves it.
   run gcloud run services update-traffic "$service" --project="$PROJECT" --region="$REGION" \
     --to-revisions="$service-$RELEASE=100" --quiet
-  run gcloud run services describe "$service" --project="$PROJECT" --region="$REGION" \
-    --format="value(status.traffic)"
+  [[ -n ${DRY_RUN:-} ]] && return
+  gcloud run services describe "$service" --project="$PROJECT" --region="$REGION" --format=json |
+    python3 -c 'import json,sys;[print("serving", t["percent"], "%", t["revisionName"]) for t in json.load(sys.stdin)["status"]["traffic"] if t.get("percent")]'
 }
 
 case ${1:-} in

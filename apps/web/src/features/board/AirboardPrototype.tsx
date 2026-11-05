@@ -566,6 +566,10 @@ const OBJECT_DOCK: readonly { label: string; tool: ObjectDockTool }[] = [
 ];
 
 const CATALOG_DRAG_MIME = "application/x-airboard-tool";
+/** How long the browser may take to answer for the camera before Airboard explains the wait. */
+const CAMERA_PROMPT_HINT_DELAY_MS = 1_500;
+const CAMERA_PROMPT_HINT =
+  "Your browser is asking to use the camera. Choose Allow in its prompt near the address bar. No prompt? Another app or tab may be using the camera.";
 const CATALOG_DROP_EXIT_PX = 12;
 const CATALOG_DROP_MIN_TRAVEL_PX = 24;
 const UNDO_TOAST_VISIBLE_MS = 6_000;
@@ -999,6 +1003,7 @@ export function AirboardPrototype({
   const [cameraStatus, setCameraStatus] = useState<CameraStatus>("idle");
   const [inputPaused, setInputPaused] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraPromptWaiting, setCameraPromptWaiting] = useState(false);
   const [gestureResult, setGestureResult] = useState<GestureResult | null>(null);
   const [sensitivity, setSensitivity] = useState(1);
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.6);
@@ -8227,17 +8232,47 @@ export function AirboardPrototype({
       return canvas.captureStream(30);
     };
 
+    // Load hand tracking (about 11 MB on a first visit) while the browser asks
+    // for the camera, so the download overlaps the prompt instead of following
+    // it. A tracker nobody adopts is closed once it arrives (see finally).
+    let trackerLoad: Promise<MediaPipeHandTracker> | null = null;
+    let trackerSettled = false;
     try {
-      const stream = bridge
-        ? await acquireBridgedStream()
-        : await navigator.mediaDevices.getUserMedia({
-            video: {
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-              frameRate: { ideal: 30 },
-            },
-            audio: false,
-          });
+      trackerLoad = MediaPipeHandTracker.create({
+        wasmBaseUrl: "/vendor/mediapipe/wasm",
+        ...handPerceptionOptions(confidenceThreshold),
+      });
+      // Awaited below; this only keeps a load failed before then from going unhandled.
+      trackerLoad.catch(() => undefined);
+      // Some browsers take seconds to show their prompt (opening the camera,
+      // or another app holding it), so say what Airboard is waiting for.
+      const promptHint = bridge
+        ? null
+        : window.setTimeout(() => {
+            setCameraPromptWaiting(true);
+            appendCopilotActivity({
+              source: "Airo",
+              title: "Waiting for the camera",
+              detail: CAMERA_PROMPT_HINT,
+              tone: "warning",
+            });
+          }, CAMERA_PROMPT_HINT_DELAY_MS);
+      let stream: MediaStream;
+      try {
+        stream = bridge
+          ? await acquireBridgedStream()
+          : await navigator.mediaDevices.getUserMedia({
+              video: {
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                frameRate: { ideal: 30 },
+              },
+              audio: false,
+            });
+      } finally {
+        if (promptHint !== null) window.clearTimeout(promptHint);
+        setCameraPromptWaiting(false);
+      }
       if (releaseIfUnmounted(stream, null)) {
         meetBridgeSessionRef.current?.stop();
         meetBridgeSessionRef.current = null;
@@ -8252,10 +8287,8 @@ export function AirboardPrototype({
       video.srcObject = stream;
       await video.play();
       setCameraStatus("tracker_loading");
-      const tracker = await MediaPipeHandTracker.create({
-        wasmBaseUrl: "/vendor/mediapipe/wasm",
-        ...handPerceptionOptions(confidenceThreshold),
-      });
+      const tracker = await trackerLoad;
+      trackerSettled = true;
       if (releaseIfUnmounted(stream, tracker)) {
         meetBridgeSessionRef.current?.stop();
         meetBridgeSessionRef.current = null;
@@ -8293,8 +8326,11 @@ export function AirboardPrototype({
       }
     } finally {
       cameraStartInProgressRef.current = false;
+      if (!trackerSettled) {
+        void trackerLoad?.then((tracker) => tracker.close(), () => undefined);
+      }
     }
-  }, [cameraCaptureAvailable, cameraStatus, confidenceThreshold, embeddedMediaCapture, enforceCameraCanvas, isMeetSurface, meetMediaBridge, refreshStandaloneMediaPermissions, standaloneEditor, stopCamera]);
+  }, [appendCopilotActivity, cameraCaptureAvailable, cameraStatus, confidenceThreshold, embeddedMediaCapture, enforceCameraCanvas, isMeetSurface, meetMediaBridge, refreshStandaloneMediaPermissions, standaloneEditor, stopCamera]);
 
   useEffect(() => {
     if (
@@ -11737,6 +11773,9 @@ export function AirboardPrototype({
                         : "Allow"}
                 </button>
               </div>
+              {cameraPromptWaiting ? (
+                <p className="permission-warning" role="status">{CAMERA_PROMPT_HINT}</p>
+              ) : null}
               <p className="permission-note">
                 Choose <strong>Allow while visiting the site</strong> in the browser prompt.
                 Airboard will then resume an input you previously enabled without asking again.
