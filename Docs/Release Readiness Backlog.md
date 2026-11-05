@@ -447,9 +447,14 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - The new API revision logged no errors besides the smoke's own 401s.
   - Rollback: API and web `launch-1217615`.
   - The API (Mumbai) and Supabase (Seoul) are still in different regions; co-locating them is the remaining large latency win.
-- **2026-11-05** — Read-only switch for the Supabase move (built, not deployed):
+- **2026-11-05** — Read-only switch for the Supabase move:
   - **API:** with `AIRBOARD_READ_ONLY=true`, every change gets `503 MAINTENANCE` with `Retry-After: 300` (`apps/api/src/readOnly.ts`). The guard runs after CORS, so browsers can read the refusal. Board live connections close with `MAINTENANCE`, and `/auth/config` reports `readOnly`.
   - **Web:** `airboardApi` announces a maintenance refusal, and a banner in the app shell and on the guest live page shows "Airboard is down for a short upgrade". The banner also appears on load when `/auth/config` says read-only, and it rechecks every 30 seconds. Saves, Share and guest live links each explain the pause. The error-code reference lists `MAINTENANCE`.
   - **Verified locally** with the API in read-only mode: the dashboard banner; a board opening with Share explaining the pause; an edit showing "saving is paused" and retrying; and a guest live link showing the upgrade page with Try again.
   - API 128/128 and web 375/375 tests pass (new: the guard with real CORS, and the maintenance announcement), and every package typechecks.
   - The new Mumbai project `ujotgzjpkocuhtfrvbzu` (Aura organization) is created and set up with all migrations and sign-in settings, with no data. See `Docs/Supabase Move to Mumbai Plan.md`.
+  - **Deployed, switch off** (commit `513185f`): `airboard-pilot-api-launch-513185f` and `airboard-pilot-web-launch-513185f` at 100%. No migration.
+    - **Tagged smoke:** API health and ready 200; `/auth/config` reports `readOnly: false`; unauthenticated changes reach the sign-in check (401, not 503); 6 web pages 200. The bundles carry the banner and the pause messages, and the error-code help lists `MAINTENANCE`.
+    - **Production after promotion:** `/auth/config` reports `readOnly: false`. On the owner's board, every request returned 200 (including the banner's `/auth/config` check), the live session started and no banner showed. The new API revision logged no server errors.
+    - **Rollback:** API and web `launch-6cdeed8`.
+    - **To turn it on at cut-over:** `gcloud run services update airboard-pilot-api --region=asia-south1 --update-env-vars AIRBOARD_READ_ONLY=true`. Set it to `false` to turn it off.

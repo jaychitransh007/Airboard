@@ -97,7 +97,7 @@ It would be slower than today and would tie the two apps together.
    - A new project means new signing keys, and the browser keeps its session under a key named after the project, so **everyone signs in again** after the move.
    - Sign-in is email-only, so the new project needs Resend SMTP on your own domain before cut-over; otherwise pilot users are locked out.
    - This is the pending "sending domain" item.
-2. ~~**A read-only switch in the API.**~~ Built 2026-11-05, not yet deployed. With `AIRBOARD_READ_ONLY=true`:
+2. ~~**A read-only switch in the API.**~~ Built and deployed (switched off) 2026-11-05 as `launch-513185f`. With `AIRBOARD_READ_ONLY=true`:
    - every change (any method other than GET, HEAD or OPTIONS) gets `503 MAINTENANCE` with `Retry-After: 300` and CORS headers, so browsers can read it;
    - live-board connections close with `MAINTENANCE`;
    - `/auth/config` reports `readOnly: true`.
