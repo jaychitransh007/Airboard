@@ -56,9 +56,11 @@ function createFakeSupabase(tables, options = {}) {
       },
     },
     deletedAuthUsers: [],
+    authDeleteError: null,
     auth: {
       admin: {
         async deleteUser(id) {
+          if (fakeClient.authDeleteError) return { data: null, error: fakeClient.authDeleteError };
           fakeClient.deletedAuthUsers.push(id);
           return { data: {}, error: null };
         },
@@ -512,6 +514,7 @@ test("a storage failure keeps expired boards for the next lifecycle run", async 
 
 test("workspace deletion erases the organization's objects and retries on storage failure", async (t) => {
   const tables = lifecycleTables();
+  tables.organization_memberships = [{ id: "m1", organization_id: ORG, profile_id: PROFILE, role: "owner", status: "active" }];
   tables.data_requests.push({
     id: "request-1",
     request_type: "delete_workspace",
@@ -572,6 +575,118 @@ test("account deletion erases a personal workspace's objects before deleting the
   assert.deepEqual(client.deletedAuthUsers, ["auth-user"]);
   assert.equal(client.tables.organizations.length, 0);
   assert.equal(client.tables.profiles.length, 0);
+});
+
+function deletionRequest(overrides = {}) {
+  return {
+    id: "request-3",
+    request_type: "delete_account",
+    organization_id: ORG,
+    profile_id: PROFILE,
+    status: "queued",
+    execute_after: new Date(Date.now() - DAY).toISOString(),
+    requested_at: new Date(Date.now() - 2 * DAY).toISOString(),
+    ...overrides,
+  };
+}
+
+test("account deletion removes every personal workspace left without a member and resumes after a failure", async (t) => {
+  const SECOND_PERSONAL = "77777777-7777-4777-8777-777777777777";
+  const SHARED_PERSONAL = "88888888-8888-4888-8888-888888888888";
+  const TEAM = "99999999-9999-4999-8999-999999999999";
+  const OTHER = "44444444-4444-4444-8444-444444444444";
+  const tables = lifecycleTables();
+  tables.organizations = [
+    { id: ORG, kind: "personal" },
+    { id: SECOND_PERSONAL, kind: "personal" },
+    { id: SHARED_PERSONAL, kind: "personal" },
+    { id: TEAM, kind: "team" },
+  ];
+  tables.organization_memberships = [
+    { id: "m1", organization_id: ORG, profile_id: PROFILE, status: "active" },
+    { id: "m2", organization_id: SECOND_PERSONAL, profile_id: PROFILE, status: "active" },
+    { id: "m3", organization_id: SHARED_PERSONAL, profile_id: PROFILE, status: "active" },
+    { id: "m4", organization_id: SHARED_PERSONAL, profile_id: OTHER, status: "active" },
+    { id: "m5", organization_id: TEAM, profile_id: PROFILE, status: "active" },
+  ];
+  tables.profiles = [{ id: PROFILE, auth_user_id: "auth-user", email: "owner@airboard.test" }];
+  tables.data_requests.push(deletionRequest());
+  const client = createFakeSupabase(tables);
+  client.authDeleteError = { status: 500, message: "auth unavailable" };
+  const server = await buildApp(t, client);
+
+  const failed = await runLifecycle(server);
+  assert.equal(failed.statusCode, 500, "a failed erasure alerts");
+  assert.deepEqual(failed.json().dataRequests, { completed: 0, failed: 1, storageFailures: 0 });
+  assert.equal(client.tables.data_requests[0].status, "queued", "it is retried, not abandoned");
+  assert.equal(client.tables.data_requests[0].attempts, 1);
+  assert.equal(client.tables.data_requests[0].error_code, "AUTH_USER_DELETE_FAILED");
+  assert.equal(client.tables.profiles.length, 1);
+
+  // The retry finds the auth user already gone (an interrupted run) and finishes.
+  client.authDeleteError = { status: 404, message: "User not found" };
+  const retried = await runLifecycle(server);
+  assert.deepEqual(retried.json().dataRequests, { completed: 1, failed: 0, storageFailures: 0 });
+  assert.deepEqual(
+    client.tables.organizations.map((organization) => organization.id).sort(),
+    [SHARED_PERSONAL, TEAM].sort(),
+    "both sole-member personal workspaces go; shared and team workspaces stay",
+  );
+  assert.equal(client.tables.profiles.length, 0);
+});
+
+test("account deletion gives up after repeated database failures", async (t) => {
+  const tables = lifecycleTables();
+  tables.organizations = [{ id: ORG, kind: "personal" }];
+  tables.organization_memberships = [{ id: "m1", organization_id: ORG, profile_id: PROFILE, status: "active" }];
+  tables.profiles = [{ id: PROFILE, auth_user_id: "auth-user", email: "owner@airboard.test" }];
+  tables.product_events = [{ id: "e1", profile_id: PROFILE }];
+  tables.data_requests.push(deletionRequest());
+  const client = createFakeSupabase(tables, {
+    fail: (table, op) => (table === "product_events" && op === "delete" ? { message: "statement timeout" } : null),
+  });
+  const server = await buildApp(t, client);
+
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    await runLifecycle(server);
+    assert.equal(client.tables.data_requests[0].attempts, attempt);
+  }
+  assert.equal(client.tables.data_requests[0].status, "failed");
+  assert.equal(client.tables.data_requests[0].error_code, "ACCOUNT_DATA_ERASE_FAILED");
+  assert.deepEqual(client.deletedAuthUsers, [], "the account is never half-deleted");
+  assert.equal(client.tables.profiles.length, 1);
+});
+
+test("an interrupted request is picked up again, a fresh one is left to its run", async (t) => {
+  const tables = lifecycleTables();
+  tables.organizations = [{ id: ORG, kind: "personal" }];
+  tables.organization_memberships = [{ id: "m1", organization_id: ORG, profile_id: PROFILE, status: "active" }];
+  tables.profiles = [{ id: PROFILE, auth_user_id: "auth-user", email: "owner@airboard.test" }];
+  tables.data_requests.push(deletionRequest({ status: "processing", updated_at: new Date(Date.now() - 5 * 60_000).toISOString() }));
+  const client = createFakeSupabase(tables);
+  const server = await buildApp(t, client);
+
+  assert.deepEqual((await runLifecycle(server)).json().dataRequests, { completed: 0, failed: 0, storageFailures: 0 });
+  client.tables.data_requests[0].updated_at = new Date(Date.now() - 60 * 60_000).toISOString();
+  assert.deepEqual((await runLifecycle(server)).json().dataRequests, { completed: 1, failed: 0, storageFailures: 0 });
+  assert.equal(client.tables.profiles.length, 0);
+});
+
+test("workspace deletion is refused if the requester is no longer its owner", async (t) => {
+  const tables = lifecycleTables();
+  tables.organization_memberships = [{ id: "m1", organization_id: ORG, profile_id: PROFILE, role: "admin", status: "active" }];
+  tables.data_requests.push(deletionRequest({ request_type: "delete_workspace" }));
+  const client = createFakeSupabase(tables);
+  const server = await buildApp(t, client);
+
+  assert.deepEqual((await runLifecycle(server)).json().dataRequests, { completed: 0, failed: 1, storageFailures: 0 });
+  assert.equal(client.tables.data_requests[0].status, "failed", "refusals are not retried");
+  assert.equal(client.tables.data_requests[0].error_code, "OWNER_ROLE_REQUIRED");
+  assert.equal(client.tables.organizations.length, 1);
+  assert.ok(
+    client.storageCalls.every((call) => !call.paths.some((path) => path.includes(BOARD))),
+    "the workspace's live uploads are untouched",
+  );
 });
 
 test("/me reports a pilot that ended instead of hiding it", () => {
@@ -758,4 +873,13 @@ test("the library list carries a small preview of each board, and only when aske
   assert.equal("latest_state" in withPreview, false, "the full board content is never sent with the list");
   assert.deepEqual(withPreview.preview.text, ["Payments API"]);
   assert.deepEqual(withPreview.preview.shapes, [{ kind: "shape", x: 10, y: 20, width: 100, height: 50 }]);
+});
+
+test("the development sign-in trusts only the connection's real loopback address", async () => {
+  const { isLoopbackRequest } = await import("../src/controlPlaneRoutes.ts");
+  assert.equal(isLoopbackRequest({ socket: { remoteAddress: "127.0.0.1" } }), true);
+  assert.equal(isLoopbackRequest({ socket: { remoteAddress: "::ffff:127.0.0.1" } }), true);
+  // A caller-controlled Host header no longer counts.
+  assert.equal(isLoopbackRequest({ socket: { remoteAddress: "10.0.0.5" }, hostname: "127.0.0.1.attacker.example" }), false);
+  assert.equal(isLoopbackRequest({ socket: {} }), false);
 });

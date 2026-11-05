@@ -15,7 +15,8 @@ import type {
   TranscriptionServerMessage,
 } from "./types";
 import type { AuthService } from "../auth";
-import { configuredApiTokenAllowed } from "../security";
+import { clientKey, configuredApiTokenAllowed, createCircuitBreaker, createRateLimiter, originAllowed } from "../security";
+import { issueSignedToken, verifySignedToken } from "../signedTokens";
 
 const MAX_PCM16_FRAME_BYTES = 256 * 1024;
 const MAX_STARTUP_BUFFER_BYTES = 384 * 1024;
@@ -25,6 +26,8 @@ type ActiveTranscription = {
   session: RealtimeTranscriptionSession;
   stopReason: "completed" | "aborted" | "provider_closed";
 };
+
+const TRANSCRIPTION_TICKET_TTL_SECONDS = 60;
 
 type TranscriptionAuthorization =
   | { allowed: true; profileId: string | null }
@@ -44,28 +47,74 @@ export function registerTranscriptionRoutes(
   // Live stream slots per signed-in profile, so one account cannot occupy
   // every maxConcurrentStreams slot.
   const streamsByProfile = new Map<string, number>();
+  // Connection attempts per caller address; stream caps bound the rest.
+  const connectionLimiter = createRateLimiter({
+    windowMs: 60_000,
+    max: config.rateLimits?.transcriptionConnectionsPerMinute ?? 60,
+  });
+  // During a provider outage, refuse at once rather than holding every
+  // start open for the connect timeout.
+  const providerBreaker = createCircuitBreaker({ failureThreshold: 3, cooldownMs: 30_000 });
 
   server.get("/transcription/config", async () => publicTranscriptionConfig(config.transcription));
+
+  // Who may stream audio: the shared API token or local development, else a
+  // signed-in (or installation) identity whose organization is entitled. Any
+  // email can sign in, so Deepgram spend also requires an entitlement; the
+  // reason string is the client-facing error code.
+  const authorizeRequest = async (request: Parameters<AuthService["authenticate"]>[0]): Promise<TranscriptionAuthorization> => {
+    if (configuredApiTokenAllowed(request, config.apiToken) || config.localEntitlements) {
+      return { allowed: true, profileId: null };
+    }
+    const context = auth ? await auth.authenticate(request, { allowInstallation: true }) : null;
+    if (!auth || !context) {
+      return { allowed: false, reason: "Airboard authentication required" };
+    }
+    if (!(await auth.activeEntitlement(context.organizationId))) {
+      return { allowed: false, reason: "ACTIVE_ENTITLEMENT_REQUIRED" };
+    }
+    return { allowed: true, profileId: context.profileId };
+  };
+
+  // Browsers cannot set headers on a WebSocket upgrade, so the socket URL
+  // carries this one-minute ticket instead of the person's sign-in token,
+  // which would otherwise land in request logs.
+  server.post("/transcription/ticket", async (request, reply) => {
+    const authorization = await authorizeRequest(request);
+    if (!authorization.allowed) {
+      return reply
+        .code(authorization.reason === "ACTIVE_ENTITLEMENT_REQUIRED" ? 403 : 401)
+        .send({ error: authorization.reason });
+    }
+    const ticket = issueSignedToken(config.sessionSigningSecret, {
+      purpose: "transcription",
+      sub: authorization.profileId ?? "",
+      ttlSeconds: TRANSCRIPTION_TICKET_TTL_SECONDS,
+    });
+    return { ticket, expiresInSeconds: TRANSCRIPTION_TICKET_TTL_SECONDS };
+  });
 
   server.get("/transcription/ws", { websocket: true }, (socket, request) => {
     if (!originAllowed(request.headers.origin, config.allowedOrigins)) {
       socket.close(1008, "Origin is not allowed");
       return;
     }
+    if (!connectionLimiter.allow(clientKey(request, { trustedProxyHops: config.trustedProxyHops ?? 0 }))) {
+      socket.close(1013, "RATE_LIMITED");
+      return;
+    }
     const authorize = async (): Promise<TranscriptionAuthorization> => {
-      if (configuredApiTokenAllowed(request, config.apiToken) || config.localEntitlements) {
-        return { allowed: true, profileId: null };
+      const query = request.query as Record<string, unknown> | undefined;
+      if (typeof query?.ticket === "string") {
+        // Access and entitlement were checked when the ticket was issued.
+        const ticket = verifySignedToken(config.sessionSigningSecret, query.ticket, "transcription");
+        return ticket
+          ? { allowed: true, profileId: ticket.sub || null }
+          : { allowed: false, reason: "Airboard authentication required" };
       }
-      const context = auth ? await auth.authenticate(request, { allowInstallation: true }) : null;
-      if (!auth || !context) {
-        return { allowed: false, reason: "Airboard authentication required" };
-      }
-      // Any email can sign in, so Deepgram spend also requires an entitled
-      // organization. The reason string is the client-facing error code.
-      if (!(await auth.activeEntitlement(context.organizationId))) {
-        return { allowed: false, reason: "ACTIVE_ENTITLEMENT_REQUIRED" };
-      }
-      return { allowed: true, profileId: context.profileId };
+      // Older clients send the sign-in token itself as `access_token`; kept
+      // for one release so tabs opened before a deploy keep their voice.
+      return authorizeRequest(request);
     };
 
     const clientSocket = socket as unknown as WebSocket;
@@ -263,6 +312,16 @@ export function registerTranscriptionRoutes(
         );
         return;
       }
+      if (providerBreaker.retryAfterMs() !== null) {
+        releaseStreamSlot();
+        sendError(
+          clientSocket,
+          "TRANSCRIPTION_PROVIDER_UNAVAILABLE",
+          "The transcription provider is unavailable. Try again shortly.",
+          true,
+        );
+        return;
+      }
 
       const token = Symbol("transcription");
       const abortController = new AbortController();
@@ -276,6 +335,7 @@ export function registerTranscriptionRoutes(
           (event) => relayProviderEvent(token, event),
           abortController.signal,
         );
+        providerBreaker.recordSuccess();
         if (closed || openingToken !== token) {
           session.abort();
           return;
@@ -299,8 +359,11 @@ export function registerTranscriptionRoutes(
         });
       } catch (error) {
         if (openingToken !== token || closed) {
+          // Stopped while opening: the failure says nothing about the provider.
+          providerBreaker.abandon();
           return;
         }
+        providerBreaker.recordFailure();
         openingToken = null;
         if (openingAbortController === abortController) {
           openingAbortController = null;
@@ -484,12 +547,6 @@ function send(socket: WebSocket, message: TranscriptionServerMessage): void {
   }
 }
 
-function originAllowed(origin: string | undefined, allowedOrigins: string[]): boolean {
-  if (!origin) {
-    return false;
-  }
-  return allowedOrigins.includes("*") || allowedOrigins.includes(origin);
-}
 
 function rawDataToUint8Array(raw: RawData): Uint8Array {
   if (Array.isArray(raw)) {

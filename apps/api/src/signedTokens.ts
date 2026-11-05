@@ -5,7 +5,9 @@ export type AirboardTokenPurpose =
   | "realtime"
   | "join"
   | "installation_link"
-  | "installation";
+  | "installation"
+  /** Opens one voice-transcription socket; lives a minute, so it can sit in a URL. */
+  | "transcription";
 
 export type AirboardSignedToken = {
   v: 1;

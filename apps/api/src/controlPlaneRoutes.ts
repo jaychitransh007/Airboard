@@ -26,6 +26,7 @@ import {
   failClosedChromeExtensionPolicy,
 } from "./chromeExtensionPolicy";
 import { bearerToken, issueSignedToken, verifySignedToken } from "./signedTokens";
+import { secretsMatch } from "./security";
 import { registerBoardContentRoutes, removeBoardAssetObjects } from "./boardContentRoutes";
 import { BoardAssetLifecycleError } from "./boardAssetLifecycle";
 import { boardAccessFilter, writeAccessibleBoard } from "./boardAccess";
@@ -1556,8 +1557,9 @@ function registerPrivacyAndTelemetryRoutes(server: FastifyInstance, auth: AuthSe
     if (!["export", "delete_account", "delete_workspace"].includes(requestType)) {
       return reply.code(400).send({ error: "INVALID_DATA_REQUEST" });
     }
-    if (requestType === "delete_workspace" && !auth.hasRole(context, ADMIN_ROLES)) {
-      return reply.code(403).send({ error: "ADMIN_ROLE_REQUIRED" });
+    // Erasing a whole workspace removes every member's boards: owners only.
+    if (requestType === "delete_workspace" && !auth.hasRole(context, ["owner"])) {
+      return reply.code(403).send({ error: "OWNER_ROLE_REQUIRED" });
     }
     if (requestType.startsWith("delete_") && requestBody.confirmation !== "DELETE") {
       return reply.code(400).send({ error: "DELETION_CONFIRMATION_REQUIRED" });
@@ -1765,7 +1767,7 @@ function registerBillingRoutes(server: FastifyInstance, config: ApiConfig, auth:
 
 function registerLifecycleRoutes(server: FastifyInstance, config: ApiConfig, auth: AuthService) {
   server.post("/internal/lifecycle/run", async (request, reply) => {
-    if (!config.cronSecret || bearerToken(request.headers) !== config.cronSecret) {
+    if (!secretsMatch(bearerToken(request.headers), config.cronSecret)) {
       return reply.code(401).send({ error: "CRON_AUTH_REQUIRED" });
     }
     if (!auth.client) return reply.code(503).send({ error: "CONTROL_PLANE_UNAVAILABLE" });
@@ -1971,34 +1973,67 @@ function registerEnterpriseRoutes(server: FastifyInstance, auth: AuthService) {
   });
 }
 
+// Every erasure step is safe to repeat, so a failed request goes back on the
+// queue for the next lifecycle run and is marked failed only after this many
+// attempts.
+const DATA_REQUEST_MAX_ATTEMPTS = 5;
+// A request still "processing" after this long was interrupted (the instance
+// stopped mid-run) and is picked up again.
+const DATA_REQUEST_STALE_MS = 30 * 60_000;
+
+/** A request that must not run, now or on a retry. */
+class DataRequestRefused extends Error {}
+
+/** Supabase reports a failed query in its result; erasure must never read that as success. */
+function mustSucceed<T extends { error: unknown }>(result: T, code: string): T {
+  if (result.error) throw new Error(code);
+  return result;
+}
+
 async function processDataRequests(auth: AuthService) {
   if (!auth.client) return { completed: 0, failed: 0, storageFailures: 0 };
+  const client = auth.client;
   const now = new Date().toISOString();
-  const { data: requests } = await auth.client.from("data_requests").select("*")
-    .eq("status", "queued").lte("execute_after", now).order("requested_at", { ascending: true }).limit(10);
+  const staleBefore = new Date(Date.now() - DATA_REQUEST_STALE_MS).toISOString();
+  const [queued, stalled] = await Promise.all([
+    client.from("data_requests").select("*")
+      .eq("status", "queued").lte("execute_after", now).order("requested_at", { ascending: true }).limit(10),
+    client.from("data_requests").select("*")
+      .eq("status", "processing").lt("updated_at", staleBefore).order("requested_at", { ascending: true }).limit(10),
+  ]);
+  if (queued.error || stalled.error) return { completed: 0, failed: 1, storageFailures: 0 };
   let completed = 0;
   let failed = 0;
   let storageFailures = 0;
-  for (const item of requests ?? []) {
-    await auth.client.from("data_requests").update({ status: "processing", updated_at: now }).eq("id", item.id).eq("status", "queued");
+  for (const item of [...(stalled.data ?? []), ...(queued.data ?? [])]) {
+    // Claim the request; when two runs overlap, only one gets it.
+    let claim = client.from("data_requests").update({ status: "processing", updated_at: new Date().toISOString() })
+      .eq("id", item.id).eq("status", item.status);
+    if (item.status === "processing") claim = claim.lt("updated_at", staleBefore);
+    const { data: claimed } = await claim.select("id").maybeSingle();
+    if (!claimed) continue;
     try {
       if (item.request_type === "export") {
-        const profile = await auth.client.from("profiles")
+        const profile = await client.from("profiles")
           .select("id,email,display_name,avatar_url,locale,timezone,preferences,notification_preferences,created_at")
           .eq("id", item.profile_id)
           .single();
+        mustSucceed(profile, "EXPORT_PROFILE_LOOKUP_FAILED");
         const profileEmail = profile.data?.email ?? "";
-        const [memberships, boards, consents, installations, supportRequests, productEvents, auditEvents, notifications, leads] = await Promise.all([
-          auth.client.from("organization_memberships").select("organization_id,role,status,joined_at,organizations(name,slug,kind)").eq("profile_id", item.profile_id),
-          auth.client.from("boards").select("id,workspace_id,title,description,latest_state,latest_version,visibility,archived_at,deleted_at,created_at,updated_at").eq("organization_id", item.organization_id).eq("owner_profile_id", item.profile_id).limit(500),
-          auth.client.from("consent_records").select("consent_type,document_version,granted,source,created_at").eq("profile_id", item.profile_id),
-          auth.client.from("platform_installations").select("platform,status,version,settings,consented_at,last_seen_at,last_success_at,created_at").eq("organization_id", item.organization_id).eq("installed_by", item.profile_id),
-          auth.client.from("support_requests").select("category,subject,message,status,created_at,updated_at").eq("profile_id", item.profile_id),
-          auth.client.from("product_events").select("event_name,properties,occurred_at,received_at").eq("profile_id", item.profile_id).limit(5_000),
-          auth.client.from("audit_events").select("actor_type,action,target_type,target_id,metadata,occurred_at").eq("actor_profile_id", item.profile_id).limit(5_000),
-          auth.client.from("notification_jobs").select("template_key,status,send_after,created_at,sent_at").eq("profile_id", item.profile_id).limit(1_000),
-          auth.client.from("marketing_leads").select("name,email,company,company_size_band,use_case,source,status,created_at").eq("email", profileEmail).limit(100),
+        const sections = await Promise.all([
+          client.from("organization_memberships").select("organization_id,role,status,joined_at,organizations(name,slug,kind)").eq("profile_id", item.profile_id),
+          client.from("boards").select("id,workspace_id,title,description,latest_state,latest_version,visibility,archived_at,deleted_at,created_at,updated_at").eq("organization_id", item.organization_id).eq("owner_profile_id", item.profile_id).limit(500),
+          client.from("consent_records").select("consent_type,document_version,granted,source,created_at").eq("profile_id", item.profile_id),
+          client.from("platform_installations").select("platform,status,version,settings,consented_at,last_seen_at,last_success_at,created_at").eq("organization_id", item.organization_id).eq("installed_by", item.profile_id),
+          client.from("support_requests").select("category,subject,message,status,created_at,updated_at").eq("profile_id", item.profile_id),
+          client.from("product_events").select("event_name,properties,occurred_at,received_at").eq("profile_id", item.profile_id).limit(5_000),
+          client.from("audit_events").select("actor_type,action,target_type,target_id,metadata,occurred_at").eq("actor_profile_id", item.profile_id).limit(5_000),
+          client.from("notification_jobs").select("template_key,status,send_after,created_at,sent_at").eq("profile_id", item.profile_id).limit(1_000),
+          client.from("marketing_leads").select("name,email,company,company_size_band,use_case,source,status,created_at").eq("email", profileEmail).limit(100),
         ]);
+        // An export with a silently missing section would look complete.
+        if (sections.some((section) => section.error)) throw new Error("EXPORT_QUERY_FAILED");
+        const [memberships, boards, consents, installations, supportRequests, productEvents, auditEvents, notifications, leads] = sections;
         const result = {
           schemaVersion: 2,
           profile: profile.data,
@@ -2012,27 +2047,36 @@ async function processDataRequests(auth: AuthService) {
           notifications: notifications.data ?? [],
           leads: leads.data ?? [],
         };
-        await auth.client.from("data_requests").update({ status: "completed", result, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", item.id);
+        mustSucceed(
+          await client.from("data_requests").update({ status: "completed", result, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", item.id),
+          "EXPORT_SAVE_FAILED",
+        );
       } else if (item.request_type === "delete_workspace") {
+        // The requester may have lost the owner role during the
+        // cancellation window.
+        const { data: membership, error: membershipError } = await client.from("organization_memberships")
+          .select("role").eq("organization_id", item.organization_id).eq("profile_id", item.profile_id).eq("status", "active").maybeSingle();
+        if (membershipError) throw new Error("MEMBERSHIP_LOOKUP_FAILED");
+        if (membership?.role !== "owner") throw new DataRequestRefused("OWNER_ROLE_REQUIRED");
         // Uploaded binaries first: board_assets rows cascade with the
         // organization, the bucket objects do not.
-        await removeBoardAssetObjects(auth.client, { organizationId: item.organization_id });
-        await auth.client.from("support_requests").delete().eq("organization_id", item.organization_id);
-        await auth.client.from("organizations").delete().eq("id", item.organization_id);
+        await removeBoardAssetObjects(client, { organizationId: item.organization_id });
+        mustSucceed(await client.from("support_requests").delete().eq("organization_id", item.organization_id), "SUPPORT_REQUEST_DELETE_FAILED");
+        // The request row cascades with the organization.
+        mustSucceed(await client.from("organizations").delete().eq("id", item.organization_id), "ORGANIZATION_DELETE_FAILED");
       } else {
-        const { data: profile } = await auth.client.from("profiles").select("auth_user_id,email").eq("id", item.profile_id).maybeSingle();
-        const { count } = await auth.client.from("organization_memberships").select("id", { count: "exact", head: true }).eq("organization_id", item.organization_id).eq("status", "active");
-        const { data: organization } = await auth.client.from("organizations").select("kind").eq("id", item.organization_id).maybeSingle();
-        const deletesOrganization = organization?.kind === "personal" && (count ?? 0) <= 1;
-        // Erase the personal workspace's uploads before anything
-        // irreversible (the auth user) so a storage failure retries cleanly.
-        if (deletesOrganization) {
-          await removeBoardAssetObjects(auth.client, { organizationId: item.organization_id });
+        const { data: profile, error: profileError } = await client.from("profiles").select("auth_user_id,email").eq("id", item.profile_id).maybeSingle();
+        if (profileError) throw new Error("PROFILE_LOOKUP_FAILED");
+        const soleWorkspaces = await personalWorkspacesOnlyMember(client, item.profile_id, item.organization_id);
+        // Erase those workspaces' uploads before anything irreversible (the
+        // auth user) so a storage failure retries cleanly.
+        for (const organizationId of soleWorkspaces) {
+          await removeBoardAssetObjects(client, { organizationId });
         }
-        await Promise.all([
-          auth.client.from("support_requests").delete().eq("profile_id", item.profile_id),
-          auth.client.from("product_events").delete().eq("profile_id", item.profile_id),
-          auth.client.from("platform_installations").update({
+        const erased = await Promise.all([
+          client.from("support_requests").delete().eq("profile_id", item.profile_id),
+          client.from("product_events").delete().eq("profile_id", item.profile_id),
+          client.from("platform_installations").update({
             status: "revoked",
             token_hash: null,
             previous_token_hash: null,
@@ -2041,24 +2085,28 @@ async function processDataRequests(auth: AuthService) {
             capabilities: {},
             updated_at: new Date().toISOString(),
           }).eq("installed_by", item.profile_id),
-          auth.client.from("audit_events").update({
+          client.from("audit_events").update({
             actor_profile_id: null,
             ip_hash: null,
             user_agent_summary: null,
             metadata: {},
           }).eq("actor_profile_id", item.profile_id),
           ...(profile?.email
-            ? [auth.client.from("marketing_leads").delete().eq("email", profile.email)]
+            ? [client.from("marketing_leads").delete().eq("email", profile.email)]
             : []),
         ]);
+        if (erased.some((step) => step.error)) throw new Error("ACCOUNT_DATA_ERASE_FAILED");
         if (profile?.auth_user_id) {
-          const { error } = await auth.client.auth.admin.deleteUser(profile.auth_user_id);
-          if (error) throw new Error("AUTH_USER_DELETE_FAILED");
+          const { error } = await client.auth.admin.deleteUser(profile.auth_user_id);
+          // A retry after an interrupted run finds the auth user already gone.
+          if (error && error.status !== 404) throw new Error("AUTH_USER_DELETE_FAILED");
         }
-        if (deletesOrganization) {
-          await auth.client.from("organizations").delete().eq("id", item.organization_id);
+        if (soleWorkspaces.length) {
+          mustSucceed(await client.from("organizations").delete().in("id", soleWorkspaces), "ORGANIZATION_DELETE_FAILED");
         }
-        await auth.client.from("profiles").delete().eq("id", item.profile_id);
+        // Last, because the request row cascades with the profile: until
+        // here, a failure leaves the request to be retried.
+        mustSucceed(await client.from("profiles").delete().eq("id", item.profile_id), "PROFILE_DELETE_FAILED");
         auth.forgetProfile(item.profile_id);
       }
       completed += 1;
@@ -2066,7 +2114,7 @@ async function processDataRequests(auth: AuthService) {
       if (error instanceof BoardAssetLifecycleError) {
         // Nothing was deleted yet; requeue so the next lifecycle run retries
         // instead of leaving orphaned binaries behind a "failed" request.
-        await auth.client.from("data_requests").update({
+        await client.from("data_requests").update({
           status: "queued",
           error_code: error.code,
           updated_at: new Date().toISOString(),
@@ -2074,16 +2122,43 @@ async function processDataRequests(auth: AuthService) {
         storageFailures += 1;
         continue;
       }
-      await auth.client.from("data_requests").update({
-        status: "failed",
+      const attempts = (Number(item.attempts) || 0) + 1;
+      const giveUp = error instanceof DataRequestRefused || attempts >= DATA_REQUEST_MAX_ATTEMPTS;
+      await client.from("data_requests").update({
+        status: giveUp ? "failed" : "queued",
+        attempts,
         error_code: error instanceof Error ? error.message.slice(0, 80) : "PROCESSING_FAILED",
-        completed_at: new Date().toISOString(),
+        ...(giveUp ? { completed_at: new Date().toISOString() } : {}),
         updated_at: new Date().toISOString(),
       }).eq("id", item.id);
       failed += 1;
     }
   }
   return { completed, failed, storageFailures };
+}
+
+/**
+ * The personal workspaces that would be left with no member once this
+ * profile goes: the one the request was filed from and any other the
+ * account is the last active member of. They are erased with the account.
+ */
+async function personalWorkspacesOnlyMember(
+  client: NonNullable<AuthService["client"]>,
+  profileId: string,
+  requestOrganizationId: string,
+): Promise<string[]> {
+  const { data: memberships, error } = await client.from("organization_memberships")
+    .select("organization_id").eq("profile_id", profileId).eq("status", "active");
+  if (error) throw new Error("MEMBERSHIP_LOOKUP_FAILED");
+  const candidates = [...new Set([requestOrganizationId, ...(memberships ?? []).map((row) => String(row.organization_id))])];
+  const [personal, others] = await Promise.all([
+    client.from("organizations").select("id").in("id", candidates).eq("kind", "personal"),
+    client.from("organization_memberships").select("organization_id")
+      .in("organization_id", candidates).eq("status", "active").neq("profile_id", profileId),
+  ]);
+  if (personal.error || others.error) throw new Error("MEMBERSHIP_LOOKUP_FAILED");
+  const shared = new Set((others.data ?? []).map((row) => String(row.organization_id)));
+  return (personal.data ?? []).map((row) => String(row.id)).filter((id) => !shared.has(id));
 }
 
 async function requireScim(auth: AuthService, request: FastifyRequest, reply: FastifyReply) {
@@ -2808,10 +2883,15 @@ function summarizeUserAgent(value: string | string[] | undefined): string | null
   return typeof value === "string" ? value.replace(/[()]/g, "").slice(0, 240) : null;
 }
 
-function isLoopbackRequest(request: FastifyRequest): boolean {
-  return ["127.0.0.1", "::1", "localhost"].some((host) =>
-    String(request.hostname ?? request.ip).includes(host),
-  );
+const LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+
+/**
+ * True only for a connection that really comes from this machine. The Host
+ * header is caller-controlled, so this reads the socket's peer address and
+ * compares it exactly.
+ */
+export function isLoopbackRequest(request: Pick<FastifyRequest, "socket">): boolean {
+  return LOOPBACK_ADDRESSES.has(request.socket?.remoteAddress ?? "");
 }
 
 function escapeHtml(value: string): string {

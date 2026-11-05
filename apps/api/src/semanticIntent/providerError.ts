@@ -104,6 +104,21 @@ export function mapSemanticIntentProviderError(input: unknown): SemanticIntentHt
   }
 }
 
+/**
+ * Whether a failure says the provider itself is down or unusable, as opposed
+ * to one request or one model answer going wrong.
+ */
+export function isSemanticIntentProviderOutage(input: unknown): boolean {
+  if (!(input instanceof SemanticIntentProviderError)) return false;
+  return (
+    input.kind === "timeout" ||
+    input.kind === "provider_unavailable" ||
+    input.kind === "quota_exhausted" ||
+    input.kind === "authentication_failed" ||
+    input.kind === "model_unavailable"
+  );
+}
+
 export function classifyOpenAiProviderError(
   upstreamStatus: number,
   providerCode: string | undefined,

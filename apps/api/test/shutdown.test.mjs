@@ -4,7 +4,7 @@ import websocket from "@fastify/websocket";
 import Fastify from "fastify";
 import WebSocket from "ws";
 
-import { registerGracefulShutdown, SERVICE_RESTART_CLOSE_CODE } from "../src/shutdown.ts";
+import { registerCrashHandlers, registerGracefulShutdown, SERVICE_RESTART_CLOSE_CODE } from "../src/shutdown.ts";
 
 test("on SIGTERM, open board sockets are told to reconnect and the process exits cleanly", async (t) => {
   const server = Fastify();
@@ -41,3 +41,19 @@ test("on SIGTERM, open board sockets are told to reconnect and the process exits
   await shutdown("SIGINT");
   assert.deepEqual(exits, [0]);
 });
+
+test("an unhandled error is logged and shuts the process down with a failure code", async () => {
+  const server = Fastify();
+  const logged = [];
+  server.log.fatal = (details, message) => logged.push([details.event, message]);
+  const handlers = new Map();
+  const shutdowns = [];
+  registerCrashHandlers(server, async (signal, code) => shutdowns.push([signal, code]), (event, handler) => handlers.set(event, handler));
+  assert.deepEqual([...handlers.keys()].sort(), ["uncaughtException", "unhandledRejection"]);
+
+  handlers.get("unhandledRejection")(new Error("lost promise"));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(logged, [["unhandledRejection", "unhandled error; shutting down"]]);
+  assert.deepEqual(shutdowns, [["SIGTERM", 1]]);
+});
+

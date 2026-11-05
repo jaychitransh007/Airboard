@@ -75,7 +75,10 @@ export type RealtimeSpeechOptions = {
   apiBaseUrl?: string;
   /** Explicit WebSocket URL. Takes precedence over apiBaseUrl. */
   url?: string;
-  /** Verified user token, carried only in the WebSocket upgrade query. */
+  /**
+   * Verified user or installation token. It is exchanged for a one-minute
+   * transcription ticket, and only the ticket goes in the socket URL.
+   */
   accessToken?: string;
   language?: string;
   /** Provider model identifier selected for this session. */
@@ -170,6 +173,8 @@ export type RealtimeAudioContextLike = {
 
 export type RealtimeSpeechDependencies = {
   createWebSocket?: (url: string) => RealtimeWebSocketLike;
+  /** Exchanges the access token for a transcription ticket (POST /transcription/ticket). */
+  fetchTranscriptionTicket?: (apiBaseUrl: string, accessToken: string) => Promise<string>;
   /**
    * Direct mono PCM source for hosts that already expose decoded microphone
    * samples (for example the Meet extension bridge). This bypasses
@@ -237,7 +242,7 @@ export function supportsRealtimeSpeech(): boolean {
 export function buildRealtimeTranscriptionWebSocketUrl(
   apiBaseUrl?: string,
   path = DEFAULT_REALTIME_TRANSCRIPTION_PATH,
-  accessToken?: string,
+  ticket?: string,
 ): string {
   const fallbackOrigin = typeof window === "undefined" ? "http://localhost:4000" : window.location.origin;
   const baseUrl = new URL(apiBaseUrl || fallbackOrigin);
@@ -245,12 +250,38 @@ export function buildRealtimeTranscriptionWebSocketUrl(
   baseUrl.pathname = path;
   baseUrl.search = "";
   baseUrl.hash = "";
-  // Browsers cannot set headers on WebSocket upgrades; the shared API token
-  // (when configured) travels as a query parameter instead.
-  if (accessToken) {
-    baseUrl.searchParams.set("access_token", accessToken);
+  // Browsers cannot set headers on WebSocket upgrades, so a one-minute
+  // ticket travels in the query instead of the sign-in token.
+  if (ticket) {
+    baseUrl.searchParams.set("ticket", ticket);
   }
   return baseUrl.toString();
+}
+
+/** The API refuses with a client-facing code, such as ACTIVE_ENTITLEMENT_REQUIRED. */
+export class TranscriptionTicketError extends Error {
+  readonly code: string;
+
+  constructor(code: string) {
+    super(code);
+    this.code = code;
+  }
+}
+
+export async function fetchTranscriptionTicket(
+  apiBaseUrl: string,
+  accessToken: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string> {
+  const response = await fetchImpl(new URL("/transcription/ticket", apiBaseUrl).toString(), {
+    method: "POST",
+    headers: { authorization: `Bearer ${accessToken}` },
+  });
+  const body = (await response.json().catch(() => null)) as { ticket?: unknown; error?: unknown } | null;
+  if (!response.ok || typeof body?.ticket !== "string") {
+    throw new TranscriptionTicketError(typeof body?.error === "string" ? body.error : "AUTHORIZATION_UNAVAILABLE");
+  }
+  return body.ticket;
 }
 
 export async function fetchRealtimeTranscriptionConfig(
@@ -298,11 +329,9 @@ export function createRealtimeSpeechSession(
     return null;
   }
 
-  const url = options.url ?? buildRealtimeTranscriptionWebSocketUrl(
-    options.apiBaseUrl,
-    DEFAULT_REALTIME_TRANSCRIPTION_PATH,
-    options.accessToken,
-  );
+  // The socket URL without credentials; a ticket is added when the socket opens.
+  const url = options.url ?? buildRealtimeTranscriptionWebSocketUrl(options.apiBaseUrl);
+  const exchangeTicket = dependencies.fetchTranscriptionTicket ?? fetchTranscriptionTicket;
   const requestedModel = cleanOptionalString(options.model);
   const targetSampleRate = positiveInteger(
     options.sampleRate,
@@ -705,8 +734,30 @@ export function createRealtimeSpeechSession(
     if (state !== "starting") {
       return;
     }
+    if (options.url || !options.accessToken) {
+      connectSocket(url);
+      return;
+    }
+    const apiBaseUrl = options.apiBaseUrl || (typeof window === "undefined" ? "http://localhost:4000" : window.location.origin);
+    void exchangeTicket(apiBaseUrl, options.accessToken).then(
+      (ticket) => {
+        if (state === "starting") {
+          connectSocket(buildRealtimeTranscriptionWebSocketUrl(options.apiBaseUrl, DEFAULT_REALTIME_TRANSCRIPTION_PATH, ticket));
+        }
+      },
+      (error: unknown) => {
+        const code = error instanceof TranscriptionTicketError ? error.code : "AUTHORIZATION_UNAVAILABLE";
+        fail(
+          describeTranscriptionCloseRefusal(code) ?? "Could not connect to the realtime transcription service.",
+          code,
+        );
+      },
+    );
+  };
+
+  const connectSocket = (socketUrl: string) => {
     try {
-      socket = createWebSocket(url);
+      socket = createWebSocket(socketUrl);
       socket.binaryType = "arraybuffer";
       socket.addEventListener("open", sendStart);
       socket.addEventListener("message", handleServerMessage);
@@ -1010,7 +1061,7 @@ function describeTranscriptionCloseRefusal(reason: string): string | null {
     case "ACTIVE_ENTITLEMENT_REQUIRED":
       return "Your pilot access has ended, so Airo voice is off. Typed commands and pointer edits still work.";
     case "AUTHORIZATION_UNAVAILABLE":
-      return "Airo couldn't confirm your access just now. Start Airo again in a moment.";
+      return "Airo couldn't confirm your access just now. Turn Airo on again in a moment.";
     default:
       return null;
   }

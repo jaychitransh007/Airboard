@@ -24,13 +24,13 @@ export function registerGracefulShutdown(
     exit = (code) => process.exit(code),
     onSignal = (signal, handler) => process.once(signal, handler),
   }: ShutdownOptions = {},
-): (signal: NodeJS.Signals) => Promise<void> {
+): (signal: NodeJS.Signals, exitCode?: number) => Promise<void> {
   let closing = false;
-  const shutdown = async (signal: NodeJS.Signals) => {
+  const shutdown = async (signal: NodeJS.Signals, exitCode = 0) => {
     if (closing) return;
     closing = true;
     server.log.info({ signal }, "shutting down");
-    const forced = setTimeout(() => exit(0), graceMs);
+    const forced = setTimeout(() => exit(exitCode), graceMs);
     forced.unref();
     for (const client of server.websocketServer?.clients ?? []) {
       try {
@@ -45,10 +45,29 @@ export function registerGracefulShutdown(
       server.log.error({ err: error }, "shutdown could not close the server cleanly");
     }
     clearTimeout(forced);
-    exit(0);
+    exit(exitCode);
   };
   for (const signal of ["SIGTERM", "SIGINT"] as const) {
     onSignal(signal, () => void shutdown(signal));
   }
   return shutdown;
+}
+
+/**
+ * An error nothing caught leaves the process in an unknown state. Log it and
+ * shut down as on SIGTERM (board sockets reconnect elsewhere, requests in
+ * flight finish), but exit non-zero so Cloud Run replaces the instance.
+ */
+export function registerCrashHandlers(
+  server: FastifyInstance,
+  shutdown: (signal: NodeJS.Signals, exitCode?: number) => Promise<void>,
+  on: (event: "unhandledRejection" | "uncaughtException", handler: (error: unknown) => void) => void =
+    (event, handler) => process.on(event, handler),
+): void {
+  for (const event of ["unhandledRejection", "uncaughtException"] as const) {
+    on(event, (error) => {
+      server.log.fatal({ err: error, event }, "unhandled error; shutting down");
+      void shutdown("SIGTERM", 1);
+    });
+  }
 }
