@@ -25,7 +25,7 @@
   - #13: camera start.
   - #14: calmer board.
 
-  #16 (cleanup), #18 (dependency updates and docs), #21 (security, robustness, erasure and image hardening) and #23 (CI gates) followed. Both live revisions are `launch-05c0281` (Luna as the only intent model), which is on `codex/production-readiness` and not yet merged to `main`.
+  #16 (cleanup), #18 (dependency updates and docs), #21 (security, robustness, erasure and image hardening), #23 (CI gates) and #24 (Luna as the only intent model) followed. Both live revisions are `launch-05c0281`, which #24 merged to `main`.
 - **Image retention:** Artifact Registry keeps images tagged `live`, plus the 10 newest per image, and deletes anything older than 3 days. `release.sh promote` moves the `live` tag.
 
 ## Shipped in the launch hardening (November 2026)
