@@ -732,3 +732,9 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - **Production:** `/ready` passes and the new revision logged no errors.
     - **Tags:** the `live` image tag moved to `api:launch-3e17071`. The previous serving tag was removed.
     - **Rollback:** API to `launch-87aec6f`.
+  - **Web deployed:** `airboard-pilot-web-launch-3e17071` at 100%, the same build as the API, so both match `main`.
+    - **Tagged smoke:** 7 pages returned 200. The MediaPipe 1.2 engine (14.6 MB) and the hand model are served, and the retired gesture model returns 404. The bundles carry the "Turn Airo on" hints and the menu Undo hint, with no "Press Start Airo" left. Help 03 and 10 show the corrected text. The bundles reference only Mumbai.
+    - **Production:** the pages and API `/ready` pass, and the new revision logged no errors.
+    - **Tags:** the `live` image tag moved to `web:launch-3e17071`. Only the serving revisions keep a tag.
+    - **Rollback:** web to `launch-d8446ea`.
+    - **Owner check:** wave a hand at a board once to confirm MediaPipe 1.2 detects real hands; no automated test covers that.

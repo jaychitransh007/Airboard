@@ -8,7 +8,7 @@
 
 | Part | Where | Notes |
 | --- | --- | --- |
-| Web | Cloud Run `airboard-pilot-web`, revision `launch-d8446ea` | `https://airboard-pilot-web-634900453473.asia-south1.run.app`; one instance, kept warm |
+| Web | Cloud Run `airboard-pilot-web`, revision `launch-3e17071` | `https://airboard-pilot-web-634900453473.asia-south1.run.app`; one instance, kept warm |
 | API | Cloud Run `airboard-pilot-api`, revision `launch-3e17071` | Up to 3 instances, one kept warm; live boards are shared across instances |
 | Database and sign-in | Supabase `ujotgzjpkocuhtfrvbzu` (ap-south-1, Mumbai) | Every migration in `supabase/migrations` applied, the last `20261105140000` |
 | Google sign-in | Google Auth Platform in the pilot Google Cloud project | Consent screen "Airboard", published to every Google account; client "Airboard sign-in (Supabase)" |
@@ -16,7 +16,7 @@
 
 - **Health:** the API's `/ready` reports the database and `boardFanOut` (live boards across instances).
 - **Launch check:** `pnpm launch:check:deployed` checks the live revisions and passes **19 of 23**.
-- **Rollback:** web to `launch-6c4ca43`, API to `launch-87aec6f` (`AIRBOARD_RELEASE=launch-<hash> infra/cloud-run/release.sh promote web|api`).
+- **Rollback:** web to `launch-d8446ea`, API to `launch-87aec6f` (`AIRBOARD_RELEASE=launch-<hash> infra/cloud-run/release.sh promote web|api`).
 - **Code:** `main`. The working branch `codex/production-readiness` reached it on 5 November 2026 through these pull requests:
   - #1: launch hardening.
   - #11: Google sign-in.
@@ -24,7 +24,7 @@
   - #13: camera start.
   - #14: calmer board.
 
-  #16 (cleanup) and #18 (dependency updates and docs) followed. The live API matches `main` exactly (`launch-3e17071`). The live web (`launch-d8446ea`) predates #18's dependency updates (React 19.3, MediaPipe 1.2) and re-checked help pages.
+  #16 (cleanup) and #18 (dependency updates and docs) followed. Both live revisions are `launch-3e17071` and match `main` exactly.
 - **Image retention:** Artifact Registry keeps images tagged `live`, plus the 10 newest per image, and deletes anything older than 3 days. `release.sh promote` moves the `live` tag.
 
 ## Shipped in the launch hardening (November 2026)
