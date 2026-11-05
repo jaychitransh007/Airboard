@@ -40,22 +40,26 @@ export function guestDisplayName(value: string | null | undefined): string {
 
 /**
  * Joining can fail because the link outlived its token, the host ended the
- * session, or the network is down; each needs a different next step.
+ * session, Airboard is down for a short upgrade, or the network is down; each
+ * needs a different next step.
  */
-export function liveJoinFailure(message: string | undefined): "expired" | "ended" | "offline" {
+export function liveJoinFailure(message: string | undefined): "expired" | "ended" | "maintenance" | "offline" {
   if (!message) return "offline";
+  if (/MAINTENANCE/.test(message)) return "maintenance";
   if (/JOIN_TOKEN|HTTP_401/.test(message)) return "expired";
   if (/NOT_JOINABLE|NOT_FOUND|HTTP_404/.test(message)) return "ended";
   return "offline";
 }
 
-export type LiveStartFailure = "pilot_ended" | "offline";
+export type LiveStartFailure = "pilot_ended" | "maintenance" | "offline";
 
 /**
  * Starting the host's live session is refused once the workspace's pilot has
- * ended (the board itself still saves); anything else means the live server
- * could not be reached.
+ * ended (the board itself still saves) and while Airboard is down for a short
+ * upgrade; anything else means the live server could not be reached.
  */
 export function liveStartFailure(message: string | undefined): LiveStartFailure {
-  return message && /OWNER_ENTITLEMENT_REQUIRED/.test(message) ? "pilot_ended" : "offline";
+  if (message && /OWNER_ENTITLEMENT_REQUIRED/.test(message)) return "pilot_ended";
+  if (message && /MAINTENANCE/.test(message)) return "maintenance";
+  return "offline";
 }

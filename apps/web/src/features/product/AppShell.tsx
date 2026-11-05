@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { useAirboardAuth } from "../../platform/auth";
 import { airboardApi } from "../../platform/api";
+import { MaintenanceBanner } from "./MaintenanceBanner";
 import { isImmersiveBoardPath } from "./productRouting";
 
 const MAIN_NAV = [
@@ -52,6 +53,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const mainNav = personal ? MAIN_NAV : [MAIN_NAV[0], MAIN_NAV[1], SHARED_NAV, ...MAIN_NAV.slice(2)];
   return (
     <div className={`app-shell${isBoardWorkspace ? " board-app-shell" : ""}`}>
+      <MaintenanceBanner />
       {!isBoardWorkspace ? <aside className="app-sidebar">
         <Link className="app-brand" href="/app"><span className="brand-orbit" />Airboard</Link>
         <div className="workspace-switcher">

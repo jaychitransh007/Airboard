@@ -328,6 +328,7 @@ function saveFailureMessage(code: string): string {
   if (code === "BOARD_STATE_TOO_LARGE") return "This board is too large to save. Remove some media or split it into another board.";
   if (code === "BOARD_NOT_FOUND") return "This board was deleted elsewhere, so these changes can't be saved.";
   if (code === "NETWORK_UNAVAILABLE") return "Can't reach Airboard. Your changes are safe in this tab.";
+  if (code === "MAINTENANCE") return "Airboard is down for a short upgrade, so saving is paused. Please hold off on changes.";
   if (code === "AUTH_REQUIRED" || code === "HTTP_401") return "Your sign-in is refreshing. Your changes are safe in this tab.";
   return "Your latest changes aren't saved yet.";
 }

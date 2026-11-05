@@ -1,4 +1,5 @@
 import { AIRBOARD_API_URL } from "./config.ts";
+import { announceMaintenance, MAINTENANCE_CODE } from "./maintenance.ts";
 
 export class AirboardApiError extends Error {
   readonly code: string;
@@ -39,6 +40,7 @@ export async function airboardApi<T>(
     } catch {
       // Keep the HTTP fallback for non-JSON edge responses.
     }
+    if (code === MAINTENANCE_CODE) announceMaintenance();
     throw new AirboardApiError(code, response.status);
   }
   if (response.status === 204) return undefined as T;

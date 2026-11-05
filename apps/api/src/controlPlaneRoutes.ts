@@ -84,6 +84,7 @@ export function registerControlPlaneRoutes(
   server.get("/auth/config", async () => ({
     supabaseEnabled: auth.enabled,
     developmentAccessEnabled: config.localEntitlements,
+    readOnly: config.readOnly,
     providers: await auth.providerAvailability(),
   }));
 

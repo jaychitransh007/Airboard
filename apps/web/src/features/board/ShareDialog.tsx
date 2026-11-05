@@ -136,6 +136,12 @@ export function ShareDialog({
               <a href="/app/billing">Ask for more pilot time</a>
             </p>
           ) : null}
+          {!liveLink && liveUnavailable === "maintenance" ? (
+            <p className="share-dialog-note">
+              Airboard is down for a short upgrade, so live links are paused for a few minutes.
+              You can still download a picture.
+            </p>
+          ) : null}
           {!liveLink && liveUnavailable === "offline" ? (
             <p className="share-dialog-note">
               The board could not reach the live server, so nobody can join right now. Your work
@@ -162,7 +168,7 @@ export function ShareDialog({
             {access.personal ? (
               <p>
                 Boards in your personal workspace stay private to you.{" "}
-                {liveUnavailable === "pilot_ended"
+                {liveUnavailable === "pilot_ended" || liveUnavailable === "maintenance"
                   ? "Download a picture to send to others."
                   : "Use the live link to work with others, or download a picture to send."}
               </p>

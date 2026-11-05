@@ -6264,3 +6264,29 @@ button.screen-underlay-active {
     transform: translate(-50%, 0);
   }
 }
+
+/* Shown while the API is read-only for a short upgrade. It floats over the
+   page instead of pushing it down, and lets clicks through to what's below. */
+.maintenance-banner {
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  z-index: 80;
+  width: max-content;
+  max-width: min(560px, calc(100% - 32px));
+  padding: 9px 14px;
+  border: 1px solid #f0c75e;
+  border-radius: 12px;
+  background: #fff6dc;
+  box-shadow: 0 8px 24px rgba(54, 36, 91, 0.14);
+  color: #4a3a07;
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.maintenance-banner strong {
+  font-weight: 750;
+}

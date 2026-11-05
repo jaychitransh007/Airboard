@@ -31,6 +31,8 @@ test("join failures map to the next step a guest can take", () => {
   assert.equal(liveJoinFailure("Board session join failed: HTTP_404"), "ended");
   assert.equal(liveJoinFailure("Failed to fetch"), "offline");
   assert.equal(liveJoinFailure(undefined), "offline");
+  // During a short upgrade the API refuses the join with MAINTENANCE.
+  assert.equal(liveJoinFailure("Board session join failed: MAINTENANCE"), "maintenance");
 });
 
 test("a board address carrying a live session falls back to the live route", () => {
@@ -47,4 +49,5 @@ test("a host whose pilot ended is told so instead of blaming the live server", (
   assert.equal(liveStartFailure("Board session start failed: BOARD_ACCESS_DENIED"), "offline");
   assert.equal(liveStartFailure("Failed to fetch"), "offline");
   assert.equal(liveStartFailure(undefined), "offline");
+  assert.equal(liveStartFailure("Board session start failed: MAINTENANCE"), "maintenance");
 });

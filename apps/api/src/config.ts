@@ -11,6 +11,8 @@ export type ApiConfig = {
   appUrl: string;
   ownerGraceSeconds: number;
   localEntitlements: boolean;
+  /** Refuse every change with 503 MAINTENANCE (AIRBOARD_READ_ONLY=true), e.g. while the database moves. */
+  readOnly: boolean;
   chromeExtensionEnabled: boolean;
   /** Exact reviewed Chrome Web Store package ID; required when enabled in production. */
   chromeExtensionId?: string;
@@ -94,6 +96,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     appUrl,
     ownerGraceSeconds: Number(env.AIRBOARD_OWNER_GRACE_SECONDS ?? 180),
     localEntitlements: !isProduction && env.AIRBOARD_LOCAL_ENTITLEMENTS !== "false",
+    readOnly: env.AIRBOARD_READ_ONLY === "true",
     chromeExtensionEnabled,
     ...(chromeExtensionId ? { chromeExtensionId } : {}),
     chromeExtensionCompatibleVersions,

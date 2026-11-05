@@ -23,6 +23,7 @@ ID before retrying.
 | `AUTH_NOT_CONFIGURED` | Authentication is unavailable in this environment. | Contact the Airboard operator; this is not fixed by changing board content. |
 | `ACCOUNT_LOOKUP_FAILED` | Airboard could not load the account record. | Retry once, then contact support with the request ID. |
 | `BOARD_ACCESS_DENIED` | The signed-in identity cannot access the board. | Check the selected organization and ask the board owner or administrator. |
+| `MAINTENANCE` | Airboard is read-only for a short upgrade. Boards still open, but changes, live boards and new sessions are paused. | Wait a few minutes and try again; the banner disappears when it's over. |
 | `ACTIVE_ENTITLEMENT_REQUIRED`, `OWNER_ENTITLEMENT_REQUIRED` | The workspace's pilot or plan has ended, so new boards, live sessions and Airo voice are off. Saved boards still open and save. | Choose **Ask for more pilot time** on **Plan & billing**. |
 
 ## Extension and integration

@@ -447,3 +447,9 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - The new API revision logged no errors besides the smoke's own 401s.
   - Rollback: API and web `launch-1217615`.
   - The API (Mumbai) and Supabase (Seoul) are still in different regions; co-locating them is the remaining large latency win.
+- **2026-11-05** — Read-only switch for the Supabase move (built, not deployed):
+  - **API:** with `AIRBOARD_READ_ONLY=true`, every change gets `503 MAINTENANCE` with `Retry-After: 300` (`apps/api/src/readOnly.ts`). The guard runs after CORS, so browsers can read the refusal. Board live connections close with `MAINTENANCE`, and `/auth/config` reports `readOnly`.
+  - **Web:** `airboardApi` announces a maintenance refusal, and a banner in the app shell and on the guest live page shows "Airboard is down for a short upgrade". The banner also appears on load when `/auth/config` says read-only, and it rechecks every 30 seconds. Saves, Share and guest live links each explain the pause. The error-code reference lists `MAINTENANCE`.
+  - **Verified locally** with the API in read-only mode: the dashboard banner; a board opening with Share explaining the pause; an edit showing "saving is paused" and retrying; and a guest live link showing the upgrade page with Try again.
+  - API 128/128 and web 375/375 tests pass (new: the guard with real CORS, and the maintenance announcement), and every package typechecks.
+  - The new Mumbai project `ujotgzjpkocuhtfrvbzu` (Aura organization) is created and set up with all migrations and sign-in settings, with no data. See `Docs/Supabase Move to Mumbai Plan.md`.
