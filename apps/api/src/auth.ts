@@ -36,6 +36,24 @@ type MembershipRow = {
   status: string;
 };
 
+type SignInMembershipRow = MembershipRow & { created_at: string };
+
+type CachedSignIn = {
+  expiresAt: number;
+  context: Promise<AuthContext | null>;
+  profileId?: string;
+};
+
+const PROFILE_COLUMNS = "id,auth_user_id,local_user_key,email,display_name,default_organization_id";
+// The profile and its memberships in one round trip; Supabase is a region away.
+const PROFILE_WITH_MEMBERSHIPS = `${PROFILE_COLUMNS},memberships:organization_memberships!organization_memberships_profile_id_fkey(organization_id,role,status,created_at)`;
+
+// Opening a board sends several requests at once; they share one lookup, and
+// later requests reuse it briefly. Routes that change a person's organization,
+// role or name call forgetProfile, so the window only bounds outside changes.
+const SIGN_IN_CACHE_TTL_MS = 30_000;
+const SIGN_IN_CACHE_LIMIT = 1_000;
+
 const LIVE_ENTITLEMENT_STATUSES = new Set(["active", "trialing", "grace", "past_due"]);
 
 /**
@@ -49,18 +67,35 @@ export function accountEntitlement<T extends { status: string }>(rows: readonly 
   return [...rows].sort((left, right) => rank(left.status) - rank(right.status))[0] ?? null;
 }
 
+/**
+ * The membership a request acts in: the one in the profile's default
+ * organization when it has one, otherwise its oldest active membership.
+ */
+export function signInMembership<T extends SignInMembershipRow>(
+  memberships: readonly T[],
+  defaultOrganizationId: string | null,
+): T | null {
+  return memberships
+    .filter((membership) =>
+      membership.status === "active" &&
+      (!defaultOrganizationId || membership.organization_id === defaultOrganizationId))
+    .sort((left, right) => Date.parse(left.created_at) - Date.parse(right.created_at))[0] ?? null;
+}
+
 export class AuthService {
   readonly client: SupabaseClient | null;
   private readonly config: ApiConfig;
+  private readonly signIns = new Map<string, CachedSignIn>();
 
-  constructor(config: ApiConfig) {
+  constructor(config: ApiConfig, client?: SupabaseClient) {
     this.config = config;
     this.client =
-      config.supabaseUrl && config.supabaseServiceRoleKey
+      client ??
+      (config.supabaseUrl && config.supabaseServiceRoleKey
         ? createClient(config.supabaseUrl, config.supabaseServiceRoleKey, {
             auth: { persistSession: false, autoRefreshToken: false },
           })
-        : null;
+        : null);
   }
 
   get enabled(): boolean {
@@ -157,7 +192,7 @@ export class AuthService {
       ) {
         const { data: profile } = await this.client
           .from("profiles")
-          .select("id,auth_user_id,local_user_key,email,display_name,default_organization_id")
+          .select(PROFILE_COLUMNS)
           .eq("id", installRow.installed_by)
           .maybeSingle();
         if (profile) {
@@ -175,12 +210,21 @@ export class AuthService {
     if (!this.client) {
       return null;
     }
-    const { data, error } = await this.client.auth.getUser(token);
-    if (error || !data.user) {
+    const authUserId = await this.verifiedAuthUserId(token);
+    if (!authUserId) {
       return null;
     }
-    const profile = await this.ensureProfile(data.user);
-    return this.contextForProfile(profile, "supabase");
+    return this.signInContext(authUserId, token);
+  }
+
+  /** Drops cached sign-ins after a profile's organization, role or name changes. */
+  forgetProfile(profileId: string): void {
+    for (const [authUserId, entry] of this.signIns) {
+      // A lookup still in flight may have read the old rows; drop it too.
+      if (entry.profileId === undefined || entry.profileId === profileId) {
+        this.signIns.delete(authUserId);
+      }
+    }
   }
 
   async account(context: AuthContext): Promise<Record<string, unknown>> {
@@ -308,13 +352,94 @@ export class AuthService {
     return data as Record<string, unknown>;
   }
 
+  /**
+   * Checks the access token's signature against the project's published
+   * signing key (fetched once and cached by supabase-js), so a request no
+   * longer waits on a Supabase Auth round trip. A signed-out session's token
+   * stays valid until it expires, at most an hour. Projects still on a shared
+   * HS256 secret fall back to asking Supabase Auth.
+   */
+  private async verifiedAuthUserId(token: string): Promise<string | null> {
+    if (!this.client) {
+      return null;
+    }
+    try {
+      const { data, error } = await this.client.auth.getClaims(token);
+      const claims = data?.claims;
+      if (error || !claims || claims.role !== "authenticated" || typeof claims.sub !== "string" || !claims.sub) {
+        return null;
+      }
+      return claims.sub;
+    } catch {
+      return null;
+    }
+  }
+
+  private signInContext(authUserId: string, token: string): Promise<AuthContext | null> {
+    const now = Date.now();
+    const cached = this.signIns.get(authUserId);
+    if (cached && cached.expiresAt > now) {
+      return cached.context;
+    }
+    const entry: CachedSignIn = {
+      expiresAt: now + SIGN_IN_CACHE_TTL_MS,
+      context: this.lookupSignInContext(authUserId, token),
+    };
+    // Re-inserting keeps the map ordered oldest first for eviction.
+    this.signIns.delete(authUserId);
+    this.signIns.set(authUserId, entry);
+    for (const key of this.signIns.keys()) {
+      if (this.signIns.size <= SIGN_IN_CACHE_LIMIT) break;
+      this.signIns.delete(key);
+    }
+    // Only a found context is reused; a failure or a missing membership is
+    // looked up again on the next request.
+    const forget = () => {
+      if (this.signIns.get(authUserId) === entry) this.signIns.delete(authUserId);
+    };
+    entry.context.then((context) => {
+      if (context) entry.profileId = context.profileId;
+      else forget();
+    }, forget);
+    return entry.context;
+  }
+
+  private async lookupSignInContext(authUserId: string, token: string): Promise<AuthContext | null> {
+    if (!this.client) {
+      return null;
+    }
+    const { data, error } = await this.client
+      .from("profiles")
+      .select(PROFILE_WITH_MEMBERSHIPS)
+      .eq("auth_user_id", authUserId)
+      .maybeSingle();
+    if (error) {
+      throw new Error("PROFILE_LOOKUP_FAILED");
+    }
+    if (!data) {
+      // A first sign-in (or an account from before the auth trigger) builds
+      // its profile from the full user record.
+      const { data: userData, error: userError } = await this.client.auth.getUser(token);
+      if (userError || !userData.user) {
+        return null;
+      }
+      const profile = await this.ensureProfile(userData.user);
+      return this.contextForProfile(profile, "supabase");
+    }
+    const { memberships, ...profile } = data as unknown as ProfileRow & {
+      memberships: SignInMembershipRow[] | null;
+    };
+    const membership = signInMembership(memberships ?? [], profile.default_organization_id);
+    return membership ? toAuthContext(profile, membership, "supabase") : null;
+  }
+
   private async ensureProfile(user: User): Promise<ProfileRow> {
     if (!this.client) {
       throw new Error("AUTH_NOT_CONFIGURED");
     }
     const { data: existing, error: lookupError } = await this.client
       .from("profiles")
-      .select("id,auth_user_id,local_user_key,email,display_name,default_organization_id")
+      .select(PROFILE_COLUMNS)
       .eq("auth_user_id", user.id)
       .maybeSingle();
     if (lookupError) {
@@ -339,7 +464,7 @@ export class AuthService {
         },
         { onConflict: "auth_user_id" },
       )
-      .select("id,auth_user_id,local_user_key,email,display_name,default_organization_id")
+      .select(PROFILE_COLUMNS)
       .single();
     if (error || !data) {
       throw new Error("PROFILE_BOOTSTRAP_FAILED");
@@ -419,7 +544,7 @@ export class AuthService {
     }
     const { data, error } = await this.client
       .from("profiles")
-      .select("id,auth_user_id,local_user_key,email,display_name,default_organization_id")
+      .select(PROFILE_COLUMNS)
       .eq("local_user_key", localUserKey)
       .maybeSingle();
     if (error) {
@@ -455,17 +580,25 @@ export class AuthService {
     if (!data) {
       return null;
     }
-    const membership = data as MembershipRow;
-    return {
-      authUserId: profile.auth_user_id ?? profile.local_user_key ?? profile.id,
-      profileId: profile.id,
-      organizationId: membership.organization_id,
-      role: membership.role,
-      email: profile.email,
-      displayName: profile.display_name,
-      tokenKind,
-    };
+    return toAuthContext(profile, data as MembershipRow, tokenKind);
   }
+}
+
+function toAuthContext(
+  profile: ProfileRow,
+  membership: MembershipRow,
+  tokenKind: AuthContext["tokenKind"],
+): AuthContext {
+  // Concurrent requests share one context, so none may change it for another.
+  return Object.freeze({
+    authUserId: profile.auth_user_id ?? profile.local_user_key ?? profile.id,
+    profileId: profile.id,
+    organizationId: membership.organization_id,
+    role: membership.role,
+    email: profile.email,
+    displayName: profile.display_name,
+    tokenKind,
+  });
 }
 
 function stringValue(value: unknown): string | null {

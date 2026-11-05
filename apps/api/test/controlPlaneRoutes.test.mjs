@@ -216,6 +216,7 @@ function fakeAuth(client) {
       return request.headers.authorization === "Bearer owner" ? context : null;
     },
     hasRole: (account, roles) => roles.includes(account.role),
+    forgetProfile() {},
     async activeEntitlement() {
       return { status: "active" };
     },
@@ -573,5 +574,60 @@ test("live sessions use the workspace's entitlement, so team members can start t
   await assert.rejects(
     store.startSession({ ownerUserId: PROFILE, organizationId: ORG, provider: "standalone", allowParticipantDrawing: true }),
     /OWNER_ENTITLEMENT_REQUIRED/,
+  );
+});
+
+test("session start reads the owner, entitlement and board together and still guards private boards", async () => {
+  const MEMBER = "55555555-5555-4555-8555-555555555555";
+  const tables = {
+    profiles: [
+      { id: PROFILE, display_name: "Owner" },
+      { id: MEMBER, display_name: "Member" },
+    ],
+    entitlements: [{
+      id: "entitlement-1",
+      user_id: PROFILE,
+      organization_id: ORG,
+      plan: "team",
+      status: "active",
+      source: "stripe",
+      valid_until: "2999-01-01T00:00:00.000Z",
+    }],
+    boards: [boardRow()],
+  };
+  const client = createFakeSupabase(tables);
+  // Each query takes a beat, so reads that wait on one another show up as
+  // separate in-flight batches.
+  let inFlight = 0;
+  let mostInFlight = 0;
+  const from = client.from.bind(client);
+  client.from = (table) => {
+    const query = from(table);
+    const then = query.then.bind(query);
+    query.then = (resolve, reject) => {
+      inFlight += 1;
+      mostInFlight = Math.max(mostInFlight, inFlight);
+      return new Promise((done) => setTimeout(done, 5))
+        .then(() => { inFlight -= 1; })
+        .then(() => then(resolve, reject));
+    };
+    return query;
+  };
+  const store = new SupabaseSessionStore(client);
+
+  const started = await store.startSession({
+    ownerUserId: PROFILE,
+    organizationId: ORG,
+    boardId: BOARD,
+    provider: "standalone",
+    allowParticipantDrawing: true,
+  });
+  assert.equal(started.session.ownerUserId, PROFILE);
+  assert.equal(mostInFlight, 3);
+
+  // The owner's private board stays closed to other members of the workspace.
+  await assert.rejects(
+    store.startSession({ ownerUserId: MEMBER, organizationId: ORG, boardId: BOARD, provider: "standalone", allowParticipantDrawing: true }),
+    /BOARD_ACCESS_DENIED/,
   );
 });

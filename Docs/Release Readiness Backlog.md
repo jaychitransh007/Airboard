@@ -392,3 +392,32 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - The trial and its entitlement now run 30 days from today, to 2026-12-05. The change was one production transaction, and the original activation date is kept. No reminder emails were queued for the new end.
   - Billing now reads "Active until Dec 5, 2026", and **Share** on a board offers **Copy live link**.
   - Seen while connecting: the Supabase project is in ap-northeast-2 (Seoul) and the API is in asia-south1 (Mumbai), so every database call crosses regions. This bears on the slow board open.
+- **2026-11-05** — Opening a board made fast (not deployed):
+  - **Cause:** every signed-in request made about 4 Supabase round trips in a row: `auth.getUser` (a call to Supabase Auth), the profile, the membership, then the route's own query. `/sessions/start` made 8–9. The board page sent 7 of these one after another: `/me`, then the preflight and `/me/organizations`, then `/trial/activate`, then `GET /boards/:id`, then `/me` again, then `/sessions/start`. Supabase runs in Seoul (ap-northeast-2) and the API in Mumbai (asia-south1), so every round trip crosses regions.
+  - **Server:**
+    - The access token is checked locally against the project's ES256 signing key (`auth.getClaims`; supabase-js caches the key for 10 minutes) instead of calling Supabase Auth. A signed-out session's token stays usable until it expires (at most an hour).
+    - The profile and its memberships come back in one query.
+    - Requests that arrive together share one sign-in lookup, and later ones reuse it for 30 seconds. Switching organization, accepting an invitation, changing a member's role or status, renaming a profile and deleting an account drop it at once.
+    - `/sessions/start` reads the owner, the entitlement and the board access together.
+    - CORS preflights are cached for 10 minutes (`Access-Control-Max-Age: 600`). Chrome rechecked them after 5 seconds before.
+  - **Web:**
+    - A board page mounts as soon as the sign-in token is known, and the board loads alongside `/me`.
+    - `/trial/activate` and the second `/me` run only while the trial is still `eligible`. The preflight record no longer holds up the board. An organization without a trial row could not open boards before (`TRIAL_NOT_ELIGIBLE`), and now it can.
+    - Board pages skip `/me/organizations`, which only feeds the hidden sidebar.
+  - **Measured locally** against the local Supabase stack with production builds of the web app and API. "+130 ms" sends every Supabase request through a proxy that adds 130 ms, roughly the Mumbai–Seoul round trip. Each row is the median of 3 runs with a cold sign-in cache (the replayed baseline is the median of 5).
+
+    | Opening a saved board | Supabase calls | Canvas mounted | Live session |
+    |---|---|---|---|
+    | Before, local | 40 | 217 ms | 281 ms |
+    | After, local | 13 | 67 ms | 92 ms |
+    | Before, +130 ms, in the browser | 40 | 2,960 ms | 4,073 ms |
+    | Server change only, +130 ms, replayed requests | 20 | 921 ms | 1,368 ms |
+    | After, +130 ms, in the browser | 13 | 347 ms | 764 ms |
+
+  - **Production estimate:** the path to the canvas drops from 20 Supabase round trips in a row to 2, and to the live session from 28 to 5. The 8 seconds seen on production fit about 270 ms per round trip. At that rate the canvas should mount about 0.7 s after the page's JavaScript starts, and the live session should follow at about 1.5 s, down from about 6 s and 8 s. Page download and hydration are unchanged. After 10 idle minutes, the first request fetches the signing key again, which costs one more round trip.
+  - Web 373/373 and API 125/125 tests pass (new: local token checks, the shared and dropped sign-in, membership choice, the board-open order, parallel session-start reads, the preflight max age), and every package typechecks.
+  - **Still open:**
+    - The database and the API sit in different regions, so each remaining round trip still costs about 130–270 ms. Running the API in asia-northeast3 (Seoul), or moving Supabase to ap-south-1 (Mumbai), would bring each one down to a few milliseconds.
+    - `/sessions/start` still inserts the session and then its owner participant in two steps; one database function would make it a single round trip.
+    - The canvas starts its live session only after it mounts. Starting it together with the board load would hide about three more round trips.
+    - Locally, PostgREST v14.3 (Supabase CLI 2.75) fails every board save. A PATCH with the `or=` access filter and `select` returns 42703, which the API reports as `BOARD_SAVE_FAILED`. Production saves worked after `7be667a`, but a PostgREST upgrade of the hosted project would break them.

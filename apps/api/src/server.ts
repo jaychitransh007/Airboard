@@ -24,7 +24,7 @@ import { registerVoiceTraceRoutes } from "./voiceTrace/routes";
 import { AuthService } from "./auth";
 import { registerControlPlaneRoutes } from "./controlPlaneRoutes";
 import { bearerToken, issueSignedToken, verifySignedToken } from "./signedTokens";
-import { AIRBOARD_CORS_METHODS } from "./cors";
+import { AIRBOARD_CORS_MAX_AGE_SECONDS, AIRBOARD_CORS_METHODS } from "./cors";
 import { redactSensitiveRequestUrl } from "./requestLogging";
 import {
   invalidBoardEventReason,
@@ -98,6 +98,7 @@ export async function buildServer(config: ApiConfig) {
   await server.register(cors, {
     origin: config.allowedOrigins,
     methods: [...AIRBOARD_CORS_METHODS],
+    maxAge: AIRBOARD_CORS_MAX_AGE_SECONDS,
   });
   // Preserve Stripe's exact request bytes for signature verification while
   // continuing to parse every other JSON request normally.

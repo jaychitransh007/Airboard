@@ -15,6 +15,7 @@ import {
 import { airboardApi } from "./api";
 import { AUTH_CONFIGURED, safeAppPath, SUPABASE_ANON_KEY, SUPABASE_URL } from "./config";
 import { liveLinkFromBoardAddress } from "../features/board/shareLinks";
+import { isImmersiveBoardPath } from "../features/product/productRouting";
 
 export type AirboardAccount = {
   profile: {
@@ -56,6 +57,8 @@ type AuthValue = {
   accessToken: string | null;
   account: AirboardAccount | null;
   error: string | null;
+  /** The signed-in person's account once its first load settles (null if it failed). */
+  accountReady: () => Promise<AirboardAccount | null>;
   refreshAccount: () => Promise<void>;
   signInWithOAuth: (provider: "google" | "azure", next?: string) => Promise<void>;
   signInWithMagicLink: (email: string, next?: string) => Promise<void>;
@@ -86,18 +89,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const accessToken = session?.access_token ?? developmentToken;
 
-  const loadAccount = useCallback(async (token: string | null) => {
+  const loadAccount = useCallback(async (token: string | null): Promise<AirboardAccount | null> => {
     if (!token) {
       setAccount(null);
-      return;
+      return null;
     }
     try {
       const next = await airboardApi<AirboardAccount>("/me", { accessToken: token });
       setAccount(next);
       setError(null);
+      return next;
     } catch (caught) {
       setAccount(null);
       setError(caught instanceof Error ? caught.message : "ACCOUNT_UNAVAILABLE");
+      return null;
     }
   }, []);
 
@@ -106,7 +111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // reloading /me on each one doubled start-up requests and let one transient
   // failure blank the account (and the board) mid-session.
   const sessionUserRef = useRef<string | null | undefined>(undefined);
-  const accountLoadRef = useRef<Promise<void>>(Promise.resolve());
+  const accountLoadRef = useRef<Promise<AirboardAccount | null>>(Promise.resolve(null));
   const syncSession = useCallback((nextSession: Session | null) => {
     setSession(nextSession);
     const nextUser = nextSession?.user.id ?? null;
@@ -133,8 +138,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // only on loopback and is never enabled by the production API config.
     void airboardApi<{ accessToken: string }>("/auth/development", { method: "POST" })
       .then((result) => {
+        accountLoadRef.current = loadAccount(result.accessToken);
         setDevelopmentToken(result.accessToken);
-        return loadAccount(result.accessToken);
+        return accountLoadRef.current;
       })
       .catch(() => setError("AUTH_NOT_CONFIGURED"))
       .finally(() => setLoading(false));
@@ -147,7 +153,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       accessToken,
       account,
       error,
-      refreshAccount: () => loadAccount(accessToken),
+      accountReady: () => accountLoadRef.current,
+      refreshAccount: async () => {
+        accountLoadRef.current = loadAccount(accessToken);
+        await accountLoadRef.current;
+      },
       signInWithOAuth: async (provider, next) => {
         const client = supabaseBrowserClient();
         if (!client) throw new Error("AUTH_NOT_CONFIGURED");
@@ -211,7 +221,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
       router.replace(`/login?next=${encodeURIComponent(returnPath)}`);
     }
   }, [auth.accessToken, auth.loading, pathname, router]);
-  if (auth.loading) return <div className="product-loading">Preparing your Airboard…</div>;
+  // A board starts loading alongside the account rather than after it; board
+  // pages wait for the account themselves.
+  const opensBeforeAccount = Boolean(auth.accessToken) && isImmersiveBoardPath(pathname);
+  if (auth.loading && !opensBeforeAccount) return <div className="product-loading">Preparing your Airboard…</div>;
   if (!auth.accessToken) return <div className="product-loading">Taking you to sign in…</div>;
   if (auth.error && !auth.account) {
     return (

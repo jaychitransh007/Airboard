@@ -69,6 +69,11 @@ type BoardEventRow = {
   created_at: string;
 };
 
+// PostgreSQL's uuid type accepts the full hexadecimal UUID shape. Local seed
+// identities intentionally use a nil-style UUID, so restricting this to RFC
+// version/variant bits would treat that profile id as a local_user_key.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // Page size for board_events replay. Must be <= PostgREST [api] max_rows (1000)
 // so each page is returned in full and truncation is detected by a short page.
 const BOARD_EVENT_PAGE_SIZE = 1000;
@@ -97,36 +102,30 @@ export class SupabaseSessionStore implements SessionStore {
     session: BoardSession;
     ownerParticipant: Participant;
   }> {
-    const profile = await this.getProfileByIdentity(input.ownerUserId);
-    const entitlement = await this.getActiveEntitlement(profile.id, input.organizationId);
+    // The owner, the entitlement and the board or workspace scope are
+    // independent reads, so they go out together. The scope check assumes the
+    // identity is the owner's profile id, as it is for signed-in owners, and
+    // is redone when the profile was found by its local key instead.
+    const profileLookup = this.getProfileByIdentity(input.ownerUserId);
+    const assumedOwnerId = UUID_PATTERN.test(input.ownerUserId) ? input.ownerUserId : null;
+    const [profile, entitlement, assumedScopeDenial] = await Promise.all([
+      profileLookup,
+      input.organizationId
+        ? this.getActiveEntitlement(input.ownerUserId, input.organizationId)
+        : profileLookup.then((owner) => this.getActiveEntitlement(owner.id)),
+      assumedOwnerId ? this.sessionScopeDenial(input, assumedOwnerId) : null,
+    ]);
 
     if (!canStartBoard(entitlement)) {
       throw new Error("OWNER_ENTITLEMENT_REQUIRED");
     }
 
-    if (input.organizationId && (input.boardId || input.workspaceId)) {
-      const workspaceId = input.workspaceId ?? null;
-      if (input.boardId) {
-        const { data: board } = await this.client
-          .from("boards")
-          .select("id,workspace_id")
-          .eq("id", input.boardId)
-          .eq("organization_id", input.organizationId)
-          .or(boardAccessFilter(profile.id))
-          .is("deleted_at", null)
-          .maybeSingle();
-        if (!board || (workspaceId && board.workspace_id !== workspaceId)) {
-          throw new Error("BOARD_ACCESS_DENIED");
-        }
-      } else if (workspaceId) {
-        const { data: workspace } = await this.client
-          .from("workspaces")
-          .select("id")
-          .eq("id", workspaceId)
-          .eq("organization_id", input.organizationId)
-          .maybeSingle();
-        if (!workspace) throw new Error("WORKSPACE_ACCESS_DENIED");
-      }
+    const scopeDenial =
+      profile.id === assumedOwnerId
+        ? assumedScopeDenial
+        : await this.sessionScopeDenial(input, profile.id);
+    if (scopeDenial) {
+      throw new Error(scopeDenial);
     }
 
     const now = new Date();
@@ -344,13 +343,34 @@ export class SupabaseSessionStore implements SessionStore {
     return mapSession(data as BoardSessionRow);
   }
 
+  /** Why the owner may not start a session on the requested board or workspace, if not. */
+  private async sessionScopeDenial(input: StartSessionInput, profileId: string): Promise<string | null> {
+    if (!input.organizationId || (!input.boardId && !input.workspaceId)) {
+      return null;
+    }
+    const workspaceId = input.workspaceId ?? null;
+    if (input.boardId) {
+      const { data: board } = await this.client
+        .from("boards")
+        .select("id,workspace_id")
+        .eq("id", input.boardId)
+        .eq("organization_id", input.organizationId)
+        .or(boardAccessFilter(profileId))
+        .is("deleted_at", null)
+        .maybeSingle();
+      return !board || (workspaceId && board.workspace_id !== workspaceId) ? "BOARD_ACCESS_DENIED" : null;
+    }
+    const { data: workspace } = await this.client
+      .from("workspaces")
+      .select("id")
+      .eq("id", workspaceId)
+      .eq("organization_id", input.organizationId)
+      .maybeSingle();
+    return workspace ? null : "WORKSPACE_ACCESS_DENIED";
+  }
+
   private async getProfileByIdentity(identity: string): Promise<ProfileRow> {
-    // PostgreSQL's uuid type accepts the full hexadecimal UUID shape. Local
-    // seed identities intentionally use a nil-style UUID, so restricting this
-    // lookup to RFC version/variant bits incorrectly treats that profile id as
-    // a local_user_key.
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identity);
-    if (isUuid) {
+    if (UUID_PATTERN.test(identity)) {
       const { data, error } = await this.client
         .from("profiles")
         .select("*")
