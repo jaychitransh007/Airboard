@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { LIVE_LINK_HOURS } from "./shareLinks";
+import { LIVE_LINK_HOURS, type LiveStartFailure } from "./shareLinks";
 
 export type BoardVisibility = "private" | "organization" | "link";
 
@@ -30,8 +30,8 @@ export function ShareDialog({
   boardTitle: string;
   /** Null until the live session connects (or when it could not). */
   liveLink: string | null;
-  /** True when the live session could not start, so no link is coming. */
-  liveUnavailable: boolean;
+  /** Why the live session could not start, so no link is coming; null while it may. */
+  liveUnavailable: LiveStartFailure | null;
   access?: BoardShareAccess;
   onDownloadPng: () => void;
   onClose: () => void;
@@ -129,7 +129,14 @@ export function ShareDialog({
                     : "Connecting…"}
             </button>
           </div>
-          {!liveLink && liveUnavailable ? (
+          {!liveLink && liveUnavailable === "pilot_ended" ? (
+            <p className="share-dialog-note">
+              Your free pilot has ended, so you can&apos;t start live sessions. This board still
+              saves, and you can still download a picture.{" "}
+              <a href="/app/billing">Ask for more pilot time</a>
+            </p>
+          ) : null}
+          {!liveLink && liveUnavailable === "offline" ? (
             <p className="share-dialog-note">
               The board could not reach the live server, so nobody can join right now. Your work
               is still saved; reload to try again.
@@ -154,8 +161,10 @@ export function ShareDialog({
             <h3 id="share-access-title">Who can open this board later</h3>
             {access.personal ? (
               <p>
-                Boards in your personal workspace stay private to you. Use the live link to work
-                with others, or download a picture to send.
+                Boards in your personal workspace stay private to you.{" "}
+                {liveUnavailable === "pilot_ended"
+                  ? "Download a picture to send to others."
+                  : "Use the live link to work with others, or download a picture to send."}
               </p>
             ) : (
               <>

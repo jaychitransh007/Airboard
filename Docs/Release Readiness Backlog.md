@@ -371,3 +371,14 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - Cause: the account has no active or trialing entitlement. The trial-expiry step of the hourly lifecycle job likely ended it; the production database was not read to confirm.
     - New pilots are unaffected: opening a first board activates a 30-day trial, and live sessions start.
     - The product hides an ended pilot. **Share** says the live server could not be reached, and **Billing** says the pilot "starts when you open your first board", because `/me` drops expired entitlements. New boards are refused too (`POST /boards` requires an entitlement).
+- **2026-11-05** — Ended pilots are explained instead of hidden:
+  - **API:**
+    - `/me` reports the latest entitlement even after it ends; a live one still comes first, and a pending (not started) trial last. Before, an expired trial looked like no entitlement at all.
+    - Live sessions check the workspace's entitlement, as new boards and Airo already did. Before, they checked the signed-in person's own row, so members of a team, whose entitlement is held by its owner, could not start live sessions.
+  - **Billing:** an ended pilot shows "Ended on <date>", says what still works (saved boards open and save) and what is off (new boards, live links, Airo voice), and offers one-tap **Ask for more pilot time**. A pending pilot now says it starts with the first board. Before, it showed "Ended on" the sign-up date.
+  - **Share:** when the pilot has ended, the live-link section says so and links to Plan & billing. Before, it blamed the live server.
+  - **New board blocked:** the "pilot access has ended" page uses the same one-tap request.
+  - The request files a `pilot_extension` support request and remembers it per ended pilot. "Notify me" now uses the same button.
+  - Help: the trial and billing article gains "When the pilot ends", and the error-code reference lists the two entitlement codes.
+  - **Verified locally** with the test account's pilot ended, then pending, then restored: Billing in all three states, the request landing in `support_requests`, the Share note, the blocked new-board page, and a live link again once active.
+  - Web 368/368 and API 117/117 tests pass (new: plan states, live-start failure, `/me` entitlement choice, team-member session start), and every package typechecks.

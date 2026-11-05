@@ -18,6 +18,8 @@ registerHooks({
 });
 
 const { registerControlPlaneRoutes } = await import("../src/controlPlaneRoutes.ts");
+const { accountEntitlement } = await import("../src/auth.ts");
+const { SupabaseSessionStore } = await import("../src/supabaseSessionStore.ts");
 
 /**
  * Minimal in-memory stand-in for the supabase-js query builder: just the
@@ -522,4 +524,54 @@ test("account deletion erases a personal workspace's objects before deleting the
   assert.deepEqual(client.deletedAuthUsers, ["auth-user"]);
   assert.equal(client.tables.organizations.length, 0);
   assert.equal(client.tables.profiles.length, 0);
+});
+
+test("/me reports a pilot that ended instead of hiding it", () => {
+  const expired = { status: "expired", valid_until: "2026-11-01T00:00:00.000Z" };
+  const pending = { status: "pending", valid_until: "2026-11-02T00:00:00.000Z" };
+  const trialing = { status: "trialing", valid_until: "2026-10-30T00:00:00.000Z" };
+  // Rows arrive newest valid_until first; a live entitlement wins over newer ended ones.
+  assert.equal(accountEntitlement([expired, trialing]), trialing);
+  assert.equal(accountEntitlement([expired]), expired);
+  // A pending trial is reported only when nothing has started or ended.
+  assert.equal(accountEntitlement([pending, expired]), expired);
+  assert.equal(accountEntitlement([pending]), pending);
+  assert.equal(accountEntitlement([]), null);
+});
+
+test("live sessions use the workspace's entitlement, so team members can start them", async () => {
+  const MEMBER = "55555555-5555-4555-8555-555555555555";
+  const tables = {
+    profiles: [
+      { id: PROFILE, display_name: "Owner" },
+      { id: MEMBER, display_name: "Member" },
+    ],
+    // A team's entitlement row is held by its owner.
+    entitlements: [{
+      id: "entitlement-1",
+      user_id: PROFILE,
+      organization_id: ORG,
+      plan: "team",
+      status: "active",
+      source: "stripe",
+      valid_until: "2999-01-01T00:00:00.000Z",
+    }],
+    boards: [boardRow({ visibility: "organization" })],
+  };
+  const store = new SupabaseSessionStore(createFakeSupabase(tables));
+  const started = await store.startSession({
+    ownerUserId: MEMBER,
+    organizationId: ORG,
+    boardId: BOARD,
+    provider: "standalone",
+    allowParticipantDrawing: true,
+  });
+  assert.equal(started.session.ownerUserId, MEMBER);
+
+  // Once the workspace's access ends, nobody in it can start one.
+  tables.entitlements[0].status = "expired";
+  await assert.rejects(
+    store.startSession({ ownerUserId: PROFILE, organizationId: ORG, provider: "standalone", allowParticipantDrawing: true }),
+    /OWNER_ENTITLEMENT_REQUIRED/,
+  );
 });

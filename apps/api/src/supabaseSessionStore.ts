@@ -74,7 +74,13 @@ type BoardEventRow = {
 const BOARD_EVENT_PAGE_SIZE = 1000;
 
 export class SupabaseSessionStore implements SessionStore {
-  constructor(private readonly client: SupabaseClient) {}
+  // A declared field rather than a parameter property, so Node's type
+  // stripping can load this module in tests.
+  private readonly client: SupabaseClient;
+
+  constructor(client: SupabaseClient) {
+    this.client = client;
+  }
 
   static create(input: { supabaseUrl: string; serviceRoleKey: string }): SupabaseSessionStore {
     return new SupabaseSessionStore(
@@ -92,7 +98,7 @@ export class SupabaseSessionStore implements SessionStore {
     ownerParticipant: Participant;
   }> {
     const profile = await this.getProfileByIdentity(input.ownerUserId);
-    const entitlement = await this.getActiveEntitlement(profile.id);
+    const entitlement = await this.getActiveEntitlement(profile.id, input.organizationId);
 
     if (!canStartBoard(entitlement)) {
       throw new Error("OWNER_ENTITLEMENT_REQUIRED");
@@ -368,11 +374,17 @@ export class SupabaseSessionStore implements SessionStore {
     return data as ProfileRow;
   }
 
-  private async getActiveEntitlement(userId: string): Promise<Entitlement | null> {
-    const { data, error } = await this.client
-      .from("entitlements")
-      .select("*")
-      .eq("user_id", userId)
+  // Access belongs to the organization, as in the control plane: a team's
+  // entitlement row is held by its owner, so members are checked through the
+  // organization. Sessions without one fall back to the person's own row.
+  private async getActiveEntitlement(
+    userId: string,
+    organizationId?: string,
+  ): Promise<Entitlement | null> {
+    const entitlements = this.client.from("entitlements").select("*");
+    const { data, error } = await (organizationId
+      ? entitlements.eq("organization_id", organizationId)
+      : entitlements.eq("user_id", userId))
       .in("status", ["active", "trialing"])
       .order("valid_until", { ascending: false })
       .limit(1)

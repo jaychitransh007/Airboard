@@ -3241,9 +3241,9 @@ button.screen-underlay-active {
 .integration-meanwhile { display: grid; justify-items: start; gap: 8px; margin-top: 18px; padding: 16px 18px; border-radius: 15px; background: rgba(31, 20, 45, 0.05); }
 .integration-meanwhile strong { color: var(--air-ink); font-size: 14px; }
 .integration-meanwhile p { margin: 0; color: var(--air-muted); font-size: 13px; line-height: 1.55; }
-.waitlist-action { display: inline-grid; justify-items: end; gap: 4px; }
-.waitlist-action small { color: #b42318; font-size: 11px; }
-.waitlist-joined { display: inline-flex; align-items: center; min-height: 40px; color: #2f7d5b; font-size: 13px; font-weight: 750; white-space: nowrap; }
+.one-tap-request { display: inline-grid; justify-items: end; gap: 4px; }
+.one-tap-request small { color: #b42318; font-size: 11px; }
+.one-tap-request-done { display: inline-flex; align-items: center; min-height: 40px; color: #2f7d5b; font-size: 13px; font-weight: 750; white-space: nowrap; }
 .secondary-integrations { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .secondary-integrations .integration-card { min-height: 245px; }
 .download-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(290px, 0.65fr); gap: 18px; }
@@ -3280,6 +3280,9 @@ button.screen-underlay-active {
 .privacy-card { border-color: rgba(118, 87, 235, 0.14); border-radius: 18px; background: rgba(237, 231, 255, 0.62); }
 .current-plan { padding: 25px 27px; }
 .current-plan strong { font-family: Georgia, "Times New Roman", serif; font-size: 31px; font-weight: 500; }
+.current-plan .current-plan-note { max-width: 520px; margin: 8px 0 0; color: var(--air-muted); font-size: 13px; line-height: 1.5; }
+.current-plan .one-tap-request { flex: none; }
+.current-plan .one-tap-request .button { white-space: nowrap; }
 
 .pricing-grid.app-pricing { gap: 15px; }
 .app-shell .pricing-card { border: 1px solid rgba(54, 36, 91, 0.09); border-radius: 23px; background: rgba(255, 255, 255, 0.68); box-shadow: var(--air-shadow-soft); }
@@ -3733,6 +3736,12 @@ button.screen-underlay-active {
 .share-dialog-note {
   color: #6f6877;
   font-size: 12px !important;
+}
+
+.share-dialog-note a {
+  color: #5b3fd6;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .share-dialog-link {

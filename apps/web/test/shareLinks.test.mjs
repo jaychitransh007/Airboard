@@ -5,6 +5,7 @@ import {
   guestDisplayName,
   liveBoardLink,
   liveJoinFailure,
+  liveStartFailure,
   liveLinkFromBoardAddress,
   savedBoardLink,
 } from "../src/features/board/shareLinks.ts";
@@ -39,4 +40,11 @@ test("a board address carrying a live session falls back to the live route", () 
   );
   assert.equal(liveLinkFromBoardAddress("https://airboard.app", "?boardSessionId=s-1"), null);
   assert.equal(liveLinkFromBoardAddress("https://airboard.app", ""), null);
+});
+
+test("a host whose pilot ended is told so instead of blaming the live server", () => {
+  assert.equal(liveStartFailure("Board session start failed: OWNER_ENTITLEMENT_REQUIRED"), "pilot_ended");
+  assert.equal(liveStartFailure("Board session start failed: BOARD_ACCESS_DENIED"), "offline");
+  assert.equal(liveStartFailure("Failed to fetch"), "offline");
+  assert.equal(liveStartFailure(undefined), "offline");
 });

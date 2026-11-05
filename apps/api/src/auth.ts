@@ -36,6 +36,19 @@ type MembershipRow = {
   status: string;
 };
 
+const LIVE_ENTITLEMENT_STATUSES = new Set(["active", "trialing", "grace", "past_due"]);
+
+/**
+ * The entitlement /me reports: a live one when there is one, otherwise the
+ * latest that ended, so Billing can say a pilot is over instead of looking
+ * like it never started. A pending (not yet started) trial comes last. Rows
+ * arrive newest valid_until first, and the sort keeps that order per rank.
+ */
+export function accountEntitlement<T extends { status: string }>(rows: readonly T[]): T | null {
+  const rank = (status: string) => (LIVE_ENTITLEMENT_STATUSES.has(status) ? 0 : status === "pending" ? 2 : 1);
+  return [...rows].sort((left, right) => rank(left.status) - rank(right.status))[0] ?? null;
+}
+
 export class AuthService {
   readonly client: SupabaseClient | null;
   private readonly config: ApiConfig;
@@ -213,10 +226,8 @@ export class AuthService {
           .from("entitlements")
           .select("*")
           .eq("organization_id", context.organizationId)
-          .in("status", ["pending", "trialing", "grace", "active", "past_due"])
           .order("valid_until", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
+          .limit(10),
       ]);
     if (profileResult.error || organizationResult.error) {
       throw new Error("ACCOUNT_LOOKUP_FAILED");
@@ -225,7 +236,7 @@ export class AuthService {
     const organization = organizationResult.data;
     const workspace = workspaceResult.data;
     const trial = trialResult.data;
-    const entitlement = entitlementResult.data;
+    const entitlement = accountEntitlement(entitlementResult.data ?? []);
     return {
         profile: {
         id: profile.id,

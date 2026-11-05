@@ -48,3 +48,14 @@ export function liveJoinFailure(message: string | undefined): "expired" | "ended
   if (/NOT_JOINABLE|NOT_FOUND|HTTP_404/.test(message)) return "ended";
   return "offline";
 }
+
+export type LiveStartFailure = "pilot_ended" | "offline";
+
+/**
+ * Starting the host's live session is refused once the workspace's pilot has
+ * ended (the board itself still saves); anything else means the live server
+ * could not be reached.
+ */
+export function liveStartFailure(message: string | undefined): LiveStartFailure {
+  return message && /OWNER_ENTITLEMENT_REQUIRED/.test(message) ? "pilot_ended" : "offline";
+}

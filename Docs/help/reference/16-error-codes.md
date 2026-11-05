@@ -6,7 +6,7 @@ categoryLabel: Troubleshooting and reference
 order: 16
 status: reference
 audiences: ["everyone", "admins", "support"]
-lastVerified: 2026-07-30
+lastVerified: 2026-11-05
 sources: ["apps/web/src/platform/api.ts", "apps/web/src/features/product/IntegrationsPage.tsx", "apps/api/src/auth.ts", "apps/api/src/transcription/routes.ts", "apps/api/src/semanticIntent/providerError.ts"]
 ---
 
@@ -23,6 +23,7 @@ ID before retrying.
 | `AUTH_NOT_CONFIGURED` | Authentication is unavailable in this environment. | Contact the Airboard operator; this is not fixed by changing board content. |
 | `ACCOUNT_LOOKUP_FAILED` | Airboard could not load the account record. | Retry once, then contact support with the request ID. |
 | `BOARD_ACCESS_DENIED` | The signed-in identity cannot access the board. | Check the selected organization and ask the board owner or administrator. |
+| `ACTIVE_ENTITLEMENT_REQUIRED`, `OWNER_ENTITLEMENT_REQUIRED` | The workspace's pilot or plan has ended, so new boards, live sessions and Airo voice are off. Saved boards still open and save. | Choose **Ask for more pilot time** on **Plan & billing**. |
 
 ## Extension and integration
 

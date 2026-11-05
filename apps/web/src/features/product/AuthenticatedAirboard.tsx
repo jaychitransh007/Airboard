@@ -9,6 +9,7 @@ import type { BoardShareAccess, BoardVisibility } from "../board/ShareDialog";
 import { liveLinkFromBoardAddress, savedBoardLink } from "../board/shareLinks";
 import { AirboardApiError, airboardApi } from "../../platform/api";
 import { useAirboardAuth } from "../../platform/auth";
+import { PilotExtensionButton } from "./OneTapRequestButton";
 
 const SAVE_RETRY_BASE_MS = 1_000;
 const SAVE_RETRY_MAX_MS = 30_000;
@@ -324,9 +325,9 @@ function BoardUnavailable({ code }: { code: string }) {
     return (
       <div className="product-loading">
         <strong>Your pilot access has ended.</strong>
-        <span>Your saved boards are still in your library. Starting a new board needs active pilot access — ask us and we will extend it.</span>
+        <span>Your saved boards are still in your library. Starting a new board needs an active pilot. Ask us and we&apos;ll extend it.</span>
         <span className="product-loading-actions">
-          <Link className="button button-primary" href="/support">Request more pilot time</Link>
+          <PilotExtensionButton primary />
           <Link className="button button-quiet" href="/app/boards">Go to my boards</Link>
         </span>
       </div>

@@ -140,7 +140,7 @@ import {
 } from "./sceneContextToolbarHelpers";
 import { SceneTextEditor } from "./SceneTextEditor";
 import { ShareDialog, type BoardShareAccess } from "./ShareDialog";
-import { liveBoardLink } from "./shareLinks";
+import { liveBoardLink, liveStartFailure, type LiveStartFailure } from "./shareLinks";
 import { blockedMediaHelp, deniedMediaHelp } from "./mediaPermissionHelp";
 import { boardTemplate } from "./boardTemplates";
 import { ScenePlaybackOverlay } from "./ScenePlaybackOverlay";
@@ -1117,6 +1117,7 @@ export function AirboardPrototype({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [liveStartProblem, setLiveStartProblem] = useState<LiveStartFailure | null>(null);
   const [titleEditing, setTitleEditing] = useState(false);
   const [titleDraft, setTitleDraft] = useState(boardTitle);
   const [titleStatus, setTitleStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -3795,6 +3796,9 @@ export function AirboardPrototype({
         }
         boardSyncStatusRef.current = "offline";
         setBoardSyncStatus("offline");
+        if (!requestedSessionId) {
+          setLiveStartProblem(liveStartFailure(caught instanceof Error ? caught.message : String(caught)));
+        }
         if (requestedSessionId && onLiveJoinFailed) {
           onLiveJoinFailed(caught instanceof Error ? caught.message : String(caught));
         } else if (requestedSessionId) {
@@ -10482,7 +10486,9 @@ export function AirboardPrototype({
               ? liveBoardLink(window.location.origin, activeBoardSessionId, activeJoinToken)
               : null
           }
-          liveUnavailable={!activeBoardSessionId && boardSyncStatus === "offline"}
+          liveUnavailable={
+            !activeBoardSessionId && boardSyncStatus === "offline" ? liveStartProblem ?? "offline" : null
+          }
           {...(shareAccess ? { access: shareAccess } : {})}
           onDownloadPng={exportPng}
           onClose={closeShareDialog}
