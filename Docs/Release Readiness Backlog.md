@@ -62,35 +62,35 @@ These are fixable in the repo and each would make a public "supported product" c
 ### Security hardening (mediums)
 | ID | Title | Status | Owner | Verification | Evidence | Recommendation |
 |----|-------|--------|-------|--------------|----------|----------------|
-| RGB-015 | Non-constant-time `===` compare on operator secrets (apiToken, cron secret, metrics token) | Done 2026-11-05 (not deployed) | Engineering | Reported | `apps/api/src/security.ts:71,75`; `server.ts:211`; `controlPlaneRoutes.ts:1484` — the cron secret guards *destructive* deletion | Use `crypto.timingSafeEqual` on length-normalized buffers, matching the signed-token & Stripe paths. |
-| RGB-016 | Transcription WS forwards the raw ~1h Supabase JWT in the `access_token` URL query | Partly done 2026-11-05 (not deployed): the old `access_token` path stays one release for older clients | Engineering | Reported (partly tracked) | `apps/api/src/auth.ts:84`; `apps/web/src/features/board/realtimeSpeech.ts:242` — vs board `/ws` which uses a 30-min purpose-scoped signed ticket | Issue a short-lived `purpose='transcription'` signed ticket; ensure ingress/log-sink redaction covers `access_token`. |
-| RGB-017 | Loopback gate uses substring match on attacker-controlled Host header | Done 2026-11-05 (not deployed) | Engineering | Verified | `controlPlaneRoutes.ts:2407-2410` `.includes(host)`; only reachable when `localEntitlements` (not in prod) — defense-in-depth only | Exact equality/allowlist against `request.ip`. |
-| RGB-018 | `'*'` allowed-origin honored by WS/intent/voice helpers but not the REST CORS layer | Done 2026-11-05 (not deployed) | Engineering | Verified | `transcription/routes.ts:372`, `semanticIntent/routes.ts:191`, `voiceTrace/routes.ts:145` short-circuit `true` on `*`; `server.ts:137` (@fastify/cors) does not | Pick one policy; drop the `*` special-case or document it as unsupported in prod. |
+| RGB-015 | Non-constant-time `===` compare on operator secrets (apiToken, cron secret, metrics token) | Done 2026-11-05 | Engineering | Reported | `apps/api/src/security.ts:71,75`; `server.ts:211`; `controlPlaneRoutes.ts:1484` — the cron secret guards *destructive* deletion | Use `crypto.timingSafeEqual` on length-normalized buffers, matching the signed-token & Stripe paths. |
+| RGB-016 | Transcription WS forwards the raw ~1h Supabase JWT in the `access_token` URL query | Partly done 2026-11-05: the old `access_token` path stays one release for older clients | Engineering | Reported (partly tracked) | `apps/api/src/auth.ts:84`; `apps/web/src/features/board/realtimeSpeech.ts:242` — vs board `/ws` which uses a 30-min purpose-scoped signed ticket | Issue a short-lived `purpose='transcription'` signed ticket; ensure ingress/log-sink redaction covers `access_token`. |
+| RGB-017 | Loopback gate uses substring match on attacker-controlled Host header | Done 2026-11-05 | Engineering | Verified | `controlPlaneRoutes.ts:2407-2410` `.includes(host)`; only reachable when `localEntitlements` (not in prod) — defense-in-depth only | Exact equality/allowlist against `request.ip`. |
+| RGB-018 | `'*'` allowed-origin honored by WS/intent/voice helpers but not the REST CORS layer | Done 2026-11-05 | Engineering | Verified | `transcription/routes.ts:372`, `semanticIntent/routes.ts:191`, `voiceTrace/routes.ts:145` short-circuit `true` on `*`; `server.ts:137` (@fastify/cors) does not | Pick one policy; drop the `*` special-case or document it as unsupported in prod. |
 
 ### Backend robustness (mediums/lows)
 | ID | Title | Status | Owner | Verification | Evidence | Recommendation |
 |----|-------|--------|-------|--------------|----------|----------------|
 | RGB-019 | Provider concurrency caps & rate limits are per-process (multiply by instance count) | Partly done 2026-11-04: limits are per instance | Engineering | Reported | Per-process maps for rate limiter / concurrency | Move to a shared store if provider spend/quota must be bounded globally. |
-| RGB-020 | Boot does not fail-fast on missing Supabase config; `/ready` returns 200 when DB unconfigured | Done 2026-11-05 (not deployed) | Engineering | Reported | `apps/api/src` config/boot path | Fail-fast in production on required env; make `/ready` reflect DB reachability. |
-| RGB-021 | Board WS has no per-connection event rate limit, no batch-size cap, no explicit `maxPayload` | Done 2026-11-05 (not deployed) | Engineering | Reported | `server.ts` WS handler | Add per-connection event rate limit + payload/batch caps. |
-| RGB-022 | No retry / circuit-breaking for OpenAI intent or Deepgram; an outage burns concurrency slots on timeouts | Done 2026-11-05 (not deployed) | Engineering | Reported | intent/transcription paths | Add bounded retry + circuit breaker. |
-| RGB-023 | No process-level `unhandledRejection`/`uncaughtException` handler | Done 2026-11-05 (not deployed) | Engineering | Verified | `apps/api/src` | Add handlers that log and exit cleanly (paired with RGB-003). |
-| RGB-024 | No connection-level rate limiting on WS upgrades or on `/state` & `/heartbeat` | Done 2026-11-05 (not deployed) | Engineering | Verified | `server.ts:322,343,363`; `transcription/routes.ts:30` | Per-IP connection/attempt limiter + modest limiter on `/state`,`/heartbeat`. |
+| RGB-020 | Boot does not fail-fast on missing Supabase config; `/ready` returns 200 when DB unconfigured | Done 2026-11-05 | Engineering | Reported | `apps/api/src` config/boot path | Fail-fast in production on required env; make `/ready` reflect DB reachability. |
+| RGB-021 | Board WS has no per-connection event rate limit, no batch-size cap, no explicit `maxPayload` | Done 2026-11-05 | Engineering | Reported | `server.ts` WS handler | Add per-connection event rate limit + payload/batch caps. |
+| RGB-022 | No retry / circuit-breaking for OpenAI intent or Deepgram; an outage burns concurrency slots on timeouts | Done 2026-11-05 | Engineering | Reported | intent/transcription paths | Add bounded retry + circuit breaker. |
+| RGB-023 | No process-level `unhandledRejection`/`uncaughtException` handler | Done 2026-11-05 | Engineering | Verified | `apps/api/src` | Add handlers that log and exit cleanly (paired with RGB-003). |
+| RGB-024 | No connection-level rate limiting on WS upgrades or on `/state` & `/heartbeat` | Done 2026-11-05 | Engineering | Verified | `server.ts:322,343,363`; `transcription/routes.ts:30` | Per-IP connection/attempt limiter + modest limiter on `/state`,`/heartbeat`. |
 
 ### Data / DB correctness
 | ID | Title | Status | Owner | Verification | Evidence | Recommendation |
 |----|-------|--------|-------|--------------|----------|----------------|
-| RGB-025 | Account deletion is not atomic and has no retry — a mid-flight failure leaves a half-erased account | Done 2026-11-05 (not deployed) | Engineering | Reported | `processDataRequests` sequence in `controlPlaneRoutes.ts` (no transaction) | Wrap in a transaction / make each step idempotent + resumable. |
-| RGB-026 | No index on `product_events.profile_id` or `audit_events.actor_profile_id` | Done 2026-11-05 (migration not applied to production) | Engineering | Reported | export/erasure full-scans the two highest-volume tables | Add indexes in a migration. |
-| RGB-027 | `delete_workspace` erases the whole org; account deletion orphans non-default personal orgs | Done 2026-11-05 (not deployed) | Engineering | Reported | `supabase/migrations` account-operations | Verify & correct the deletion/ownership graph. |
+| RGB-025 | Account deletion is not atomic and has no retry — a mid-flight failure leaves a half-erased account | Done 2026-11-05 | Engineering | Reported | `processDataRequests` sequence in `controlPlaneRoutes.ts` (no transaction) | Wrap in a transaction / make each step idempotent + resumable. |
+| RGB-026 | No index on `product_events.profile_id` or `audit_events.actor_profile_id` | Done 2026-11-05 | Engineering | Reported | export/erasure full-scans the two highest-volume tables | Add indexes in a migration. |
+| RGB-027 | `delete_workspace` erases the whole org; account deletion orphans non-default personal orgs | Done 2026-11-05 | Engineering | Reported | `supabase/migrations` account-operations | Verify & correct the deletion/ownership graph. |
 | RGB-028 | Migrations not cleanly re-runnable (create policy / add constraint / drop function lack guards) | Partly done 2026-11-05: new migrations are checked; the 30 statements in applied migrations stay as written | Engineering | Verified | `supabase/migrations/*` | Add `if not exists` / `drop … if exists` guards. |
 | RGB-029 | `board_shares` (hashed share tokens) is schema-only; no code creates or resolves share links | Partly done 2026-11-05: `board_shares` table unused | Engineering / Product | Verified | migration defines table; no producer/consumer in code | Wire share-link flow or drop the table; ensure no UI advertises sharing that doesn't work. |
 
 ### Packaging / images
 | ID | Title | Status | Owner | Verification | Evidence | Recommendation |
 |----|-------|--------|-------|--------------|----------|----------------|
-| RGB-030 | API runtime image copies full `node_modules` (esbuild, tsx, typescript, @types) | Done 2026-11-05 (not deployed) | Engineering | Reported | `infra/cloud-run/api.Dockerfile` | Ship production-only deps. |
-| RGB-031 | Docker base images use floating tags (not digest-pinned) and declare no `HEALTHCHECK` | Done 2026-11-05 (not deployed) | Engineering | Verified | `infra/cloud-run/*.Dockerfile` | Digest-pin bases; add `HEALTHCHECK` (or rely on platform probes explicitly). |
+| RGB-030 | API runtime image copies full `node_modules` (esbuild, tsx, typescript, @types) | Done 2026-11-05 | Engineering | Reported | `infra/cloud-run/api.Dockerfile` | Ship production-only deps. |
+| RGB-031 | Docker base images use floating tags (not digest-pinned) and declare no `HEALTHCHECK` | Done 2026-11-05 | Engineering | Verified | `infra/cloud-run/*.Dockerfile` | Digest-pin bases; add `HEALTHCHECK` (or rely on platform probes explicitly). |
 | RGB-032 | Desktop app has no packaging, signing, notarization, or auto-update tooling | Backlog (desktop public) | Engineering | Verified | `apps/desktop/package.json` (electron devDep only) | Required only for `desktop-public`; tracked as a preview meanwhile. |
 | RGB-033 | Chrome extension packaging not run in CI; manifest hardcodes pilot Cloud Run URLs | Partly done 2026-08-04: manifest hardcodes pilot URLs | Engineering | Reported | `extensions/chrome-meet-bridge/manifest.json`; `scripts/package-chrome-extension.mjs` not in CI | Parameterize URLs; run packaging in CI. Ties to `chrome-public`. |
 
@@ -738,7 +738,7 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - **Tags:** the `live` image tag moved to `web:launch-3e17071`. Only the serving revisions keep a tag.
     - **Rollback:** web to `launch-d8446ea`.
     - **Owner check:** wave a hand at a board once to confirm MediaPipe 1.2 detects real hands; no automated test covers that.
-- **2026-11-05** — Security, robustness, data and image items from Tier 3 (on `codex/production-readiness`; not yet committed or deployed):
+- **2026-11-05** — Security, robustness, data and image items from Tier 3 (commit `854858a` on `codex/production-readiness`):
   - **Security:**
     - RGB-015: the API token, cron secret and metrics token are compared in constant time (`secretsMatch` in `security.ts` hashes both sides, then uses `timingSafeEqual`).
     - RGB-016: the app swaps its sign-in token for a one-minute `transcription` ticket (`POST /transcription/ticket`) and opens the voice socket with that, so the sign-in token no longer goes in a URL. The server still accepts `access_token` for one release; `scripts/lib/audio-stt-eval/adapters.mjs` uses it too. Remove both next release.
@@ -752,9 +752,20 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - RGB-024: per-caller limits on board socket connections (120/min), `/state` and `/heartbeat` reads (300/min) and voice socket connections (60/min).
   - **Data:**
     - RGB-025: deletion cannot be one transaction (it spans the database, Storage and Supabase Auth), so every step is now checked and safe to repeat. A failed request goes back on the queue for the next hourly run and is marked failed after 5 attempts (new `data_requests.attempts`). A request left `processing` for 30 minutes is picked up again, and overlapping runs cannot both claim one. A retry that finds the auth user already gone carries on. Exports fail and retry instead of completing with a missing section.
-    - RGB-026: `product_events_profile_idx` and `audit_events_actor_profile_idx` in `supabase/migrations/20261105150000_data_request_erasure.sql`, applied to local Supabase. Production still needs `supabase db push` before the API that reads `attempts` deploys.
+    - RGB-026: `product_events_profile_idx` and `audit_events_actor_profile_idx` in `supabase/migrations/20261105150000_data_request_erasure.sql`, applied to local Supabase. Applied to production before the API deployed (see below).
     - RGB-027: account deletion erases every personal workspace the account is the last active member of, not only the one the request came from. Shared and team workspaces stay. Workspace deletion now needs the owner role (was owner or admin), checked again when it runs after the seven-day window. Open: a team whose only owner deletes their account keeps its members but has no owner.
     - RGB-028: `scripts/test/migration-guards.test.mjs` fails `pnpm test:scripts` when a migration from `20261105150000` on is unsafe to run twice. The 30 unguarded statements in older migrations stay as written: those versions are recorded as applied and never run again.
   - **Images:**
     - RGB-030: the API image installs production dependencies only (`pnpm deploy --prod`), and esbuild moved to devDependencies. Local arm64 build: 526 MB → 419 MB, and `node_modules` holds only the bundle's externals plus Supabase JS (54 MB). The image starts, answers `/health` and loads sharp (libvips 8.18.7), heic-convert, Fastify and ws.
     - RGB-031: both images pin `node:22-bookworm-slim` by digest, and Dependabot now proposes digest updates (Node majors ignored). Cloud Run ignores Docker `HEALTHCHECK`, so `release.sh stage` sets HTTP startup and liveness probes (API `/health`, web `/favicon.ico`).
+- **2026-11-05** — `854858a` deployed to the pilot:
+  - **Migration:** `20261105150000_data_request_erasure.sql` applied to Mumbai first. The production REST API sees `data_requests.attempts`.
+  - **API:** `airboard-pilot-api-launch-854858a` at 100%, with the startup and liveness probes on `/health`.
+    - **Tagged smoke:** `/ready` passes for the database and `boardFanOut`. A ticket request, session start, intent, `/metrics` and the lifecycle endpoint all return 401 without credentials, as does a forged sign-in token. Voice sockets with a forged or missing ticket close with 1008. The ticket endpoint's CORS preflight allows the web origin only. The revision logged no errors.
+  - **Web:** `airboard-pilot-web-launch-854858a` at 100%, with probes on `/favicon.ico`.
+    - **Tagged smoke:** 7 pages returned 200. The bundle exchanges the sign-in token for a ticket at `/transcription/ticket` and puts only `ticket` in the voice socket URL. It references only Mumbai.
+  - **Tags:** the `live` image tags moved to `launch-854858a`, and the `launch-3e17071` Cloud Run tags were removed.
+  - **Rollback:** both services to `launch-3e17071`. Its API does not read `attempts`, so the migration needs no rollback.
+  - **Lifecycle:** the 14:00 UTC scheduled run, the first on the new erasure code, returned 200 and logged no errors.
+  - **Launch check:** `pnpm launch:check:deployed` still passes 19 of 23. The blockers are unchanged: lifecycle email, release owner, support path and the commercial smoke.
+  - **Owner check:** turn Airo on once in production. It is the first signed-in use of the voice ticket, which no automated test covers against production.
