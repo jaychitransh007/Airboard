@@ -10,6 +10,7 @@ import {
   type AuthProviderAvailability,
 } from "../../platform/config";
 import { MAGIC_LINK_RESEND_SECONDS, magicLinkFailureMessage } from "./magicLinkRequest";
+import { FormStatus } from "./FormStatus";
 
 export function AuthPage({ mode }: { mode: "login" | "signup" }) {
   const auth = useAirboardAuth();
@@ -147,7 +148,7 @@ export function AuthPage({ mode }: { mode: "login" | "signup" }) {
               <button className="button button-primary" disabled={busy} type="submit">{reason ? "Email me a new secure link" : "Email me a sign-in link"}</button>
             </form>
           )}
-          {message ? <p className="form-message" role="status">{message}</p> : null}
+          <FormStatus message={message} />
           {auth.error === "AUTH_NOT_CONFIGURED" ? (
             <p className="form-warning">Authentication must be configured before public signup. Local development uses a server-signed test account.</p>
           ) : null}

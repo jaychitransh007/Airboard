@@ -7,7 +7,7 @@ export function HelpShell({ children }: { children: ReactNode }) {
     <div className="help-shell">
       <a className="skip-link" href="#main-content">Skip to content</a>
       <header className="help-header">
-        <Link className="help-brand" href="/" aria-label="Airboard home">
+        <Link className="help-brand" href="/">
           <span className="brand-orbit" aria-hidden="true" />
           Airboard
           <small>Help center</small>

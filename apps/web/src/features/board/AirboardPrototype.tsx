@@ -10848,7 +10848,7 @@ export function AirboardPrototype({
                     <button
                       type="button"
                       role="menuitem"
-                      aria-controls="canvas-settings"
+                      aria-controls={settingsOpen ? "canvas-settings" : undefined}
                       onClick={() => {
                         setSettingsOpen((value) => !value);
                         setMoreMenuOpen(false);
@@ -11317,7 +11317,7 @@ export function AirboardPrototype({
                         type="button"
                         data-toolbar-button="true"
                         className="canvas-zoom-value"
-                        aria-label="Reset canvas zoom"
+                        aria-label={`${Math.round(viewportScale * 100)}%, reset canvas zoom`}
                         onClick={() => applyViewport({ ...IDENTITY_VIEWPORT })}
                       >
                         {Math.round(viewportScale * 100)}%
