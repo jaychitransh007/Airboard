@@ -694,3 +694,9 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - `.claude/` is now git-ignored.
     - Old build output (`apps/web/.next-production`), a stray root `.next/` and the 0.7.0 extension zip were deleted. About 1.2 GB freed.
   - **Left for decisions:** retiring the Meet add-on code (routes, adapter and SDK, which the test harness still exercises), a status column and separate change log for this backlog, and an Artifact Registry cleanup policy.
+  - **Deployed** with `infra/cloud-run/release.sh`: web `airboard-pilot-web-launch-d8446ea` at 100%. The API is unchanged at `launch-87aec6f`; its only changes were an unused type and a dev dependency.
+    - **Tagged smoke:** 7 pages returned 200. The hand model and engine load, and `gesture_recognizer.task` returns 404. The bundles keep the strip, dock zoom and camera message and reference only Mumbai. Help 01 shows the new Undo wording.
+    - **Production:** the pages and API `/ready` pass, and the new revision logged no errors.
+    - **Tags:** the previous serving tag was removed, so only the live revisions keep a tag.
+    - **Rollback:** web to `launch-6c4ca43`.
+    - **Extension:** the popup fix reaches users only when the extension is repackaged and published.

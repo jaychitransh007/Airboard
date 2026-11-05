@@ -8,7 +8,7 @@
 
 | Part | Where | Notes |
 | --- | --- | --- |
-| Web | Cloud Run `airboard-pilot-web`, revision `launch-6c4ca43` | `https://airboard-pilot-web-634900453473.asia-south1.run.app`; one instance, kept warm |
+| Web | Cloud Run `airboard-pilot-web`, revision `launch-d8446ea` | `https://airboard-pilot-web-634900453473.asia-south1.run.app`; one instance, kept warm |
 | API | Cloud Run `airboard-pilot-api`, revision `launch-87aec6f` | Up to 3 instances, one kept warm; live boards are shared across instances |
 | Database and sign-in | Supabase `ujotgzjpkocuhtfrvbzu` (ap-south-1, Mumbai) | Every migration in `supabase/migrations` applied, the last `20261105140000` |
 | Google sign-in | Google Auth Platform in the pilot Google Cloud project | Consent screen "Airboard", published to every Google account; client "Airboard sign-in (Supabase)" |
@@ -16,7 +16,7 @@
 
 - **Health:** the API's `/ready` reports the database and `boardFanOut` (live boards across instances).
 - **Launch check:** `pnpm launch:check:deployed` checks the live revisions and passes **19 of 23**.
-- **Rollback:** web to `launch-f33b2cb`, API to `launch-34df218` (`AIRBOARD_RELEASE=launch-<hash> infra/cloud-run/release.sh promote web|api`).
+- **Rollback:** web to `launch-6c4ca43`, API to `launch-34df218` (`AIRBOARD_RELEASE=launch-<hash> infra/cloud-run/release.sh promote web|api`).
 - **Code:** `main`. The working branch `codex/production-readiness` reached it on 5 November 2026 through these pull requests:
   - #1: launch hardening.
   - #11: Google sign-in.
@@ -24,7 +24,7 @@
   - #13: camera start.
   - #14: calmer board.
 
-  Both live revisions match `main`'s code.
+  The live API matches `main`'s code. The live web is the branch's cleanup commit `d8446ea`, which reaches `main` at the next merge.
 
 ## Shipped in the launch hardening (November 2026)
 
