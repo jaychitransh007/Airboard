@@ -57,7 +57,7 @@ These are fixable in the repo and each would make a public "supported product" c
 | RGB-011 | No linter anywhere (no ESLint config/script/CI step) | Done 2026-11-05 | Engineering | Verified | `.github/workflows/ci.yml`; no ESLint in any `package.json` | Add ESLint + a CI lint gate. |
 | RGB-012 | No dependency-vulnerability audit, secret scanning, or dependabot/CodeQL in CI | Done 2026-11-05 | Engineering / Security | Verified | `.github/workflows/ci.yml` | Add `pnpm audit`/OSV, secret scan (e.g. gitleaks), and Dependabot/CodeQL. |
 | RGB-013 | Semantic (LLM) voice false-accept path not covered by any CI gate | Done 2026-11-05 | Engineering | Reported | Only deterministic grammar/false-accept evals gate CI | Add an offline semantic false-accept gate (or document the exclusion). |
-| RGB-038 | The production intent model acts on meeting talk: `gpt-5.4-mini` changes the board for 8 of 60 ambient cases and asks a question for 14 | Backlog | Engineering / Product | Verified | `evals/voice-intent/semantic-negatives.known-false-accepts.v1.json`; production `AIRBOARD_INTENT_MODEL=gpt-5.4-mini`. The code default `gpt-5.6-terra` changed the board for 3 of the same 60 | Move production to the safer model after a latency check, then tighten the prompt until the known list is empty. |
+| RGB-038 | The production intent model acts on meeting talk: `gpt-5.4-mini` changed the board for 8–10 of 60 ambient cases and asked a question for 12–14 | Partly done 2026-11-05: Luna changes the board for 1 of 60 but asks a question for 20 | Engineering / Product | Verified | `evals/voice-intent/semantic-negatives.known-false-accepts.v1.json` | Tighten the prompt until the known list is empty, starting with the questions Luna asks about meeting talk. |
 | RGB-014 | New `catalogDock` E2E is uncommitted & never run; CI can't show E2E is a required merge check | Done 2026-11-05 | Engineering | Verified | `apps/web/e2e/catalogDock.spec.ts` (uncommitted, +235 lines); Playwright not in the fast verify path | Run it before committing the dock diff; make the E2E job a required check on the release branch. |
 
 ### Security hardening (mediums)
@@ -777,3 +777,24 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - **Secret scan:** it had failed on `main` since `6e81f44`, because gitleaks read the image tag `api:launch-3e17071` in a deploy record as a key. `.gitleaks.toml` now allows `api:`/`web:` release tags only. All history scans clean, and a fake key next to a tag is still caught.
   - **RGB-014:** `main` is now protected. A pull request merges only when "Typecheck, tests, safety evals", "Playwright E2E (interaction layer)" and "Secret scan" pass, each bound to GitHub Actions so no other app can report it. The rule applies to admins too, and force-pushes and deleting `main` are blocked. Branches need not be up to date with `main` first. #23 showed `BLOCKED` while its checks ran.
   - **Dependabot #19 (closed):** took `@types/node` 22.20.5. Declined its `@mediapipe/tasks-vision` change, which was a downgrade from 1.2.2 to 1.2.0 and would mismatch the vendored WASM. A new `@types/ws>@types/node` override keeps `@types/ws` on the Node 22 types instead of the Node 24 copy Electron brings.
+- **2026-11-05** — The intent model is now `gpt-5.6-luna` alone (on `codex/production-readiness`):
+  - **Why:** measured on the same day, one attempt per case.
+
+    | Model | 38 real commands right | 60 chatter lines that change the board | Asks a question about chatter | Typical response | Slowest 5% |
+    | --- | --- | --- | --- | --- | --- |
+    | `gpt-5.4-mini` (production until now) | 26 | 8–10 | 12–14 | 1.6–1.7 s | 3.1–3.2 s |
+    | `gpt-5.6-luna` | 34 (after the fix below) | 1–3 | 20–24 | 1.9–2.1 s | 2.7–3.5 s |
+    | `gpt-5.6-terra` | not run | 1–3 | 13 | 1.6–1.7 s | 2.3–2.4 s |
+
+    The product owner chose Luna. Terra was faster on the same prompt (OpenAI processing p50 1.18 s against Luna's 1.46 s, with the same answer length).
+  - **Only model:** the default allowlist is now `gpt-5.6-luna` alone, so the in-app Intent model picker has nothing else to switch to.
+  - **Contract fix:** a lone `current_selection` reference now satisfies align (2+), distribute (3+) and layout (2+). The corpus expects that form, but the parser rejected it, so neither model could pass those cases: Luna's plans were refused outright. The board still checks the selection size when it runs the step. Both the API and the browser parse plans with this code, so both need the release.
+  - **Chatter replay:** re-recorded with Luna. It changes the board for 1 case ("make a note that we owe legal a response by Friday"), asks a question for 20, gives the wrong reason for 7, has 2 answers rejected and stays quiet for 30. The known list now holds those 30.
+  - **Latency:** neither model meets the eval's 2.5 s end-to-action p95 gate: Luna 3.5 s, Mini 3.1 s on the real-command run.
+- **2026-11-05** — `launch-05c0281` deployed to the pilot (commit `05c0281`):
+  - **API:** `airboard-pilot-api-launch-05c0281` at 100%, deployed with `AIRBOARD_INTENT_MODEL=gpt-5.6-luna` and `AIRBOARD_INTENT_ALLOWED_MODELS=gpt-5.6-luna`. Production `/intent/config` reports Luna as the only model, `/ready` passes and intent without sign-in returns 401. The revision logged no errors.
+  - **Web:** `airboard-pilot-web-launch-05c0281` at 100%, so the browser also accepts a lone `current_selection`. Six paths returned 200, and the bundle references only Mumbai.
+  - **Tags:** the `live` image tags moved to `launch-05c0281`, and the `launch-854858a` Cloud Run tags were removed.
+  - **Rollback:** both services to `launch-854858a`. That API revision keeps its own settings, so rolling back also restores `gpt-5.4-mini`.
+  - **Not verified in production:** a signed-in voice command through Luna (needs a real sign-in). The same code and model passed 34 of 38 real commands locally.
+  - **Local setup:** `.env` must name an allowed model, so a local `AIRBOARD_INTENT_MODEL=gpt-5.6-terra` now stops the API from starting; the repository's `.env` was moved to Luna.

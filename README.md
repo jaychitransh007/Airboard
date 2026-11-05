@@ -90,12 +90,12 @@ The OpenAI Responses adapter requires one strict `propose_diagram_plan` function
 
 Clarifications are conversational. For example, `connect the decision to user one and user two with yes and…` produces a focused question instead of guessing, and the next Airo turn completes the pending request.
 
-The first server adapter uses the OpenAI Responses API. The default is `gpt-5.6-terra` with reasoning effort `none`, chosen to keep command interpretation capable while avoiding unnecessary reasoning latency. The default model and its allowlist are runtime configuration, so models can be evaluated without code changes. Intent Canvas also exposes a separate **Intent model** selector; changing it affects the next unclear command immediately and does not restart the microphone stream:
+The first server adapter uses the OpenAI Responses API. It uses `gpt-5.6-luna`, the only allowed model, with reasoning effort `none`. On 2026-11-05 Luna planned 34 of the 38 real-command cases correctly, against 26 for `gpt-5.4-mini`, and changed the board for 3 of 60 meeting-talk cases, against 10. The default model and its allowlist are runtime configuration, so other models can still be evaluated without code changes. Intent Canvas also exposes a separate **Intent model** selector; changing it affects the next unclear command immediately and does not restart the microphone stream:
 
 ```sh
 AIRBOARD_INTENT_PROVIDER=openai \
-AIRBOARD_INTENT_MODEL=gpt-5.6-terra \
-AIRBOARD_INTENT_ALLOWED_MODELS=gpt-5.6-terra,gpt-5.6-luna,gpt-5.4-mini \
+AIRBOARD_INTENT_MODEL=gpt-5.6-luna \
+AIRBOARD_INTENT_ALLOWED_MODELS=gpt-5.6-luna \
 AIRBOARD_INTENT_REASONING_EFFORT=none \
 AIRBOARD_INTENT_TIMEOUT_MS=5000 \
 AIRBOARD_INTENT_API_KEY=your_server_side_key \

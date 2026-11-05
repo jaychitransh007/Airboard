@@ -8,15 +8,16 @@
 
 | Part | Where | Notes |
 | --- | --- | --- |
-| Web | Cloud Run `airboard-pilot-web`, revision `launch-854858a` | `https://airboard-pilot-web-634900453473.asia-south1.run.app`; one instance, kept warm |
-| API | Cloud Run `airboard-pilot-api`, revision `launch-854858a` | Up to 3 instances, one kept warm; live boards are shared across instances |
+| Web | Cloud Run `airboard-pilot-web`, revision `launch-05c0281` | `https://airboard-pilot-web-634900453473.asia-south1.run.app`; one instance, kept warm |
+| API | Cloud Run `airboard-pilot-api`, revision `launch-05c0281` | Up to 3 instances, one kept warm; live boards are shared across instances |
 | Database and sign-in | Supabase `ujotgzjpkocuhtfrvbzu` (ap-south-1, Mumbai) | Every migration in `supabase/migrations` applied, the last `20261105150000` |
 | Google sign-in | Google Auth Platform in the pilot Google Cloud project | Consent screen "Airboard", published to every Google account; client "Airboard sign-in (Supabase)" |
 | Lifecycle jobs | Cloud Scheduler `airboard-lifecycle-hourly` | Alert on a failed run |
 
+- **Voice commands:** the built-in grammar handles exact phrasings instantly; anything else goes to OpenAI `gpt-5.6-luna`, the only allowed intent model since 5 November 2026.
 - **Health:** the API's `/ready` reports the database and `boardFanOut` (live boards across instances). Cloud Run restarts an instance that stops answering its health path (API `/health`, web `/favicon.ico`) for 90 seconds.
 - **Launch check:** `pnpm launch:check:deployed` checks the live revisions and passes **19 of 23**.
-- **Rollback:** both to `launch-3e17071` (`AIRBOARD_RELEASE=launch-<hash> infra/cloud-run/release.sh promote web|api`).
+- **Rollback:** both to `launch-854858a`, which also restores the `gpt-5.4-mini` intent model (`AIRBOARD_RELEASE=launch-<hash> infra/cloud-run/release.sh promote web|api`).
 - **Code:** `main`. The working branch `codex/production-readiness` reached it on 5 November 2026 through these pull requests:
   - #1: launch hardening.
   - #11: Google sign-in.
@@ -24,7 +25,7 @@
   - #13: camera start.
   - #14: calmer board.
 
-  #16 (cleanup), #18 (dependency updates and docs) and #21 (security, robustness, erasure and image hardening) followed. Both live revisions are `launch-854858a`, which #21 merged to `main`.
+  #16 (cleanup), #18 (dependency updates and docs), #21 (security, robustness, erasure and image hardening) and #23 (CI gates) followed. Both live revisions are `launch-05c0281` (Luna as the only intent model), which is on `codex/production-readiness` and not yet merged to `main`.
 - **Image retention:** Artifact Registry keeps images tagged `live`, plus the 10 newest per image, and deletes anything older than 3 days. `release.sh promote` moves the `live` tag.
 
 ## Shipped in the launch hardening (November 2026)
