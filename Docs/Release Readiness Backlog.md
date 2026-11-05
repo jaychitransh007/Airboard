@@ -382,3 +382,8 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - Help: the trial and billing article gains "When the pilot ends", and the error-code reference lists the two entitlement codes.
   - **Verified locally** with the test account's pilot ended, then pending, then restored: Billing in all three states, the request landing in `support_requests`, the Share note, the blocked new-board page, and a live link again once active.
   - Web 368/368 and API 117/117 tests pass (new: plan states, live-start failure, `/me` entitlement choice, team-member session start), and every package typechecks.
+  - **Deployed** (commit `1217615`): `airboard-pilot-api-launch-1217615` and `airboard-pilot-web-launch-1217615` at 100%. No migration.
+    - Tagged smoke before promotion: API health and ready 200; `/me` and `/sessions/start` refuse unauthenticated calls (401); 10 web pages 200. The bundles carry the Billing ended state, the one-tap request, the Share note and "Ask about Personal". The help articles serve the new section and codes.
+    - On production, the owner's Billing reads "Ended on Jul 22, 2026" with the explanation and **Ask for more pilot time**; the request was not sent. **Share** on a board says the pilot has ended and links to Billing.
+    - Rollback: API and web `launch-0f6ab46`.
+    - Seen while checking: opening a board takes about 8 seconds on production, because the page makes about six API calls one after another and each takes 1–2 seconds. Latency matches earlier revisions, so this deploy did not cause it.
