@@ -581,4 +581,20 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - API 135 and scripts 182.
     - Lint, typecheck, docs, the PR evals, the production audit and the build are clean.
     - The full e2e suite: 56 passed, 2 skipped.
-  - **Not yet deployed:** the migration must reach production before the API that calls `start_board_session`. The API then stages with `--max-instances=3`.
+  - **Deployed:**
+    - **Migration:** `20261105140000` was applied to Mumbai first.
+      - Only `service_role` may execute the function.
+      - A call as `service_role` inside a rolled-back transaction returned an active 6-hour session with its linked owner and left no row.
+    - **API:** `airboard-pilot-api-launch-87aec6f` (commit `87aec6f`) at 100%, with a revision max of 3 instances.
+      - The first staged revision (`6d2bb10`) logged `CHANNEL_ERROR` from the startup check, which led to the `/ready` check above. It was never promoted, and its tag was removed.
+    - **Web:** `airboard-pilot-web-launch-6d2bb10` at 100%. Its code is unchanged since then, and it stays at 1 instance.
+    - Both services keep the service-level minimum of 1.
+    - **Smoke:**
+      - Mumbai settings and secret kept, read-only off.
+      - Production `/ready` reports `database: ready` and `boardFanOut: ready`.
+      - Session start, board list and a forged token got 401.
+      - 7 web pages returned 200.
+      - The bundles reference only Mumbai and the production API.
+      - Neither revision logged errors.
+      - The deployed launch check is unchanged at 19/23.
+    - **Rollback:** both services to `launch-34df218` (untagged; route with `--to-revisions`). The new function is additive, and older revisions ignore it.
