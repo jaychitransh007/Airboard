@@ -989,7 +989,7 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - **Not yet checked in production:**
     - A signed-in command hitting the allowance.
     - A voice stream being charged.
-- **2026-11-06** — Fixed the eight medium-risk gaps from the threat model (not deployed yet):
+- **2026-11-06** — Fixed the eight medium-risk gaps from the threat model (committed as `19ddecb`):
   - **Viewer and Billing are read-only:** the API refuses their board create, save, trash, restore, upload, asset delete, share-link and live-session start (`BOARD_READ_ONLY_ROLE`); the web opens boards for them view-only.
   - **Admin switches enforced:** External guests on live joins and view-only links; Voice on voice tickets; camera, gestures and exports in the browser. `/me` now returns the policy.
   - **Session history:** migration `20261106150000` keeps board-less sessions to their owner and deletes a board's sessions when it is purged.
@@ -999,3 +999,29 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - **Uploads:** 2 GiB per workspace (migration `20261106160000`), 30 starts a minute per person, hourly sweep of abandoned uploads, HEIC sized before decoding.
   - **Live links:** 2 hours instead of 6, and kept out of the address bar.
   - **Still open:** guests view-only by default and a "New link" button for live links; a 90-day cap for "until turned off" view-only links.
+- **2026-11-06** — Deployed `launch-19ddecb` to both services, closing the eight medium-risk gaps:
+  - **Order:**
+    - Applied migrations `20261106150000_session_history_access.sql` and `20261106160000_board_asset_quota.sql` with `release.sh migrate`. Both had been run twice on local Postgres 17, and the database then had every migration in the repository.
+    - Staged and promoted the API, then staged and promoted the web.
+  - **Staged API checks:**
+    - `/ready` reported the database, transcription, the intent model and `boardFanOut` ready.
+    - Without a sign-in, `/me`, the admin link list and turn-off, board create, save, share and upload, voice tickets and session start answered 401. Joining with a bad link answered 401, an unknown share link 404, and Airo without an allowed origin 403.
+    - The only warnings in the revision's logs were those test requests.
+  - **Staged web checks:**
+    - `/`, `/login`, `/status`, `/help`, `/pilot/privacy`, `/s/<token>`, `/meet/overlay-engine` and `/app/boards` answered 200.
+    - The security headers were right for normal pages, the share page and the overlay engine, with the production API and Supabase addresses allowed.
+    - In a browser, the pages started up under the new script rules: every script carried that load's key, and nothing was refused.
+    - The view-only board, the admin link list, the members-only join message and the upload limit messages were in the build.
+  - **After promoting:**
+    - The live `/status` shows Website, Boards and Airo, and Saved boards as Working.
+    - The sign-in page loads with no console errors.
+    - Neither new revision logged an error.
+    - `pnpm launch:check:deployed` reports READY, 21 of 21.
+    - The old tags `launch-09f196e-api` and `launch-09f196e-web` were removed.
+  - **Rollback:** both services to `launch-09f196e`, which works with both new migrations.
+  - **Not yet checked in production with a signed-in account:**
+    - A Viewer's view-only board.
+    - The admin switches.
+    - The admin link list.
+    - Photo cleaning.
+    - Upload limits.

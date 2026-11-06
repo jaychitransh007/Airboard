@@ -84,7 +84,7 @@
       "status": "pending",
       "owner": "Security",
       "evidence": "",
-      "notes": "Complete review with owners and remediation dates."
+      "notes": "2026-11-06: draft written and kept private for now. Its two High and eight Medium engineering gaps are fixed and deployed (launch-09f196e, launch-19ddecb). Still needed: the owner's review, decisions on the remaining gaps, and whether to publish it."
     },
     "independent-security-test": {
       "description": "Independent testing has no unresolved critical or high finding.",
