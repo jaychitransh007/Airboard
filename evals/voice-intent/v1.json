@@ -847,18 +847,18 @@
           { "label": "Gateway", "nodeType": "api", "ordinal": 1, "position": { "x": 540, "y": 140 }, "size": { "width": 180, "height": 92 } },
           { "label": "Cache", "nodeType": "service", "ordinal": 2, "position": { "x": 760, "y": 140 }, "size": { "width": 180, "height": 92 } },
           { "label": "Orders API", "nodeType": "api", "ordinal": 2, "position": { "x": 980, "y": 140 }, "size": { "width": 180, "height": 92 } },
-          { "label": "Orders DB", "nodeType": "database", "ordinal": 1, "position": { "x": 980, "y": 420 }, "size": { "width": 200, "height": 110 } },
-          { "label": "Orders Queue", "nodeType": "queue", "ordinal": 1, "position": { "x": 760, "y": 420 }, "size": { "width": 190, "height": 96 } },
-          { "label": "Cache", "nodeType": "database", "ordinal": 2, "position": { "x": 540, "y": 420 }, "size": { "width": 200, "height": 110 } },
+          { "label": "Audit Log", "nodeType": "document", "ordinal": 1, "position": { "x": 100, "y": 420 }, "size": { "width": 170, "height": 110 } },
           { "label": "Worker", "nodeType": "service", "ordinal": 3, "position": { "x": 320, "y": 420 }, "size": { "width": 180, "height": 92 } },
-          { "label": "Audit Log", "nodeType": "document", "ordinal": 1, "position": { "x": 100, "y": 420 }, "size": { "width": 170, "height": 110 } }
+          { "label": "Cache", "nodeType": "database", "ordinal": 1, "position": { "x": 540, "y": 420 }, "size": { "width": 200, "height": 110 } },
+          { "label": "Orders Queue", "nodeType": "queue", "ordinal": 1, "position": { "x": 760, "y": 420 }, "size": { "width": 190, "height": 96 } },
+          { "label": "Orders DB", "nodeType": "database", "ordinal": 2, "position": { "x": 980, "y": 420 }, "size": { "width": 200, "height": 110 } }
         ],
         "edges": [
           { "from": { "label": "Customer", "nodeType": "user", "ordinal": 1 }, "to": { "label": "Web App", "nodeType": "service", "ordinal": 1 }, "label": "uses", "occurrence": 1 },
           { "from": { "label": "Web App", "nodeType": "service", "ordinal": 1 }, "to": { "label": "Gateway", "nodeType": "api", "ordinal": 1 }, "label": "calls", "occurrence": 1 },
           { "from": { "label": "Gateway", "nodeType": "api", "ordinal": 1 }, "to": { "label": "Cache", "nodeType": "service", "ordinal": 2 }, "label": "reads", "occurrence": 1 },
-          { "from": { "label": "Orders API", "nodeType": "api", "ordinal": 2 }, "to": { "label": "Cache", "nodeType": "database", "ordinal": 2 }, "label": "reads", "occurrence": 1 },
-          { "from": { "label": "Orders API", "nodeType": "api", "ordinal": 2 }, "to": { "label": "Orders DB", "nodeType": "database", "ordinal": 1 }, "label": "writes", "occurrence": 1 }
+          { "from": { "label": "Orders API", "nodeType": "api", "ordinal": 2 }, "to": { "label": "Cache", "nodeType": "database", "ordinal": 1 }, "label": "reads", "occurrence": 1 },
+          { "from": { "label": "Orders API", "nodeType": "api", "ordinal": 2 }, "to": { "label": "Orders DB", "nodeType": "database", "ordinal": 2 }, "label": "writes", "occurrence": 1 }
         ],
         "projectGlossary": [],
         "pointerAvailable": false
@@ -873,7 +873,7 @@
           "edgeCountDelta": 0,
           "requiredNodes": [
             { "label": "Cache", "nodeType": "service", "ordinal": 2 },
-            { "label": "Cache", "nodeType": "database", "ordinal": 2 }
+            { "label": "Cache", "nodeType": "database", "ordinal": 1 }
           ]
         }
       }
@@ -1258,16 +1258,16 @@
       "context": {
         "selectionCount": 4,
         "selected": [
-          { "label": "Search", "nodeType": "service", "ordinal": 1 },
-          { "label": "Catalog", "nodeType": "service", "ordinal": 2 },
-          { "label": "Billing", "nodeType": "service", "ordinal": 3 },
-          { "label": "Auth", "nodeType": "service", "ordinal": 4 }
+          { "label": "Auth", "nodeType": "service", "ordinal": 1 },
+          { "label": "Billing", "nodeType": "service", "ordinal": 2 },
+          { "label": "Catalog", "nodeType": "service", "ordinal": 3 },
+          { "label": "Search", "nodeType": "service", "ordinal": 4 }
         ],
         "objects": [
-          { "label": "Search", "nodeType": "service", "ordinal": 1, "selected": true, "position": { "x": 600, "y": 400 }, "size": { "width": 140, "height": 90 } },
-          { "label": "Catalog", "nodeType": "service", "ordinal": 2, "selected": true, "position": { "x": 200, "y": 400 }, "size": { "width": 140, "height": 90 } },
-          { "label": "Billing", "nodeType": "service", "ordinal": 3, "selected": true, "position": { "x": 600, "y": 150 }, "size": { "width": 140, "height": 90 } },
-          { "label": "Auth", "nodeType": "service", "ordinal": 4, "selected": true, "position": { "x": 200, "y": 150 }, "size": { "width": 140, "height": 90 } }
+          { "label": "Auth", "nodeType": "service", "ordinal": 1, "selected": true, "position": { "x": 200, "y": 150 }, "size": { "width": 140, "height": 90 } },
+          { "label": "Billing", "nodeType": "service", "ordinal": 2, "selected": true, "position": { "x": 600, "y": 150 }, "size": { "width": 140, "height": 90 } },
+          { "label": "Catalog", "nodeType": "service", "ordinal": 3, "selected": true, "position": { "x": 200, "y": 400 }, "size": { "width": 140, "height": 90 } },
+          { "label": "Search", "nodeType": "service", "ordinal": 4, "selected": true, "position": { "x": 600, "y": 400 }, "size": { "width": 140, "height": 90 } }
         ],
         "edges": [],
         "projectGlossary": [],
@@ -1383,8 +1383,8 @@
         ],
         "objects": [
           { "label": "Golden Dataset", "nodeType": "database", "ordinal": 1, "selected": false, "position": { "x": 220, "y": 140 }, "size": { "width": 180, "height": 92 } },
-          { "label": "Historical Dataset", "nodeType": "database", "ordinal": 2, "selected": false, "position": { "x": 220, "y": 380 }, "size": { "width": 180, "height": 92 } },
-          { "label": "Planner", "nodeType": "process", "ordinal": 1, "selected": true, "position": { "x": 620, "y": 260 }, "size": { "width": 180, "height": 92 } }
+          { "label": "Planner", "nodeType": "process", "ordinal": 1, "selected": true, "position": { "x": 620, "y": 260 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Historical Dataset", "nodeType": "database", "ordinal": 2, "selected": false, "position": { "x": 220, "y": 380 }, "size": { "width": 180, "height": 92 } }
         ],
         "edges": [],
         "projectGlossary": [
@@ -1429,8 +1429,8 @@
         ],
         "objects": [
           { "label": "Golden Dataset", "nodeType": "database", "ordinal": 1, "selected": false, "position": { "x": 220, "y": 140 }, "size": { "width": 180, "height": 92 } },
-          { "label": "Historical Dataset", "nodeType": "database", "ordinal": 2, "selected": false, "position": { "x": 220, "y": 380 }, "size": { "width": 180, "height": 92 } },
-          { "label": "Planner", "nodeType": "process", "ordinal": 1, "selected": true, "position": { "x": 620, "y": 260 }, "size": { "width": 180, "height": 92 } }
+          { "label": "Planner", "nodeType": "process", "ordinal": 1, "selected": true, "position": { "x": 620, "y": 260 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Historical Dataset", "nodeType": "database", "ordinal": 2, "selected": false, "position": { "x": 220, "y": 380 }, "size": { "width": 180, "height": 92 } }
         ],
         "edges": [],
         "projectGlossary": [
@@ -1468,18 +1468,18 @@
         "selectionCount": 0,
         "selected": [],
         "objects": [
-          { "label": "Historical Dataset", "nodeType": "database", "ordinal": 1, "selected": false, "position": { "x": 140, "y": 120 }, "size": { "width": 180, "height": 92 } },
-          { "label": "Golden Dataset", "nodeType": "database", "ordinal": 2, "selected": false, "position": { "x": 140, "y": 340 }, "size": { "width": 180, "height": 92 } },
-          { "label": "Planner", "nodeType": "process", "ordinal": 1, "selected": false, "position": { "x": 500, "y": 230 }, "size": { "width": 180, "height": 92 } },
-          { "label": "Policy Store", "nodeType": "database", "ordinal": 3, "selected": false, "position": { "x": 820, "y": 90 }, "size": { "width": 180, "height": 92 } },
-          { "label": "Feature Service", "nodeType": "service", "ordinal": 1, "selected": false, "position": { "x": 820, "y": 230 }, "size": { "width": 180, "height": 92 } },
-          { "label": "Evaluation Runner", "nodeType": "process", "ordinal": 2, "selected": false, "position": { "x": 820, "y": 370 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Policy Store", "nodeType": "database", "ordinal": 1, "selected": false, "position": { "x": 820, "y": 90 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Historical Dataset", "nodeType": "database", "ordinal": 2, "selected": false, "position": { "x": 140, "y": 120 }, "size": { "width": 180, "height": 92 } },
           { "label": "Audit Queue", "nodeType": "queue", "ordinal": 1, "selected": false, "position": { "x": 1080, "y": 160 }, "size": { "width": 180, "height": 92 } },
-          { "label": "Schema Registry", "nodeType": "database", "ordinal": 4, "selected": false, "position": { "x": 1080, "y": 320 }, "size": { "width": 180, "height": 92 } }
+          { "label": "Planner", "nodeType": "process", "ordinal": 1, "selected": false, "position": { "x": 500, "y": 230 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Feature Service", "nodeType": "service", "ordinal": 1, "selected": false, "position": { "x": 820, "y": 230 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Schema Registry", "nodeType": "database", "ordinal": 3, "selected": false, "position": { "x": 1080, "y": 320 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Golden Dataset", "nodeType": "database", "ordinal": 4, "selected": false, "position": { "x": 140, "y": 340 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Evaluation Runner", "nodeType": "process", "ordinal": 2, "selected": false, "position": { "x": 820, "y": 370 }, "size": { "width": 180, "height": 92 } }
         ],
         "edges": [
           {
-            "from": { "label": "Policy Store", "nodeType": "database", "ordinal": 3 },
+            "from": { "label": "Policy Store", "nodeType": "database", "ordinal": 1 },
             "to": { "label": "Feature Service", "nodeType": "service", "ordinal": 1 },
             "label": "feeds",
             "occurrence": 1
@@ -1539,9 +1539,9 @@
         "selected": [],
         "objects": [
           { "label": "Historical Dataset", "nodeType": "database", "ordinal": 1, "selected": false, "position": { "x": 180, "y": 120 }, "size": { "width": 180, "height": 92 } },
-          { "label": "Golden Dataset", "nodeType": "database", "ordinal": 2, "selected": false, "position": { "x": 180, "y": 360 }, "size": { "width": 180, "height": 92 } },
           { "label": "Planner", "nodeType": "process", "ordinal": 1, "selected": false, "position": { "x": 560, "y": 240 }, "size": { "width": 180, "height": 92 } },
-          { "label": "Policy Store", "nodeType": "database", "ordinal": 3, "selected": false, "position": { "x": 900, "y": 240 }, "size": { "width": 180, "height": 92 } }
+          { "label": "Policy Store", "nodeType": "database", "ordinal": 2, "selected": false, "position": { "x": 900, "y": 240 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Golden Dataset", "nodeType": "database", "ordinal": 3, "selected": false, "position": { "x": 180, "y": 360 }, "size": { "width": 180, "height": 92 } }
         ],
         "edges": [
           {
@@ -1590,9 +1590,9 @@
         "selected": [],
         "objects": [
           { "label": "Historical Dataset", "nodeType": "database", "ordinal": 1, "selected": false, "position": { "x": 180, "y": 120 }, "size": { "width": 180, "height": 92 } },
-          { "label": "Golden Dataset", "nodeType": "database", "ordinal": 2, "selected": false, "position": { "x": 180, "y": 360 }, "size": { "width": 180, "height": 92 } },
           { "label": "Planner", "nodeType": "process", "ordinal": 1, "selected": false, "position": { "x": 560, "y": 240 }, "size": { "width": 180, "height": 92 } },
-          { "label": "Policy Store", "nodeType": "database", "ordinal": 3, "selected": false, "position": { "x": 900, "y": 240 }, "size": { "width": 180, "height": 92 } }
+          { "label": "Policy Store", "nodeType": "database", "ordinal": 2, "selected": false, "position": { "x": 900, "y": 240 }, "size": { "width": 180, "height": 92 } },
+          { "label": "Golden Dataset", "nodeType": "database", "ordinal": 3, "selected": false, "position": { "x": 180, "y": 360 }, "size": { "width": 180, "height": 92 } }
         ],
         "edges": [
           {
@@ -1602,7 +1602,7 @@
             "occurrence": 1
           },
           {
-            "from": { "label": "Golden Dataset", "nodeType": "database", "ordinal": 2 },
+            "from": { "label": "Golden Dataset", "nodeType": "database", "ordinal": 3 },
             "to": { "label": "Planner", "nodeType": "process", "ordinal": 1 },
             "label": "additional context",
             "occurrence": 1
@@ -1710,6 +1710,7 @@
       "expected": {
         "status": "clarification",
         "issueCode": "missing_context",
+        "issueCodeAlternatives": ["ambiguous_reference"],
         "actionTypeCounts": {},
         "missingSlotsIncludes": ["object_reference"],
         "selectionCount": 0,
