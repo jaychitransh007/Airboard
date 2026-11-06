@@ -925,3 +925,21 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - Every changed case passed 5 of 5, and the grid case 10 of 10.
     - The full set passed 76 of 76 runs (38 cases, twice).
     - The speed check failed on that run, at a p95 of 2,615 ms against 2,500 ms. It has ranged from 2.0 to 3.2 s across today's runs with no code change, and it is not a CI gate.
+- **2026-11-06** — Browser tests for the signed-in app (not yet deployed; one web fix):
+  - **Before:** no browser test signed in, so the board library, saving, the Share dialog's view-only links and Admin's invite link were checked only by unit tests or by hand.
+  - **Harness (`apps/web/e2e/support/signedInApi.ts`):**
+    - The page signs in for real through the E2E API's loopback development identity. Its account and live sessions also come from the real API.
+    - The routes that need a database are answered inside the browser with the response shapes of `controlPlaneRoutes.ts` and `boardShareRoutes.ts`: the board list, board load and save, share links, the shared-board viewer, members and invitations. The API's own tests cover those routes' server side.
+    - It models version conflicts, link expiry, the 20-link cap and owner-only link management.
+  - **Tests (`apps/web/e2e/signedInApp.spec.ts`, 8):**
+    - The library opens a saved board with its content.
+    - An edit is saved as the next version.
+    - A save that loses to another tab shows "Keep my version", and keeping it saves version 3.
+    - The owner makes a 30-day link, copies it (checked against the clipboard), opens it as a viewer and turns it off; the viewer then shows "no longer works".
+    - The 20-link limit message appears.
+    - A teammate's board says only its creator can make links.
+    - An admin invites a teammate and copies the invite link.
+    - Axe WCAG 2.2 AA passes on the library, the Share dialog and Admin members.
+  - **Checked that they catch breakage:** letting anyone make links, and sending the wrong save version, each made the relevant tests fail.
+  - **Fix found by the new accessibility test:** the role pickers on Admin › Members had no accessible name ("Invite as", and "Role for <name>" on each member), and the email field relied on its placeholder. All three now have labels.
+  - **Result:** 85 browser tests pass, and the 8 new ones passed 24 of 24 across three repeats.
