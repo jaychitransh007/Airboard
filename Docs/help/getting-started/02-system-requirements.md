@@ -6,18 +6,28 @@ categoryLabel: Getting started
 order: 2
 status: reference
 audiences: ["everyone", "admins"]
-lastVerified: 2026-11-05
-sources: ["Docs/Platform Support Matrix.md", "apps/api/src/config.ts", "apps/web/src/features/board/mediaPermissionPreference.ts", "extensions/chrome-meet-bridge/manifest.json"]
+lastVerified: 2026-11-06
+sources: ["Docs/Platform Support Matrix.md", "Docs/Browser Matrix.md", "apps/api/src/config.ts", "apps/web/src/features/board/mediaPermissionPreference.ts", "extensions/chrome-meet-bridge/manifest.json"]
 ---
 
-Use a current desktop browser for the standalone Airboard workspace. Camera,
-microphone, screen capture, and meeting integration support depend on browser
-permissions and your organization's Airboard policy.
+Use Google Chrome on a desktop or laptop for the standalone Airboard workspace.
+Camera, microphone, screen capture, and meeting integration support depend on
+browser permissions and your organization's Airboard policy.
+
+## Supported browsers
+
+- Google Chrome, current or previous version, on Windows or macOS.
+- Microsoft Edge, current or previous version, on Windows.
+
+Firefox, Safari, and phone or tablet browsers are not supported yet. A board may
+open in them, but camera gestures, Airo voice, and the canvas are not tested
+there.
 
 ## Standalone workspace
 
 You need:
 
+- A supported browser.
 - JavaScript and browser storage enabled.
 - A stable network connection for sign-in, saving, realtime voice, and semantic
   command recovery.

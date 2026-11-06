@@ -118,3 +118,109 @@ test("board sockets cap batch size, event rate, message size and connections per
   assert.equal((await state()).status, 200);
   assert.equal((await state()).status, 429);
 });
+
+async function cappedServer(t) {
+  const config = loadConfig({
+    NODE_ENV: "test",
+    AIRBOARD_LOCAL_ENTITLEMENTS: "true",
+    AIRBOARD_TRUSTED_PROXY_HOPS: "1",
+    AIRBOARD_BOARD_SOCKETS_PER_PARTICIPANT: "2",
+    AIRBOARD_BOARD_SOCKETS_PER_CALLER: "3",
+    AIRBOARD_BOARD_SOCKETS_PER_SESSION: "4",
+  });
+  const store = new InMemorySessionStore({ ownerGraceSeconds: 180, localEntitlements: true });
+  const server = await buildServer(config, { store });
+  await server.listen({ host: "127.0.0.1", port: 0 });
+  t.after(() => server.close());
+  const { session, ownerParticipant } = store.startSession({ ownerUserId: "owner-1", provider: "standalone", allowParticipantDrawing: true });
+  const ticketFor = (participantId) =>
+    issueSignedToken(config.sessionSigningSecret, { purpose: "realtime", sub: "owner-1", sessionId: session.id, participantId, ttlSeconds: 600 });
+  const guest = () => ticketFor(store.joinSession({ sessionId: session.id, displayName: "Guest" }).participant.id);
+  return { port: server.server.address().port, store, session, ownerParticipant, ownerTicket: ticketFor(ownerParticipant.id), guest };
+}
+
+function openFrom(port, ticket, address) {
+  const socket = new WebSocket(`ws://127.0.0.1:${port}/ws?ticket=${encodeURIComponent(ticket)}&sceneVersion=${BOARD_SCENE_VERSION}`, {
+    headers: { "x-forwarded-for": address },
+  });
+  const messages = [];
+  socket.on("message", (data) => messages.push(JSON.parse(String(data))));
+  socket.on("error", () => undefined);
+  let isClosed = false;
+  const closed = new Promise((resolve) =>
+    socket.on("close", (code, reason) => {
+      isClosed = true;
+      resolve({ code, reason: String(reason) });
+    }),
+  );
+  const ready = new Promise((resolve) => {
+    const check = () => {
+      if (messages.some((m) => m.type === "board.initialized")) resolve();
+      else if (!isClosed) setTimeout(check, 5);
+    };
+    check();
+  });
+  return { socket, messages, closed, ready };
+}
+
+const CONNECTION_LIMIT = { code: 1013, reason: "BOARD_CONNECTION_LIMIT" };
+
+test("one participant, address or board can hold only so many open sockets", async (t) => {
+  const { port, ownerTicket, guest } = await cappedServer(t);
+  const closeAll = async (clients) => {
+    for (const client of clients) client.socket.close();
+    await Promise.all(clients.map((client) => client.closed));
+  };
+
+  // Per participant (2): a third tab waits until one closes.
+  const tabs = [openFrom(port, ownerTicket, "203.0.113.1"), openFrom(port, ownerTicket, "203.0.113.2")];
+  await Promise.all(tabs.map((client) => client.ready));
+  assert.deepEqual(await openFrom(port, ownerTicket, "203.0.113.3").closed, CONNECTION_LIMIT);
+  await closeAll([tabs[0]]);
+  const replacement = openFrom(port, ownerTicket, "203.0.113.3");
+  await replacement.ready;
+  await closeAll([tabs[1], replacement]);
+
+  // Per address (3): different people behind one address; the board holds 3 of its 4.
+  const office = [1, 2, 3].map(() => openFrom(port, guest(), "198.51.100.7"));
+  await Promise.all(office.map((client) => client.ready));
+  assert.deepEqual(await openFrom(port, guest(), "198.51.100.7").closed, CONNECTION_LIMIT);
+
+  // Per board (4): one more from elsewhere fits, the next is refused.
+  const remote = openFrom(port, guest(), "192.0.2.10");
+  await remote.ready;
+  assert.deepEqual(await openFrom(port, guest(), "192.0.2.11").closed, CONNECTION_LIMIT);
+
+  // Closing a socket frees its slot on every count.
+  await closeAll([office[0]]);
+  const late = openFrom(port, guest(), "198.51.100.7");
+  await late.ready;
+  await closeAll([office[1], office[2], remote, late]);
+});
+
+test("cursor moves reach everyone on the board but are never stored", async (t) => {
+  const { port, store, session, ownerParticipant, ownerTicket, guest } = await cappedServer(t);
+  const owner = openFrom(port, ownerTicket, "203.0.113.1");
+  const viewer = openFrom(port, guest(), "203.0.113.2");
+  await Promise.all([owner.ready, viewer.ready]);
+
+  const envelope = () => createEventEnvelope({ boardSessionId: session.id, actorParticipantId: ownerParticipant.id });
+  owner.socket.send(JSON.stringify({
+    type: "board.event",
+    event: { ...envelope(), sequence: 99, type: "cursor.moved", cursor: { participantId: ownerParticipant.id, x: 10, y: 20, mode: "idle" } },
+  }));
+  await waitFor(() => viewer.messages.some((m) => m.type === "board.event" && m.event.type === "cursor.moved"));
+  const relayed = viewer.messages.find((m) => m.type === "board.event" && m.event.type === "cursor.moved").event;
+  assert.deepEqual([relayed.cursor.x, relayed.cursor.y], [10, 20]);
+  assert.equal(relayed.sequence, undefined, "presence carries no sequence");
+  assert.equal(store.getLatestSequence(session.id), 0, "nothing was stored");
+
+  // Board changes are still stored and numbered.
+  owner.socket.send(JSON.stringify({ type: "board.event", event: { ...envelope(), type: "board.cleared" } }));
+  await waitFor(() => viewer.messages.some((m) => m.type === "board.event" && m.event.type === "board.cleared"));
+  assert.equal(viewer.messages.find((m) => m.event?.type === "board.cleared").event.sequence, 1);
+  assert.equal(store.getLatestSequence(session.id), 1);
+
+  owner.socket.close();
+  viewer.socket.close();
+});

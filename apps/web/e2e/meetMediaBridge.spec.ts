@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { launchOptionsWith } from "./support/launchOptions";
 
 /**
  * E2E path: the Meet media bridge. The harness emulates the bridge extension
@@ -9,9 +10,7 @@ import { expect, test } from "@playwright/test";
  */
 
 test.use({
-  launchOptions: {
-    args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"],
-  },
+  launchOptions: launchOptionsWith(["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"]),
 });
 
 test("the bridge restores embedded gesture on the Meet main stage", async ({ page }) => {

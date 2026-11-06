@@ -423,3 +423,77 @@ test("a provider outage trips the breaker so later commands fail fast", async (t
   assert.ok(Number(fastFail.headers["retry-after"]) > 0);
   assert.equal(providerCalls, 3, "the provider is not called while the breaker is open");
 });
+
+test("a person's daily Airo allowance is checked before the model is called", async (t) => {
+  const { createServer } = await import("node:http");
+  let providerCalls = 0;
+  const provider = createServer((_request, response) => {
+    providerCalls += 1;
+    response.writeHead(500, { "content-type": "application/json" });
+    response.end(JSON.stringify({ error: { code: "server_error" } }));
+  });
+  await new Promise((resolve) => provider.listen(0, "127.0.0.1", resolve));
+  t.after(() => provider.close());
+
+  const charges = [];
+  let remaining = 1;
+  let failCount = false;
+  const auth = {
+    ...fakeAuth({ entitledOrganizations: ["org-a"] }),
+    client: {
+      async rpc(name, params) {
+        charges.push({ name, ...params });
+        if (failCount) return { data: null, error: { message: "database unavailable" } };
+        if (remaining <= 0) return { data: null, error: null };
+        remaining -= 1;
+        return { data: 1, error: null };
+      },
+    },
+  };
+  const server = Fastify();
+  t.after(() => server.close());
+  const config = productionConfig();
+  registerSemanticIntentRoutes(server, {
+    ...config,
+    dailyUsage: { airoCommands: 300, voiceSeconds: 600 },
+    semanticIntent: {
+      ...config.semanticIntent,
+      provider: "openai",
+      apiKey: "test-key",
+      endpoint: `http://127.0.0.1:${provider.address().port}/v1/responses`,
+    },
+  }, undefined, auth);
+  const send = (transcript) =>
+    server.inject({
+      method: "POST",
+      url: "/intent/resolve",
+      headers: { origin, authorization: "Bearer user:a" },
+      payload: requestBody(transcript),
+    });
+
+  // Built-in answers cost nothing.
+  assert.equal((await send(fanInTranscript)).statusCode, 200);
+  assert.equal(charges.length, 0);
+
+  // The first model call is charged and reaches the model.
+  assert.equal((await send("make the planner talk to the dataset")).json().error, "SEMANTIC_INTENT_PROVIDER_UNAVAILABLE");
+  assert.deepEqual(charges[0], {
+    name: "consume_daily_usage",
+    p_profile_id: "profile-a",
+    p_metric: "airo_commands",
+    p_amount: 1,
+    p_limit: 300,
+  });
+  assert.equal(providerCalls, 1);
+
+  // With the allowance used up, the model is not called.
+  const exhausted = await send("make the planner talk to the dataset");
+  assert.equal(exhausted.statusCode, 429);
+  assert.equal(exhausted.json().error, "DAILY_AIRO_LIMIT");
+  assert.equal(providerCalls, 1);
+
+  // If the count itself fails, the command still goes through.
+  failCount = true;
+  assert.equal((await send("make the planner talk to the dataset")).json().error, "SEMANTIC_INTENT_PROVIDER_UNAVAILABLE");
+  assert.equal(providerCalls, 2);
+});

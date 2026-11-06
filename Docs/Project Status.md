@@ -8,16 +8,16 @@
 
 | Part | Where | Notes |
 | --- | --- | --- |
-| Web | Cloud Run `airboard-pilot-web`, revision `launch-2f31bf2` | `https://airboard-pilot-web-634900453473.asia-south1.run.app`; one instance, kept warm |
-| API | Cloud Run `airboard-pilot-api`, revision `launch-010a9b7` | Up to 3 instances, one kept warm; live boards are shared across instances |
-| Database and sign-in | Supabase `ujotgzjpkocuhtfrvbzu` (ap-south-1, Mumbai) | Every migration in `supabase/migrations` applied, the last `20261105150000` |
+| Web | Cloud Run `airboard-pilot-web`, revision `launch-09f196e` | `https://airboard-pilot-web-634900453473.asia-south1.run.app`; one instance, kept warm |
+| API | Cloud Run `airboard-pilot-api`, revision `launch-09f196e` | Up to 3 instances, one kept warm; live boards are shared across instances. Each person gets 500 Airo model commands and 240 voice minutes a day |
+| Database and sign-in | Supabase `ujotgzjpkocuhtfrvbzu` (ap-south-1, Mumbai) | Every migration in `supabase/migrations` applied, the last `20261106120000` (daily usage) |
 | Google sign-in | Google Auth Platform in the pilot Google Cloud project | Consent screen "Airboard", published to every Google account; client "Airboard sign-in (Supabase)" |
 | Lifecycle jobs | Cloud Scheduler `airboard-lifecycle-hourly` | Failed runs are logged; no alerts (the support inbox carries customer mail only) |
 
 - **Voice commands:** the built-in grammar handles exact phrasings instantly; anything else goes to OpenAI `gpt-5.6-luna`, the only allowed intent model since 5 November 2026, on OpenAI's priority tier (typically 1.7 s, the slowest 5% about 2.5 s). Since prompt 2.12 (6 November 2026) Airo leaves all 60 recorded meeting-talk cases alone.
 - **Health:** the API's `/ready` reports the database and `boardFanOut` (live boards across instances). Cloud Run restarts an instance that stops answering its health path (API `/health`, web `/favicon.ico`) for 90 seconds.
 - **Launch check:** `pnpm launch:check:deployed` checks the live revisions and reports **READY, 21 of 21** for the controlled pilot. The commercial smoke test, which needs a disposable account on the release database, is a standalone-GA gate (decided 5 November 2026). The founder is the release owner and support owner, on `hellosigmascience@gmail.com`. The pilot signs people in with Google and sends no email, so it needs no email sender (decided 5 November 2026).
-- **Rollback:** the web to `launch-7fa8ff1` (Admin role pickers unlabelled); the API to `launch-7fa8ff1` (intent prompt 2.11, which answers some meeting talk); both services to `launch-e9912d6` to remove view-only links (links already made stop opening until the release returns). Earlier API revisions restore older intent prompts.
+- **Rollback:** both services to the previous releases, the web to `launch-2f31bf2` (old status page) and the API to `launch-010a9b7` (no daily allowances or socket caps). The old API ignores the new `daily_usage` table, so no database change is needed. Further back: the web to `launch-7fa8ff1` (Admin role pickers unlabelled); the API to `launch-7fa8ff1` (intent prompt 2.11, which answers some meeting talk); both services to `launch-e9912d6` to remove view-only links (links already made stop opening until the release returns). Earlier API revisions restore older intent prompts.
 - **Code:** `main`. The working branch `codex/production-readiness` reached it on 5 November 2026 through these pull requests:
   - #1: launch hardening.
   - #11: Google sign-in.
@@ -25,7 +25,7 @@
   - #13: camera start.
   - #14: calmer board.
 
-  #16 (cleanup), #18 (dependency updates and docs), #21 (security, robustness, erasure and image hardening), #23 (CI gates) and #24 (Luna as the only intent model) followed. View-only share links reached `main` through #36, intent prompt 2.12 (the API, `launch-010a9b7`) through #37, and the signed-in browser tests with the Admin label fix (the web, `launch-2f31bf2`) through #39.
+  #16 (cleanup), #18 (dependency updates and docs), #21 (security, robustness, erasure and image hardening), #23 (CI gates) and #24 (Luna as the only intent model) followed. View-only share links reached `main` through #36, intent prompt 2.12 (the API, `launch-010a9b7`) through #37, and the signed-in browser tests with the Admin label fix (the web, `launch-2f31bf2`) through #39. Both services now run `launch-09f196e`, which adds daily allowances, socket caps, the incident status page and the browser matrix; it is on `codex/production-readiness` and not yet merged to `main`.
 - **Image retention:** Artifact Registry keeps images tagged `live`, plus the 10 newest per image, and deletes anything older than 3 days. `release.sh promote` moves the `live` tag.
 
 ## Shipped in the launch hardening (November 2026)

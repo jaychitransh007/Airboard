@@ -6174,3 +6174,11 @@ button:disabled {
 /* Live regions stay mounted while empty so screen readers announce the next message. */
 .share-dialog-note:empty { position: absolute; width: 1px; height: 1px; margin: 0; padding: 0; overflow: hidden; border: 0; clip-path: inset(50%); }
 
+/* Status page incidents (StatusPage.tsx). */
+.status-incidents ul { margin: 0; padding: 0; list-style: none; }
+.status-incidents li + li { border-top: 1px solid rgba(54, 36, 91, 0.08); }
+.status-incident { padding: 16px 0; }
+.status-incident h3 { margin: 0 0 6px; font-size: 17px; }
+.status-incident-meta { display: flex; align-items: center; margin: 0 0 8px; color: var(--air-muted); font-size: 13px; }
+.status-incident-text { margin: 0 0 8px; line-height: 1.55; white-space: pre-line; }
+.status-incident a { color: var(--air-ink); font-size: 13px; font-weight: 700; }

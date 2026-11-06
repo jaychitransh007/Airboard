@@ -56,7 +56,7 @@ const fakeProvider = {
   },
 };
 
-async function startServer(t, { auth, transcription = {}, provider = fakeProvider } = {}) {
+async function startServer(t, { auth, transcription = {}, provider = fakeProvider, dailyUsage } = {}) {
   const server = Fastify();
   t.after(() => server.close());
   await server.register(websocket);
@@ -73,6 +73,7 @@ async function startServer(t, { auth, transcription = {}, provider = fakeProvide
         maxStreamsPerProfile: 2,
         ...transcription,
       },
+      ...(dailyUsage ? { dailyUsage } : {}),
     },
     auth,
     { provider },
@@ -245,4 +246,47 @@ test("repeated provider failures make later starts fail fast", { timeout: 5_000 
   assert.equal(fastFail.code, "TRANSCRIPTION_PROVIDER_UNAVAILABLE");
   assert.match(fastFail.message, /Try again shortly/);
   assert.equal(opens, 3, "the provider is not dialled while the breaker is open");
+});
+
+test("voice stops when a person's daily minutes run out", { timeout: 5_000 }, async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const charges = [];
+  let blocksLeft = 2;
+  const auth = {
+    ...fakeAuth({ entitledOrganizations: ["org-a"] }),
+    client: {
+      async rpc(name, params) {
+        charges.push({ name, ...params });
+        if (blocksLeft <= 0) return { data: null, error: null };
+        blocksLeft -= 1;
+        return { data: 15, error: null };
+      },
+    },
+  };
+  const url = await startServer(t, { auth, dailyUsage: { airoCommands: 500, voiceSeconds: 600 } });
+
+  // The first block is paid when the stream starts.
+  const client = connect(url, "a");
+  client.start();
+  await client.nextMessage("transcription.ready");
+  assert.deepEqual(charges, [
+    { name: "consume_daily_usage", p_profile_id: "profile-a", p_metric: "voice_seconds", p_amount: 15, p_limit: 600 },
+  ]);
+
+  // Each next block is paid ahead; when none is left the stream ends.
+  t.mock.timers.tick(15_000);
+  await new Promise((resolve) => setImmediate(resolve));
+  t.mock.timers.tick(15_000);
+  const limit = await client.nextMessage("transcription.error");
+  assert.equal(limit.code, "DAILY_VOICE_LIMIT");
+  assert.equal(limit.fatal, true);
+  await client.nextMessage("transcription.stopped");
+  assert.equal(charges.length, 3);
+
+  // A new stream is refused before the provider opens.
+  client.start();
+  const refused = await client.nextMessage("transcription.error");
+  assert.equal(refused.code, "DAILY_VOICE_LIMIT");
+  assert.match(refused.message, /midnight UTC/);
+  client.socket.close();
 });

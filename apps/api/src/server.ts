@@ -194,6 +194,14 @@ export async function buildServer(
   });
   const callerKey = (request: FastifyRequest) =>
     clientKey(request, { trustedProxyHops: config.trustedProxyHops });
+  // Board sockets open on this instance. Each Cloud Run instance takes a fixed
+  // number of requests, sockets included, so these caps stop one participant,
+  // address or board from holding all of them.
+  const openBoardSockets = {
+    participant: new Map<string, number>(),
+    caller: new Map<string, number>(),
+    session: new Map<string, number>(),
+  };
   registerTranscriptionRoutes(server, config, auth);
   registerSemanticIntentRoutes(server, config, voiceTraceBuffer, auth);
   registerVoiceTraceRoutes(server, config, voiceTraceBuffer, auth);
@@ -449,6 +457,25 @@ export async function buildServer(
       return;
     }
 
+    const held = [
+      [openBoardSockets.participant, participantId, config.boardSockets.perParticipant],
+      [openBoardSockets.caller, callerKey(request), config.boardSockets.perCaller],
+      [openBoardSockets.session, boardSessionId, config.boardSockets.perSession],
+    ] as const;
+    if (held.some(([open, key, limit]) => (open.get(key) ?? 0) >= limit)) {
+      // 1013 (try again later): the client backs off and retries.
+      socket.close(1013, "BOARD_CONNECTION_LIMIT");
+      return;
+    }
+    for (const [open, key] of held) open.set(key, (open.get(key) ?? 0) + 1);
+    socket.once("close", () => {
+      for (const [open, key] of held) {
+        const remaining = (open.get(key) ?? 1) - 1;
+        if (remaining > 0) open.set(key, remaining);
+        else open.delete(key);
+      }
+    });
+
     const typedSocket = socket as unknown as WebSocket;
     const client: RoomClient = {
       participantId,
@@ -659,6 +686,22 @@ export async function buildServer(
           } catch {
             // best effort
           }
+          return;
+        }
+
+        // Cursor moves are live presence: relay them but never store them.
+        // They arrive several times a second per person, and replaying a board
+        // never needs them. Without a sequence they skip the relay's catch-up.
+        if (incoming.every((event) => event.type === "cursor.moved")) {
+          const presence = incoming.map(({ sequence: _sequence, ...event }) => ({
+            ...event,
+            boardSessionId,
+            actorParticipantId: participantId,
+          })) as BoardEvent[];
+          for (const event of presence) {
+            broadcast(room, { type: "board.event", event });
+          }
+          fanOut.publish(boardSessionId, presence);
           return;
         }
 

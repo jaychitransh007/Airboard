@@ -6,8 +6,8 @@ categoryLabel: Troubleshooting and reference
 order: 16
 status: reference
 audiences: ["everyone", "admins", "support"]
-lastVerified: 2026-11-05
-sources: ["apps/web/src/platform/api.ts", "apps/web/src/features/product/IntegrationsPage.tsx", "apps/api/src/auth.ts", "apps/api/src/transcription/routes.ts", "apps/api/src/semanticIntent/providerError.ts"]
+lastVerified: 2026-11-06
+sources: ["apps/web/src/platform/api.ts", "apps/web/src/features/product/IntegrationsPage.tsx", "apps/api/src/auth.ts", "apps/api/src/transcription/routes.ts", "apps/api/src/semanticIntent/providerError.ts", "apps/api/src/semanticIntent/routes.ts", "apps/api/src/dailyUsage.ts"]
 ---
 
 Error codes identify the failed capability without requiring conversation or
@@ -40,6 +40,8 @@ ID before retrying.
 | --- | --- | --- |
 | `TRANSCRIPTION_UNAVAILABLE` | Realtime transcription is not configured. | Use typed commands and notify the operator if voice is expected. |
 | `TRANSCRIPTION_SESSION_LIMIT` | This account or environment has reached its active stream limit. | Close unused Airo sessions, wait briefly, and retry. |
+| `DAILY_VOICE_LIMIT` | You've used today's Airo voice minutes. Each person has a daily allowance. | Use typed commands; voice comes back at midnight UTC. |
+| `DAILY_AIRO_LIMIT` | You've reached today's limit for Airo commands that need its language model. | Built-in commands still work; the limit resets at midnight UTC. |
 | `TRANSCRIPTION_PROVIDER_UNAVAILABLE` | The transcription provider could not be reached. | Use typed commands and retry later. |
 | `SEMANTIC_INTENT_UNAVAILABLE` | Natural-language recovery is unavailable. | Use a canonical command; deterministic commands still work. |
 | `SEMANTIC_INTENT_RATE_LIMITED` | The semantic provider is temporarily rate limited. | Wait and retry, or use a shorter canonical command. |

@@ -10,6 +10,14 @@ export default defineConfig({
   timeout: 60_000,
   retries: process.env.CI ? 1 : 0,
   use: {
+    // Playwright's bundled Chromium by default. For the release browser matrix
+    // (Docs/Browser Matrix.md), AIRBOARD_E2E_CHANNEL=chrome or msedge runs the
+    // suite in the installed browser, and AIRBOARD_E2E_EXECUTABLE in any other
+    // Chromium build, such as an earlier Chrome for Testing.
+    ...(process.env.AIRBOARD_E2E_CHANNEL ? { channel: process.env.AIRBOARD_E2E_CHANNEL } : {}),
+    ...(process.env.AIRBOARD_E2E_EXECUTABLE
+      ? { launchOptions: { executablePath: process.env.AIRBOARD_E2E_EXECUTABLE } }
+      : {}),
     baseURL: "http://127.0.0.1:3100",
     storageState: {
       cookies: [],
