@@ -64,7 +64,7 @@ These are fixable in the repo and each would make a public "supported product" c
 | ID | Title | Status | Owner | Verification | Evidence | Recommendation |
 |----|-------|--------|-------|--------------|----------|----------------|
 | RGB-015 | Non-constant-time `===` compare on operator secrets (apiToken, cron secret, metrics token) | Done 2026-11-05 | Engineering | Reported | `apps/api/src/security.ts:71,75`; `server.ts:211`; `controlPlaneRoutes.ts:1484` — the cron secret guards *destructive* deletion | Use `crypto.timingSafeEqual` on length-normalized buffers, matching the signed-token & Stripe paths. |
-| RGB-016 | Transcription WS forwards the raw ~1h Supabase JWT in the `access_token` URL query | Done 2026-11-06 on branch `codex/remove-legacy-access-token`, held until after 8 November so tabs opened before the ticket change have closed: the API no longer reads a sign-in token from any URL, and the voice evaluation tool trades its token for a ticket | Engineering | Reported (partly tracked) | `apps/api/src/auth.ts:84`; `apps/web/src/features/board/realtimeSpeech.ts:242` — vs board `/ws` which uses a 30-min purpose-scoped signed ticket | Issue a short-lived `purpose='transcription'` signed ticket; ensure ingress/log-sink redaction covers `access_token`. |
+| RGB-016 | Transcription WS forwards the raw ~1h Supabase JWT in the `access_token` URL query | Done and deployed 2026-11-07 (`launch-fc7bc79`, two days early at the owner's choice): the API no longer reads a sign-in token from any URL, and the voice evaluation tool trades its token for a ticket | Engineering | Reported (partly tracked) | `apps/api/src/auth.ts:84`; `apps/web/src/features/board/realtimeSpeech.ts:242` — vs board `/ws` which uses a 30-min purpose-scoped signed ticket | Issue a short-lived `purpose='transcription'` signed ticket; ensure ingress/log-sink redaction covers `access_token`. |
 | RGB-017 | Loopback gate uses substring match on attacker-controlled Host header | Done 2026-11-05 | Engineering | Verified | `controlPlaneRoutes.ts:2407-2410` `.includes(host)`; only reachable when `localEntitlements` (not in prod) — defense-in-depth only | Exact equality/allowlist against `request.ip`. |
 | RGB-018 | `'*'` allowed-origin honored by WS/intent/voice helpers but not the REST CORS layer | Done 2026-11-05 | Engineering | Verified | `transcription/routes.ts:372`, `semanticIntent/routes.ts:191`, `voiceTrace/routes.ts:145` short-circuit `true` on `*`; `server.ts:137` (@fastify/cors) does not | Pick one policy; drop the `*` special-case or document it as unsupported in prod. |
 
@@ -1061,3 +1061,18 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - The Can view / Can edit switch.
     - New link.
     - The owner rejoining after a reload.
+- **2026-11-07** — RGB-016 deployed, and the live sign-up journey:
+  - **RGB-016:** the branch was merged and the API promoted as `launch-fc7bc79`; the web stays on `launch-91d1c63`.
+    - The staged API was healthy and refused requests without a sign-in, including `/me?access_token=…`.
+    - No errors were logged.
+    - The tag `launch-91d1c63-api` was removed.
+    - Rollback: the API to `launch-91d1c63`.
+  - **Live journey**, run in the browser on the live site in the owner's signed-in account, on one test board that is now in Trash (recoverable):
+    - **Board:** created a board; added shapes and a connector by typed commands; ran a free-form Airo command (the AI model and the daily allowance path) and it applied; renamed the board; a reload kept the content.
+    - **Live links:** Share defaults to Can view, with no live link in the address bar. A guest saw the view-only live board, switched to the editor on Can edit and back on Can view without reloading. New link made the old link answer "This live link was replaced", while the guest already in stayed. After a reload the owner kept the owner controls.
+    - **View-only link:** opened read-only, then stopped working once turned off.
+    - **Library:** search by board content worked; Move to Trash and Restore worked.
+    - **Settings:** Sessions listed the sessions and ended one.
+    - **Other pages:** Billing showed the pilot until 5 December, and Privacy & data loaded.
+    - **Clipboard:** the browser blocked copying, and Share's fallback showed the link to copy by hand.
+  - **Defect found and fixed (`abc3725`, not deployed yet):** the Airo command's result reached the live session but was never saved, so the saved board and its view-only link lacked it. Commands applied as one batch (Airo plans and compound typed commands) and undoing them never scheduled a save. They do now, and a browser test that stands in for the Airo model fails without the fix.
