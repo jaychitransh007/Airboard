@@ -43,7 +43,8 @@ and provider timeouts. A displayed rate or capacity error is a safety boundary,
 not a request to retry rapidly.
 
 The API defaults include 30 semantic intent requests, 10 session starts, and
-240 voice-trace events per minute per enforced rate-limit scope. Deployment
+240 voice-trace events per minute per enforced rate-limit scope. These limits
+hold across the whole service, however many servers are running. Deployment
 configuration can be more restrictive.
 
 ## Images and videos on boards

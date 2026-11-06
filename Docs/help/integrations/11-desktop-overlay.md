@@ -6,16 +6,21 @@ categoryLabel: Integrations
 order: 11
 status: development-preview
 audiences: ["everyone", "creators"]
-lastVerified: 2026-11-05
-sources: ["README.md", "apps/desktop/src/main.mjs", "apps/desktop/src/overlayWindow.mjs"]
+lastVerified: 2026-11-07
+sources: ["README.md", "apps/desktop/README.md", "apps/desktop/src/main.mjs", "apps/desktop/src/overlayWindow.mjs", "apps/desktop/src/autoUpdate.mjs"]
 ---
 
 The desktop overlay is a native Electron development preview. It places a
 transparent, frameless, always-on-top Airboard above desktop applications and
 can pass pointer events through to the application underneath.
 
-Signed installers and automatic updates are still required before general
-distribution.
+The app can now be packaged as a macOS and Windows installer that updates
+itself, but it isn't distributed yet: installers have to be signed with
+Airboard's Apple and Microsoft signing accounts first. Until then, run it from
+the source code as below.
+
+The overlay lets only the Airboard page use the camera and microphone, for
+hands and Airo's voice, and refuses every other permission.
 
 ## Launch the development preview
 

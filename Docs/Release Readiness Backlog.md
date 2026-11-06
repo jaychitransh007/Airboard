@@ -58,7 +58,7 @@ These are fixable in the repo and each would make a public "supported product" c
 | RGB-012 | No dependency-vulnerability audit, secret scanning, or dependabot/CodeQL in CI | Done 2026-11-05 | Engineering / Security | Verified | `.github/workflows/ci.yml` | Add `pnpm audit`/OSV, secret scan (e.g. gitleaks), and Dependabot/CodeQL. |
 | RGB-013 | Semantic (LLM) voice false-accept path not covered by any CI gate | Done 2026-11-05 | Engineering | Reported | Only deterministic grammar/false-accept evals gate CI | Add an offline semantic false-accept gate (or document the exclusion). |
 | RGB-038 | The production intent model acts on meeting talk: `gpt-5.4-mini` changed the board for 8–10 of 60 ambient cases and asked a question for 12–14 | Done and deployed 2026-11-06 (`launch-010a9b7`): prompt 2.12 leaves all 60 alone; the known list is empty | Engineering / Product | Verified | `evals/voice-intent/semantic-negatives.known-false-accepts.v1.json` | Keep tightening the prompt until the known list is empty, without losing real commands. |
-| RGB-039 | Airo can't see or change shapes made by typed commands or the toolbar, so it draws duplicates (found 2026-11-07 in the live journey: "the API" became a second API box) | Done and deployed 2026-11-07 (`launch-376f31e`): Airo sees and changes typed and toolbar shapes; align, distribute, layout, duplicate and group on them say "not yet" | Engineering | Verified on the live site | `buildSemanticIntentContext`, `resolveSemanticReference` and `spatialSemanticNodes` in `apps/web/src/features/board/intentPipeline.ts` read only legacy annotation strokes; `applyDiagramCommand` in `packages/core/src/diagramCommands.ts` writes only strokes. Typed commands such as "add a user" and the toolbar create v2 scene elements, which none of these read | Later: let align, distribute, layout, duplicate and group reach typed and toolbar shapes. |
+| RGB-039 | Airo can't see or change shapes made by typed commands or the toolbar, so it draws duplicates (found 2026-11-07 in the live journey: "the API" became a second API box) | Done 2026-11-07: Airo sees typed and toolbar shapes and can connect, rename, move, line up, spread out, tidy, copy, group and delete them (the first part is live in `launch-376f31e`; arranging, copying and grouping are not deployed yet) | Engineering | Verified locally (unit and browser tests) | `buildSemanticIntentContext`, `resolveSemanticReference` and `spatialSemanticNodes` in `apps/web/src/features/board/intentPipeline.ts` read only legacy annotation strokes; `applyDiagramCommand` in `packages/core/src/diagramCommands.ts` writes only strokes. Typed commands such as "add a user" and the toolbar create v2 scene elements, which none of these read | Deploy the web build. Grouping Airo's own nodes together with typed shapes still says "not yet", because a section can't own a legacy node. |
 | RGB-014 | New `catalogDock` E2E is uncommitted & never run; CI can't show E2E is a required merge check | Done 2026-11-05 | Engineering | Verified | `apps/web/e2e/catalogDock.spec.ts` (uncommitted, +235 lines); Playwright not in the fast verify path | Run it before committing the dock diff; make the E2E job a required check on the release branch. |
 
 ### Security hardening (mediums)
@@ -72,7 +72,7 @@ These are fixable in the repo and each would make a public "supported product" c
 ### Backend robustness (mediums/lows)
 | ID | Title | Status | Owner | Verification | Evidence | Recommendation |
 |----|-------|--------|-------|--------------|----------|----------------|
-| RGB-019 | Provider concurrency caps & rate limits are per-process (multiply by instance count) | Mostly done and deployed 2026-11-06 (`launch-09f196e`): daily voice and Airo allowances per person are held in the database across instances; per-minute limits and stream caps stay per instance | Engineering | Reported | Per-process maps for rate limiter / concurrency | Move to a shared store if provider spend/quota must be bounded globally. |
+| RGB-019 | Provider concurrency caps & rate limits are per-process (multiply by instance count) | Done 2026-11-07, not deployed: per-minute limits are counted in Postgres (`consume_rate_limit`), so they hold across instances; stream caps stay per instance | Engineering | Verified locally (unit tests and a real Postgres) | Per-process maps for rate limiter / concurrency | Apply migration `20261107120000_shared_rate_limits` before deploying the API. |
 | RGB-020 | Boot does not fail-fast on missing Supabase config; `/ready` returns 200 when DB unconfigured | Done 2026-11-05 | Engineering | Reported | `apps/api/src` config/boot path | Fail-fast in production on required env; make `/ready` reflect DB reachability. |
 | RGB-021 | Board WS has no per-connection event rate limit, no batch-size cap, no explicit `maxPayload` | Done 2026-11-05 | Engineering | Reported | `server.ts` WS handler | Add per-connection event rate limit + payload/batch caps. |
 | RGB-022 | No retry / circuit-breaking for OpenAI intent or Deepgram; an outage burns concurrency slots on timeouts | Done 2026-11-05 | Engineering | Reported | intent/transcription paths | Add bounded retry + circuit breaker. |
@@ -85,7 +85,7 @@ These are fixable in the repo and each would make a public "supported product" c
 | RGB-025 | Account deletion is not atomic and has no retry — a mid-flight failure leaves a half-erased account | Done 2026-11-05 | Engineering | Reported | `processDataRequests` sequence in `controlPlaneRoutes.ts` (no transaction) | Wrap in a transaction / make each step idempotent + resumable. |
 | RGB-026 | No index on `product_events.profile_id` or `audit_events.actor_profile_id` | Done 2026-11-05 | Engineering | Reported | export/erasure full-scans the two highest-volume tables | Add indexes in a migration. |
 | RGB-027 | `delete_workspace` erases the whole org; account deletion orphans non-default personal orgs | Done 2026-11-05 | Engineering | Reported | `supabase/migrations` account-operations | Verify & correct the deletion/ownership graph. |
-| RGB-028 | Migrations not cleanly re-runnable (create policy / add constraint / drop function lack guards) | Partly done 2026-11-05: new migrations are checked; the 30 statements in applied migrations stay as written | Engineering | Verified | `supabase/migrations/*` | Add `if not exists` / `drop … if exists` guards. |
+| RGB-028 | Migrations not cleanly re-runnable (create policy / add constraint / drop function lack guards) | Done 2026-11-07: every migration is safe to run twice; the guard check covers all files and more statement kinds | Engineering | Verified on a local Supabase stack | `supabase/migrations/*` | Keep new migrations re-runnable; the guard check enforces it. |
 | RGB-029 | `board_shares` (hashed share tokens) is schema-only; no code creates or resolves share links | Done and deployed 2026-11-06 (`launch-7fa8ff1`) | Engineering / Product | Verified | migration defines table; no producer/consumer in code | Wire share-link flow or drop the table; ensure no UI advertises sharing that doesn't work. |
 
 ### Packaging / images
@@ -93,8 +93,8 @@ These are fixable in the repo and each would make a public "supported product" c
 |----|-------|--------|-------|--------------|----------|----------------|
 | RGB-030 | API runtime image copies full `node_modules` (esbuild, tsx, typescript, @types) | Done 2026-11-05 | Engineering | Reported | `infra/cloud-run/api.Dockerfile` | Ship production-only deps. |
 | RGB-031 | Docker base images use floating tags (not digest-pinned) and declare no `HEALTHCHECK` | Done 2026-11-05 | Engineering | Verified | `infra/cloud-run/*.Dockerfile` | Digest-pin bases; add `HEALTHCHECK` (or rely on platform probes explicitly). |
-| RGB-032 | Desktop app has no packaging, signing, notarization, or auto-update tooling | Backlog (desktop public) | Engineering | Verified | `apps/desktop/package.json` (electron devDep only) | Required only for `desktop-public`; tracked as a preview meanwhile. |
-| RGB-033 | Chrome extension packaging not run in CI; manifest hardcodes pilot Cloud Run URLs | Partly done 2026-08-04: manifest hardcodes pilot URLs | Engineering | Reported | `extensions/chrome-meet-bridge/manifest.json`; `scripts/package-chrome-extension.mjs` not in CI | Parameterize URLs; run packaging in CI. Ties to `chrome-public`. |
+| RGB-032 | Desktop app has no packaging, signing, notarization, or auto-update tooling | Tooling done 2026-11-07: electron-builder packages macOS dmg/zip and a Windows installer, signing and notarization run from CI secrets, and electron-updater updates installed apps from GitHub Releases; nothing signed or released yet | Engineering | Unsigned macOS build and smoke run verified locally; Windows untested | `apps/desktop/package.json` (electron devDep only) | The owner adds the Apple Developer ID and Windows signing secrets (see `apps/desktop/README.md`), then a `desktop-v*` tag builds the first signed draft release. |
+| RGB-033 | Chrome extension packaging not run in CI; manifest hardcodes pilot Cloud Run URLs | Done 2026-11-07: the packager stamps the chosen release target's addresses (`targets.json`, `AIRBOARD_EXTENSION_TARGET`), and CI keeps each package as an artifact | Engineering | Verified locally (pilot package byte-identical) | `extensions/chrome-meet-bridge/manifest.json`; `scripts/package-chrome-extension.mjs` not in CI | For a production domain, add a target and set the API's allowed origins and the web build's extension ID to match. |
 
 ### Docs drift / honesty
 | ID | Title | Status | Owner | Verification | Evidence | Recommendation |
@@ -1119,3 +1119,29 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - The tags `launch-8eff5db-api` and `launch-8eff5db-web` were removed.
   - **Live journey:** in the owner's signed-in account, a new board got "add a user" and "add an API next to the user", then "could you sketch a little database that the API talks to". Luna added one Database and a "talks to" connector from the existing API; there was still one API. A reload showed the same board, so it saved. The test board is in Trash.
   - **Rollback:** both services to `launch-8eff5db`.
+- **2026-11-07** — Five engineering items (not deployed yet):
+  - **Airo arranges, copies and groups typed shapes (RGB-039):**
+    - Align, distribute and layout move shapes from typed commands and the toolbar alongside Airo's own nodes, and v2 connectors follow.
+    - `scene.duplicate` copies them as the toolbar does, and `scene.group` draws a section around them.
+    - Grouping Airo's nodes together with typed shapes still says "not yet".
+    - Typed shapes Airo changed stay selected for a follow-up.
+  - **Shared per-minute limits (RGB-019):**
+    - Migration `20261107120000_shared_rate_limits` adds `rate_limit_windows` and `consume_rate_limit` (service role only).
+    - The API counts each per-minute limit there after its own local check, so three instances allow the limit, not three times it.
+    - Keys are keyed hashes (HMAC with the session signing secret). The hourly lifecycle job deletes windows older than an hour, and a database error lets the request through.
+    - Each limited request makes one database call. The migration must reach production before the API.
+  - **Re-runnable migrations (RGB-028):** every migration now has guards. Re-applying all 21 on a local Supabase stack gave no errors, and the schema and data dumps were unchanged. The guard check covers every file and more statement kinds.
+  - **Chrome extension targets (RGB-033):**
+    - `targets.json` and `AIRBOARD_EXTENSION_TARGET` (or explicit address overrides) set the addresses the packager stamps in.
+    - The pilot package is byte-identical to before.
+    - CI keeps the zip, checksum and permission review as an artifact.
+  - **Desktop packaging (RGB-032):**
+    - electron-builder 26.18.0 and electron-updater 6.8.11.
+    - `.github/workflows/desktop.yml` builds on macOS and Windows on a `desktop-v*` tag or by hand, signing only when the secrets exist.
+    - The overlay now grants the camera, microphone and clipboard only to the Airboard origin.
+    - An unsigned macOS package built and passed its smoke run locally.
+  - **Tests:**
+    - Unit: API 203, web 422, core 73, desktop 19, scripts 196. Lint, typecheck, docs and the production audit are clean.
+    - The full browser suite: 171 passed, 2 skipped.
+    - The offline PR evals pass.
+    - The live voice-intent eval against Luna scored 36 and 37 of 38 on two runs, a different case each time, with the model returning no actions. Nothing the model sees changed, so this is model variance (38 of 38 twice earlier the same day).
