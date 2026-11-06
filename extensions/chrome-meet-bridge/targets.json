@@ -1,0 +1,9 @@
+{
+  "pilot": {
+    "apiUrl": "https://airboard-pilot-api-634900453473.asia-south1.run.app",
+    "appOrigins": [
+      "https://airboard-pilot-web-634900453473.asia-south1.run.app",
+      "https://airboard-pilot-web-efs77okmmq-el.a.run.app"
+    ]
+  }
+}

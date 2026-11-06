@@ -30,6 +30,19 @@ jobs:
       - name: Package and validate Chrome extension
         run: pnpm build:extension
 
+      # The pilot package (extensions/chrome-meet-bridge/targets.json), ready
+      # for Web Store review: the zip, its checksum and the permission review.
+      - name: Upload Chrome extension package
+        uses: actions/upload-artifact@v7
+        with:
+          name: chrome-extension-${{ github.run_id }}
+          path: |
+            dist/chrome-extension/*.zip
+            dist/chrome-extension/*.zip.sha256
+            dist/chrome-extension/*.permission-review.json
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Typecheck
         run: pnpm typecheck
 

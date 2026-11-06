@@ -60,8 +60,9 @@ profile cannot reuse that migrated row and must connect separately.
 6. Keep the popup open until all six readiness checks pass, then confirm the
    decoded image from a second participant.
 
-Local development also permits `http://localhost:3000` and
-`http://127.0.0.1:3100`. The production package removes those origins.
+Local development also permits `http://localhost:3000`,
+`http://127.0.0.1:3100` and the API at `http://127.0.0.1:4000`. Every package
+removes those origins.
 
 ## Chrome Web Store package
 
@@ -85,6 +86,42 @@ destinations compiled into the extension do not match.
 The upload-ready archive and SHA-256 checksum are written to
 `dist/chrome-extension/`. The script excludes development origins, includes
 all icons, and fails if the production package retains localhost references.
+CI builds the pilot package on every push and pull request and keeps the
+archive, checksum and permission review as a workflow artifact for 14 days.
+
+### Release targets
+
+[`targets.json`](targets.json) is the one place that names where a package
+points: each target's Airboard API and the web origins allowed to host the
+renderer (the app first, then any aliases of the same deployment). The
+packager writes the chosen target into the manifest's host permission, frame
+source and `externally_connectable` list, `API_URL` and `APP_URL` in
+`background.js` and `popup.js`, the relay's `AIRBOARD_ORIGINS` and the
+renderer address in `engine.html`, and checks the reviewed permissions
+against that target. Every address must be a plain HTTPS origin.
+
+The source files keep the `pilot` target's addresses so the folder still loads
+unpacked; a script test fails if they drift from `targets.json`.
+
+- `pnpm build:extension` packages `pilot`, the default.
+- `AIRBOARD_EXTENSION_TARGET=<name> pnpm build:extension` packages another
+  target in `targets.json`.
+- A domain not yet in `targets.json` can be packaged from the environment:
+
+  ```sh
+  AIRBOARD_EXTENSION_TARGET=production \
+  AIRBOARD_EXTENSION_API_URL=https://api.example.com \
+  AIRBOARD_EXTENSION_APP_ORIGINS=https://app.example.com \
+  pnpm build:extension
+  ```
+
+  The override needs its own target name. Packages for any target but `pilot`
+  carry the name in their file names, for example
+  `airboard-for-google-meet-0.8.0-production.zip`.
+
+`pnpm release:extension` checks the deployment for the same target before it
+packages. A new domain also needs the API's `AIRBOARD_ALLOWED_ORIGINS` and the
+web build's extension ID set to match.
 Publication, privacy declarations, screenshots, review, and the final Web
 Store URL remain publisher-console actions; follow
 [`Docs/Chrome Web Store Release.md`](../../Docs/Chrome%20Web%20Store%20Release.md).
