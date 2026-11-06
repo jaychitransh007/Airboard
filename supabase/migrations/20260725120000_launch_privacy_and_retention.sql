@@ -43,7 +43,7 @@ update public.voice_trace_events
 set data = public.airboard_redact_trace_content(data)
 where data is not null;
 
-drop function public.airboard_redact_trace_content(jsonb);
+drop function if exists public.airboard_redact_trace_content(jsonb);
 
 comment on table public.voice_trace_events is
   'Content-free operational voice stages. Speech transcripts, commands, board labels, credentials, and raw media must not be stored.';

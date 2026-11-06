@@ -21,6 +21,7 @@ create index if not exists board_assets_pending_idx
   where status = 'pending';
 
 alter table public.board_assets enable row level security;
+drop policy if exists "board_assets_read_member" on public.board_assets;
 create policy "board_assets_read_member" on public.board_assets for select to authenticated
   using (public.is_org_member(organization_id));
 

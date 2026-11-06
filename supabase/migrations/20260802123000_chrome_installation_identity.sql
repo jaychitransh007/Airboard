@@ -7,7 +7,9 @@ alter table public.platform_installations
 update public.platform_installations
 set external_package_id = external_installation_id
 where platform = 'chrome_meet'
-  and external_package_id is null;
+  and external_package_id is null
+  -- Only a package ID (32 letters a-p), so running this again skips newer rows.
+  and external_installation_id ~ '^[a-p]{32}$';
 
 create index if not exists platform_installations_chrome_package_idx
   on public.platform_installations (organization_id, external_package_id)
