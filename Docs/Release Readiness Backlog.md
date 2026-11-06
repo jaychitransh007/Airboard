@@ -57,7 +57,7 @@ These are fixable in the repo and each would make a public "supported product" c
 | RGB-011 | No linter anywhere (no ESLint config/script/CI step) | Done 2026-11-05 | Engineering | Verified | `.github/workflows/ci.yml`; no ESLint in any `package.json` | Add ESLint + a CI lint gate. |
 | RGB-012 | No dependency-vulnerability audit, secret scanning, or dependabot/CodeQL in CI | Done 2026-11-05 | Engineering / Security | Verified | `.github/workflows/ci.yml` | Add `pnpm audit`/OSV, secret scan (e.g. gitleaks), and Dependabot/CodeQL. |
 | RGB-013 | Semantic (LLM) voice false-accept path not covered by any CI gate | Done 2026-11-05 | Engineering | Reported | Only deterministic grammar/false-accept evals gate CI | Add an offline semantic false-accept gate (or document the exclusion). |
-| RGB-038 | The production intent model acts on meeting talk: `gpt-5.4-mini` changed the board for 8–10 of 60 ambient cases and asked a question for 12–14 | Done 2026-11-06 (not deployed): prompt 2.12 leaves all 60 alone; the known list is empty | Engineering / Product | Verified | `evals/voice-intent/semantic-negatives.known-false-accepts.v1.json` | Keep tightening the prompt until the known list is empty, without losing real commands. |
+| RGB-038 | The production intent model acts on meeting talk: `gpt-5.4-mini` changed the board for 8–10 of 60 ambient cases and asked a question for 12–14 | Done and deployed 2026-11-06 (`launch-010a9b7`): prompt 2.12 leaves all 60 alone; the known list is empty | Engineering / Product | Verified | `evals/voice-intent/semantic-negatives.known-false-accepts.v1.json` | Keep tightening the prompt until the known list is empty, without losing real commands. |
 | RGB-014 | New `catalogDock` E2E is uncommitted & never run; CI can't show E2E is a required merge check | Done 2026-11-05 | Engineering | Verified | `apps/web/e2e/catalogDock.spec.ts` (uncommitted, +235 lines); Playwright not in the fast verify path | Run it before committing the dock diff; make the E2E job a required check on the release branch. |
 
 ### Security hardening (mediums)
@@ -886,7 +886,7 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - **Tags:** the `launch-e9912d6` tags were removed; only the serving revisions keep one.
   - **Rollback:** both services to `launch-e9912d6`.
   - **Not yet checked in production:** creating, opening and turning off a real link from a signed-in board.
-- **2026-11-06** — RGB-038: Airo leaves meeting talk alone (intent prompt 2.12; not yet deployed):
+- **2026-11-06** — RGB-038: Airo leaves meeting talk alone (intent prompt 2.12; deployed as `launch-010a9b7`, see below):
   - **Problem:** with prompt 2.11, Luna answered 7 of the 60 meeting-talk cases although nobody spoke to Airo. Four got a question ("the service talks to the database through the queue", "there is a queue between the API and the workers", "the arrow in that diagram points the wrong way I think", "insert a slide about churn after the revenue one"). Two got "can't do that" ("can you make the font bigger in the doc you're sharing", "make it black and white for the printout"). One restated the board and came back as an empty plan the API rejected. None changed the board.
   - **Prompt changes (`apps/api/src/semanticIntent/openaiResponses.ts`):** these sit in the "is this for the board?" test, not in the planning rules. The planning rules were tried first and made real commands ask more often.
     - Speech that restates the board is not_board_command, never an empty plan.
@@ -905,3 +905,10 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - Earlier drafts were rejected because they made "Airo add 21 circles", "place the order before the discount expires" or "add the document to the shared drive" worse.
   - **Test fix:** the brand-narrative case accepts "lands on" and "lands to" for "the user lands to the Airboard page", as its sister case already does. The new prompt picks "lands on" where 2.11 picked "redirects"; the diagram is otherwise identical.
   - **Gate:** the replay is re-recorded (60 quiet) and the known list is empty, so any meeting case that stops being quiet now fails CI. The gate's own test no longer assumes the list has an entry.
+- **2026-11-06** — Deployed `launch-010a9b7` (intent prompt 2.12) to the API only:
+  - **Unchanged:** the web stays on `launch-7fa8ff1`, and no migration was pending.
+  - **Staged checks:** `/ready` reported the database and `boardFanOut` ready. `/intent/config` lists only `gpt-5.6-luna`. An unauthenticated intent request is refused, and share links still answer.
+  - **After promoting:** production `/ready` is ready, and `pnpm launch:check:deployed` reports READY, 21 of 21.
+  - **Tags:** the `launch-7fa8ff1-api` tag was removed.
+  - **Rollback:** the API to `launch-7fa8ff1`.
+  - **Not yet checked in production:** a spoken command in a live meeting, which needs a signed-in board.
