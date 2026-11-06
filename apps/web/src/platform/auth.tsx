@@ -47,9 +47,24 @@ export type AirboardAccount = {
     role: "owner" | "admin" | "billing" | "member" | "viewer";
   };
   workspace: { id: string; name: string; isDefault?: boolean } | null;
+  /** Admin → Organization policy; absent from accounts loaded before it existed. */
+  policy?: OrganizationPolicy;
   trial: { status: string; activatedAt: string | null; expiresAt: string | null } | null;
   entitlement: { plan: string; status: string; validUntil: string | null } | null;
 };
+
+export type OrganizationPolicy = {
+  externalGuestsAllowed: boolean;
+  voiceEnabled: boolean;
+  cameraEnabled: boolean;
+  gestureEnabled: boolean;
+  exportsEnabled: boolean;
+};
+
+/** Owners, admins and members change boards; Viewer and Billing members only look. */
+export function canEditBoards(role: string | null | undefined): boolean {
+  return role === "owner" || role === "admin" || role === "member";
+}
 
 type AuthValue = {
   loading: boolean;

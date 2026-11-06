@@ -24,8 +24,23 @@ const { registerTranscriptionRoutes } = await import("../src/transcription/route
 
 const origin = "https://airboard.test";
 
-function fakeAuth({ entitledOrganizations = [], failWith } = {}) {
+function fakeAuth({ entitledOrganizations = [], failWith, voiceOffOrganizations = [] } = {}) {
   return {
+    // Only the organization_policies read organizationPolicy makes.
+    client: {
+      from: () => {
+        let organizationId = null;
+        const query = {
+          select: () => query,
+          eq: (_column, value) => { organizationId = value; return query; },
+          maybeSingle: async () => ({
+            data: { voice_enabled: !voiceOffOrganizations.includes(organizationId) },
+            error: null,
+          }),
+        };
+        return query;
+      },
+    },
     async authenticate(request) {
       if (failWith) throw failWith;
       const header = request.headers.authorization;
@@ -252,9 +267,11 @@ test("voice stops when a person's daily minutes run out", { timeout: 5_000 }, as
   t.mock.timers.enable({ apis: ["setInterval"] });
   const charges = [];
   let blocksLeft = 2;
+  const signedIn = fakeAuth({ entitledOrganizations: ["org-a"] });
   const auth = {
-    ...fakeAuth({ entitledOrganizations: ["org-a"] }),
+    ...signedIn,
     client: {
+      ...signedIn.client,
       async rpc(name, params) {
         charges.push({ name, ...params });
         if (blocksLeft <= 0) return { data: null, error: null };
@@ -289,4 +306,18 @@ test("voice stops when a person's daily minutes run out", { timeout: 5_000 }, as
   assert.equal(refused.code, "DAILY_VOICE_LIMIT");
   assert.match(refused.message, /midnight UTC/);
   client.socket.close();
+});
+
+test("an admin who turns voice off stops new voice tickets for the whole organization", { timeout: 5_000 }, async (t) => {
+  const url = await startServer(t, {
+    auth: fakeAuth({ entitledOrganizations: ["org-quiet", "org-loud"], voiceOffOrganizations: ["org-quiet"] }),
+  });
+  const api = url.replace("ws://", "http://").replace("/transcription/ws", "");
+  const ticketFor = (user) =>
+    fetch(`${api}/transcription/ticket`, { method: "POST", headers: { authorization: `Bearer user:${user}` } });
+
+  const refused = await ticketFor("quiet");
+  assert.equal(refused.status, 403);
+  assert.equal((await refused.json()).error, "VOICE_DISABLED_BY_ADMIN");
+  assert.equal((await ticketFor("loud")).status, 200);
 });

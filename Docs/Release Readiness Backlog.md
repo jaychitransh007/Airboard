@@ -989,3 +989,13 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - **Not yet checked in production:**
     - A signed-in command hitting the allowance.
     - A voice stream being charged.
+- **2026-11-06** — Fixed the eight medium-risk gaps from the threat model (not deployed yet):
+  - **Viewer and Billing are read-only:** the API refuses their board create, save, trash, restore, upload, asset delete, share-link and live-session start (`BOARD_READ_ONLY_ROLE`); the web opens boards for them view-only.
+  - **Admin switches enforced:** External guests on live joins and view-only links; Voice on voice tickets; camera, gestures and exports in the browser. `/me` now returns the policy.
+  - **Session history:** migration `20261106150000` keeps board-less sessions to their owner and deletes a board's sessions when it is purged.
+  - **Security headers:** per-request nonce CSP, framing refused except the Meet overlay engine, nosniff, Referrer-Policy, Permissions-Policy, HSTS (`Docs/Security Headers.md`).
+  - **Photos:** every image is re-encoded without metadata.
+  - **Share links:** stop when their maker leaves, is suspended or loses the editing role; admins list and turn off every link.
+  - **Uploads:** 2 GiB per workspace (migration `20261106160000`), 30 starts a minute per person, hourly sweep of abandoned uploads, HEIC sized before decoding.
+  - **Live links:** 2 hours instead of 6, and kept out of the address bar.
+  - **Still open:** guests view-only by default and a "New link" button for live links; a 90-day cap for "until turned off" view-only links.

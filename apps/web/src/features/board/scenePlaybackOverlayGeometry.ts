@@ -5,7 +5,8 @@ import type {
 } from "@airboard/core";
 import type { BoardViewport } from "./boardViewport.ts";
 
-const INTERACTIVE_EMBED_HOSTS = new Set([
+// Also the page's CSP frame-src (src/platform/securityHeaders.ts).
+export const INTERACTIVE_EMBED_HOSTS: ReadonlySet<string> = new Set([
   "airtable.com",
   "coda.io",
   "codepen.io",

@@ -23,6 +23,9 @@ required to operate and secure the service.
 Active boards remain until deletion. Deleted boards are purged after the
 organization recovery window.
 
+Photos you add to a board are saved without their hidden details, such as where
+and when they were taken or which camera took them.
+
 ## Camera, microphone, and providers
 
 Raw camera and microphone media is processed live and is not stored by

@@ -8,12 +8,13 @@ import { AirboardPrototype } from "../board/AirboardPrototype";
 import type { BoardShareAccess, BoardVisibility } from "../board/ShareDialog";
 import type { ViewLink, ViewLinkControls } from "../board/ViewLinksSection";
 import { requestBoardSessionStart } from "../board/boardSync";
-import { liveLinkFromBoardAddress, savedBoardLink } from "../board/shareLinks";
+import { liveLinkFromBoardAddress, rememberedLiveSession, savedBoardLink } from "../board/shareLinks";
 import { AirboardApiError, airboardApi } from "../../platform/api";
-import { useAirboardAuth } from "../../platform/auth";
+import { canEditBoards, useAirboardAuth } from "../../platform/auth";
 import { AIRBOARD_API_URL } from "../../platform/config";
 import { prepareDurableBoard } from "./boardPreparation";
 import { PilotExtensionButton } from "./OneTapRequestButton";
+import { ViewOnlyBoard } from "./ViewOnlyBoard";
 
 const SAVE_RETRY_BASE_MS = 1_000;
 const SAVE_RETRY_MAX_MS = 30_000;
@@ -27,7 +28,17 @@ type SaveNotice =
   | { kind: "failed"; message: string }
   | { kind: "conflict" };
 
+/**
+ * A signed-in person's board. Viewer and Billing members get the view-only
+ * board: no live session, no saving, no tools.
+ */
 export function AuthenticatedAirboard({ boardId, templateId }: { boardId?: string; templateId?: string }) {
+  const auth = useAirboardAuth();
+  if (auth.account && !canEditBoards(auth.account.organization.role)) return <ViewOnlyBoard boardId={boardId} />;
+  return <EditableAirboard {...(boardId ? { boardId } : {})} {...(templateId ? { templateId } : {})} />;
+}
+
+function EditableAirboard({ boardId, templateId }: { boardId?: string; templateId?: string }) {
   const auth = useAirboardAuth();
   const router = useRouter();
   const [ready, setReady] = useState(false);
@@ -58,7 +69,7 @@ export function AuthenticatedAirboard({ boardId, templateId }: { boardId?: strin
     // board starts it now, alongside the board load, instead of after the
     // canvas mounts. An address that names a session to rejoin skips this.
     pendingSessionStartRef.current = null;
-    if (boardId && !new URLSearchParams(window.location.search).get("boardSessionId")) {
+    if (boardId && !new URLSearchParams(window.location.search).get("boardSessionId") && !rememberedLiveSession(boardId)) {
       const pending = requestBoardSessionStart({ apiBaseUrl: AIRBOARD_API_URL, accessToken, boardId, title: "Airboard" });
       pending.catch(() => undefined);
       pendingSessionStartRef.current = pending;
@@ -302,7 +313,7 @@ export function AuthenticatedAirboard({ boardId, templateId }: { boardId?: strin
   };
   return (
     <>
-      <AirboardPrototype surface="standalone" accessToken={auth.accessToken} accountUserId={auth.account.profile.id} persistentBoardId={board.id} persistentWorkspaceId={board.workspace_id} pendingSessionStart={pendingSessionStartRef.current} boardTitle={board.title} persistentSaveStatus={saveStatus} initialBoardState={normalizeBoardState(board.latest_state, board.id)} onPersistentBoardChange={persist} onRenameBoard={renameBoard} onDeleteBoard={deleteBoard} shareAccess={shareAccess} {...(templateId ? { initialTemplateId: templateId } : {})} {...(auth.account.profile.preferences ? { initialPreferences: auth.account.profile.preferences } : {})} />
+      <AirboardPrototype surface="standalone" accessToken={auth.accessToken} accountUserId={auth.account.profile.id} persistentBoardId={board.id} persistentWorkspaceId={board.workspace_id} pendingSessionStart={pendingSessionStartRef.current} boardTitle={board.title} persistentSaveStatus={saveStatus} initialBoardState={normalizeBoardState(board.latest_state, board.id)} onPersistentBoardChange={persist} onRenameBoard={renameBoard} onDeleteBoard={deleteBoard} shareAccess={shareAccess} {...(auth.account.policy ? { organizationPolicy: auth.account.policy } : {})} {...(templateId ? { initialTemplateId: templateId } : {})} {...(auth.account.profile.preferences ? { initialPreferences: auth.account.profile.preferences } : {})} />
       {saveNotice ? (
         <div className="board-save-warning" role={saveNotice.kind === "conflict" ? "alert" : "status"}>
           {saveNotice.kind === "conflict" ? (
@@ -341,6 +352,8 @@ function BoardUnavailable({ code }: { code: string }) {
           ? "Airboard can't be reached right now. Check your connection and try again."
           : code === "BOARD_NOT_FOUND"
             ? "This board doesn't exist or isn't shared with your workspace."
+            : code === "BOARD_READ_ONLY_ROLE"
+              ? "Your role in this workspace can view boards but not change them. Ask an admin if you need to edit."
             : "Something went wrong while preparing the canvas. Please try again."}
       </span>
       <span className="product-loading-actions">
@@ -353,10 +366,11 @@ function BoardUnavailable({ code }: { code: string }) {
 }
 
 function retryableSaveFailure(code: string): boolean {
-  return code !== "BOARD_STATE_TOO_LARGE" && code !== "BOARD_NOT_FOUND";
+  return code !== "BOARD_STATE_TOO_LARGE" && code !== "BOARD_NOT_FOUND" && code !== "BOARD_READ_ONLY_ROLE";
 }
 
 function saveFailureMessage(code: string): string {
+  if (code === "BOARD_READ_ONLY_ROLE") return "Your role in this workspace can view boards but not change them, so these changes can't be saved.";
   if (code === "BOARD_STATE_TOO_LARGE") return "This board is too large to save. Remove some media or split it into another board.";
   if (code === "BOARD_NOT_FOUND") return "This board was deleted elsewhere, so these changes can't be saved.";
   if (code === "NETWORK_UNAVAILABLE") return "Can't reach Airboard. Your changes are safe in this tab.";

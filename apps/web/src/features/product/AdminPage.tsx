@@ -57,8 +57,58 @@ function PoliciesAdmin() {
   const [message, setMessage] = useState<string | null>(null);
   useEffect(() => { if (!auth.accessToken) return; void airboardApi<{ policy: Record<string, unknown> }>("/organization/policies", { accessToken: auth.accessToken }).then(({ policy: value }) => { if (!value) return; setPolicy({ externalGuestsAllowed: value.external_guests_allowed !== false, voiceEnabled: value.voice_enabled !== false, cameraEnabled: value.camera_enabled !== false, gestureEnabled: value.gesture_enabled !== false, exportsEnabled: value.exports_enabled !== false, contentRetentionDays: Number(value.content_retention_days ?? 30) }); }); }, [auth.accessToken]);
   const save = async () => { if (!auth.accessToken) return; await airboardApi("/organization/policies", { method: "PATCH", accessToken: auth.accessToken, body: JSON.stringify(policy) }); setMessage("Organization policy updated and recorded in the audit log."); };
-  const toggles: Array<[string, keyof Omit<typeof policy, "contentRetentionDays">]> = [["External guests","externalGuestsAllowed"],["Voice commands","voiceEnabled"],["Camera and gesture input","cameraEnabled"],["Gesture control","gestureEnabled"],["Exports","exportsEnabled"]];
-  return <div><section className="app-page-heading"><p className="eyebrow">Guardrails</p><h1>Organization policy</h1><p>Central controls are returned to every connected installation.</p></section><div className="policy-panel">{toggles.map(([label,key]) => <label className="setting-toggle" key={key}><div><strong>{label}</strong><span>Allowed for organization members and supported installations.</span></div><input type="checkbox" checked={policy[key]} onChange={(event) => setPolicy({ ...policy, [key]: event.target.checked })} /></label>)}<label>Deleted-board recovery window (days)<span>Soft-deleted boards are permanently purged by the lifecycle job after this window.</span><input type="number" min="1" max="3650" value={policy.contentRetentionDays} onChange={(event) => setPolicy({ ...policy, contentRetentionDays: Number(event.target.value) })} /></label><button className="button button-primary" onClick={() => void save()}>Save policy</button><FormStatus message={message} /></div></div>;
+  const toggles: Array<[string, keyof Omit<typeof policy, "contentRetentionDays">, string]> = [
+    ["External guests", "externalGuestsAllowed", "People outside the workspace can join live boards and open view-only links. When off, only signed-in members can join, and every view-only link stops working until it's turned back on."],
+    ["Voice commands", "voiceEnabled", "Airo listens for spoken commands. When off, voice is refused for everyone in the workspace; typed commands still work."],
+    ["Camera and gesture input", "cameraEnabled", "The camera, used for hand gestures, in Airboard and the Meet extension."],
+    ["Gesture control", "gestureEnabled", "Hand gestures in Airboard and the Meet extension."],
+    ["Exports", "exportsEnabled", "Downloading or copying boards as PNG or PDF. When off, those buttons stop working. People can still take screenshots."],
+  ];
+  return <div><section className="app-page-heading"><p className="eyebrow">Guardrails</p><h1>Organization policy</h1><p>These apply to everyone in the workspace, in Airboard and the Meet extension.</p></section><div className="policy-panel">{toggles.map(([label,key,detail]) => <label className="setting-toggle" key={key}><div><strong>{label}</strong><span>{detail}</span></div><input type="checkbox" checked={policy[key]} onChange={(event) => setPolicy({ ...policy, [key]: event.target.checked })} /></label>)}<label>Deleted-board recovery window (days)<span>Soft-deleted boards are permanently purged by the lifecycle job after this window.</span><input type="number" min="1" max="3650" value={policy.contentRetentionDays} onChange={(event) => setPolicy({ ...policy, contentRetentionDays: Number(event.target.value) })} /></label><button className="button button-primary" onClick={() => void save()}>Save policy</button><FormStatus message={message} /></div><ShareLinksAdmin /></div>;
+}
+
+type AdminShareLink = { id: string; boardId: string; boardTitle: string; createdBy: string; createdAt: string; expiresAt: string | null };
+
+/** Every working view-only link in the workspace, so an admin can turn any of them off. */
+function ShareLinksAdmin() {
+  const auth = useAirboardAuth();
+  const [links, setLinks] = useState<AdminShareLink[] | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  useEffect(() => {
+    if (!auth.accessToken) return;
+    void airboardApi<{ links: AdminShareLink[] }>("/organization/share-links", { accessToken: auth.accessToken })
+      .then((result) => setLinks(result.links))
+      .catch(() => setMessage("View-only links could not be loaded. Reload the page to try again."));
+  }, [auth.accessToken]);
+  const turnOff = async (link: AdminShareLink) => {
+    if (!auth.accessToken) return;
+    try {
+      await airboardApi(`/organization/share-links/${encodeURIComponent(link.id)}`, { method: "DELETE", accessToken: auth.accessToken });
+      setLinks((current) => (current ?? []).filter((item) => item.id !== link.id));
+      setMessage(`Turned off a view-only link to “${link.boardTitle}”. It is recorded in the audit log.`);
+    } catch {
+      setMessage("The link was not turned off. Check your connection and try again.");
+    }
+  };
+  return (
+    <section className="admin-share-links" aria-labelledby="admin-share-links-title">
+      <h2 id="admin-share-links-title">View-only links</h2>
+      <p>Links people in this workspace made so anyone can view a board. A link also stops working when the person who made it leaves the workspace, is suspended or becomes a Viewer.</p>
+      <FormStatus message={message} />
+      {links === null ? (message ? null : <p>Loading links…</p>) : links.length ? (
+        <div className="data-table">
+          <div className="table-head"><span>Board</span><span>Made by</span><span>Action</span></div>
+          {links.map((link) => (
+            <div key={link.id}>
+              <span><strong>{link.boardTitle}</strong><small>{link.expiresAt ? `Expires ${new Date(link.expiresAt).toLocaleDateString()}` : "Until turned off"}</small></span>
+              <span>{link.createdBy}</span>
+              <span><button type="button" onClick={() => void turnOff(link)} aria-label={`Turn off view-only link to ${link.boardTitle}`}>Turn off</button></span>
+            </div>
+          ))}
+        </div>
+      ) : <p>No working view-only links.</p>}
+    </section>
+  );
 }
 
 function IdentityDirectoryAdmin() {

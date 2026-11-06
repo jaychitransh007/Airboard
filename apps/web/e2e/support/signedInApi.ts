@@ -36,13 +36,16 @@ type StoredInvitation = { id: string; email: string; role: string; createdAt: st
  * and boardShareRoutes.ts; sign-in, the account and live sessions still reach
  * the real API. The routes' own behaviour is covered by the API's tests.
  */
-export async function signIn(page: Page, options: { workspace?: "personal" | "team"; boards?: SavedBoardSeed[] } = {}) {
+export async function signIn(
+  page: Page,
+  options: { workspace?: "personal" | "team"; role?: "owner" | "admin" | "member" | "viewer" | "billing"; boards?: SavedBoardSeed[] } = {},
+) {
   const development = await page.request.post(`${API_ORIGIN}/auth/development`);
   const { accessToken } = (await development.json()) as { accessToken: string };
   const account = await page.request.get(`${API_ORIGIN}/me`, { headers: { Authorization: `Bearer ${accessToken}` } });
   const { profile } = (await account.json()) as { profile: { id: string; email: string | null } };
   const api = new StandInControlPlane(profile.id, options.boards ?? []);
-  await page.context().route(`${API_ORIGIN}/**`, (route) => api.handle(route, options.workspace ?? "personal"));
+  await page.context().route(`${API_ORIGIN}/**`, (route) => api.handle(route, options.workspace ?? "personal", options.role ?? "owner"));
   return api;
 }
 
@@ -103,7 +106,7 @@ export class StandInControlPlane {
     );
   }
 
-  async handle(route: Route, workspace: "personal" | "team") {
+  async handle(route: Route, workspace: "personal" | "team", role: string) {
     const request = route.request();
     const url = new URL(request.url());
     const method = request.method();
@@ -114,7 +117,7 @@ export class StandInControlPlane {
     if (url.pathname === "/me" && method === "GET" && workspace === "team") {
       const response = await route.fetch();
       const account = (await response.json()) as { organization: Record<string, unknown> };
-      account.organization = { ...account.organization, name: "Acme Product", slug: "acme-product", kind: "team", role: "owner" };
+      account.organization = { ...account.organization, name: "Acme Product", slug: "acme-product", kind: "team", role };
       return route.fulfill({ response, json: account });
     }
     if (path[0] === "boards") return this.boardRoute(route, method, path, url, body);
@@ -134,6 +137,7 @@ export class StandInControlPlane {
       });
     }
     if (path[0] === "organization" && path[1] === "invitations") return this.invitationRoute(route, method, path, body);
+    if (path[0] === "organization" && path[1] === "share-links") return this.organizationLinkRoute(route, method, path);
     return route.fallback();
   }
 
@@ -198,6 +202,28 @@ export class StandInControlPlane {
     }
     if (path.length === 4 && method === "DELETE") {
       const link = this.activeLinks(board.id).find((candidate) => candidate.id === path[3]);
+      if (!link) return json(route, 404, { error: "SHARE_LINK_NOT_FOUND" });
+      link.revoked = true;
+      return route.fulfill({ status: 204, headers: corsHeaders(route) });
+    }
+    return route.fallback();
+  }
+
+  /** Admin → Policy's list of every working view-only link, and its Turn off. */
+  private organizationLinkRoute(route: Route, method: string, path: string[]) {
+    if (path.length === 2 && method === "GET") {
+      const links = [...this.boards.values()].flatMap((board) => this.activeLinks(board.id).map((link) => ({
+        id: link.id,
+        createdAt: link.createdAt,
+        expiresAt: link.expiresAt,
+        boardId: board.id,
+        boardTitle: board.title,
+        createdBy: "Acme Owner",
+      })));
+      return json(route, 200, { links });
+    }
+    if (path.length === 3 && method === "DELETE") {
+      const link = this.links.find((candidate) => candidate.id === path[2] && !candidate.revoked);
       if (!link) return json(route, 404, { error: "SHARE_LINK_NOT_FOUND" });
       link.revoked = true;
       return route.fulfill({ status: 204, headers: corsHeaders(route) });

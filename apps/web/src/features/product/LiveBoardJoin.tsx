@@ -48,6 +48,10 @@ function LiveJoinProblem({ failure }: { failure: JoinFailure }) {
       title: "This live session has ended",
       body: "Ask the person who shared it to open their board and send a fresh live link from Share.",
     },
+    members_only: {
+      title: "Only this workspace's members can join",
+      body: "The board's workspace has turned off guests. Sign in with the account your workspace invited, then open the link again.",
+    },
     maintenance: {
       title: "Airboard is down for a short upgrade",
       body: "Live boards are paused for a few minutes. Try this link again shortly.",

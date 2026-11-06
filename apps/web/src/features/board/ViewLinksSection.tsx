@@ -48,10 +48,15 @@ export function ViewLinksSection({ controls, canCreate }: { controls: ViewLinkCo
       setLinks((current) => [result.link, ...(current ?? [])]);
       setStatus("View-only link created. Copy it now; Airboard shows each link only once.");
     } catch (caught) {
+      const code = caught instanceof Error ? caught.message : "";
       setProblem(
-        caught instanceof Error && /SHARE_LINK_LIMIT/.test(caught.message)
+        /SHARE_LINK_LIMIT/.test(code)
           ? "This board already has 20 links. Turn one off to make another."
-          : "The link was not created. Check your connection and try again.",
+          : /EXTERNAL_GUESTS_DISABLED/.test(code)
+            ? "Your workspace admin turned off sharing with people outside the workspace."
+            : /BOARD_READ_ONLY_ROLE/.test(code)
+              ? "Your role in this workspace can view boards but not share them."
+              : "The link was not created. Check your connection and try again.",
       );
     } finally {
       setBusy(false);

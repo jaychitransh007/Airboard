@@ -5,8 +5,8 @@
  * saved board and opens only for people the board's visibility allows.
  */
 
-/** Join tokens are issued for six hours by the API's /sessions/start. */
-export const LIVE_LINK_HOURS = 6;
+/** Join tokens are issued for two hours by the API's /sessions/start (JOIN_LINK_TTL_SECONDS). */
+export const LIVE_LINK_HOURS = 2;
 
 const GUEST_NAME_LIMIT = 40;
 
@@ -40,12 +40,13 @@ export function guestDisplayName(value: string | null | undefined): string {
 
 /**
  * Joining can fail because the link outlived its token, the host ended the
- * session, Airboard is down for a short upgrade, or the network is down; each
- * needs a different next step.
+ * session, the host's workspace admits only its members, Airboard is down for
+ * a short upgrade, or the network is down; each needs a different next step.
  */
-export function liveJoinFailure(message: string | undefined): "expired" | "ended" | "maintenance" | "offline" {
+export function liveJoinFailure(message: string | undefined): "expired" | "ended" | "members_only" | "maintenance" | "offline" {
   if (!message) return "offline";
   if (/MAINTENANCE/.test(message)) return "maintenance";
+  if (/EXTERNAL_GUESTS_DISABLED/.test(message)) return "members_only";
   if (/JOIN_TOKEN|HTTP_401/.test(message)) return "expired";
   if (/NOT_JOINABLE|NOT_FOUND|HTTP_404/.test(message)) return "ended";
   return "offline";
@@ -62,4 +63,42 @@ export function liveStartFailure(message: string | undefined): LiveStartFailure 
   if (message && /OWNER_ENTITLEMENT_REQUIRED/.test(message)) return "pilot_ended";
   if (message && /MAINTENANCE/.test(message)) return "maintenance";
   return "offline";
+}
+
+const LIVE_SESSION_KEY_PREFIX = "airboard.liveSession.";
+
+export type RememberedLiveSession = { boardSessionId: string; joinToken: string };
+
+/**
+ * The owner's live session for a saved board, kept for this tab only so a
+ * reload rejoins it. It stays out of the address bar: an address copied from
+ * there, or kept in browser history, must not let others edit the board.
+ */
+export function rememberLiveSession(boardId: string, session: RememberedLiveSession): void {
+  try {
+    window.sessionStorage.setItem(`${LIVE_SESSION_KEY_PREFIX}${boardId}`, JSON.stringify(session));
+  } catch {
+    // Storage can be off (private windows); a reload then starts a new session.
+  }
+}
+
+export function rememberedLiveSession(boardId: string): RememberedLiveSession | null {
+  try {
+    const value = JSON.parse(window.sessionStorage.getItem(`${LIVE_SESSION_KEY_PREFIX}${boardId}`) ?? "null") as unknown;
+    if (value && typeof value === "object") {
+      const { boardSessionId, joinToken } = value as Record<string, unknown>;
+      if (typeof boardSessionId === "string" && typeof joinToken === "string") return { boardSessionId, joinToken };
+    }
+  } catch {
+    // Unreadable or blocked storage counts as nothing remembered.
+  }
+  return null;
+}
+
+export function forgetLiveSession(boardId: string): void {
+  try {
+    window.sessionStorage.removeItem(`${LIVE_SESSION_KEY_PREFIX}${boardId}`);
+  } catch {
+    // Nothing to forget.
+  }
 }

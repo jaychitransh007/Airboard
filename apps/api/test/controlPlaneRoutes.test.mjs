@@ -265,7 +265,10 @@ function fakeAuth(client) {
     client,
     enabled: true,
     async authenticate(request) {
-      return request.headers.authorization === "Bearer owner" ? context : null;
+      if (request.headers.authorization === "Bearer owner") return context;
+      // "Bearer as-viewer" is the same person holding another role.
+      const role = /^Bearer as-(\w+)$/.exec(request.headers.authorization ?? "")?.[1];
+      return role ? { ...context, role } : null;
     },
     hasRole: (account, roles) => roles.includes(account.role),
     forgetProfile() {},
@@ -758,6 +761,7 @@ function shareTables() {
       boardRow({ id: "44444444-4444-4444-8444-444444444444", owner_profile_id: "77777777-7777-4777-8777-777777777777" }),
     ],
     board_shares: [],
+    organization_memberships: [{ id: "membership-owner", organization_id: ORG, profile_id: PROFILE, role: "owner", status: "active" }],
     board_assets: [
       { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", board_id: BOARD, organization_id: ORG, status: "ready", storage_path: `${ORG}/${BOARD}/a/one.png` },
       { id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", board_id: "44444444-4444-4444-8444-444444444444", organization_id: ORG, status: "ready", storage_path: "other.png" },
@@ -1041,4 +1045,146 @@ test("the development sign-in trusts only the connection's real loopback address
   // A caller-controlled Host header no longer counts.
   assert.equal(isLoopbackRequest({ socket: { remoteAddress: "10.0.0.5" }, hostname: "127.0.0.1.attacker.example" }), false);
   assert.equal(isLoopbackRequest({ socket: {} }), false);
+});
+
+test("Viewer and Billing members open boards but cannot change or share them", async (t) => {
+  const tables = shareTables();
+  tables.boards[0].visibility = "organization";
+  tables.board_versions = [];
+  const client = createFakeSupabase(tables);
+  const server = await buildApp(t, client, { appUrl: "https://app.airboard.test", trustedProxyHops: 0 });
+  const before = JSON.stringify(client.tables.boards);
+  for (const role of ["viewer", "billing"]) {
+    const as = (method, url, payload) =>
+      server.inject({ method, url, headers: { authorization: `Bearer as-${role}` }, ...(payload ? { payload } : {}) });
+    assert.equal((await as("GET", `/boards/${BOARD}`)).statusCode, 200, `${role} opens the board`);
+    for (const [method, url, payload] of [
+      ["POST", "/boards", { title: "New" }],
+      ["PATCH", `/boards/${BOARD}`, { version: 4, state: { nodes: ["changed"] } }],
+      ["PATCH", `/boards/${BOARD}`, { title: "Renamed" }],
+      ["DELETE", `/boards/${BOARD}`],
+      ["POST", `/boards/${BOARD}/restore`],
+      ["POST", `/boards/${BOARD}/share-links`, {}],
+    ]) {
+      const response = await as(method, url, payload);
+      assert.equal(response.statusCode, 403, `${role} ${method} ${url}`);
+      assert.equal(response.json().error, "BOARD_READ_ONLY_ROLE");
+    }
+  }
+  assert.equal(JSON.stringify(client.tables.boards), before, "nothing changed");
+  assert.equal(client.tables.board_shares.length, 0);
+});
+
+test("a view-only link stops when its maker leaves, is suspended or becomes a Viewer", async (t) => {
+  const client = createFakeSupabase(shareTables());
+  const server = await buildApp(t, client, { appUrl: "https://app.airboard.test", trustedProxyHops: 0 });
+  const created = await server.inject({ method: "POST", url: `/boards/${BOARD}/share-links`, headers: { authorization: "Bearer owner" }, payload: {} });
+  const token = created.json().url.split("/s/")[1];
+  const view = async () => (await server.inject({ method: "GET", url: `/shared-boards/${token}` })).statusCode;
+  const membership = client.tables.organization_memberships[0];
+
+  assert.equal(await view(), 200);
+  membership.status = "suspended";
+  assert.equal(await view(), 404, "suspended");
+  membership.status = "active";
+  membership.role = "viewer";
+  assert.equal(await view(), 404, "now a Viewer");
+  membership.role = "member";
+  assert.equal(await view(), 200, "a member's links work");
+  client.tables.organization_memberships = [];
+  assert.equal(await view(), 404, "left the workspace");
+});
+
+test("turning off external guests stops view-only links and refuses new ones", async (t) => {
+  const tables = shareTables();
+  tables.organization_policies = [{ organization_id: ORG, external_guests_allowed: true }];
+  const client = createFakeSupabase(tables);
+  const server = await buildApp(t, client, { appUrl: "https://app.airboard.test", trustedProxyHops: 0 });
+  const owner = { authorization: "Bearer owner" };
+  const created = await server.inject({ method: "POST", url: `/boards/${BOARD}/share-links`, headers: owner, payload: {} });
+  const token = created.json().url.split("/s/")[1];
+
+  client.tables.organization_policies[0].external_guests_allowed = false;
+  assert.equal((await server.inject({ method: "GET", url: `/shared-boards/${token}` })).statusCode, 404);
+  assert.equal((await server.inject({ method: "GET", url: `/shared-boards/${token}/assets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/content` })).statusCode, 404);
+  const refused = await server.inject({ method: "POST", url: `/boards/${BOARD}/share-links`, headers: owner, payload: {} });
+  assert.equal(refused.statusCode, 403);
+  assert.equal(refused.json().error, "EXTERNAL_GUESTS_DISABLED");
+
+  client.tables.organization_policies[0].external_guests_allowed = true;
+  assert.equal((await server.inject({ method: "GET", url: `/shared-boards/${token}` })).statusCode, 200, "back on, the link works again");
+});
+
+test("admins list and turn off every view-only link in their workspace, and only theirs", async (t) => {
+  const OTHER_BOARD = "44444444-4444-4444-8444-444444444444";
+  const FOREIGN_BOARD = "88888888-8888-4888-8888-888888888888";
+  const tables = shareTables();
+  tables.boards.push(boardRow({ id: FOREIGN_BOARD, organization_id: "99999999-9999-4999-8999-999999999999", title: "Elsewhere" }));
+  tables.profiles = [{ id: PROFILE, display_name: "Asha", email: "asha@airboard.test" }];
+  const link = (id, boardId, overrides = {}) => ({
+    id, board_id: boardId, token_hash: `hash-${id}`, role: "viewer", created_by: PROFILE,
+    expires_at: null, revoked_at: null, created_at: "2026-11-01T00:00:00.000Z", ...overrides,
+  });
+  tables.board_shares = [
+    link("aaaaaaaa-0000-4000-8000-000000000001", BOARD),
+    link("aaaaaaaa-0000-4000-8000-000000000002", OTHER_BOARD, { created_by: null, created_at: "2026-11-02T00:00:00.000Z" }),
+    link("aaaaaaaa-0000-4000-8000-000000000003", BOARD, { revoked_at: "2026-11-03T00:00:00.000Z" }),
+    link("aaaaaaaa-0000-4000-8000-000000000004", FOREIGN_BOARD),
+  ];
+  const client = createFakeSupabase(tables);
+  const server = await buildApp(t, client, { appUrl: "https://app.airboard.test", trustedProxyHops: 0 });
+  const owner = { authorization: "Bearer owner" };
+
+  const listed = await server.inject({ method: "GET", url: "/organization/share-links", headers: owner });
+  assert.equal(listed.statusCode, 200, listed.body);
+  assert.deepEqual(listed.json().links.map(({ id, boardTitle, createdBy }) => ({ id, boardTitle, createdBy })), [
+    { id: "aaaaaaaa-0000-4000-8000-000000000002", boardTitle: "Board", createdBy: "Former member" },
+    { id: "aaaaaaaa-0000-4000-8000-000000000001", boardTitle: "Checkout flow", createdBy: "Asha" },
+  ]);
+  assert.equal(JSON.stringify(listed.json()).includes("hash-"), false, "token hashes stay private");
+
+  for (const role of ["member", "viewer", "billing"]) {
+    const headers = { authorization: `Bearer as-${role}` };
+    assert.equal((await server.inject({ method: "GET", url: "/organization/share-links", headers })).statusCode, 403, role);
+    assert.equal((await server.inject({ method: "DELETE", url: "/organization/share-links/aaaaaaaa-0000-4000-8000-000000000001", headers })).statusCode, 403, role);
+  }
+  assert.equal((await server.inject({ method: "DELETE", url: "/organization/share-links/aaaaaaaa-0000-4000-8000-000000000004", headers: owner })).statusCode, 404, "another workspace's link");
+  assert.equal(client.tables.board_shares[3].revoked_at, null);
+
+  assert.equal((await server.inject({ method: "DELETE", url: "/organization/share-links/aaaaaaaa-0000-4000-8000-000000000002", headers: owner })).statusCode, 204);
+  assert.notEqual(client.tables.board_shares[1].revoked_at, null);
+  assert.deepEqual(client.tables.audit_events.map((event) => [event.action, event.metadata]), [["board.share_link_revoked", { byAdmin: true }]]);
+  assert.equal((await server.inject({ method: "DELETE", url: "/organization/share-links/aaaaaaaa-0000-4000-8000-000000000002", headers: owner })).statusCode, 404, "already off");
+});
+
+test("the hourly job sweeps abandoned uploads in every organization and fails the run when it can't", async (t) => {
+  const old = new Date(Date.now() - 2 * 86_400_000).toISOString();
+  const fresh = new Date().toISOString();
+  const asset = (id, organizationId, status, updatedAt) => ({
+    id, organization_id: organizationId, board_id: BOARD, status, updated_at: updatedAt, storage_path: `${organizationId}/${id}`,
+  });
+  const client = createFakeSupabase({
+    organization_policies: [],
+    board_assets: [
+      asset("stale-a", ORG, "pending", old),
+      asset("stale-b", "99999999-9999-4999-8999-999999999999", "failed", old),
+      asset("in-progress", ORG, "pending", fresh),
+      asset("kept", ORG, "ready", old),
+    ],
+  });
+  const server = await buildApp(t, client);
+  const run = () => server.inject({ method: "POST", url: "/internal/lifecycle/run", headers: { authorization: `Bearer ${CRON_SECRET}` } });
+
+  const response = await run();
+  assert.equal(response.statusCode, 200, response.body);
+  assert.deepEqual(response.json().abandonedUploads, { removed: 2, failures: 0 });
+  assert.deepEqual(client.tables.board_assets.map((row) => row.id), ["in-progress", "kept"]);
+  assert.deepEqual(client.storageCalls.flatMap((call) => call.paths).sort(), [`${ORG}/stale-a`, "99999999-9999-4999-8999-999999999999/stale-b"]);
+
+  client.tables.board_assets.push(asset("stale-c", ORG, "pending", old));
+  client.storageError = { message: "storage down", statusCode: "500" };
+  const failed = await run();
+  assert.equal(failed.statusCode, 500);
+  assert.deepEqual(failed.json().abandonedUploads, { removed: 0, failures: 1 });
+  assert.ok(client.tables.board_assets.some((row) => row.id === "stale-c"), "kept for the next run");
 });

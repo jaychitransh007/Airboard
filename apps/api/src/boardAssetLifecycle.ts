@@ -1,9 +1,19 @@
-import sharp, { type Metadata } from "sharp";
+import sharp, { type Metadata, type SharpOptions } from "sharp";
 import heicConvert from "heic-convert";
 
 export const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 export const MAX_IMAGE_BYTES = 32 * 1024 * 1024;
 export const MAX_IMAGE_PIXELS = 40_000_000;
+
+/**
+ * Bytes of board images and video one organization may keep (threat model
+ * A-6). Pending uploads count at their declared size, so concurrent starts
+ * cannot reserve past the limit. Exported so it can move to config later.
+ */
+export const DEFAULT_ORGANIZATION_ASSET_QUOTA_BYTES = 2 * 1024 * 1024 * 1024;
+
+/** Upload starts one person may make per minute, on each API instance. */
+export const UPLOAD_STARTS_PER_MINUTE = 30;
 
 export const IMAGE_MIME_TYPES = new Set([
   "image/png",
@@ -40,12 +50,16 @@ export type StoredObjectInfo = {
   metadata?: Record<string, unknown> | null;
 };
 
-export type BrowserImageResult = {
+export type BoardImageResult = {
   metadata: Record<string, unknown>;
-  normalized: null | {
+  /**
+   * The image re-encoded by sharp: EXIF orientation applied, colour converted
+   * to sRGB and no EXIF, GPS, XMP, IPTC or ICC data. These bytes replace the
+   * uploaded object, so the type here is what the row must record.
+   */
+  stored: {
     bytes: Buffer;
-    mimeType: "image/jpeg";
-    storagePath: string;
+    mimeType: string;
   };
 };
 
@@ -129,17 +143,19 @@ export function verifyStoredObject(asset: PendingBoardAsset, info: StoredObjectI
 }
 
 /**
- * Decode image headers server-side and normalize formats that browsers do not
- * render consistently. Sharp/libvips always supports TIFF in our runtime. HEIC
- * succeeds only on deployments whose libvips includes a HEVC decoder; a codec
- * failure is surfaced and the asset is never promoted to ready.
+ * Decodes an uploaded image server-side and re-encodes it with sharp, so the
+ * stored copy carries no EXIF, GPS, XMP or IPTC data (threat model A-8): view
+ * links serve these bytes to anyone holding them. PNG, JPEG, WebP and GIF keep
+ * their format, transparency and animation; TIFF and HEIC become JPEG, which
+ * every browser renders. Colour is converted to sRGB and the profile dropped.
+ * Sharp/libvips always supports TIFF in our runtime. HEIC decodes natively
+ * only where libvips includes a HEVC decoder, otherwise through heic-convert.
  */
 export async function inspectAndNormalizeBoardImage(
   input: Buffer,
   mimeType: string,
-  storagePath: string,
   dependencies: ImageInspectionDependencies = {},
-): Promise<BrowserImageResult> {
+): Promise<BoardImageResult> {
   if (
     (mimeType === "image/heic" || mimeType === "image/heif") &&
     (dependencies.forceHeicFallback || !nativeHeicDecodeAvailable())
@@ -147,7 +163,6 @@ export async function inspectAndNormalizeBoardImage(
     return inspectAndNormalizeHeic(
       input,
       mimeType,
-      storagePath,
       dependencies.convertHeic ?? convertHeicToJpeg,
     );
   }
@@ -155,104 +170,267 @@ export async function inspectAndNormalizeBoardImage(
   if (!expectedFormat) {
     throw new BoardAssetLifecycleError("BOARD_ASSET_UNSUPPORTED_IMAGE", 415);
   }
+  // Every frame of an animation is decoded, so the pixel limit bounds the
+  // whole animation, not just its first frame.
+  const decodeOptions: SharpOptions = {
+    animated: mimeType === "image/gif" || mimeType === "image/webp",
+    failOn: "error",
+    limitInputPixels: MAX_IMAGE_PIXELS,
+  };
 
   let metadata: Metadata;
   try {
-    metadata = await sharp(input, {
-      animated: mimeType === "image/gif",
-      failOn: "error",
-      limitInputPixels: MAX_IMAGE_PIXELS,
-    }).metadata();
-  } catch {
-    throw new BoardAssetLifecycleError(
-      requiresNormalization(mimeType)
-        ? "BOARD_ASSET_NORMALIZATION_UNAVAILABLE"
-        : "BOARD_ASSET_INVALID_IMAGE",
-      422,
-    );
+    metadata = await sharp(input, decodeOptions).metadata();
+  } catch (error) {
+    throw imageDecodeError(error, mimeType);
   }
-
   if (metadata.format !== expectedFormat) {
     throw new BoardAssetLifecycleError("BOARD_ASSET_MIME_MISMATCH", 422);
   }
-  const safeMetadata = imageMetadata(metadata);
-  if (!requiresNormalization(mimeType)) {
-    return { metadata: safeMetadata, normalized: null };
+
+  let pipeline = sharp(input, decodeOptions);
+  // libvips cannot rotate multi-page images; GIF has no EXIF orientation and
+  // animated WebP with one does not occur in practice, so frames keep theirs.
+  if ((metadata.pages ?? 1) <= 1) pipeline = pipeline.autoOrient();
+  let storedMimeType = mimeType;
+  switch (mimeType) {
+    case "image/jpeg":
+      pipeline = pipeline.jpeg({
+        quality: 90,
+        chromaSubsampling: metadata.chromaSubsampling === "4:4:4" ? "4:4:4" : "4:2:0",
+      });
+      break;
+    case "image/png":
+      pipeline = pipeline.png({ palette: metadata.isPalette === true });
+      break;
+    case "image/webp":
+      pipeline = pipeline.webp(webpIsLossless(input) ? { lossless: true } : { quality: 90 });
+      break;
+    case "image/gif":
+      pipeline = pipeline.gif();
+      break;
+    default:
+      // TIFF and native HEIC: flatten onto white and hand browsers a JPEG.
+      pipeline = pipeline
+        .flatten({ background: "#ffffff" })
+        .jpeg({ quality: 90, mozjpeg: true });
+      storedMimeType = "image/jpeg";
   }
 
+  let bytes: Buffer;
   try {
-    const bytes = await sharp(input, {
-      failOn: "error",
-      limitInputPixels: MAX_IMAGE_PIXELS,
-    })
-      .rotate()
-      .flatten({ background: "#ffffff" })
-      .jpeg({ quality: 90, mozjpeg: true })
-      .toBuffer();
-    if (bytes.byteLength <= 0 || bytes.byteLength > MAX_IMAGE_BYTES) {
-      throw new BoardAssetLifecycleError("BOARD_ASSET_TOO_LARGE", 413);
-    }
-    return {
-      metadata: {
-        ...safeMetadata,
+    bytes = await pipeline.toBuffer();
+  } catch (error) {
+    throw imageDecodeError(error, mimeType);
+  }
+  assertStoredImageSize(bytes);
+  const storedMetadata = await storedImageMetadata(bytes, storedMimeType);
+  return {
+    metadata: storedMimeType === mimeType
+      ? storedMetadata
+      : {
+        ...storedMetadata,
+        sourceFormat: expectedFormat,
         normalizedFrom: mimeType,
         normalizedAt: new Date().toISOString(),
       },
-      normalized: {
-        bytes,
-        mimeType: "image/jpeg",
-        storagePath: browserSafeStoragePath(storagePath),
-      },
-    };
-  } catch (error) {
-    if (error instanceof BoardAssetLifecycleError) throw error;
-    throw new BoardAssetLifecycleError("BOARD_ASSET_NORMALIZATION_UNAVAILABLE", 422);
-  }
+    stored: { bytes, mimeType: storedMimeType },
+  };
 }
 
 async function inspectAndNormalizeHeic(
   input: Buffer,
   mimeType: "image/heic" | "image/heif",
-  storagePath: string,
   converter: typeof convertHeicToJpeg,
-): Promise<BrowserImageResult> {
+): Promise<BoardImageResult> {
   if (!hasHeicBrand(input)) {
     throw new BoardAssetLifecycleError("BOARD_ASSET_MIME_MISMATCH", 422);
   }
-  let bytes: Buffer;
+  // heic-convert decodes the whole image before any sharp limit applies, so
+  // read the declared size from the container first.
+  const dimensions = heifImageDimensions(input);
+  if (!dimensions) {
+    throw new BoardAssetLifecycleError("BOARD_ASSET_INVALID_IMAGE", 422);
+  }
+  if (dimensions.width * dimensions.height > MAX_IMAGE_PIXELS) {
+    throw new BoardAssetLifecycleError("BOARD_ASSET_TOO_LARGE", 413);
+  }
+  let converted: Buffer;
   try {
-    bytes = Buffer.from(await converter(input));
+    converted = Buffer.from(await converter(input));
   } catch {
     throw new BoardAssetLifecycleError("BOARD_ASSET_INVALID_IMAGE", 422);
   }
-  if (bytes.byteLength <= 0 || bytes.byteLength > MAX_IMAGE_BYTES) {
+  if (converted.byteLength <= 0 || converted.byteLength > MAX_IMAGE_BYTES) {
     throw new BoardAssetLifecycleError("BOARD_ASSET_TOO_LARGE", 413);
   }
   let metadata: Metadata;
   try {
-    metadata = await sharp(bytes, {
+    metadata = await sharp(converted, {
       failOn: "error",
       limitInputPixels: MAX_IMAGE_PIXELS,
     }).metadata();
-  } catch {
-    throw new BoardAssetLifecycleError("BOARD_ASSET_INVALID_IMAGE", 422);
+  } catch (error) {
+    throw imageDecodeError(error, "image/jpeg");
   }
   if (metadata.format !== "jpeg") {
     throw new BoardAssetLifecycleError("BOARD_ASSET_INVALID_IMAGE", 422);
   }
+  // The decoder already applied the container's rotation; re-encoding through
+  // sharp guarantees the stored copy carries no metadata whatever it emitted.
+  let bytes: Buffer;
+  try {
+    bytes = await sharp(converted, { failOn: "error", limitInputPixels: MAX_IMAGE_PIXELS })
+      .autoOrient()
+      .jpeg({ quality: 90 })
+      .toBuffer();
+  } catch (error) {
+    throw imageDecodeError(error, "image/jpeg");
+  }
+  assertStoredImageSize(bytes);
   return {
     metadata: {
-      ...imageMetadata(metadata),
+      ...(await storedImageMetadata(bytes, "image/jpeg")),
       sourceFormat: "heif",
       normalizedFrom: mimeType,
       normalizedAt: new Date().toISOString(),
     },
-    normalized: {
-      bytes,
-      mimeType: "image/jpeg",
-      storagePath: browserSafeStoragePath(storagePath),
-    },
+    stored: { bytes, mimeType: "image/jpeg" },
   };
+}
+
+/**
+ * Width and height declared by a HEIF/HEIC container's `ispe` properties
+ * (meta > iprp > ipco > ispe), read without decoding anything. Returns the
+ * largest image item (a grid's canvas is larger than its tiles), or null
+ * when the container declares no usable size.
+ */
+export function heifImageDimensions(input: Uint8Array): { width: number; height: number } | null {
+  const view = new DataView(input.buffer, input.byteOffset, input.byteLength);
+  let largest: { width: number; height: number } | null = null;
+  for (const meta of isoBoxes(view, 0, input.byteLength, "meta")) {
+    // meta is a FullBox: four bytes of version and flags precede its children.
+    for (const iprp of isoBoxes(view, meta.start + 4, meta.end, "iprp")) {
+      for (const ipco of isoBoxes(view, iprp.start, iprp.end, "ipco")) {
+        for (const ispe of isoBoxes(view, ipco.start, ipco.end, "ispe")) {
+          if (ispe.end - ispe.start < 12) return null;
+          const width = view.getUint32(ispe.start + 4);
+          const height = view.getUint32(ispe.start + 8);
+          if (width === 0 || height === 0) return null;
+          if (!largest || width * height > largest.width * largest.height) {
+            largest = { width, height };
+          }
+        }
+      }
+    }
+  }
+  return largest;
+}
+
+/** The child boxes of one ISO-BMFF box (or the file) with the given type. */
+function isoBoxes(
+  view: DataView,
+  start: number,
+  end: number,
+  type: string,
+): Array<{ start: number; end: number }> {
+  const found: Array<{ start: number; end: number }> = [];
+  let offset = start;
+  while (offset + 8 <= end) {
+    let size = view.getUint32(offset);
+    let header = 8;
+    if (size === 1) {
+      if (offset + 16 > end) break;
+      size = view.getUint32(offset + 8) * 2 ** 32 + view.getUint32(offset + 12);
+      header = 16;
+    } else if (size === 0) {
+      size = end - offset;
+    }
+    if (size < header || offset + size > end) break;
+    if (boxType(view, offset + 4) === type) {
+      found.push({ start: offset + header, end: offset + size });
+    }
+    offset += size;
+  }
+  return found;
+}
+
+function boxType(view: DataView, offset: number): string {
+  return String.fromCharCode(
+    view.getUint8(offset),
+    view.getUint8(offset + 1),
+    view.getUint8(offset + 2),
+    view.getUint8(offset + 3),
+  );
+}
+
+/**
+ * Whether a WebP's first frame is VP8L (lossless). Screenshots saved as
+ * lossless WebP stay lossless instead of gaining JPEG-style artefacts.
+ */
+function webpIsLossless(input: Uint8Array): boolean {
+  if (ascii(input, 0, 4) !== "RIFF" || ascii(input, 8, 12) !== "WEBP") return false;
+  const view = new DataView(input.buffer, input.byteOffset, input.byteLength);
+  return webpBitstream(view, 12, input.byteLength, true) === "lossless";
+}
+
+function webpBitstream(
+  view: DataView,
+  start: number,
+  end: number,
+  descend: boolean,
+): "lossless" | "lossy" | null {
+  let offset = start;
+  while (offset + 8 <= end) {
+    const type = boxType(view, offset);
+    const size = view.getUint32(offset + 4, true);
+    const payload = offset + 8;
+    if (type === "VP8L") return "lossless";
+    if (type === "VP8 ") return "lossy";
+    if (type === "ANMF" && descend) {
+      // An animation frame: a 16-byte header, then the frame's own chunks.
+      const frame = webpBitstream(view, payload + 16, Math.min(end, payload + size), false);
+      if (frame) return frame;
+    }
+    offset = payload + size + (size % 2);
+  }
+  return null;
+}
+
+function assertStoredImageSize(bytes: Buffer): void {
+  if (bytes.byteLength <= 0 || bytes.byteLength > MAX_IMAGE_BYTES) {
+    throw new BoardAssetLifecycleError("BOARD_ASSET_TOO_LARGE", 413);
+  }
+}
+
+/** Describes the re-encoded copy: what is stored, not what was uploaded. */
+async function storedImageMetadata(bytes: Buffer, mimeType: string): Promise<Record<string, unknown>> {
+  const metadata = await sharp(bytes, {
+    animated: mimeType === "image/gif" || mimeType === "image/webp",
+    limitInputPixels: false,
+  }).metadata();
+  return {
+    format: metadata.format ?? null,
+    width: metadata.width ?? null,
+    height: metadata.pageHeight ?? metadata.height ?? null,
+    pages: metadata.pages ?? 1,
+    hasAlpha: metadata.hasAlpha ?? false,
+    metadataStripped: true,
+  };
+}
+
+function imageDecodeError(error: unknown, mimeType: string): BoardAssetLifecycleError {
+  if (error instanceof BoardAssetLifecycleError) return error;
+  const message = error instanceof Error ? error.message : "";
+  if (/pixel limit/i.test(message)) {
+    return new BoardAssetLifecycleError("BOARD_ASSET_TOO_LARGE", 413);
+  }
+  return new BoardAssetLifecycleError(
+    requiresNormalization(mimeType)
+      ? "BOARD_ASSET_NORMALIZATION_UNAVAILABLE"
+      : "BOARD_ASSET_INVALID_IMAGE",
+    422,
+  );
 }
 
 async function convertHeicToJpeg(input: Buffer): Promise<Buffer> {
@@ -276,12 +454,6 @@ function hasHeicBrand(input: Uint8Array): boolean {
     if (accepted.has(ascii(input, offset, offset + 4).toLowerCase())) return true;
   }
   return false;
-}
-
-export function browserSafeStoragePath(storagePath: string): string {
-  const slash = storagePath.lastIndexOf("/");
-  const directory = slash >= 0 ? storagePath.slice(0, slash + 1) : "";
-  return `${directory}browser-safe.jpg`;
 }
 
 export function staleAssetCutoff(now = Date.now(), maximumAgeMs = 24 * 60 * 60 * 1_000): string {
@@ -317,17 +489,6 @@ function stringMetadata(
 ): string | null {
   const value = metadata?.[key];
   return typeof value === "string" ? value : null;
-}
-
-function imageMetadata(metadata: Metadata): Record<string, unknown> {
-  return {
-    format: metadata.format ?? null,
-    width: metadata.width ?? null,
-    height: metadata.height ?? null,
-    pages: metadata.pages ?? 1,
-    orientation: metadata.orientation ?? null,
-    hasAlpha: metadata.hasAlpha ?? false,
-  };
 }
 
 function ascii(input: Uint8Array, start: number, end: number): string {

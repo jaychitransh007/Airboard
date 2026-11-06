@@ -1060,7 +1060,10 @@ function describeTranscriptionCloseRefusal(reason: string): string | null {
   switch (reason) {
     case "ACTIVE_ENTITLEMENT_REQUIRED":
       return "Your pilot access has ended, so Airo voice is off. Typed commands and pointer edits still work.";
+    case "VOICE_DISABLED_BY_ADMIN":
+      return "Your workspace admin turned off voice. Typed commands and pointer edits still work.";
     case "AUTHORIZATION_UNAVAILABLE":
+    case "POLICY_UNAVAILABLE":
       return "Airo couldn't confirm your access just now. Turn Airo on again in a moment.";
     default:
       return null;

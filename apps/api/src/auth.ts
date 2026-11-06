@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient, type User } from "@supabase/supabase
 import { createHash } from "node:crypto";
 import type { ApiConfig } from "./config";
 import { installationTokenMatches } from "./installationCredential";
+import { DEFAULT_ORGANIZATION_POLICY, policyFromRow } from "./organizationPolicy";
 import { bearerToken, verifySignedToken } from "./signedTokens";
 
 export type AccountRole = "owner" | "admin" | "billing" | "member" | "viewer";
@@ -247,12 +248,13 @@ export class AuthService {
           role: context.role,
         },
         workspace: { id: "local-workspace", name: "My Airboards" },
+        policy: DEFAULT_ORGANIZATION_POLICY,
         trial: { status: "active", activatedAt: null, expiresAt: null },
         entitlement: { plan: "local", status: "active", validUntil: null },
       };
     }
 
-    const [profileResult, organizationResult, workspaceResult, trialResult, entitlementResult] =
+    const [profileResult, organizationResult, workspaceResult, trialResult, entitlementResult, policyResult] =
       await Promise.all([
         this.client.from("profiles").select("*").eq("id", context.profileId).single(),
         this.client.from("organizations").select("*").eq("id", context.organizationId).single(),
@@ -273,6 +275,11 @@ export class AuthService {
           .eq("organization_id", context.organizationId)
           .order("valid_until", { ascending: false })
           .limit(10),
+        this.client
+          .from("organization_policies")
+          .select("external_guests_allowed,voice_enabled,camera_enabled,gesture_enabled,exports_enabled")
+          .eq("organization_id", context.organizationId)
+          .maybeSingle(),
       ]);
     if (profileResult.error || organizationResult.error) {
       throw new Error("ACCOUNT_LOOKUP_FAILED");
@@ -306,6 +313,9 @@ export class AuthService {
       workspace: workspace
         ? { id: workspace.id, name: workspace.name, isDefault: workspace.is_default }
         : null,
+      // The browser applies the switches only it can: camera, gestures and
+      // downloads never reach the API.
+      policy: policyFromRow(policyResult.data),
       trial: trial
         ? {
             status: trial.status,
