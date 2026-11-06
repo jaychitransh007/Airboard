@@ -8,3 +8,10 @@ useDefault = true
 description = "Container image release tags"
 regexTarget = "match"
 regexes = ['''\b(api|web):launch-[0-9a-f]{7}\b''']
+
+# The same release names in prose ("the API, `launch-010a9b7`") put the word
+# API next to the name, which generic-api-key reads as a key and its value.
+[[allowlists]]
+description = "Release names flagged as the secret itself"
+regexTarget = "secret"
+regexes = ['''^launch-[0-9a-f]{7}$''']
