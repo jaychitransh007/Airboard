@@ -1,0 +1,81 @@
+import { expect, test, type Page } from "@playwright/test";
+import { signIn } from "./support/signedInApi";
+
+// RGB-039: in the live journey Airo drew a second "API" because the first one,
+// made by a typed command, was invisible to it.
+
+type SceneShape = { id: string; kind: string; status: string; shapeKind?: string; content?: { blocks: Array<{ runs: Array<{ text: string }> }> } };
+type SceneConnector = { id: string; kind: "connector"; status: string; legacyStrokeId?: string; start: { binding?: { elementId: string } }; end: { binding?: { elementId: string } } };
+
+function boardElements(page: Page) {
+  return page.evaluate(() =>
+    Object.values(
+      (window as never as { __airboardTestHooks: { getCanonicalBoardState(): { elements: Record<string, unknown> } } })
+        .__airboardTestHooks.getCanonicalBoardState().elements,
+    ),
+  ) as Promise<Array<SceneShape | SceneConnector>>;
+}
+
+const text = (element: SceneShape) => element.content?.blocks.map((block) => block.runs.map((run) => run.text).join("")).join("\n") ?? "";
+
+async function runCommand(page: Page, command: string) {
+  await page.getByTestId("intent-command-input").fill(command);
+  await page.getByTestId("intent-primary-action").click();
+  await expect(page.locator(".intent-feedback")).toContainText("Applied:", { timeout: 15_000 });
+}
+
+test("Airo connects to the API a typed command made instead of drawing a second one", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.setItem("airboard.onboarding.v1", "done"));
+  const api = await signIn(page, { boards: [{ title: "Mixed board", state: { elements: {}, strokes: {} } }] });
+  const sent: { summary: { objects: Array<{ label: string }> } | null } = { summary: null };
+  await page.route("**/intent/config", (route) => route.fulfill({
+    status: 200,
+    headers: { "access-control-allow-origin": "*" },
+    json: { available: true, provider: "test-provider", defaultModel: "test-model", allowedModels: ["test-model"] },
+  }));
+  await page.route("**/intent/resolve", (route) => {
+    sent.summary = (route.request().postDataJSON() as { context: typeof sent.summary }).context;
+    return route.fulfill({
+      status: 200,
+      headers: { "access-control-allow-origin": "*" },
+      json: {
+        plan: {
+          version: "1.1",
+          status: "resolved",
+          issueCode: "none",
+          clarificationQuestion: null,
+          missingSlots: [],
+          actions: [
+            { type: "create", nodeType: "database", label: "Database", handle: "db_1", placement: { kind: "auto" } },
+            { type: "connect", from: { kind: "visible_label", label: "API", occurrence: null }, to: { kind: "plan_handle", handle: "db_1" }, label: "talks to" },
+          ],
+        },
+        provider: "test-provider",
+        model: "test-model",
+        metadata: {
+          responseId: "resp_e2e", responseModel: "test-model", providerRequestId: "req_e2e", clientRequestId: "airboard:e2e:client",
+          providerProcessingMs: 5, totalLatencyMs: 10, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        },
+      },
+    });
+  });
+  await page.goto(`/app/boards/${api.boardId("Mixed board")}`);
+  await expect(page.getByTestId("share-board")).toBeVisible({ timeout: 30_000 });
+
+  await runCommand(page, "add a user");
+  await runCommand(page, "add an API next to the user");
+  await runCommand(page, "could you sketch a little database that the API talks to");
+
+  // Airo was told about the typed shapes...
+  expect(sent.summary?.objects.map(({ label }) => label)).toEqual(expect.arrayContaining(["User", "API"]));
+  // ...so there is still one API, and the new connector starts at it.
+  const elements = await boardElements(page);
+  const shapes = elements.filter((element): element is SceneShape => element.kind === "shape" && element.status === "active");
+  const apis = shapes.filter((shape) => text(shape) === "API");
+  expect(apis).toHaveLength(1);
+  const connectors = elements.filter((element): element is SceneConnector =>
+    element.kind === "connector" && element.status === "active" && !(element as SceneConnector).legacyStrokeId);
+  expect(connectors.some((connector) => connector.start.binding?.elementId === apis[0]!.id)).toBe(true);
+  // And it all reaches the saved board.
+  await expect.poll(() => JSON.stringify(api.saves.at(-1)?.state ?? null), { timeout: 10_000 }).toContain("talks to");
+});

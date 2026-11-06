@@ -6,7 +6,7 @@ categoryLabel: Troubleshooting and reference
 order: 17
 status: reference
 audiences: ["everyone", "admins", "security"]
-lastVerified: 2026-11-06
+lastVerified: 2026-11-07
 sources: ["Docs/Platform Support Matrix.md", "apps/api/src/config.ts", "apps/api/src/boardAssetLifecycle.ts", "apps/web/src/platform/distribution.ts", "Docs/Commercial Platform Runbook.md"]
 ---
 
@@ -30,6 +30,10 @@ Airo realtime transcription requires its configured provider and key. Semantic
 command recovery requires a separately configured intent provider. If those
 providers are unavailable, pointer, keyboard, and typed canonical commands
 remain available.
+
+Airo can connect, rename, move and delete shapes added from the toolbar or with
+typed commands. It can't yet align, distribute, lay out, duplicate or group
+them; use the toolbar for those.
 
 ## Default service limits
 
