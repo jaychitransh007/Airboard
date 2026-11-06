@@ -15,6 +15,7 @@ import {
   evaluateGestureBrowserEvidence,
   writeGestureBrowserEvidence,
 } from "../../../scripts/lib/gesture-browser-evidence.mjs";
+import { launchOptionsWith } from "./support/launchOptions";
 
 type BrowserReplayAsset = {
   id: string;
@@ -125,13 +126,11 @@ for (const asset of assets) {
   test.describe(`recorded gesture provider replay: ${asset.id}`, () => {
     const videoPath = restrictedVideoPath(asset);
     test.use({
-      launchOptions: {
-        args: [
-          "--use-fake-ui-for-media-stream",
-          "--use-fake-device-for-media-stream",
-          `--use-file-for-fake-video-capture=${videoPath}`,
-        ],
-      },
+      launchOptions: launchOptionsWith([
+        "--use-fake-ui-for-media-stream",
+        "--use-fake-device-for-media-stream",
+        `--use-file-for-fake-video-capture=${videoPath}`,
+      ]),
     });
 
     test(`runs ${asset.id} through video, HandLandmarker, arbitration, and board effects`, async ({

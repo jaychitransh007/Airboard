@@ -98,21 +98,21 @@
       "status": "pending",
       "owner": "Engineering",
       "evidence": "",
-      "notes": "Run and time a restore; record data validation."
+      "notes": "2026-11-06: daily Supabase backups confirmed (read-only listing); Storage files are not backed up and point-in-time recovery is off; targets and exercise options in Docs/Backup and Restore.md. Still needed: the owner picks a restore method, then run and time it."
     },
     "incident-exercise": {
       "description": "The team completes an incident and breach-notification tabletop exercise.",
       "status": "pending",
       "owner": "Founder",
       "evidence": "",
-      "notes": "Record roles, contacts, decisions and improvements."
+      "notes": "2026-11-06: runbook and five tabletop scenarios drafted in Docs/Incident and Breach Exercise.md. Still needed: run the walk-through with the founder and fill in its record; name a backup responder; counsel to confirm breach-notification duties."
     },
     "browser-matrix": {
       "description": "The promised standalone desktop browser and OS matrix passes with documented exclusions.",
       "status": "pending",
       "owner": "Product",
       "evidence": "",
-      "notes": "Test Chrome, Edge and Safari only where explicitly promised."
+      "notes": "2026-11-06: macOS Chrome 156 (current) and Chrome for Testing 155 (previous) pass the full browser suite (85 passed, 2 skipped by design); see Docs/Browser Matrix.md. Still needed: Windows Chrome and Edge runs and the manual device checks listed there."
     },
     "accessibility-audit": {
       "description": "Core non-media workflows pass an accessibility audit and published limitations are accurate.",
@@ -133,7 +133,7 @@
       "status": "pending",
       "owner": "Operations",
       "evidence": "",
-      "notes": "Connect a status provider before making uptime claims."
+      "notes": "2026-11-06: /status now shows live checks plus incidents from GitHub issues labelled `incident` (label created); process and templates in Docs/Status and Incident Updates.md. Still needed: deploy the web and the owner's acceptance of the posting targets."
     },
     "support-sla": {
       "description": "Published support hours and response targets match actual staffing.",

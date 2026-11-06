@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { launchOptionsWith } from "./support/launchOptions";
 
 /**
  * E2E path: the board keeps out of the way. The top bar is Share plus one
@@ -8,7 +9,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 // A fake camera and microphone, so Airo stays on instead of failing to start.
 test.use({
-  launchOptions: { args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] },
+  launchOptions: launchOptionsWith(["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"]),
   permissions: ["camera", "microphone"],
 });
 

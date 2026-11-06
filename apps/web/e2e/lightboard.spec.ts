@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 
 import { expect, test, type Page } from "@playwright/test";
+import { launchOptionsWith } from "./support/launchOptions";
 
 /**
  * E2E path: the lightboard (neon-on-dark) theme on the standalone surface —
@@ -12,9 +13,7 @@ import { expect, test, type Page } from "@playwright/test";
  */
 
 test.use({
-  launchOptions: {
-    args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"],
-  },
+  launchOptions: launchOptionsWith(["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"]),
 });
 
 async function openStandalone(page: Page) {
