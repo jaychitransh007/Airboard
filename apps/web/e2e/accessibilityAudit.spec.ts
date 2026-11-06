@@ -568,3 +568,18 @@ test("with reduced motion, nothing on the page animates", async ({ page }) => {
     expect(await moving(), `animations on ${path}`).toEqual([]);
   }
 });
+
+test("cards stay inside a 320px screen even when fonts run wide", async ({ page }) => {
+  // Linux CI fonts are wider than macOS's; widened letters stand in for them,
+  // so long words such as an email address can't push a card off-screen.
+  await page.setViewportSize({ width: 320, height: 800 });
+  for (const path of ["/accessibility", "/security", "/pricing", "/product"]) {
+    await page.goto(path);
+    await page.addStyleTag({ content: "* { letter-spacing: 0.6px !important; }" });
+    const overflowing = await page.evaluate(() =>
+      [...document.querySelectorAll("article, .feature-card, .pricing-card")]
+        .filter((element) => element.getBoundingClientRect().right > window.innerWidth + 1)
+        .map((element) => element.className));
+    expect(overflowing, path).toEqual([]);
+  }
+});
