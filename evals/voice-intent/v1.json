@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0",
-  "semanticPromptVersion": "2.12",
+  "semanticPromptVersion": "2.13",
   "description": "Airboard semantic voice-intent regression corpus for production plan contract 1.1 and semantic prompt 2.8. Every case is an independently replayable finalized voice turn.",
   "cases": [
     {
@@ -1718,6 +1718,35 @@
           "nodeCountDelta": 0,
           "edgeCountDelta": 0,
           "requiredNodes": [{ "label": "Orders API", "nodeType": "api" }]
+        }
+      }
+    },
+    {
+      "id": "two-shapes-side-by-side",
+      "description": "Two shapes side by side is a layout, never a two-object distribute that the validator would refuse and so lose the whole plan (RGB-041).",
+      "transcript": "Airo put the user and the API side by side",
+      "parserIssue": "unknown_command",
+      "context": {
+        "selectionCount": 1,
+        "selected": [{ "label": "API", "nodeType": "api", "ordinal": 1 }],
+        "objects": [
+          { "label": "User", "nodeType": "user", "ordinal": 1, "selected": false, "position": { "x": 160, "y": 120 }, "size": { "width": 120, "height": 120 } },
+          { "label": "API", "nodeType": "api", "ordinal": 1, "selected": true, "position": { "x": 160, "y": 310 }, "size": { "width": 160, "height": 90 } }
+        ],
+        "edges": [],
+        "projectGlossary": [],
+        "pointerAvailable": false
+      },
+      "expected": {
+        "status": "resolved",
+        "actionTypeCounts": { "layout": 1 },
+        "finalState": {
+          "nodeCountDelta": 0,
+          "edgeCountDelta": 0,
+          "requiredNodes": [
+            { "label": "User", "y": 120, "positionTolerance": 1 },
+            { "label": "API", "y": 105, "positionTolerance": 1 }
+          ]
         }
       }
     }

@@ -17,7 +17,8 @@ import {
 } from "./boardAssetLifecycle";
 import { resolveBoardLinkPreview } from "./boardLinkPreview";
 import { boardAccessFilter, canEditBoards } from "./boardAccess";
-import { clientKey, createRateLimiter } from "./security";
+import { clientKey } from "./security";
+import { createSharedRateLimiter } from "./sharedRateLimit";
 
 export const ASSET_BUCKET = "board-assets";
 const STALE_ASSET_CLEANUP_LIMIT = 25;
@@ -33,8 +34,10 @@ type JsonRecord = Record<string, unknown>;
 export type BoardContentRouteOptions = {
   /** Bytes of board assets one organization may keep (default 2 GiB). */
   organizationAssetQuotaBytes?: number;
-  /** Upload starts one person may make per minute on each instance (default 30). */
+  /** Upload starts one person may make per minute, across instances (default 30). */
   uploadStartsPerMinute?: number;
+  /** Keys the shared rate-limit hash: the session signing secret. */
+  rateLimitKeySecret?: string;
 };
 
 /**
@@ -48,9 +51,13 @@ export function registerBoardContentRoutes(
   options: BoardContentRouteOptions = {},
 ): void {
   const quotaBytes = options.organizationAssetQuotaBytes ?? DEFAULT_ORGANIZATION_ASSET_QUOTA_BYTES;
-  const uploadStartLimiter = createRateLimiter({
+  const uploadStartLimiter = createSharedRateLimiter({
+    bucket: "upload_start",
     windowMs: 60_000,
     max: options.uploadStartsPerMinute ?? UPLOAD_STARTS_PER_MINUTE,
+    client: auth.client,
+    keySecret: options.rateLimitKeySecret ?? "",
+    onError: (error) => server.log.warn({ err: error }, "shared upload rate limit could not be counted"),
   });
 
   server.post<{ Params: { boardId: string }; Body: unknown }>(
@@ -58,7 +65,7 @@ export function registerBoardContentRoutes(
     async (request, reply) => {
       const context = await requireBoardEditor(auth, request, reply);
       if (!context) return;
-      if (!uploadStartLimiter.allow(clientKey(request, { profileId: context.profileId }))) {
+      if (!(await uploadStartLimiter.allow(clientKey(request, { profileId: context.profileId })))) {
         return reply.code(429).send({ error: "RATE_LIMITED" });
       }
       if (!auth.client || !(await canAccessBoard(auth, context, request.params.boardId))) {

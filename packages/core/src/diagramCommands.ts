@@ -3,7 +3,12 @@ import { nodeVisualDefaultSize, pointOnNodeBoundary } from "./nodeVisuals.ts";
 import {
   connectElements,
   deleteElements,
+  duplicateElements,
+  groupElements,
+  isSceneNodeElement,
+  isSceneOnlyElement,
   moveElements,
+  positionElements,
   refreshAttachedConnectors,
   removeAttachedConnectors,
   renameElement,
@@ -219,6 +224,20 @@ export type SceneReverseConnectorCommand = {
   connectorId: string;
   label?: string;
 };
+/** Copies v2 elements, shifted by `offset`; `idMap` names the copies. */
+export type SceneDuplicateCommand = {
+  type: "scene.duplicate";
+  elementIds: string[];
+  idMap?: Record<string, string>;
+  offset?: AnnotationPoint;
+};
+/** Draws a section around v2 elements, as the toolbar's group does. */
+export type SceneGroupCommand = {
+  type: "scene.group";
+  sectionId?: string;
+  memberIds: string[];
+  label?: string;
+};
 
 export type DiagramCommand =
   | SceneConnectCommand
@@ -226,6 +245,8 @@ export type DiagramCommand =
   | SceneMoveCommand
   | SceneDeleteCommand
   | SceneReverseConnectorCommand
+  | SceneDuplicateCommand
+  | SceneGroupCommand
   | CreateNodeCommand
   | ConnectNodesCommand
   | AttachConnectionCommand
@@ -348,6 +369,12 @@ export function planDiagramCommand(
       break;
     case "scene.connector.reverse":
       reverseConnector(planner.sceneSink(), command.connectorId, command.label);
+      break;
+    case "scene.duplicate":
+      duplicateElements(planner.sceneSink(), command);
+      break;
+    case "scene.group":
+      groupElements(planner.sceneSink(), command);
       break;
   }
   // v2 connectors are drawn from stored end points: keep any attached to a
@@ -1019,12 +1046,10 @@ function planDuplicateObjects(planner: CommandPlanner, command: DuplicateObjects
 }
 
 function planAlignObjects(planner: CommandPlanner, command: AlignObjectsCommand): void {
-  const ids = unique(command.objectIds);
-  const strokes = ids.map((id) => planner.getStroke(id));
-  if (strokes.length < 2) {
+  const entries = arrangeEntries(planner, unique(command.objectIds));
+  if (entries.length < 2) {
     throw new DiagramCommandError("objects.align requires at least two objects");
   }
-  const entries = strokes.map((stroke) => ({ stroke, bounds: requireBounds(stroke) }));
   const updated = new Map<string, AnnotationBounds>();
 
   if (command.alignment === "distribute-x" || command.alignment === "distribute-y") {
@@ -1036,19 +1061,17 @@ function planAlignObjects(planner: CommandPlanner, command: AlignObjectsCommand)
     const anchor = entries[0]?.bounds;
     if (!anchor) return;
     for (const entry of entries.slice(1)) {
-      updated.set(entry.stroke.id, alignedBounds(entry.bounds, anchor, command.alignment));
+      updated.set(entry.id, alignedBounds(entry.bounds, anchor, command.alignment));
     }
   }
-  applyBoundsUpdates(planner, updated);
-  syncAttachedConnectors(planner, [...updated.keys()]);
+  applyArrangedBounds(planner, entries, updated);
 }
 
 function planLayoutObjects(planner: CommandPlanner, command: LayoutObjectsCommand): void {
-  const strokes = unique(command.objectIds).map((id) => planner.getStroke(id));
-  if (strokes.length === 0) {
+  const entries = arrangeEntries(planner, unique(command.objectIds));
+  if (entries.length === 0) {
     throw new DiagramCommandError("objects.layout requires at least one object");
   }
-  const entries = strokes.map((stroke) => ({ stroke, bounds: requireBounds(stroke) }));
   entries.sort((a, b) =>
     command.direction === "horizontal"
       ? a.bounds.x - b.bounds.x || a.bounds.y - b.bounds.y
@@ -1071,10 +1094,42 @@ function planLayoutObjects(planner: CommandPlanner, command: LayoutObjectsComman
       bounds.y = cursor;
       cursor += bounds.height + gap;
     }
-    updated.set(entry.stroke.id, bounds);
+    updated.set(entry.id, bounds);
   }
-  applyBoundsUpdates(planner, updated);
-  syncAttachedConnectors(planner, [...updated.keys()]);
+  applyArrangedBounds(planner, entries, updated);
+}
+
+type ArrangeEntry = { id: string; bounds: AnnotationBounds; scene: boolean };
+
+/** Align and layout arrange legacy nodes and v2 shapes alike. */
+function arrangeEntries(planner: CommandPlanner, ids: readonly string[]): ArrangeEntry[] {
+  return ids.map((id) => {
+    const element = planner.state.elements[id];
+    if (isSceneOnlyElement(planner.state, id) && isSceneNodeElement(element)) {
+      const { x, y, width, height } = element.transform;
+      return { id, bounds: { x, y, width, height }, scene: true };
+    }
+    return { id, bounds: requireBounds(planner.getStroke(id)), scene: false };
+  });
+}
+
+/**
+ * Legacy nodes take annotation updates and v2 shapes take position patches.
+ * v2 connectors on either are refreshed after the command (see planDiagramCommand).
+ */
+function applyArrangedBounds(
+  planner: CommandPlanner,
+  entries: readonly ArrangeEntry[],
+  updates: ReadonlyMap<string, AnnotationBounds>,
+): void {
+  const sceneIds = new Set(entries.filter(({ scene }) => scene).map(({ id }) => id));
+  const legacy = new Map([...updates].filter(([id]) => !sceneIds.has(id)));
+  applyBoundsUpdates(planner, legacy);
+  positionElements(
+    planner.sceneSink(),
+    new Map([...updates].filter(([id]) => sceneIds.has(id)).map(([id, { x, y }]) => [id, { x, y }])),
+  );
+  syncAttachedConnectors(planner, [...legacy.keys()]);
 }
 
 function applyBoundsUpdates(
@@ -1332,7 +1387,7 @@ function alignedBounds(
 }
 
 function distributeBounds(
-  entries: Array<{ stroke: Stroke; bounds: AnnotationBounds }>,
+  entries: Array<{ id: string; bounds: AnnotationBounds }>,
   alignment: "distribute-x" | "distribute-y",
   output: Map<string, AnnotationBounds>,
 ): void {
@@ -1362,7 +1417,7 @@ function distributeBounds(
       bounds.y = cursor;
       cursor += bounds.height + gap;
     }
-    output.set(entry.stroke.id, bounds);
+    output.set(entry.id, bounds);
   }
 }
 

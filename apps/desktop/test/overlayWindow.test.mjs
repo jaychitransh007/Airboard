@@ -4,8 +4,32 @@ import {
   applyOverlayWindowCapabilities,
   buildOverlayUrl,
   createOverlayWindowOptions,
+  DEVELOPMENT_WEB_URL,
   moveOverlayToDisplay,
+  overlayPermissionAllowed,
+  resolveDesktopWebUrl,
 } from "../src/overlayWindow.mjs";
+
+test("only the Airboard page gets the camera, microphone and clipboard", () => {
+  const origin = "https://airboard-pilot-web.example";
+  assert.equal(overlayPermissionAllowed("media", `${origin}/?desktopOverlay=1`, origin), true);
+  assert.equal(overlayPermissionAllowed("clipboard-sanitized-write", origin, origin), true);
+  assert.equal(overlayPermissionAllowed("media", "https://elsewhere.example/", origin), false);
+  assert.equal(overlayPermissionAllowed("geolocation", origin, origin), false);
+  assert.equal(overlayPermissionAllowed("notifications", origin, origin), false);
+  assert.equal(overlayPermissionAllowed("media", "not a url", origin), false);
+});
+
+test("the overlay opens the configured, packaged or local web address, in that order", () => {
+  const packaged = "https://airboard-pilot-web.example";
+  assert.equal(
+    resolveDesktopWebUrl({ env: { AIRBOARD_DESKTOP_URL: " https://staging.example " }, isPackaged: true, packagedWebUrl: packaged }),
+    "https://staging.example",
+  );
+  assert.equal(resolveDesktopWebUrl({ env: {}, isPackaged: true, packagedWebUrl: packaged }), packaged);
+  assert.equal(resolveDesktopWebUrl({ env: {}, isPackaged: false, packagedWebUrl: packaged }), DEVELOPMENT_WEB_URL);
+  assert.throws(() => resolveDesktopWebUrl({ env: {}, isPackaged: true }), /without an Airboard web address/);
+});
 
 test("buildOverlayUrl preserves the configured route and enables desktop mode", () => {
   assert.equal(

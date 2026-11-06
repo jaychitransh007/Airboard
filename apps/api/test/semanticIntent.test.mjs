@@ -323,7 +323,7 @@ test("uses one required strict Responses function tool and captures provider met
   assert.match(payload.instructions, /Golden Dataset to Planner/i);
   assert.match(payload.instructions, /create no Schema Data node/i);
   const modelInput = JSON.parse(payload.input);
-  assert.equal(AIRBOARD_SEMANTIC_INTENT_PROMPT_VERSION, "2.12");
+  assert.equal(AIRBOARD_SEMANTIC_INTENT_PROMPT_VERSION, "2.13");
   assert.equal(
     modelInput.semanticPlanContractVersion,
     AIRBOARD_SEMANTIC_PLAN_CONTRACT_VERSION,

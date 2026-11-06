@@ -196,6 +196,32 @@ const referenceArraySchema = {
   items: { $ref: "#/$defs/objectReference" },
 } as const;
 
+/**
+ * Targets for a step that needs at least `minimum` objects: the selection
+ * alone (it stands for every selected object, as validateReferences allows),
+ * or `minimum` to 20 references. Matching the validator here stops the model
+ * writing a step the validator refuses, which discards the whole plan, such
+ * as spreading out just two shapes (RGB-041).
+ */
+function referenceArraySchemaWithMinimum<const TMinimum extends number>(minimum: TMinimum) {
+  return {
+    anyOf: [
+      {
+        type: "array",
+        minItems: 1,
+        maxItems: 1,
+        items: {
+          type: "object",
+          properties: { kind: { type: "string", enum: ["current_selection"] } },
+          required: ["kind"],
+          additionalProperties: false,
+        },
+      },
+      { type: "array", minItems: minimum, maxItems: 20, items: { $ref: "#/$defs/objectReference" } },
+    ],
+  } as const;
+}
+
 /** Strict schema used as the parameters of an OpenAI Responses API function tool. */
 export const AIRBOARD_SEMANTIC_PLAN_JSON_SCHEMA = {
   type: "object",
@@ -430,7 +456,7 @@ export const AIRBOARD_SEMANTIC_PLAN_JSON_SCHEMA = {
           type: "object",
           properties: {
             type: { type: "string", enum: ["align"] },
-            targets: referenceArraySchema,
+            targets: referenceArraySchemaWithMinimum(2),
             alignment: { type: "string", enum: ["left", "right", "top", "bottom", "horizontal_center", "vertical_center"] },
           },
           required: ["type", "targets", "alignment"],
@@ -440,7 +466,7 @@ export const AIRBOARD_SEMANTIC_PLAN_JSON_SCHEMA = {
           type: "object",
           properties: {
             type: { type: "string", enum: ["distribute"] },
-            targets: referenceArraySchema,
+            targets: referenceArraySchemaWithMinimum(3),
             axis: { type: "string", enum: ["horizontal", "vertical"] },
           },
           required: ["type", "targets", "axis"],
@@ -450,7 +476,7 @@ export const AIRBOARD_SEMANTIC_PLAN_JSON_SCHEMA = {
           type: "object",
           properties: {
             type: { type: "string", enum: ["layout"] },
-            targets: referenceArraySchema,
+            targets: referenceArraySchemaWithMinimum(2),
             direction: { type: "string", enum: ["left_to_right", "right_to_left", "top_to_bottom", "bottom_to_top", "grid"] },
           },
           required: ["type", "targets", "direction"],

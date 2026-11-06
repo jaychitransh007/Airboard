@@ -48,13 +48,13 @@ Release the key or hand pose when you finish.
 ## Shapes already on the board
 
 Airo sees every shape on the board, including those you added from the toolbar
-or with a typed command such as `add a user`. Ask it to connect to, rename,
-move or delete them by their label, and it reuses them rather than drawing a
-second copy.
+or with a typed command such as `add a user`. Ask it to connect, rename, move,
+line up, spread out, tidy, copy, group or delete them by their label, and it
+reuses them rather than drawing a second copy. Grouping draws a section around
+them, as the toolbar does.
 
-Airo can't yet line up, spread out, tidy, copy or group shapes added from the
-toolbar or with typed commands. It says so instead of guessing; select them
-and use the toolbar.
+Airo can't yet put its own diagram shapes and toolbar shapes in one group. It
+says so instead of guessing; select them and use the toolbar.
 
 ## If speech is misheard
 

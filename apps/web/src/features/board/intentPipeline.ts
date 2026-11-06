@@ -412,9 +412,6 @@ export function resolveSemanticPlanAction(
     case "duplicate": {
       const targets = resolveMany(action.targets);
       if ("error" in targets) return targets;
-      if (targets.ids.some((id) => isSceneOnlyElement(context.boardState, id))) {
-        return { error: sceneNotYetMessage("duplicate") };
-      }
       const idMap = Object.fromEntries(targets.ids.map((id) => [id, crypto.randomUUID()]));
       const duplicatedIds = targets.ids.map((id) => idMap[id]!).filter(Boolean);
       const placement = semanticPlacementCommands(
@@ -426,15 +423,31 @@ export function resolveSemanticPlanAction(
         true,
       );
       if ("error" in placement) return placement;
+      const { legacy, scene } = splitByWorld(context.boardState, targets.ids);
+      if (scene.length === 0) {
+        return {
+          commands: [
+            {
+              type: "objects.duplicate",
+              objectIds: targets.ids,
+              idMap,
+              offset: placement.duplicateOffset,
+            },
+            ...placement.commands,
+          ],
+          selectionAfter: duplicatedIds,
+        };
+      }
+      // Each kind is copied by its own command. The copies don't exist while
+      // planning, so the placement's move becomes part of the copy offset.
+      const offset = duplicateOffsetWithPlacement(context.boardState, targets.ids, placement);
+      const copiesOf = (ids: string[]) => Object.fromEntries(ids.map((id) => [id, idMap[id]!]));
       return {
         commands: [
-          {
-            type: "objects.duplicate",
-            objectIds: targets.ids,
-            idMap,
-            offset: placement.duplicateOffset,
-          },
-          ...placement.commands,
+          ...(legacy.length > 0
+            ? [{ type: "objects.duplicate", objectIds: legacy, idMap: copiesOf(legacy), offset } as const]
+            : []),
+          { type: "scene.duplicate", elementIds: scene, idMap: copiesOf(scene), offset },
         ],
         selectionAfter: duplicatedIds,
       };
@@ -459,9 +472,6 @@ export function resolveSemanticPlanAction(
     case "align": {
       const targets = resolveMany(action.targets);
       if ("error" in targets) return targets;
-      if (targets.ids.some((id) => isSceneOnlyElement(context.boardState, id))) {
-        return { error: sceneNotYetMessage("align") };
-      }
       if (targets.ids.length < 2) return { error: "Align requires at least two objects." };
       const alignment = {
         left: "left",
@@ -479,9 +489,6 @@ export function resolveSemanticPlanAction(
     case "distribute": {
       const targets = resolveMany(action.targets);
       if ("error" in targets) return targets;
-      if (targets.ids.some((id) => isSceneOnlyElement(context.boardState, id))) {
-        return { error: sceneNotYetMessage("distribute") };
-      }
       if (targets.ids.length < 3) return { error: "Distribution requires at least three objects." };
       return {
         commands: [
@@ -497,9 +504,6 @@ export function resolveSemanticPlanAction(
     case "layout": {
       const targets = resolveMany(action.targets);
       if ("error" in targets) return targets;
-      if (targets.ids.some((id) => isSceneOnlyElement(context.boardState, id))) {
-        return { error: sceneNotYetMessage("lay out") };
-      }
       if (targets.ids.length < 2) return { error: "Layout requires at least two objects." };
       return {
         commands: createLayoutCommands(context.boardState, targets.ids, action.direction),
@@ -509,10 +513,22 @@ export function resolveSemanticPlanAction(
     case "group": {
       const targets = resolveMany(action.targets);
       if ("error" in targets) return targets;
-      if (targets.ids.some((id) => isSceneOnlyElement(context.boardState, id))) {
-        return { error: sceneNotYetMessage("group") };
-      }
       const groupId = crypto.randomUUID();
+      const { legacy, scene } = splitByWorld(context.boardState, targets.ids);
+      if (scene.length > 0) {
+        if (legacy.length > 0) {
+          return {
+            error: "Airo can't group its own diagram shapes with shapes added from the toolbar or with typed commands yet. Select them and use the toolbar.",
+          };
+        }
+        // A section, as the toolbar makes. Sections aren't objects Airo names,
+        // so the shapes stay selected rather than the section.
+        return {
+          commands: [{ type: "scene.group", sectionId: groupId, memberIds: scene, ...(action.label ? { label: action.label } : {}) }],
+          selectionAfter: scene,
+          handleAssignments: { [action.handle]: [groupId] },
+        };
+      }
       return {
         commands: [
           {
@@ -532,7 +548,7 @@ export function resolveSemanticPlanAction(
       const targets = resolveMany(action.targets);
       if ("error" in targets) return targets;
       const current = context.selectionIds.filter(
-        (id) => context.boardState.strokes[id]?.status === "committed",
+        (id) => context.boardState.strokes[id]?.status === "committed" || isSceneOnlyElement(context.boardState, id),
       );
       const next =
         action.mode === "replace"
@@ -575,8 +591,20 @@ function sceneConnectCommand(fromId: string, toId: string, label: string | null)
   };
 }
 
-function sceneNotYetMessage(verb: string): string {
-  return `Airo can't ${verb} shapes added from the toolbar or with typed commands yet. Select them and use the toolbar.`;
+/** The copies' offset, with any move the placement asked for folded in. */
+function duplicateOffsetWithPlacement(
+  state: BoardState,
+  sourceIds: string[],
+  placement: { commands: DiagramCommand[]; duplicateOffset: AnnotationPoint },
+): AnnotationPoint {
+  const bounds = semanticSelectionBounds(state, sourceIds);
+  return placement.commands.reduce((offset, command) => {
+    if (command.type !== "objects.move") return offset;
+    const delta = command.delta ?? (command.to && bounds
+      ? { x: command.to.x - bounds.x, y: command.to.y - bounds.y }
+      : { x: 0, y: 0 });
+    return { x: offset.x + delta.x, y: offset.y + delta.y };
+  }, placement.duplicateOffset);
 }
 
 /** Legacy nodes take stroke commands; v2 shapes take scene commands. */
@@ -2089,7 +2117,7 @@ function createLayoutCommands(
   direction: Extract<IntentCanvasOperation, { kind: "layout_selection" }>["direction"],
 ): DiagramCommand[] {
   const entries = selectionIds.flatMap((strokeId) => {
-    const bounds = state.strokes[strokeId]?.annotation?.bounds;
+    const bounds = semanticObjectBounds(state, strokeId);
     return bounds ? [{ strokeId, bounds }] : [];
   });
   if (entries.length === 0) {
@@ -2109,17 +2137,17 @@ function createLayoutCommands(
     ordered.reverse();
   }
   const columns = direction === "grid" ? Math.ceil(Math.sqrt(ordered.length)) : ordered.length;
-  return ordered.map((entry, index) => {
+  return ordered.flatMap((entry, index) => {
     const column = direction === "grid" ? index % columns : horizontal ? index : 0;
     const row = direction === "grid" ? Math.floor(index / columns) : horizontal ? 0 : index;
-    return {
+    return splitMoveByWorld(state, {
       type: "objects.move",
       objectIds: [entry.strokeId],
       to: {
         x: minX + column * (maxWidth + 48),
         y: minY + row * (maxHeight + 44),
       },
-    };
+    });
   });
 }
 

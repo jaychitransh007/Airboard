@@ -14,7 +14,8 @@ import {
 } from "./providerError";
 import { parseSemanticIntentRequest } from "./protocol";
 import { publicSemanticIntentConfig } from "./publicConfig";
-import { clientKey, configuredApiTokenAllowed, createCircuitBreaker, createRateLimiter, originAllowed } from "../security";
+import { clientKey, configuredApiTokenAllowed, createCircuitBreaker, originAllowed } from "../security";
+import { createSharedRateLimiter } from "../sharedRateLimit";
 import type {
   SemanticIntentHttpResult,
   SemanticIntentProviderMetadata,
@@ -36,9 +37,13 @@ export function registerSemanticIntentRoutes(
   const provider = createSemanticIntentProvider(config.semanticIntent);
   let activeRequests = 0;
   const breaker = createCircuitBreaker({ failureThreshold: 3, cooldownMs: 30_000 });
-  const rateLimiter = createRateLimiter({
+  const rateLimiter = createSharedRateLimiter({
+    bucket: "intent",
     windowMs: 60_000,
     max: config.rateLimits.intentPerMinute,
+    client: auth?.client ?? null,
+    keySecret: config.sessionSigningSecret,
+    onError: (error) => server.log.warn({ err: error }, "shared Airo rate limit could not be counted"),
   });
   const usage = createDailyUsage(auth?.client ?? null, config.dailyUsage, (error) =>
     server.log.warn({ err: error }, "daily Airo allowance could not be counted"),
@@ -57,12 +62,12 @@ export function registerSemanticIntentRoutes(
       return reply.code(401).send({ error: "AUTH_REQUIRED" });
     }
     if (
-      !rateLimiter.allow(
+      !(await rateLimiter.allow(
         clientKey(request, {
           profileId: context?.profileId,
           trustedProxyHops: config.trustedProxyHops,
         }),
-      )
+      ))
     ) {
       return reply.code(429).send({ error: "RATE_LIMITED" });
     }

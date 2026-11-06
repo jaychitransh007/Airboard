@@ -357,3 +357,27 @@ test("requires unique, backward-only plan handles and standalone undo/cancel", (
     false,
   );
 });
+
+test("the tool schema asks for as many targets as the validator needs (RGB-041)", () => {
+  // The model may only write what the validator accepts; a refused step
+  // throws away the whole plan, as spreading out two shapes once did.
+  const steps = {
+    align: (targets) => ({ type: "align", targets, alignment: "top" }),
+    distribute: (targets) => ({ type: "distribute", targets, axis: "horizontal" }),
+    layout: (targets) => ({ type: "layout", targets, direction: "left_to_right" }),
+  };
+  const schemaFor = (type) =>
+    AIRBOARD_SEMANTIC_PLAN_JSON_SCHEMA.$defs.action.anyOf.find((variant) => variant.properties.type.enum[0] === type)
+      .properties.targets;
+  for (const [type, step] of Object.entries(steps)) {
+    const [selectionOnly, named] = schemaFor(type).anyOf;
+    assert.deepEqual(selectionOnly.items.properties.kind.enum, ["current_selection"], type);
+    assert.equal(selectionOnly.maxItems, 1, type);
+    for (let count = 1; count <= 3; count += 1) {
+      const targets = ["A", "B", "C"].slice(0, count).map(ref);
+      assert.equal(parseSemanticPlan(resolved([step(targets)])).ok, count >= named.minItems, `${type} with ${count}`);
+    }
+    assert.equal(parseSemanticPlan(resolved([step([{ kind: "current_selection" }])])).ok, true, `${type} on the selection`);
+  }
+  assert.equal(schemaFor("distribute").anyOf[1].minItems, 3);
+});

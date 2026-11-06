@@ -456,6 +456,11 @@ begin
     where not exists (
       select 1 from public.organization_memberships membership where membership.profile_id = p.id
     )
+      -- Skip a profile whose personal organization an earlier run made.
+      and not exists (
+        select 1 from public.organizations organization
+        where organization.slug = left('personal-' || replace(p.id::text, '-', ''), 63)
+      )
   loop
     insert into public.organizations (name, slug, kind, created_by)
     values (
@@ -515,52 +520,76 @@ alter table public.data_requests enable row level security;
 alter table public.webhook_inbox enable row level security;
 alter table public.notification_jobs enable row level security;
 
+drop policy if exists "profiles_read_self" on public.profiles;
 create policy "profiles_read_self" on public.profiles for select to authenticated
   using (auth_user_id = auth.uid());
+drop policy if exists "organizations_read_member" on public.organizations;
 create policy "organizations_read_member" on public.organizations for select to authenticated
   using (public.is_org_member(id));
+drop policy if exists "memberships_read_member" on public.organization_memberships;
 create policy "memberships_read_member" on public.organization_memberships for select to authenticated
   using (public.is_org_member(organization_id));
+drop policy if exists "domains_read_admin" on public.organization_domains;
 create policy "domains_read_admin" on public.organization_domains for select to authenticated
   using (public.is_org_admin(organization_id));
+drop policy if exists "invitations_read_admin" on public.organization_invitations;
 create policy "invitations_read_admin" on public.organization_invitations for select to authenticated
   using (public.is_org_admin(organization_id));
+drop policy if exists "workspaces_read_member" on public.workspaces;
 create policy "workspaces_read_member" on public.workspaces for select to authenticated
   using (public.is_org_member(organization_id));
+drop policy if exists "boards_read_member" on public.boards;
 create policy "boards_read_member" on public.boards for select to authenticated
   using (public.is_org_member(organization_id));
+drop policy if exists "board_versions_read_member" on public.board_versions;
 create policy "board_versions_read_member" on public.board_versions for select to authenticated
   using (exists (select 1 from public.boards b where b.id = board_id and public.is_org_member(b.organization_id)));
+drop policy if exists "board_shares_read_admin" on public.board_shares;
 create policy "board_shares_read_admin" on public.board_shares for select to authenticated
   using (exists (select 1 from public.boards b where b.id = board_id and public.is_org_admin(b.organization_id)));
+drop policy if exists "sessions_read_member" on public.board_sessions;
 create policy "sessions_read_member" on public.board_sessions for select to authenticated
   using (organization_id is not null and public.is_org_member(organization_id));
+drop policy if exists "participants_read_session_member" on public.participants;
 create policy "participants_read_session_member" on public.participants for select to authenticated
   using (exists (select 1 from public.board_sessions s where s.id = board_session_id and public.is_org_member(s.organization_id)));
+drop policy if exists "board_events_read_session_member" on public.board_events;
 create policy "board_events_read_session_member" on public.board_events for select to authenticated
   using (exists (select 1 from public.board_sessions s where s.id = board_session_id and public.is_org_member(s.organization_id)));
+drop policy if exists "snapshots_read_session_member" on public.board_snapshots;
 create policy "snapshots_read_session_member" on public.board_snapshots for select to authenticated
   using (exists (select 1 from public.board_sessions s where s.id = board_session_id and public.is_org_member(s.organization_id)));
+drop policy if exists "exports_read_session_member" on public.exports;
 create policy "exports_read_session_member" on public.exports for select to authenticated
   using (exists (select 1 from public.board_sessions s where s.id = board_session_id and public.is_org_member(s.organization_id)));
+drop policy if exists "entitlements_read_self_or_admin" on public.entitlements;
 create policy "entitlements_read_self_or_admin" on public.entitlements for select to authenticated
   using (user_id = public.current_profile_id() or (organization_id is not null and public.is_org_admin(organization_id)));
+drop policy if exists "installations_read_member" on public.platform_installations;
 create policy "installations_read_member" on public.platform_installations for select to authenticated
   using (public.is_org_member(organization_id));
+drop policy if exists "policies_read_member" on public.organization_policies;
 create policy "policies_read_member" on public.organization_policies for select to authenticated
   using (public.is_org_member(organization_id));
+drop policy if exists "trial_read_self" on public.trial_eligibility;
 create policy "trial_read_self" on public.trial_eligibility for select to authenticated
   using (profile_id = public.current_profile_id());
+drop policy if exists "billing_customer_read_admin" on public.billing_customers;
 create policy "billing_customer_read_admin" on public.billing_customers for select to authenticated
   using (public.is_org_admin(organization_id));
+drop policy if exists "billing_subscription_read_admin" on public.billing_subscriptions;
 create policy "billing_subscription_read_admin" on public.billing_subscriptions for select to authenticated
   using (public.is_org_admin(organization_id));
+drop policy if exists "consent_read_self" on public.consent_records;
 create policy "consent_read_self" on public.consent_records for select to authenticated
   using (profile_id = public.current_profile_id());
+drop policy if exists "audit_read_admin" on public.audit_events;
 create policy "audit_read_admin" on public.audit_events for select to authenticated
   using (organization_id is not null and public.is_org_admin(organization_id));
+drop policy if exists "diagnostics_read_self" on public.diagnostic_bundles;
 create policy "diagnostics_read_self" on public.diagnostic_bundles for select to authenticated
   using (profile_id = public.current_profile_id());
+drop policy if exists "data_requests_read_self" on public.data_requests;
 create policy "data_requests_read_self" on public.data_requests for select to authenticated
   using (profile_id = public.current_profile_id());
 

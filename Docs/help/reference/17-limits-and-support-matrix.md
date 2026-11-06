@@ -31,9 +31,9 @@ command recovery requires a separately configured intent provider. If those
 providers are unavailable, pointer, keyboard, and typed canonical commands
 remain available.
 
-Airo can connect, rename, move and delete shapes added from the toolbar or with
-typed commands. It can't yet align, distribute, lay out, duplicate or group
-them; use the toolbar for those.
+Airo changes shapes added from the toolbar or with typed commands as it changes
+its own. It can't yet group them together with its own diagram shapes; use the
+toolbar for that.
 
 ## Default service limits
 
@@ -43,7 +43,8 @@ and provider timeouts. A displayed rate or capacity error is a safety boundary,
 not a request to retry rapidly.
 
 The API defaults include 30 semantic intent requests, 10 session starts, and
-240 voice-trace events per minute per enforced rate-limit scope. Deployment
+240 voice-trace events per minute per enforced rate-limit scope. These limits
+hold across the whole service, however many servers are running. Deployment
 configuration can be more restrictive.
 
 ## Images and videos on boards

@@ -5988,7 +5988,7 @@ export function AirboardPrototype({
           alreadySatisfied = alreadySatisfied || resolved.alreadySatisfied === true;
           if (resolved.selectionAfter) {
             workingSelectionIds = resolved.selectionAfter.filter(
-              (strokeId) => previewState.strokes[strokeId]?.status === "committed",
+              (id) => previewState.strokes[id]?.status === "committed" || isSceneOnlyElement(previewState, id),
             );
             workingPrimarySelectionId =
               workingSelectionIds[workingSelectionIds.length - 1] ?? null;
@@ -6250,7 +6250,7 @@ export function AirboardPrototype({
           }
           if (resolved.selectionAfter) {
             workingSelectionIds = resolved.selectionAfter.filter(
-              (strokeId) => previewState.strokes[strokeId]?.status === "committed",
+              (id) => previewState.strokes[id]?.status === "committed" || isSceneOnlyElement(previewState, id),
             );
             workingPrimarySelectionId =
               workingSelectionIds[workingSelectionIds.length - 1] ?? null;
@@ -7072,10 +7072,17 @@ export function AirboardPrototype({
       }
       const finalSelection = commit.selectionIds;
       refreshRealtimeSpeechKeyterms(nextState, finalSelection);
-      const primary = finalSelection[finalSelection.length - 1] ?? null;
-      setSelectedAnnotationIds(finalSelection);
-      setSelectedAnnotationId(primary);
-      setLabelDraft(primary ? (nextState.strokes[primary]?.annotation?.label ?? "") : "");
+      // Shapes from typed commands and the toolbar are selected as scene
+      // elements; the board selects one kind at a time, and Airo's own nodes win.
+      const annotationSelection = finalSelection.filter((id) => !isSceneOnlyElement(nextState, id));
+      if (annotationSelection.length === 0 && finalSelection.length > 0) {
+        selectSceneElements(finalSelection);
+      } else {
+        const primary = annotationSelection[annotationSelection.length - 1] ?? null;
+        setSelectedAnnotationIds(annotationSelection);
+        setSelectedAnnotationId(primary);
+        setLabelDraft(primary ? (nextState.strokes[primary]?.annotation?.label ?? "") : "");
+      }
       setEditingAnnotationId(null);
       setActiveObjectTool("select");
       setIntentCommandText("");
@@ -7128,6 +7135,7 @@ export function AirboardPrototype({
     render,
     reportVoiceTrace,
     schedulePersistentSnapshot,
+    selectSceneElements,
     updateStats,
   ]);
 

@@ -12,6 +12,45 @@ export const OVERLAY_SHORTCUTS = Object.freeze({
   toggleVisibility: "CommandOrControl+Shift+H",
 });
 
+export const DEVELOPMENT_WEB_URL = "http://127.0.0.1:3000";
+
+/**
+ * The Airboard web address the overlay loads: AIRBOARD_DESKTOP_URL when set,
+ * otherwise the address an installed build was packaged with, otherwise the
+ * local development server.
+ */
+export function resolveDesktopWebUrl({ env = {}, isPackaged, packagedWebUrl }) {
+  const configured = env.AIRBOARD_DESKTOP_URL?.trim();
+  if (configured) {
+    return configured;
+  }
+  if (isPackaged) {
+    if (!packagedWebUrl) {
+      throw new Error("This build was packaged without an Airboard web address.");
+    }
+    return packagedWebUrl;
+  }
+  return DEVELOPMENT_WEB_URL;
+}
+
+/**
+ * What the overlay's own web page may ask for: the camera and microphone, for
+ * hands and Airo's voice, and copying a link. Anything else, or any other
+ * origin, is refused.
+ */
+export const OVERLAY_ALLOWED_PERMISSIONS = Object.freeze(["media", "clipboard-sanitized-write"]);
+
+export function overlayPermissionAllowed(permission, requestingUrl, webOrigin) {
+  if (!OVERLAY_ALLOWED_PERMISSIONS.includes(permission)) {
+    return false;
+  }
+  try {
+    return new URL(requestingUrl).origin === webOrigin;
+  } catch {
+    return false;
+  }
+}
+
 export function buildOverlayUrl(baseUrl) {
   const url = new URL(baseUrl);
   if (url.protocol !== "http:" && url.protocol !== "https:") {

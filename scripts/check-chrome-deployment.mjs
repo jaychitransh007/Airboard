@@ -9,22 +9,17 @@ import {
   CHROME_ORIGIN_GATED_API_SURFACES,
   evaluateChromeCorsPreflightProbe,
   evaluateChromeHttpOriginProbe,
-  extractChromeExtensionDeploymentTargets,
   validateChromeDeploymentCompatibility,
   validateChromeDeploymentTargets,
 } from "./lib/chrome-deployment-compatibility.mjs";
+import { loadExtensionTargets, resolveExtensionTarget } from "./lib/chrome-extension-targets.mjs";
 
 const root = resolve(import.meta.dirname, "..");
-const [manifestSource, backgroundSource, engineRelaySource] = await Promise.all([
-  readFile(resolve(root, "extensions/chrome-meet-bridge/manifest.json"), "utf8"),
-  readFile(resolve(root, "extensions/chrome-meet-bridge/background.js"), "utf8"),
-  readFile(resolve(root, "extensions/chrome-meet-bridge/engine-relay.js"), "utf8"),
-]);
-const manifest = JSON.parse(manifestSource);
-const extensionTargets = extractChromeExtensionDeploymentTargets({
-  backgroundSource,
-  engineRelaySource,
-});
+const sourceDir = resolve(root, "extensions/chrome-meet-bridge");
+const manifest = JSON.parse(await readFile(resolve(sourceDir, "manifest.json"), "utf8"));
+// The same target the packager stamps (AIRBOARD_EXTENSION_TARGET, default pilot).
+const target = resolveExtensionTarget({ targets: await loadExtensionTargets(sourceDir), env: process.env });
+const extensionTargets = { target: target.name, appUrl: target.appUrl, apiUrl: target.apiUrl };
 const webUrl = requiredUrl("AIRBOARD_APP_URL");
 const apiUrl = requiredUrl("NEXT_PUBLIC_AIRBOARD_API_URL");
 const extensionId = process.env.NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_ID?.trim() ?? "";

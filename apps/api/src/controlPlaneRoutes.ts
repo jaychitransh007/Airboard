@@ -582,7 +582,7 @@ export function registerControlPlaneRoutes(
   });
 
   registerIntegrationRoutes(server, config, auth);
-  registerBoardContentRoutes(server, auth);
+  registerBoardContentRoutes(server, auth, { rateLimitKeySecret: config.sessionSigningSecret });
   registerBoardShareRoutes(server, config, auth, (context, request, action, targetType, targetId, metadata) =>
     writeAudit(auth, context, request, action, targetType, targetId, metadata));
   registerOrganizationRoutes(server, config, auth);
@@ -2560,8 +2560,11 @@ async function expireOperationalData(auth: AuthService) {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString();
   const ninetyDaysAgo = new Date(Date.now() - 90 * 86_400_000).toISOString();
   const oneYearAgo = new Date(Date.now() - 365 * 86_400_000).toISOString();
+  const oneHourAgo = new Date(Date.now() - 3_600_000).toISOString();
   const results = await Promise.all([
     auth.client.from("voice_trace_events").delete().lt("expires_at", now),
+    // Shared per-minute rate-limit windows (sharedRateLimit.ts), long finished.
+    auth.client.from("rate_limit_windows").delete().lt("window_start", oneHourAgo),
     auth.client.from("diagnostic_bundles").delete().in("status", ["expired", "deleted"]).lt("expires_at", thirtyDaysAgo),
     auth.client.from("webhook_inbox").delete().in("status", ["processed", "ignored"]).lt("received_at", thirtyDaysAgo),
     auth.client.from("board_sessions").update({ status: "ended", ended_at: now, updated_at: now }).in("status", ["active", "owner_disconnected"]).lt("expires_at", now),

@@ -5,7 +5,8 @@ import { ASSET_BUCKET } from "./boardContentRoutes";
 import { canEditBoards } from "./boardAccess";
 import type { ApiConfig } from "./config";
 import { activeMembership, organizationPolicy } from "./organizationPolicy";
-import { clientKey, createRateLimiter } from "./security";
+import { clientKey } from "./security";
+import { createSharedRateLimiter } from "./sharedRateLimit";
 
 /** How long a new view-only link lasts; null keeps it until it is turned off. */
 export const SHARE_LINK_LIFETIMES_DAYS = [7, 30, null] as const;
@@ -37,12 +38,19 @@ type ShareRow = { id: string; created_at: string; expires_at: string | null; rev
  */
 export function registerBoardShareRoutes(
   server: FastifyInstance,
-  config: Pick<ApiConfig, "appUrl" | "trustedProxyHops">,
+  config: Pick<ApiConfig, "appUrl" | "trustedProxyHops" | "sessionSigningSecret">,
   auth: AuthService,
   audit: Audit,
 ): void {
   // Anyone can call the public routes, so they are limited per caller.
-  const publicLimiter = createRateLimiter({ windowMs: 60_000, max: 120 });
+  const publicLimiter = createSharedRateLimiter({
+    bucket: "shared_board",
+    windowMs: 60_000,
+    max: 120,
+    client: auth.client,
+    keySecret: config.sessionSigningSecret,
+    onError: (error) => server.log.warn({ err: error }, "shared board rate limit could not be counted"),
+  });
 
   server.get<{ Params: { boardId: string } }>("/boards/:boardId/share-links", async (request, reply) => {
     const owned = await ownedBoard(auth, request, reply);
@@ -187,7 +195,7 @@ export function registerBoardShareRoutes(
 
   server.get<{ Params: { token: string } }>("/shared-boards/:token", async (request, reply) => {
     noStore(reply);
-    if (!publicLimiter.allow(clientKey(request, { trustedProxyHops: config.trustedProxyHops }))) {
+    if (!(await publicLimiter.allow(clientKey(request, { trustedProxyHops: config.trustedProxyHops })))) {
       return reply.code(429).send({ error: "RATE_LIMITED" });
     }
     const shared = await sharedBoard(auth, request.params.token);
@@ -204,7 +212,7 @@ export function registerBoardShareRoutes(
     "/shared-boards/:token/assets/:assetId/content",
     async (request, reply) => {
       noStore(reply);
-      if (!publicLimiter.allow(clientKey(request, { trustedProxyHops: config.trustedProxyHops }))) {
+      if (!(await publicLimiter.allow(clientKey(request, { trustedProxyHops: config.trustedProxyHops })))) {
         return reply.code(429).send({ error: "RATE_LIMITED" });
       }
       if (!UUID_PATTERN.test(request.params.assetId)) return reply.code(404).send({ error: "BOARD_ASSET_NOT_FOUND" });

@@ -181,3 +181,21 @@ test("names system shapes created by command and leaves plain geometry unlabeled
     label: "Alice",
   });
 });
+
+test("a sentence that only ends in a shape name is left for Airo, not taken as a create (RGB-040)", () => {
+  // Found on the live site: this added a "Front End" shape instead of reaching Airo.
+  assert.equal(parseBoardSceneIntent("put the user and the API side by side, lined up along the top, and group them as front end"), null);
+  assert.equal(parseBoardSceneIntent("make the user and the API line up and group them as front end"), null);
+  assert.equal(parseBoardSceneIntent("add the login step to the checkout flow as a new service"), null);
+  // A few describing words still make a create.
+  for (const [command, shapeKind] of [
+    ["add a payment service", "service"],
+    ["add an Orders queue here", "queue"],
+    ["add a big red database", "database"],
+    ["create one process here", "process"],
+  ]) {
+    const intent = parseBoardSceneIntent(command);
+    assert.equal(intent?.type, "create", command);
+    assert.equal(intent?.shapeKind, shapeKind, command);
+  }
+});

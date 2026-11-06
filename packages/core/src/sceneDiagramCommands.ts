@@ -167,28 +167,112 @@ export function renameElement(sink: SceneEventSink, elementId: string, label: st
 }
 
 export function moveElements(sink: SceneEventSink, elementIds: readonly string[], delta: AnnotationPoint): void {
+  const positions = new Map<string, AnnotationPoint>();
   for (const id of new Set(elementIds)) {
-    const element = activeNode(sink.state, id);
+    const { transform } = activeNode(sink.state, id);
+    positions.set(id, { x: transform.x + delta.x, y: transform.y + delta.y });
+  }
+  positionElements(sink, positions);
+  refreshAttachedConnectors(sink, elementIds);
+}
+
+/** Puts v2 nodes' top-left corners at new points. Attached connectors need refreshing after. */
+export function positionElements(sink: SceneEventSink, positions: ReadonlyMap<string, AnnotationPoint>): void {
+  for (const [id, point] of positions) {
+    const { transform } = activeNode(sink.state, id);
+    if (transform.x === point.x && transform.y === point.y) continue;
     sink.add(
       {
         type: "element.patched",
         elementId: id,
         patches: [
-          { op: "field.set", path: ["transform", "x"], value: element.transform.x + delta.x },
-          { op: "field.set", path: ["transform", "y"], value: element.transform.y + delta.y },
+          { op: "field.set", path: ["transform", "x"], value: point.x },
+          { op: "field.set", path: ["transform", "y"], value: point.y },
         ],
       },
       {
         type: "element.patched",
         elementId: id,
         patches: [
-          { op: "field.set", path: ["transform", "x"], value: element.transform.x },
-          { op: "field.set", path: ["transform", "y"], value: element.transform.y },
+          { op: "field.set", path: ["transform", "x"], value: transform.x },
+          { op: "field.set", path: ["transform", "y"], value: transform.y },
         ],
       },
     );
   }
-  refreshAttachedConnectors(sink, elementIds);
+}
+
+/** Copies v2 nodes, shifted by `offset`, as the toolbar's duplicate does. Returns the copies' ids. */
+export function duplicateElements(
+  sink: SceneEventSink,
+  input: { elementIds: readonly string[]; idMap?: Readonly<Record<string, string>>; offset?: AnnotationPoint },
+): string[] {
+  const offset = input.offset ?? { x: 24, y: 24 };
+  return [...new Set(input.elementIds)].map((sourceId) => {
+    const source = activeNode(sink.state, sourceId);
+    const id = sink.objectId(input.idMap?.[sourceId]);
+    if (sink.state.elements[id]) throw new Error(`Board object already exists: ${id}`);
+    const copy = structuredClone(source);
+    copy.id = id;
+    copy.transform.x += offset.x;
+    copy.transform.y += offset.y;
+    copy.zIndex = nextZIndex(sink.state);
+    copy.createdAt = sink.createdAt;
+    copy.updatedAt = sink.createdAt;
+    copy.revision = 1;
+    delete copy.legacyStrokeId;
+    if (sink.userId) copy.creatorId = sink.userId;
+    // A copied mind-map node starts its own map rather than claiming the original's links.
+    if (copy.kind === "mind_map_node") {
+      copy.relation = { direction: copy.relation.direction, childIds: [], connectorIds: [] };
+    }
+    sink.add({ type: "element.created", element: copy }, { type: "element.deleted", elementId: id });
+    return id;
+  });
+}
+
+/** Draws a section around v2 nodes, as the toolbar's group does. Returns the section's id. */
+export function groupElements(
+  sink: SceneEventSink,
+  input: { sectionId?: string; memberIds: readonly string[]; label?: string },
+): string {
+  const members = [...new Set(input.memberIds)].map((id) => {
+    // A section can't own a legacy node: the stroke, not the element, decides where that is.
+    if (!isSceneOnlyElement(sink.state, id)) throw new Error(`Not a v2 board object: ${id}`);
+    return activeNode(sink.state, id);
+  });
+  if (members.length === 0) throw new Error("A group needs at least one object.");
+  const padding = 48;
+  const left = Math.min(...members.map(({ transform }) => transform.x)) - padding;
+  const top = Math.min(...members.map(({ transform }) => transform.y)) - padding;
+  const right = Math.max(...members.map(({ transform }) => transform.x + transform.width)) + padding;
+  const bottom = Math.max(...members.map(({ transform }) => transform.y + transform.height)) + padding;
+  const id = sink.objectId(input.sectionId);
+  const section = createBoardSceneElement({
+    id,
+    boardId: sink.boardSessionId,
+    kind: "section",
+    transform: { x: left, y: top, width: right - left, height: bottom - top, rotation: 0 },
+    memberIds: members.map(({ id: memberId }) => memberId),
+    title: createRichTextDocument(input.label ?? "Group", `${id}:title`),
+    zIndex: nextZIndex(sink.state),
+    createdAt: sink.createdAt,
+    ...(sink.userId ? { creatorId: sink.userId } : {}),
+  });
+  sink.add({ type: "element.created", element: section }, { type: "element.deleted", elementId: id });
+  for (const member of members) {
+    sink.add(
+      { type: "element.patched", elementId: member.id, patches: [{ op: "field.set", path: ["sectionId"], value: id }] },
+      {
+        type: "element.patched",
+        elementId: member.id,
+        patches: [member.sectionId
+          ? { op: "field.set", path: ["sectionId"], value: member.sectionId }
+          : { op: "field.unset", path: ["sectionId"] }],
+      },
+    );
+  }
+  return id;
 }
 
 /**

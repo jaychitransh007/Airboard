@@ -1,3 +1,5 @@
+import { appendFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -10,27 +12,38 @@ import {
   screen,
   Tray,
 } from "electron";
+import { autoUpdatePolicy, createUpdateLog, startAutoUpdates } from "./autoUpdate.mjs";
 import {
   applyOverlayWindowCapabilities,
   buildOverlayUrl,
   createOverlayWindowOptions,
   moveOverlayToDisplay,
   OVERLAY_IPC,
+  overlayPermissionAllowed,
   OVERLAY_SHORTCUTS,
+  resolveDesktopWebUrl,
 } from "./overlayWindow.mjs";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const desktopDirectory = path.resolve(moduleDirectory, "..");
-const repositoryRoot = path.resolve(desktopDirectory, "../..");
-const defaultWebUrl = "http://127.0.0.1:3000";
-const webUrl = buildOverlayUrl(process.env.AIRBOARD_DESKTOP_URL ?? defaultWebUrl);
+// An installed build's package.json carries the web address it was packaged
+// for (electron-builder.config.mjs); development runs use the local server.
+const packageJson = createRequire(import.meta.url)("../package.json");
+const webUrl = buildOverlayUrl(resolveDesktopWebUrl({
+  env: process.env,
+  isPackaged: app.isPackaged,
+  packagedWebUrl: packageJson.airboardDesktop?.webUrl,
+}));
 const webOrigin = new URL(webUrl).origin;
 const smokeTest = process.argv.includes("--smoke-test");
+const updatePolicy = autoUpdatePolicy({
+  isPackaged: app.isPackaged,
+  argv: process.argv,
+  env: process.env,
+  platform: process.platform,
+});
 const preloadPath = path.join(moduleDirectory, "preload.cjs");
-const trayIconPath = path.join(
-  repositoryRoot,
-  "apps/web/public/marketplace/airboard-icon-32.png",
-);
+const trayIconPath = path.join(desktopDirectory, "assets/tray-icon.png");
 
 let overlayWindow = null;
 let tray = null;
@@ -199,6 +212,11 @@ async function createOverlayWindow() {
   applyOverlayWindowCapabilities(overlayWindow, { clickThrough: true });
 
   overlayWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  const { session } = overlayWindow.webContents;
+  session.setPermissionRequestHandler((_contents, permission, callback, details) =>
+    callback(overlayPermissionAllowed(permission, details.requestingUrl, webOrigin)));
+  session.setPermissionCheckHandler((_contents, permission, requestingOrigin) =>
+    overlayPermissionAllowed(permission, requestingOrigin, webOrigin));
   overlayWindow.webContents.on("will-navigate", (event, destination) => {
     if (new URL(destination).origin !== webOrigin) {
       event.preventDefault();
@@ -231,9 +249,29 @@ async function createOverlayWindow() {
         focusable: overlayWindow.isFocusable(),
         bounds: overlayWindow.getBounds(),
         displayBounds: display.bounds,
+        packaged: app.isPackaged,
+        autoUpdate: updatePolicy,
       })}`,
     );
     setTimeout(() => app.quit(), 250);
+  }
+}
+
+async function startUpdates() {
+  const log = createUpdateLog({
+    filePath: path.join(app.getPath("logs"), "updates.log"),
+    appendFile,
+  });
+  if (!updatePolicy.enabled) {
+    startAutoUpdates({ updater: null, policy: updatePolicy, log });
+    return;
+  }
+  try {
+    // electron-updater is CommonJS; its default export is module.exports.
+    const { autoUpdater } = (await import("electron-updater")).default;
+    startAutoUpdates({ updater: autoUpdater, policy: updatePolicy, log });
+  } catch (error) {
+    log.warn(`Automatic updates could not start: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -261,6 +299,8 @@ if (!hasSingleInstanceLock) {
     installIpcHandlers();
     registerShortcuts();
     createTray();
+    // Before the window loads, so an offline start still checks later.
+    void startUpdates();
     await createOverlayWindow();
 
     const syncDisplayBounds = () => {

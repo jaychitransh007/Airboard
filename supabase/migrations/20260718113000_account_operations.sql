@@ -155,11 +155,15 @@ alter table public.directory_users enable row level security;
 alter table public.support_requests enable row level security;
 alter table public.marketing_leads enable row level security;
 
+drop policy if exists "identity_provider_read_admin" on public.identity_provider_configs;
 create policy "identity_provider_read_admin" on public.identity_provider_configs for select to authenticated
   using (public.is_org_admin(organization_id));
+drop policy if exists "scim_tokens_read_admin" on public.scim_access_tokens;
 create policy "scim_tokens_read_admin" on public.scim_access_tokens for select to authenticated
   using (public.is_org_admin(organization_id));
+drop policy if exists "directory_users_read_admin" on public.directory_users;
 create policy "directory_users_read_admin" on public.directory_users for select to authenticated
   using (public.is_org_admin(organization_id));
+drop policy if exists "support_requests_read_self" on public.support_requests;
 create policy "support_requests_read_self" on public.support_requests for select to authenticated
   using (profile_id = public.current_profile_id());

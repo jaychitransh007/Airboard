@@ -2,16 +2,25 @@
   "name": "@airboard/desktop",
   "version": "0.1.0",
   "private": true,
+  "description": "Airboard desktop overlay",
+  "author": "Airboard",
   "type": "module",
   "main": "src/main.mjs",
   "scripts": {
     "dev": "electron src/main.mjs",
     "smoke": "electron src/main.mjs --smoke-test",
-    "build": "node --check src/main.mjs && node --check src/preload.cjs && node --check src/overlayWindow.mjs",
-    "typecheck": "node --check src/main.mjs && node --check src/preload.cjs && node --check src/overlayWindow.mjs",
-    "test": "node --test"
+    "build": "node --check src/main.mjs && node --check src/preload.cjs && node --check src/overlayWindow.mjs && node --check src/autoUpdate.mjs",
+    "typecheck": "node --check src/main.mjs && node --check src/preload.cjs && node --check src/overlayWindow.mjs && node --check src/autoUpdate.mjs && node --check electron-builder.config.mjs",
+    "test": "node --test",
+    "package": "electron-builder --config electron-builder.config.mjs --publish never",
+    "package:mac": "electron-builder --config electron-builder.config.mjs --mac --publish never",
+    "package:win": "electron-builder --config electron-builder.config.mjs --win --publish never"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.11"
   },
   "devDependencies": {
-    "electron": "45.2.1"
+    "electron": "45.2.1",
+    "electron-builder": "26.18.0"
   }
 }
