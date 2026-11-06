@@ -7,7 +7,7 @@ order: 9
 status: shipped
 audiences: ["everyone"]
 lastVerified: 2026-11-06
-sources: ["apps/web/src/features/product/BoardsPage.tsx", "apps/web/src/features/board/boardExport.ts", "packages/core/src/boardPreview.ts", "apps/web/src/features/board/boardLifecycle.ts", "apps/web/src/features/board/ShareDialog.tsx", "apps/web/src/features/board/ViewLinksSection.tsx", "apps/web/src/features/share/SharedBoardView.tsx", "apps/web/src/features/product/LiveBoardJoin.tsx", "apps/api/src/controlPlaneRoutes.ts", "apps/api/src/boardShareRoutes.ts"]
+sources: ["apps/web/src/features/product/BoardsPage.tsx", "apps/web/src/features/board/boardExport.ts", "packages/core/src/boardPreview.ts", "apps/web/src/features/board/boardLifecycle.ts", "apps/web/src/features/board/ShareDialog.tsx", "apps/web/src/features/board/ViewLinksSection.tsx", "apps/web/src/features/share/SharedBoardView.tsx", "apps/web/src/features/product/LiveBoardJoin.tsx", "apps/web/src/features/product/ViewOnlyBoard.tsx", "apps/api/src/controlPlaneRoutes.ts", "apps/api/src/boardShareRoutes.ts", "apps/api/src/server.ts"]
 ---
 
 Airboard stores persistent boards and versioned board state in your workspace.
@@ -41,8 +41,11 @@ Choose **Share** in the board header.
 - **Edit together now.** **Copy live link** and send it to anyone, for example
   in the meeting chat. People who open it join your board straight away, with
   no account, and can edit with you. Their changes save to your board while you
-  have it open. A live link stops working after 6 hours; copy a fresh one from
-  **Share** when you need it.
+  have it open. New people can join for 2 hours; people already in keep going.
+  Each time you open the board you get a fresh link in **Share**. To stop a
+  link straight away, end the session in **Settings → Sessions**. The link is
+  never put in your address bar, so copying the board's address doesn't share
+  it.
 - **Who can open this board later.** In a team workspace, the board's owner
   chooses **Only you** or **Everyone in** the workspace. Shared boards appear
   under **Shared** for every member, and **Copy board link** gives members a
@@ -54,8 +57,14 @@ Choose **Share** in the board header.
   they can move around and zoom, but not edit, and they never see who joined
   your live sessions. Copy the link straight away: Airboard shows each link only
   once. **Turn off** stops a link immediately. A board in Trash cannot be
-  opened through its links.
+  opened through its links. A link also stops working when the person who made
+  it leaves the workspace, is suspended or becomes a Viewer, and while an admin
+  has turned off **External guests**. Admins can see and turn off every link in
+  **Administration → Policy**.
 - **Send a picture.** **Download PNG** saves the board as an image.
+
+Members whose role is **Viewer** or **Billing** open boards view-only: they can
+move around and zoom, but not edit, share, move to Trash or restore.
 
 Anyone with a live link can edit while it works, so share it only with the
 people you are working with.
@@ -77,4 +86,5 @@ From the board menu (**•••**):
   copying images, use **Export PNG** instead.
 
 Review an export for customer or confidential content before sending it outside
-your organization.
+your organization. If an admin turns off **Exports**, these buttons stop
+working for everyone in the workspace.

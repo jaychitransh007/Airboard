@@ -7,7 +7,7 @@ order: 16
 status: reference
 audiences: ["everyone", "admins", "support"]
 lastVerified: 2026-11-06
-sources: ["apps/web/src/platform/api.ts", "apps/web/src/features/product/IntegrationsPage.tsx", "apps/api/src/auth.ts", "apps/api/src/transcription/routes.ts", "apps/api/src/semanticIntent/providerError.ts", "apps/api/src/semanticIntent/routes.ts", "apps/api/src/dailyUsage.ts"]
+sources: ["apps/web/src/platform/api.ts", "apps/web/src/features/product/IntegrationsPage.tsx", "apps/api/src/auth.ts", "apps/api/src/transcription/routes.ts", "apps/api/src/semanticIntent/providerError.ts", "apps/api/src/semanticIntent/routes.ts", "apps/api/src/dailyUsage.ts", "apps/api/src/organizationPolicy.ts", "apps/api/src/boardAccess.ts", "apps/api/src/boardContentRoutes.ts"]
 ---
 
 Error codes identify the failed capability without requiring conversation or
@@ -24,6 +24,11 @@ ID before retrying.
 | `ACCOUNT_LOOKUP_FAILED` | Airboard could not load the account record. | Retry once, then contact support with the request ID. |
 | `BOARD_ACCESS_DENIED` | The signed-in identity cannot access the board. | Check the selected organization and ask the board owner or administrator. |
 | `MAINTENANCE` | Airboard is read-only for a short upgrade. Boards still open, but changes, live boards and new sessions are paused. | Wait a few minutes and try again; the banner disappears when it's over. |
+| `BOARD_READ_ONLY_ROLE` | Your role in this workspace is Viewer or Billing, which can open boards but not change, share or start live sessions on them. | Ask a workspace admin to change your role if you need to edit. |
+| `EXTERNAL_GUESTS_DISABLED` | The board's workspace has turned off guests, so only its signed-in members can join live boards, and view-only links don't work. | Sign in with the account the workspace invited, or ask its admin. |
+| `VOICE_DISABLED_BY_ADMIN` | A workspace admin turned off voice commands. | Use typed commands, or ask your admin. |
+| `ASSET_QUOTA_EXCEEDED` | The workspace has used its 2 GB of board images and videos. | Delete boards you no longer need and empty them from Trash, or contact support. |
+| `POLICY_UNAVAILABLE` | Airboard couldn't check your workspace's policy just now, so it refused rather than guess. | Try again in a moment. |
 | `ACTIVE_ENTITLEMENT_REQUIRED`, `OWNER_ENTITLEMENT_REQUIRED` | The workspace's pilot or plan has ended, so new boards, live sessions and Airo voice are off. Saved boards still open and save. | Choose **Ask for more pilot time** on **Plan & billing**. |
 
 ## Extension and integration

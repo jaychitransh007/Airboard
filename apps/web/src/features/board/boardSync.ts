@@ -158,7 +158,12 @@ export async function startBoardSync(
       new URL(`/sessions/${options.boardSessionId}/join`, options.apiBaseUrl).toString(),
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        // Signed-in people send their sign-in: when a workspace turns off
+        // external guests, only its members may join.
+        headers: {
+          "Content-Type": "application/json",
+          ...(options.accessToken ? { Authorization: `Bearer ${options.accessToken}` } : {}),
+        },
         body: JSON.stringify({
           displayName: options.displayName ?? "Guest",
           joinToken: options.joinToken,

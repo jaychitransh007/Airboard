@@ -27,10 +27,10 @@ import {
 } from "./chromeExtensionPolicy";
 import { bearerToken, issueSignedToken, verifySignedToken } from "./signedTokens";
 import { secretsMatch } from "./security";
-import { registerBoardContentRoutes, removeBoardAssetObjects } from "./boardContentRoutes";
+import { registerBoardContentRoutes, removeBoardAssetObjects, sweepStaleBoardUploads } from "./boardContentRoutes";
 import { registerBoardShareRoutes } from "./boardShareRoutes";
 import { BoardAssetLifecycleError } from "./boardAssetLifecycle";
-import { boardAccessFilter, writeAccessibleBoard } from "./boardAccess";
+import { boardAccessFilter, canEditBoards, writeAccessibleBoard } from "./boardAccess";
 
 /** The pilot trial lasts one month from activation. */
 const TRIAL_DURATION_MS = 30 * 24 * 60 * 60 * 1_000;
@@ -377,7 +377,7 @@ export function registerControlPlaneRoutes(
   });
 
   server.post<{ Body: unknown }>("/boards", async (request, reply) => {
-    const context = await requireAuth(auth, request, reply);
+    const context = await requireBoardEditor(auth, request, reply);
     if (!context) return;
     const entitlement = await requireActiveEntitlement(auth, context, reply);
     if (!entitlement) return;
@@ -433,7 +433,7 @@ export function registerControlPlaneRoutes(
   server.patch<{ Params: { boardId: string }; Body: unknown }>(
     "/boards/:boardId",
     async (request, reply) => {
-      const context = await requireAuth(auth, request, reply);
+      const context = await requireBoardEditor(auth, request, reply);
       if (!context) return;
       if (!auth.client || !boundedUuid(request.params.boardId)) {
         return reply.code(404).send({ error: "BOARD_NOT_FOUND" });
@@ -545,7 +545,7 @@ export function registerControlPlaneRoutes(
   );
 
   server.delete<{ Params: { boardId: string } }>("/boards/:boardId", async (request, reply) => {
-    const context = await requireAuth(auth, request, reply);
+    const context = await requireBoardEditor(auth, request, reply);
     if (!context) return;
     if (!auth.client || !boundedUuid(request.params.boardId)) {
       return reply.code(404).send({ error: "BOARD_NOT_FOUND" });
@@ -567,7 +567,7 @@ export function registerControlPlaneRoutes(
   });
 
   server.post<{ Params: { boardId: string } }>("/boards/:boardId/restore", async (request, reply) => {
-    const context = await requireAuth(auth, request, reply);
+    const context = await requireBoardEditor(auth, request, reply);
     if (!context) return;
     if (!auth.client || !boundedUuid(request.params.boardId)) return reply.code(404).send({ error: "BOARD_NOT_FOUND" });
     const client = auth.client;
@@ -1802,12 +1802,17 @@ function registerLifecycleRoutes(server: FastifyInstance, config: ApiConfig, aut
     await expireDiagnostics(auth);
     const operationalData = await expireOperationalData(auth);
     const deletedBoards = await purgeExpiredDeletedBoards(auth);
+    // Uploads started but never finished, in every organization.
+    const abandonedUploads = auth.client
+      ? await sweepStaleBoardUploads(auth.client)
+      : { removed: 0, failures: 0 };
     const summary = {
       expiredTrials: organizationIds.length,
       dataRequests,
       notifications: delivered,
       operationalData,
       deletedBoards,
+      abandonedUploads,
     };
     // Any failed step fails the run, so Cloud Scheduler logs the attempt as an
     // error and the "Airboard lifecycle run failed" alert fires. Every step is
@@ -2251,6 +2256,21 @@ async function requireRole(
   return context;
 }
 
+/** Board changes need an editing role; Viewer and Billing members only read. */
+async function requireBoardEditor(
+  auth: AuthService,
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<AuthContext | null> {
+  const context = await requireAuth(auth, request, reply);
+  if (!context) return null;
+  if (!canEditBoards(context.role)) {
+    reply.code(403).send({ error: "BOARD_READ_ONLY_ROLE" });
+    return null;
+  }
+  return context;
+}
+
 async function requireActiveEntitlement(
   auth: AuthService,
   context: AuthContext,
@@ -2521,6 +2541,7 @@ function lifecycleFailureCount(summary: {
   notifications: { failed?: number };
   operationalData: { failures?: number };
   deletedBoards: { failures?: number };
+  abandonedUploads: { failures?: number };
 }): number {
   return [
     summary.dataRequests.failed,
@@ -2528,6 +2549,7 @@ function lifecycleFailureCount(summary: {
     summary.notifications.failed,
     summary.operationalData.failures,
     summary.deletedBoards.failures,
+    summary.abandonedUploads.failures,
   ].reduce<number>((total, count) => total + (Number(count) || 0), 0);
 }
 

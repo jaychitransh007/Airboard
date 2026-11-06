@@ -36,3 +36,14 @@ export async function writeAccessibleBoard<R extends { data: unknown; error: unk
   if (owned.error || owned.data) return owned;
   return write({ column: "visibility", operator: "neq", value: "private" });
 }
+
+/**
+ * Roles that may change boards: create, save, trash, restore, upload and
+ * share. Viewer and Billing members can open the organization's boards but
+ * not change them.
+ */
+export const BOARD_EDITOR_ROLES = ["owner", "admin", "member"] as const;
+
+export function canEditBoards(role: string): boolean {
+  return (BOARD_EDITOR_ROLES as readonly string[]).includes(role);
+}

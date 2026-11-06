@@ -121,8 +121,8 @@ export function ShareDialog({
         <section className="share-dialog-section" aria-labelledby="share-live-title">
           <h3 id="share-live-title">Edit together now</h3>
           <p>
-            Anyone with this link can join and edit with you, no account needed. It works for{" "}
-            {LIVE_LINK_HOURS} hours.
+            Anyone with this link can join and edit with you, no account needed. New people can
+            join for {LIVE_LINK_HOURS} hours; ending the session in Settings → Sessions stops it at once.
           </p>
           <div className="share-dialog-row">
             <button

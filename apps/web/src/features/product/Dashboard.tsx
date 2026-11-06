@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { airboardApi } from "../../platform/api";
-import { useAirboardAuth } from "../../platform/auth";
+import { canEditBoards, useAirboardAuth } from "../../platform/auth";
 import { CHROME_EXTENSION_PUBLICLY_INSTALLABLE } from "../../platform/distribution";
 import { BoardThumbnail } from "./BoardThumbnail";
 import { boardCardDetail, type LibraryBoard } from "./boardLibrary";
@@ -43,7 +43,7 @@ export function Dashboard() {
         <div><p className="eyebrow">Your visual workspace</p><h1>Good {dayPart()}, {firstName(auth.account?.profile.displayName)}.</h1><p>Start on Airboard or carry the same visual language into your next meeting.</p></div>
       </section>
       <section className="quick-start-grid">
-        <Link className="quick-card primary" href="/app/boards/new?preflight=1"><span>＋</span><div><strong>New Airboard</strong><p>Start a board—type or say what you want to see.</p></div></Link>
+        {auth.account && !canEditBoards(auth.account.organization.role) ? null : <Link className="quick-card primary" href="/app/boards/new?preflight=1"><span>＋</span><div><strong>New Airboard</strong><p>Start a board—type or say what you want to see.</p></div></Link>}
         <Link className="quick-card" href="/app/integrations"><span>◉</span><div><strong>Use in Google Meet</strong><p>{meetInstallable || meetConnected ? "Put your diagram on your camera video." : "Coming soon. Share your board tab in any meeting today."}</p></div></Link>
         <Link className="quick-card" href="/app/integrations"><span>↗</span><div><strong>Desktop overlay</strong><p>Coming soon: draw over any app on your screen.</p></div></Link>
       </section>

@@ -6182,3 +6182,7 @@ button:disabled {
 .status-incident-meta { display: flex; align-items: center; margin: 0 0 8px; color: var(--air-muted); font-size: 13px; }
 .status-incident-text { margin: 0 0 8px; line-height: 1.55; white-space: pre-line; }
 .status-incident a { color: var(--air-ink); font-size: 13px; font-weight: 700; }
+.shared-board-with-notice { grid-template-rows: auto auto minmax(0, 1fr); }
+.shared-board-notice { margin: 0; padding: 10px 20px; border-bottom: 1px solid var(--product-border); background: #fffbea; font-size: 14px; }
+.admin-share-links { margin-top: 32px; }
+.admin-share-links > p { max-width: 720px; color: var(--product-muted, #5d5a6b); }

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AirboardApiError, airboardApi } from "../../platform/api";
-import { useAirboardAuth } from "../../platform/auth";
+import { canEditBoards, useAirboardAuth } from "../../platform/auth";
 import { BOARD_TEMPLATES, type BoardTemplate } from "../board/boardTemplates";
 
 type Board = { id: string; title: string; updated_at: string; latest_version: number; visibility: string };
@@ -91,9 +91,11 @@ function BoardCollection({ title, description, scope }: { title: string; descrip
               <strong>{board.title}</strong>
               <small>{new Date(board.updated_at).toLocaleString()}</small>
               {isTrash ? (
-                <button className="button button-quiet" onClick={() => void restore(board.id)}>
-                  Restore
-                </button>
+                auth.account && !canEditBoards(auth.account.organization.role) ? null : (
+                  <button className="button button-quiet" onClick={() => void restore(board.id)}>
+                    Restore
+                  </button>
+                )
               ) : (
                 <Link href={`/app/boards/${board.id}`}>Open</Link>
               )}

@@ -6,8 +6,8 @@ categoryLabel: Troubleshooting and reference
 order: 17
 status: reference
 audiences: ["everyone", "admins", "security"]
-lastVerified: 2026-11-05
-sources: ["Docs/Platform Support Matrix.md", "apps/api/src/config.ts", "apps/web/src/platform/distribution.ts", "Docs/Commercial Platform Runbook.md"]
+lastVerified: 2026-11-06
+sources: ["Docs/Platform Support Matrix.md", "apps/api/src/config.ts", "apps/api/src/boardAssetLifecycle.ts", "apps/web/src/platform/distribution.ts", "Docs/Commercial Platform Runbook.md"]
 ---
 
 This matrix describes the controlled-pilot implementation. It is not an uptime,
@@ -41,6 +41,14 @@ not a request to retry rapidly.
 The API defaults include 30 semantic intent requests, 10 session starts, and
 240 voice-trace events per minute per enforced rate-limit scope. Deployment
 configuration can be more restrictive.
+
+## Images and videos on boards
+
+- Images up to 32 MB and 40 megapixels; videos up to 100 MB.
+- Each workspace can hold 2 GB of board images and videos. Deleting boards
+  frees space once they leave Trash.
+- Each person can start 30 uploads a minute.
+- Uploads that never finish are cleared after a day.
 
 ## Retention limits
 

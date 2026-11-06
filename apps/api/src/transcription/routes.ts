@@ -18,6 +18,7 @@ import type { AuthService } from "../auth";
 import { clientKey, configuredApiTokenAllowed, createCircuitBreaker, createRateLimiter, originAllowed } from "../security";
 import { issueSignedToken, verifySignedToken } from "../signedTokens";
 import { createDailyUsage } from "../dailyUsage";
+import { organizationPolicy } from "../organizationPolicy";
 
 const MAX_PCM16_FRAME_BYTES = 256 * 1024;
 const MAX_STARTUP_BUFFER_BYTES = 384 * 1024;
@@ -83,6 +84,10 @@ export function registerTranscriptionRoutes(
     if (!(await auth.activeEntitlement(context.organizationId))) {
       return { allowed: false, reason: "ACTIVE_ENTITLEMENT_REQUIRED" };
     }
+    // An admin can turn voice off for the whole organization (Admin → Policy).
+    const policy = await organizationPolicy(auth.client, context.organizationId).catch(() => null);
+    if (!policy) return { allowed: false, reason: "POLICY_UNAVAILABLE" };
+    if (!policy.voiceEnabled) return { allowed: false, reason: "VOICE_DISABLED_BY_ADMIN" };
     return { allowed: true, profileId: context.profileId };
   };
 
@@ -93,7 +98,7 @@ export function registerTranscriptionRoutes(
     const authorization = await authorizeRequest(request);
     if (!authorization.allowed) {
       return reply
-        .code(authorization.reason === "ACTIVE_ENTITLEMENT_REQUIRED" ? 403 : 401)
+        .code(ticketRefusalStatus(authorization.reason))
         .send({ error: authorization.reason });
     }
     const ticket = issueSignedToken(config.sessionSigningSecret, {
@@ -596,4 +601,10 @@ function rawDataToUint8Array(raw: RawData): Uint8Array {
     return new Uint8Array(raw);
   }
   return raw;
+}
+
+function ticketRefusalStatus(reason: string): number {
+  if (reason === "ACTIVE_ENTITLEMENT_REQUIRED" || reason === "VOICE_DISABLED_BY_ADMIN") return 403;
+  if (reason === "POLICY_UNAVAILABLE") return 503;
+  return 401;
 }

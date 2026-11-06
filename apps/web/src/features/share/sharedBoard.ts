@@ -65,19 +65,24 @@ export function sharedBoardBounds(state: BoardState): Bounds | null {
   return { x: left, y: top, width: Math.max(...xs) - left, height: Math.max(...ys) - top };
 }
 
+export type ImageSource = { url: string; aliases: string[] };
+
 /**
  * The pictures a shared board draws, each loaded through the link instead of
  * the members-only asset route, with every key the renderer may look it up by.
  */
-export function sharedImageSources(state: BoardState, token: string): Array<{ url: string; aliases: string[] }> {
+export function sharedImageSources(state: BoardState, token: string): ImageSource[] {
+  return boardImageSources(state, (assetId) =>
+    `${AIRBOARD_API_URL}/shared-boards/${encodeURIComponent(token)}/assets/${assetId}/content`);
+}
+
+/** The pictures a board draws, each fetched from `contentUrl(assetId)`. */
+export function boardImageSources(state: BoardState, contentUrl: (assetId: string) => string): ImageSource[] {
   const sources = new Map<string, string[]>();
   const add = (sourceUrl: string | undefined, aliases: Array<string | undefined>) => {
     const assetId = sourceUrl ? /\/assets\/([0-9a-f-]{36})\/content/i.exec(sourceUrl)?.[1] : undefined;
     if (!assetId) return;
-    sources.set(
-      `${AIRBOARD_API_URL}/shared-boards/${encodeURIComponent(token)}/assets/${assetId}/content`,
-      aliases.filter((alias): alias is string => Boolean(alias)),
-    );
+    sources.set(contentUrl(assetId), aliases.filter((alias): alias is string => Boolean(alias)));
   };
   for (const element of Object.values(state.elements)) {
     if (element.status !== "active") continue;

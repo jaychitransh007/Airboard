@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { airboardApi } from "../../platform/api";
-import { useAirboardAuth } from "../../platform/auth";
+import { canEditBoards, useAirboardAuth } from "../../platform/auth";
 import { useMenuKeyboard } from "../../platform/menuKeyboard";
 import { useModalFocus } from "../../platform/modalFocus";
 import { validateBoardTitle } from "../board/boardLifecycle";
@@ -22,6 +22,8 @@ type BoardAction =
 
 export function BoardsPage() {
   const auth = useAirboardAuth();
+  // Viewer and Billing members can open boards but not create or change them.
+  const readOnly = Boolean(auth.account) && !canEditBoards(auth.account?.organization.role);
   const [boards, setBoards] = useState<Board[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -137,9 +139,11 @@ export function BoardsPage() {
           <h1>Boards</h1>
           <p>Persistent diagrams, screen annotations and meeting artifacts.</p>
         </div>
-        <Link className="button button-primary" href="/app/boards/new?preflight=1">
-          New Airboard
-        </Link>
+        {readOnly ? null : (
+          <Link className="button button-primary" href="/app/boards/new?preflight=1">
+            New Airboard
+          </Link>
+        )}
       </section>
 
       {notice ? (
@@ -181,7 +185,7 @@ export function BoardsPage() {
                 <strong>{board.title}</strong>
                 <small>{boardCardDetail(board)}</small>
               </Link>
-              <div className="library-board-actions">
+              {readOnly ? null : <div className="library-board-actions">
                 <button
                   type="button"
                   aria-label={`Actions for ${board.title}`}
@@ -227,7 +231,7 @@ export function BoardsPage() {
                     </button>
                   </div>
                 ) : null}
-              </div>
+              </div>}
             </article>
           ))}
         </div>

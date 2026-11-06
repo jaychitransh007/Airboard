@@ -165,6 +165,41 @@ test("an admin invites a teammate and copies the invite link", async ({ page }) 
   expect(api.invitations.map((invitation) => invitation.email)).toEqual(["priya@acme.test"]);
 });
 
+test("a Viewer opens boards view-only and can't create, change or share them", async ({ page }) => {
+  const api = await signIn(page, { workspace: "team", role: "viewer", boards: [{ title: checkoutFlow.title, state: checkoutFlow.state }] });
+  await page.goto("/app/boards");
+  const card = page.getByRole("link", { name: new RegExp(checkoutFlow.title) });
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("link", { name: "New Airboard" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: `Actions for ${checkoutFlow.title}` })).toHaveCount(0);
+
+  await card.click();
+  await expect(page.getByRole("heading", { level: 1, name: checkoutFlow.title })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("View only", { exact: true })).toBeVisible();
+  await expect(page.getByRole("note")).toContainText("lets you view boards, not change them");
+  await expect(page.getByRole("img", { name: new RegExp(`Board “${checkoutFlow.title}”`) })).toBeVisible();
+  await expect(page.getByTestId("share-board")).toHaveCount(0);
+  await expect(page.getByTestId("intent-command-input")).toHaveCount(0);
+  expect(api.saves).toEqual([]);
+
+  await page.goto("/app/boards/new");
+  await expect(page.getByText("Your role can't create boards.")).toBeVisible({ timeout: 30_000 });
+});
+
+test("an admin sees every view-only link in the workspace and turns one off", async ({ page }) => {
+  const api = await signIn(page, { workspace: "team", boards: [{ title: checkoutFlow.title, state: checkoutFlow.state }] });
+  const boardId = api.boardId(checkoutFlow.title);
+  api.addLinks(boardId, 1);
+  await page.goto("/app/admin/policies");
+  await expect(page.getByRole("heading", { level: 2, name: "View-only links" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Downloading or copying boards as PNG or PDF.", { exact: false })).toBeVisible();
+
+  await page.getByRole("button", { name: `Turn off view-only link to ${checkoutFlow.title}` }).click();
+  await expect(page.getByText(`Turned off a view-only link to “${checkoutFlow.title}”.`, { exact: false })).toBeVisible();
+  await expect(page.getByText("No working view-only links.")).toBeVisible();
+  expect(api.activeLinks(boardId)).toEqual([]);
+});
+
 test("the library, the Share dialog and Admin members meet WCAG 2.2 AA", async ({ page }) => {
   const api = await signIn(page, { workspace: "team", boards: [{ title: checkoutFlow.title, state: checkoutFlow.state }] });
   const audit = async (scope?: string) => {
@@ -183,5 +218,10 @@ test("the library, the Share dialog and Admin members meet WCAG 2.2 AA", async (
 
   await page.goto("/app/admin/members");
   await expect(page.getByRole("heading", { level: 1, name: "Members" })).toBeVisible({ timeout: 30_000 });
+  expect(await audit()).toEqual([]);
+
+  api.addLinks(api.boardId(checkoutFlow.title), 1);
+  await page.goto("/app/admin/policies");
+  await expect(page.getByRole("button", { name: `Turn off view-only link to ${checkoutFlow.title}` })).toBeVisible({ timeout: 30_000 });
   expect(await audit()).toEqual([]);
 });

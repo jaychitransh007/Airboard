@@ -23,6 +23,8 @@ import { registerTranscriptionRoutes } from "./transcription/routes";
 import { VoiceTraceBuffer } from "./voiceTrace/buffer";
 import { registerVoiceTraceRoutes } from "./voiceTrace/routes";
 import { AuthService } from "./auth";
+import { canEditBoards } from "./boardAccess";
+import { activeMembership, organizationPolicy } from "./organizationPolicy";
 import { registerControlPlaneRoutes } from "./controlPlaneRoutes";
 import { bearerToken, issueSignedToken, verifySignedToken } from "./signedTokens";
 import { AIRBOARD_CORS_MAX_AGE_SECONDS, AIRBOARD_CORS_METHODS } from "./cors";
@@ -49,10 +51,16 @@ const AUTH_CACHE_TTL_MS = 1000;
 const MAX_SOCKET_MESSAGE_BYTES = 1024 * 1024;
 /** Most events one board batch may carry; compound commands stay far below. */
 const MAX_EVENTS_PER_BATCH = 500;
+/**
+ * How long a live link admits new people. People already in keep going; the
+ * owner gets a fresh link each time the board opens, and ending the session
+ * (Settings → Sessions) stops a link at once.
+ */
+export const JOIN_LINK_TTL_SECONDS = 2 * 60 * 60;
 
 export async function buildServer(
   config: ApiConfig,
-  dependencies: { store?: SessionStore; fanOut?: BoardEventFanOut } = {},
+  dependencies: { store?: SessionStore; fanOut?: BoardEventFanOut; auth?: AuthService } = {},
 ) {
   const server = Fastify({
     logger: {
@@ -78,7 +86,7 @@ export async function buildServer(
     },
   });
   const store = dependencies.store ?? createSessionStore(config);
-  const auth = new AuthService(config);
+  const auth = dependencies.auth ?? new AuthService(config);
   const rooms = new Map<string, Set<RoomClient>>();
   // Other API instances may hold sockets for the same session (Cloud Run can
   // run several); their accepted events arrive through the fan-out.
@@ -292,6 +300,11 @@ export async function buildServer(
     if (!account) {
       return reply.code(401).send({ error: "OWNER_AUTH_REQUIRED" });
     }
+    // Starting a session makes its owner an editor of the board; Viewer and
+    // Billing members open boards read-only instead.
+    if (!canEditBoards(account.role)) {
+      return reply.code(403).send({ error: "BOARD_READ_ONLY_ROLE" });
+    }
     if (
       !sessionStartLimiter.allow(
         clientKey(request, {
@@ -331,7 +344,7 @@ export async function buildServer(
           sub: account.profileId,
           organizationId: account.organizationId,
           sessionId: result.session.id,
-          ttlSeconds: 6 * 60 * 60,
+          ttlSeconds: JOIN_LINK_TTL_SECONDS,
         }),
       };
     } catch (error) {
@@ -348,6 +361,22 @@ export async function buildServer(
       : null;
     if (!join || join.sessionId !== request.params.sessionId) {
       return reply.code(401).send({ error: "VALID_JOIN_TOKEN_REQUIRED" });
+    }
+    // With "External guests" off (Admin → Policy), only the organization's
+    // active members may join, signed in.
+    if (join.organizationId && auth.client) {
+      try {
+        const policy = await organizationPolicy(auth.client, join.organizationId);
+        if (!policy.externalGuestsAllowed) {
+          const account = await auth.authenticate(request);
+          const member = account
+            ? await activeMembership(auth.client, join.organizationId, account.profileId)
+            : null;
+          if (!member) return reply.code(403).send({ error: "EXTERNAL_GUESTS_DISABLED" });
+        }
+      } catch {
+        return reply.code(503).send({ error: "POLICY_UNAVAILABLE" });
+      }
     }
     try {
       const result = await store.joinSession({

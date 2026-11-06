@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  boardImageSources,
   fetchSharedBoard,
   sharedBoardBounds,
   sharedBoardState,
@@ -61,4 +62,15 @@ test("an unavailable link reads as null; other failures throw", async () => {
   await assert.rejects(() => fetchSharedBoard("t", reply(503)), /SHARED_BOARD_503/);
   const board = await fetchSharedBoard("t", reply(200, { title: "Plan", state: { elements: {} } }));
   assert.equal(board.title, "Plan");
+});
+
+test("a member's view-only board loads its pictures from the members-only route", () => {
+  const state = sharedBoardState({
+    elements: {
+      photo: element({ id: "photo", kind: "media", mediaKind: "image", asset: { id: ASSET, url: `/boards/b/assets/${ASSET}/content` } }),
+    },
+  });
+  assert.deepEqual(boardImageSources(state, (assetId) => `https://api.airboard.test/boards/b/assets/${assetId}/content`), [
+    { url: `https://api.airboard.test/boards/b/assets/${ASSET}/content`, aliases: [ASSET, `/boards/b/assets/${ASSET}/content`] },
+  ]);
 });

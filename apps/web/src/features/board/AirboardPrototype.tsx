@@ -140,7 +140,7 @@ import {
 } from "./sceneContextToolbarHelpers";
 import { SceneTextEditor } from "./SceneTextEditor";
 import { ShareDialog, type BoardShareAccess } from "./ShareDialog";
-import { liveBoardLink, liveStartFailure, type LiveStartFailure } from "./shareLinks";
+import { forgetLiveSession, liveBoardLink, liveStartFailure, rememberedLiveSession, rememberLiveSession, type LiveStartFailure } from "./shareLinks";
 import { blockedMediaHelp, deniedMediaHelp } from "./mediaPermissionHelp";
 import { boardTemplate } from "./boardTemplates";
 import { ScenePlaybackOverlay } from "./ScenePlaybackOverlay";
@@ -633,6 +633,16 @@ function parseDiagramVisibilityIntent(text: string): "hide" | "show" | null {
   return null;
 }
 
+/** Limits people can act on get plain words; anything else keeps its code for support. */
+function mediaUploadFailure(code: string): string {
+  if (code === "ASSET_QUOTA_EXCEEDED") return "This workspace has used its 2 GB for board images and videos. Delete boards you no longer need and empty them from Trash.";
+  if (code === "RATE_LIMITED") return "That's a lot of uploads at once. Wait a minute, then add the rest.";
+  if (code === "BOARD_READ_ONLY_ROLE") return "Your role in this workspace can view boards but not add to them.";
+  return code ? `Media upload failed: ${code}` : "Media upload failed.";
+}
+
+const EXPORTS_BLOCKED_MESSAGE = "Your workspace admin turned off downloading and copying boards.";
+
 export function AirboardPrototype({
   surface,
   meetingProvider = "standalone",
@@ -659,6 +669,7 @@ export function AirboardPrototype({
   liveGuest = false,
   participantName,
   onLiveJoinFailed,
+  organizationPolicy,
 }: {
   surface: Surface;
   meetingProvider?: MeetingProvider;
@@ -718,7 +729,20 @@ export function AirboardPrototype({
   participantName?: string;
   /** Live-link guests leave the board when joining fails rather than edit a local copy. */
   onLiveJoinFailed?: (message: string) => void;
+  /**
+   * The signed-in person's Admin → Organization policy. Camera, gestures and
+   * downloads never reach the API, so the board itself honours those switches;
+   * the API enforces voice and guests.
+   */
+  organizationPolicy?: { cameraEnabled: boolean; gestureEnabled: boolean; exportsEnabled: boolean };
 }) {
+  const exportsBlocked = organizationPolicy?.exportsEnabled === false;
+  const cameraBlockedMessage =
+    organizationPolicy?.cameraEnabled === false
+      ? "Your workspace admin turned off the camera for Airboard."
+      : organizationPolicy?.gestureEnabled === false
+        ? "Your workspace admin turned off gesture control."
+        : null;
   const [bridgedAccessToken, setBridgedAccessToken] = useState<string | undefined>();
   const effectiveAccessToken = accessToken ?? bridgedAccessToken;
   const syncAuthenticationReady = !headlessMeetOverlay || Boolean(effectiveAccessToken);
@@ -2469,9 +2493,7 @@ export function AirboardPrototype({
           ...(accountUserId ? { creatorId: accountUserId } : {}),
         }));
       } catch (caught) {
-        setCommandFeedback(
-          caught instanceof Error ? `Media upload failed: ${caught.message}` : "Media upload failed.",
-        );
+        setCommandFeedback(mediaUploadFailure(caught instanceof Error ? caught.message : ""));
       } finally {
         if (mediaInputRef.current) mediaInputRef.current.value = "";
       }
@@ -3737,10 +3759,19 @@ export function AirboardPrototype({
       return;
     }
     let cancelled = false;
+    const addressParams = new URLSearchParams(window.location.search);
+    // A saved board's owner rejoins their live session after a reload from
+    // this tab's memory, never from the address bar.
+    const remembered =
+      persistentBoardId && !initialBoardSessionId && !addressParams.get("boardSessionId")
+        ? rememberedLiveSession(persistentBoardId)
+        : null;
     const requestedSessionId =
       initialBoardSessionId ??
-      new URLSearchParams(window.location.search).get("boardSessionId");
-    const requestedJoinToken = new URLSearchParams(window.location.search).get("joinToken");
+      addressParams.get("boardSessionId") ??
+      remembered?.boardSessionId ??
+      null;
+    const requestedJoinToken = addressParams.get("joinToken") ?? remembered?.joinToken ?? null;
     boardSyncStatusRef.current = "connecting";
     setBoardSyncStatus("connecting");
 
@@ -3837,9 +3868,20 @@ export function AirboardPrototype({
           setCommandFeedback("Live board ready. Use Share to invite people to edit with you.");
         }
         const url = new URL(window.location.href);
-        url.searchParams.set("boardSessionId", result.handle.boardSessionId);
-        if (result.handle.joinToken) {
-          url.searchParams.set("joinToken", result.handle.joinToken);
+        const joinToken = result.handle.joinToken ?? requestedJoinToken;
+        if (persistentBoardId) {
+          // Keep the live link out of the address bar and history: copying a
+          // saved board's address must not hand out edit access.
+          if (joinToken) {
+            rememberLiveSession(persistentBoardId, { boardSessionId: result.handle.boardSessionId, joinToken });
+          }
+          url.searchParams.delete("boardSessionId");
+          url.searchParams.delete("joinToken");
+        } else {
+          url.searchParams.set("boardSessionId", result.handle.boardSessionId);
+          if (result.handle.joinToken) {
+            url.searchParams.set("joinToken", result.handle.joinToken);
+          }
         }
         window.history.replaceState(null, "", url.toString());
         onBoardSessionReady?.({
@@ -3850,6 +3892,12 @@ export function AirboardPrototype({
       })
       .catch((caught: unknown) => {
         if (cancelled) {
+          return;
+        }
+        if (remembered && persistentBoardId) {
+          // The remembered session ended or its link expired: start afresh.
+          forgetLiveSession(persistentBoardId);
+          window.location.reload();
           return;
         }
         boardSyncStatusRef.current = "offline";
@@ -8203,6 +8251,11 @@ export function AirboardPrototype({
       setCameraError(null);
       return;
     }
+    if (cameraBlockedMessage) {
+      setCameraStatus("idle");
+      setCameraError(cameraBlockedMessage);
+      return;
+    }
     // Guard synchronously (state updates lag within a tick) and cover the whole
     // busy window including tracker_loading — the slow WASM/model download — so an
     // impatient second click cannot acquire a second stream + tracker.
@@ -8361,7 +8414,7 @@ export function AirboardPrototype({
         void trackerLoad?.then((tracker) => tracker.close(), () => undefined);
       }
     }
-  }, [appendCopilotActivity, cameraCaptureAvailable, cameraStatus, confidenceThreshold, embeddedMediaCapture, enforceCameraCanvas, isMeetSurface, meetMediaBridge, refreshStandaloneMediaPermissions, standaloneEditor, stopCamera]);
+  }, [appendCopilotActivity, cameraBlockedMessage, cameraCaptureAvailable, cameraStatus, confidenceThreshold, embeddedMediaCapture, enforceCameraCanvas, isMeetSurface, meetMediaBridge, refreshStandaloneMediaPermissions, standaloneEditor, stopCamera]);
 
   useEffect(() => {
     if (
@@ -8638,29 +8691,41 @@ export function AirboardPrototype({
     if (!canvas) {
       return;
     }
+    if (exportsBlocked) {
+      setCommandFeedback(EXPORTS_BLOCKED_MESSAGE);
+      return;
+    }
 
     const anchor = document.createElement("a");
     anchor.href = exportCanvasPng(canvas);
     anchor.download = `airboard-${new Date().toISOString().replaceAll(":", "-")}.png`;
     anchor.click();
-  }, []);
+  }, [exportsBlocked]);
 
   const exportPdf = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    if (exportsBlocked) {
+      setCommandFeedback(EXPORTS_BLOCKED_MESSAGE);
+      return;
+    }
     void downloadCanvasPdf(canvas).catch(() =>
       setCommandFeedback("The PDF couldn't be made in this browser. Export PNG still works."),
     );
-  }, []);
+  }, [exportsBlocked]);
 
   const copyBoardImage = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    if (exportsBlocked) {
+      setCommandFeedback(EXPORTS_BLOCKED_MESSAGE);
+      return;
+    }
     void copyCanvasImage(canvas).then(
       () => setCommandFeedback("Copied the board as an image. Paste it into chat, a doc or slides."),
       () => setCommandFeedback("This browser blocked copying images. Use Export PNG instead."),
     );
-  }, []);
+  }, [exportsBlocked]);
 
   useEffect(() => {
     render();
