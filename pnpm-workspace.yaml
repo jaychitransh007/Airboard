@@ -2,6 +2,9 @@ packages:
   - "apps/*"
   - "packages/*"
 allowBuilds:
+  # electron-builder brings it in for Squirrel.Windows; the desktop app ships
+  # an NSIS installer instead, so its 7-Zip setup script isn't needed.
+  electron-winstaller: false
   esbuild: true
   sharp: true
 # Next.js still bundles PostCSS 8.4.31, which has published advisories; the

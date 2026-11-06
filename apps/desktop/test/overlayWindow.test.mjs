@@ -4,8 +4,21 @@ import {
   applyOverlayWindowCapabilities,
   buildOverlayUrl,
   createOverlayWindowOptions,
+  DEVELOPMENT_WEB_URL,
   moveOverlayToDisplay,
+  resolveDesktopWebUrl,
 } from "../src/overlayWindow.mjs";
+
+test("the overlay opens the configured, packaged or local web address, in that order", () => {
+  const packaged = "https://airboard-pilot-web.example";
+  assert.equal(
+    resolveDesktopWebUrl({ env: { AIRBOARD_DESKTOP_URL: " https://staging.example " }, isPackaged: true, packagedWebUrl: packaged }),
+    "https://staging.example",
+  );
+  assert.equal(resolveDesktopWebUrl({ env: {}, isPackaged: true, packagedWebUrl: packaged }), packaged);
+  assert.equal(resolveDesktopWebUrl({ env: {}, isPackaged: false, packagedWebUrl: packaged }), DEVELOPMENT_WEB_URL);
+  assert.throws(() => resolveDesktopWebUrl({ env: {}, isPackaged: true }), /without an Airboard web address/);
+});
 
 test("buildOverlayUrl preserves the configured route and enables desktop mode", () => {
   assert.equal(
