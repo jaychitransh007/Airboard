@@ -94,7 +94,9 @@ export class InMemorySessionStore implements SessionStore {
       boardSessionId: record.session.id,
       guestId: crypto.randomUUID(),
       displayName: input.displayName || "Guest",
-      role: record.session.allowParticipantDrawing ? "editor" : "viewer",
+      // Whether a guest may draw is the session's live setting, which the
+      // owner can change while people are in, not something fixed at join.
+      role: "editor",
       inputEnabled: true,
       connectedAt: now,
       lastSeenAt: now,
@@ -125,7 +127,8 @@ export class InMemorySessionStore implements SessionStore {
       });
     }
 
-    if (participant?.role === "owner") {
+    // An ended session stays ended, however long the owner's tab keeps beating.
+    if (participant?.role === "owner" && record.session.status !== "ended") {
       record.session = {
         ...record.session,
         status: "active",
@@ -167,6 +170,19 @@ export class InMemorySessionStore implements SessionStore {
       status: "ended",
       updatedAt: now,
     };
+    return record.session;
+  }
+
+  setParticipantDrawing(sessionId: string, allow: boolean): BoardSession {
+    const record = this.requireSession(sessionId);
+    record.session = { ...record.session, allowParticipantDrawing: allow, updatedAt: new Date().toISOString() };
+    return record.session;
+  }
+
+  resetJoinLinks(sessionId: string): BoardSession {
+    const record = this.requireSession(sessionId);
+    const now = new Date().toISOString();
+    record.session = { ...record.session, joinLinksResetAt: now, updatedAt: now };
     return record.session;
   }
 

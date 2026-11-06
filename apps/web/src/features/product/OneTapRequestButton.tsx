@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { airboardApi } from "../../platform/api";
 import { useAirboardAuth } from "../../platform/auth";
 import { pilotExtensionRequest, pilotExtensionStorageKey, type SupportRequestBody } from "./supportRequests";
@@ -24,6 +24,15 @@ export function OneTapRequestButton({
 }) {
   const auth = useAirboardAuth();
   const [state, setState] = useState<"idle" | "saving" | "done" | "error">("idle");
+  // The button gives way to the confirmation; if it had keyboard focus, the
+  // confirmation takes it (and is read out) instead of focus falling to the page.
+  const doneRef = useRef<HTMLSpanElement | null>(null);
+  const focusDoneRef = useRef(false);
+  useEffect(() => {
+    if (state !== "done" || !focusDoneRef.current) return;
+    focusDoneRef.current = false;
+    doneRef.current?.focus();
+  }, [state]);
 
   useEffect(() => {
     try {
@@ -33,7 +42,7 @@ export function OneTapRequestButton({
     }
   }, [storageKey]);
 
-  const send = async () => {
+  const send = async (hadFocus: boolean) => {
     if (!auth.accessToken || state === "saving" || state === "done") return;
     setState("saving");
     try {
@@ -47,6 +56,7 @@ export function OneTapRequestButton({
       } catch {
         // See above.
       }
+      focusDoneRef.current = hadFocus;
       setState("done");
     } catch {
       setState("error");
@@ -54,7 +64,7 @@ export function OneTapRequestButton({
   };
 
   if (state === "done") {
-    return <span className="one-tap-request-done" role="status">✓ {doneLabel}</span>;
+    return <span className="one-tap-request-done" role="status" ref={doneRef} tabIndex={-1}>✓ {doneLabel}</span>;
   }
   return (
     <span className="one-tap-request">
@@ -62,7 +72,7 @@ export function OneTapRequestButton({
         type="button"
         className={`button ${primary ? "button-primary" : "button-quiet"}`}
         disabled={state === "saving"}
-        onClick={() => void send()}
+        onClick={(event) => void send(document.activeElement === event.currentTarget)}
       >
         {state === "saving" ? "Sending…" : label}
       </button>

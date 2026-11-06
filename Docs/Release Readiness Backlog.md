@@ -64,7 +64,7 @@ These are fixable in the repo and each would make a public "supported product" c
 | ID | Title | Status | Owner | Verification | Evidence | Recommendation |
 |----|-------|--------|-------|--------------|----------|----------------|
 | RGB-015 | Non-constant-time `===` compare on operator secrets (apiToken, cron secret, metrics token) | Done 2026-11-05 | Engineering | Reported | `apps/api/src/security.ts:71,75`; `server.ts:211`; `controlPlaneRoutes.ts:1484` — the cron secret guards *destructive* deletion | Use `crypto.timingSafeEqual` on length-normalized buffers, matching the signed-token & Stripe paths. |
-| RGB-016 | Transcription WS forwards the raw ~1h Supabase JWT in the `access_token` URL query | Partly done 2026-11-05: the old `access_token` path stays one release for older clients | Engineering | Reported (partly tracked) | `apps/api/src/auth.ts:84`; `apps/web/src/features/board/realtimeSpeech.ts:242` — vs board `/ws` which uses a 30-min purpose-scoped signed ticket | Issue a short-lived `purpose='transcription'` signed ticket; ensure ingress/log-sink redaction covers `access_token`. |
+| RGB-016 | Transcription WS forwards the raw ~1h Supabase JWT in the `access_token` URL query | Done and deployed 2026-11-07 (`launch-fc7bc79`, two days early at the owner's choice): the API no longer reads a sign-in token from any URL, and the voice evaluation tool trades its token for a ticket | Engineering | Reported (partly tracked) | `apps/api/src/auth.ts:84`; `apps/web/src/features/board/realtimeSpeech.ts:242` — vs board `/ws` which uses a 30-min purpose-scoped signed ticket | Issue a short-lived `purpose='transcription'` signed ticket; ensure ingress/log-sink redaction covers `access_token`. |
 | RGB-017 | Loopback gate uses substring match on attacker-controlled Host header | Done 2026-11-05 | Engineering | Verified | `controlPlaneRoutes.ts:2407-2410` `.includes(host)`; only reachable when `localEntitlements` (not in prod) — defense-in-depth only | Exact equality/allowlist against `request.ip`. |
 | RGB-018 | `'*'` allowed-origin honored by WS/intent/voice helpers but not the REST CORS layer | Done 2026-11-05 | Engineering | Verified | `transcription/routes.ts:372`, `semanticIntent/routes.ts:191`, `voiceTrace/routes.ts:145` short-circuit `true` on `*`; `server.ts:137` (@fastify/cors) does not | Pick one policy; drop the `*` special-case or document it as unsupported in prod. |
 
@@ -1025,3 +1025,77 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - The admin link list.
     - Photo cleaning.
     - Upload limits.
+- **2026-11-06** — Live-link controls, the accessibility audit and RGB-016 (committed as `91d1c63`; RGB-016 held on its own branch):
+  - **Live links** (threat model L-2):
+    - On saved boards, people who join with the live link can only view by default. The owner picks **Can view** or **Can edit** in Share, and people already in follow at once.
+    - **New link** stops older links letting anyone new in (migration `20261106170000`); people already in stay.
+    - After a reload, the owner rejoins their session as its owner, not as a guest, and keeps the same link.
+  - **Accessibility audit** (`Docs/Accessibility Audit.md`):
+    - 17 failures fixed across the public site, the app, the board's chrome and the live and shared boards.
+    - The board now tells a screen reader which object Tab selects and lists the board's words.
+    - Locked in by `e2e/accessibilityAudit.spec.ts` and `test/accessibilityStyles.test.mjs`.
+    - Still open:
+      - no real screen-reader pass;
+      - drawing needs a pointer;
+      - the selection toolbar sits early in the Tab order.
+  - **RGB-016:** done on branch `codex/remove-legacy-access-token`, held until after 8 November.
+- **2026-11-06** — Deployed `launch-91d1c63` to both services (live-link controls and the accessibility fixes):
+  - **Order:**
+    - Applied migration `20261106170000_live_link_reset.sql`; the database then had every migration in the repository.
+    - Staged and promoted the API, then the web.
+  - **Staged API checks:**
+    - `/ready` reported every dependency ready.
+    - Without a sign-in, the new `/sessions/:id/resume` and `/sessions/:id/join-link` answered 401, along with every other signed-in route.
+    - No errors in its logs.
+  - **Staged web checks:**
+    - Every main page answered 200 with the security headers and its own page title.
+    - The live-link choice, New link, the replaced-link message, the view-only live board and the board's screen-reader text were in the build.
+    - In a browser, pages started with no blocked scripts or start-up errors.
+  - **After promoting:**
+    - The live `/status` shows all three Working.
+    - Neither new revision logged an error.
+    - `pnpm launch:check:deployed` reports READY, 21 of 21.
+    - The tags `launch-19ddecb-api` and `launch-19ddecb-web` were removed.
+  - **Rollback:** both services to `launch-19ddecb`, which ignores the new column.
+  - **Not yet checked in production with a signed-in account:**
+    - The Can view / Can edit switch.
+    - New link.
+    - The owner rejoining after a reload.
+- **2026-11-07** — RGB-016 deployed, and the live sign-up journey:
+  - **RGB-016:** the branch was merged and the API promoted as `launch-fc7bc79`; the web stays on `launch-91d1c63`.
+    - The staged API was healthy and refused requests without a sign-in, including `/me?access_token=…`.
+    - No errors were logged.
+    - The tag `launch-91d1c63-api` was removed.
+    - Rollback: the API to `launch-91d1c63`.
+  - **Live journey**, run in the browser on the live site in the owner's signed-in account, on one test board that is now in Trash (recoverable):
+    - **Board:** created a board; added shapes and a connector by typed commands; ran a free-form Airo command (the AI model and the daily allowance path) and it applied; renamed the board; a reload kept the content.
+    - **Live links:** Share defaults to Can view, with no live link in the address bar. A guest saw the view-only live board, switched to the editor on Can edit and back on Can view without reloading. New link made the old link answer "This live link was replaced", while the guest already in stayed. After a reload the owner kept the owner controls.
+    - **View-only link:** opened read-only, then stopped working once turned off.
+    - **Library:** search by board content worked; Move to Trash and Restore worked.
+    - **Settings:** Sessions listed the sessions and ended one.
+    - **Other pages:** Billing showed the pilot until 5 December, and Privacy & data loaded.
+    - **Clipboard:** the browser blocked copying, and Share's fallback showed the link to copy by hand.
+  - **Defect found and fixed (`abc3725`, deployed the same day):** the Airo command's result reached the live session but was never saved, so the saved board and its view-only link lacked it. Commands applied as one batch (Airo plans and compound typed commands) and undoing them never scheduled a save. They do now, and a browser test that stands in for the Airo model fails without the fix.
+- **2026-11-07** — Deployed the save fix to the web as `launch-abc3725`; the API stays on `launch-fc7bc79`:
+  - **Staged checks:** every main page answered 200 with the security headers.
+  - **After promoting:**
+    - On the live site, a free-form Airo command ("a little cache that the API reads from") applied, and a fresh tab showed it saved.
+    - Neither revision logged an error.
+    - The launch check reports READY, 21 of 21.
+    - The tag `launch-91d1c63-web` was removed.
+  - **Rollback:** the web to `launch-91d1c63`.
+  - **Second defect from the journey, fixed in `c2aa572` (deployed in `launch-8eff5db`):** ending a session in Settings didn't stick while the owner had the board open. The owner's 30-second heartbeat set it back to active, so the live link kept letting people in. A heartbeat now leaves an ended session alone; tests cover both session stores.
+  - **Cleanup:** the test board is in Trash, and its three test sessions are ended. The owner's older session from 5 November was left alone.
+- **2026-11-07** — Deployed `launch-8eff5db` to both services: the ended-session fix (API) and the 320px card fix (web, which had failed PR #43's CI on Linux fonts):
+  - **Staged API checks:**
+    - Every dependency was ready, and every signed-in route refused requests without a sign-in, the same as the live API.
+    - Malformed JSON is answered with 500 rather than 400 on the live API too. That's an existing quirk, noted as a follow-up.
+  - **Staged web checks:**
+    - Every main page answered 200 with the security headers.
+    - The new card styles were in the stylesheet.
+  - **After promoting:**
+    - On the live site, a session ended in Settings stayed ended 45 seconds later, with the owner's board tab still open.
+    - No errors were logged after the malformed test requests.
+    - The launch check reports READY, 21 of 21.
+    - The tags `launch-fc7bc79-api` and `launch-abc3725-web` were removed.
+  - **Cleanup:** the test board is back in Trash and its sessions are ended.

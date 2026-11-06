@@ -38,14 +38,20 @@ a presentation.
 
 Choose **Share** in the board header.
 
-- **Edit together now.** **Copy live link** and send it to anyone, for example
+- **Work together now.** **Copy live link** and send it to anyone, for example
   in the meeting chat. People who open it join your board straight away, with
-  no account, and can edit with you. Their changes save to your board while you
-  have it open. New people can join for 2 hours; people already in keep going.
-  Each time you open the board you get a fresh link in **Share**. To stop a
-  link straight away, end the session in **Settings → Sessions**. The link is
-  never put in your address bar, so copying the board's address doesn't share
-  it.
+  no account.
+  - **Can view** (the default): they watch the board change as you work.
+  - **Can edit**: they draw and change it with you, and their changes save to
+    your board while you have it open. You can switch at any time, and people
+    already in follow the change.
+  - **New link** makes a fresh link. The old one stops letting anyone new in;
+    people already in stay. To remove everyone, end the session in
+    **Settings → Sessions**.
+
+  New people can join for 2 hours. The link is never put in your address bar,
+  so copying the board's address doesn't share it, and reloading the page keeps
+  you in the same session with the same link.
 - **Who can open this board later.** In a team workspace, the board's owner
   chooses **Only you** or **Everyone in** the workspace. Shared boards appear
   under **Shared** for every member, and **Copy board link** gives members a
@@ -66,8 +72,8 @@ Choose **Share** in the board header.
 Members whose role is **Viewer** or **Billing** open boards view-only: they can
 move around and zoom, but not edit, share, move to Trash or restore.
 
-Anyone with a live link can edit while it works, so share it only with the
-people you are working with.
+When you choose **Can edit**, anyone with the live link can change the board
+while it works, so share it only with the people you are working with.
 
 ## Trash and restore
 

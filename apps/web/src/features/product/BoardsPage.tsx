@@ -146,8 +146,10 @@ export function BoardsPage() {
         )}
       </section>
 
+      {/* Mounted while empty: a status region added together with its text is often not read out. */}
+      <p className="sr-only" role="status">{notice ?? ""}</p>
       {notice ? (
-        <div className="library-notice" role="status">
+        <div className="library-notice">
           <span>{notice}</span>
           {recentlyDeleted ? (
             <button type="button" disabled={actionBusy} onClick={() => void restoreBoard()}>

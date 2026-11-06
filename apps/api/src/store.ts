@@ -37,6 +37,10 @@ export type SessionStore = {
   markOwnerDisconnected(sessionId: string): BoardSession | Promise<BoardSession>;
   lockSession(sessionId: string): BoardSession | Promise<BoardSession>;
   endSession(sessionId: string): BoardSession | Promise<BoardSession>;
+  /** Whether guests may edit; read live by every socket's permission check. */
+  setParticipantDrawing(sessionId: string, allow: boolean): BoardSession | Promise<BoardSession>;
+  /** Stops every live link issued so far from admitting new people. */
+  resetJoinLinks(sessionId: string): BoardSession | Promise<BoardSession>;
   appendEvent(sessionId: string, event: BoardEvent): BoardEvent | Promise<BoardEvent>;
   /**
    * Append a group of events as one unit, assigning a contiguous sequence block.

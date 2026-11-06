@@ -15,7 +15,7 @@ export function ProductSection({ section }: { section: string }) {
   if (section === "activity") return <ActivityView />;
   if (section === "shared") return <BoardCollection title="Shared" description="Boards anyone in this workspace can open and edit." scope="shared" />;
   if (section === "trash") return <BoardCollection title="Trash" description="Deleted boards remain recoverable until your retention workflow removes them." scope="trash" />;
-  return <div className="empty-panel"><h3>Surface unavailable</h3><Link href="/app">Return to Airboard</Link></div>;
+  return <div className="empty-panel"><h1>Page not found</h1><p>This part of Airboard doesn&apos;t exist.</p><Link href="/app">Return to Airboard</Link></div>;
 }
 
 function Templates() {
@@ -27,7 +27,7 @@ function Templates() {
 function ActivityView() {
   const auth = useAirboardAuth(); const [events, setEvents] = useState<Activity[]>([]);
   useEffect(() => { if (auth.accessToken) void airboardApi<{ events: Activity[] }>("/activity", { accessToken: auth.accessToken }).then((result) => setEvents(result.events)); }, [auth.accessToken]);
-  return <div><section className="app-page-heading"><p className="eyebrow">Content-safe telemetry</p><h1>Activity</h1><p>Successful setups, sessions and commercial lifecycle events. Board text, raw media, transcripts and meeting URLs are excluded.</p></section><div className="data-table audit"><div className="table-head"><span>Event</span><span>Context</span><span>Time</span></div>{events.length ? events.map((event) => <div key={event.event_id}><span><strong>{event.event_name.replaceAll(".", " ")}</strong></span><span>{Object.entries(event.properties).map(([key,value]) => `${key}: ${String(value)}`).join(" · ") || "—"}</span><span>{new Date(event.occurred_at).toLocaleString()}</span></div>) : <div><span>No activity yet.</span></div>}</div></div>;
+  return <div><section className="app-page-heading"><p className="eyebrow">Content-safe telemetry</p><h1>Activity</h1><p>Successful setups, sessions and commercial lifecycle events. Board text, raw media, transcripts and meeting URLs are excluded.</p></section><div className="data-table audit" role="table" aria-label="Activity"><div className="table-head" role="row"><span role="columnheader">Event</span><span role="columnheader">Context</span><span role="columnheader">Time</span></div>{events.length ? events.map((event) => <div key={event.event_id} role="row"><span role="cell"><strong>{event.event_name.replaceAll(".", " ")}</strong></span><span role="cell">{Object.entries(event.properties).map(([key,value]) => `${key}: ${String(value)}`).join(" · ") || "—"}</span><span role="cell">{new Date(event.occurred_at).toLocaleString()}</span></div>) : <div role="row"><span role="cell">No activity yet.</span></div>}</div></div>;
 }
 
 function BoardCollection({ title, description, scope }: { title: string; description: string; scope: "shared" | "trash" }) {

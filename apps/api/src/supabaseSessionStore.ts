@@ -45,6 +45,7 @@ type BoardSessionRow = {
   expires_at: string;
   created_at: string;
   updated_at: string;
+  join_links_reset_at?: string | null;
 };
 
 type ParticipantRow = {
@@ -170,7 +171,9 @@ export class SupabaseSessionStore implements SessionStore {
       board_session_id: input.sessionId,
       guest_id: crypto.randomUUID(),
       display_name: input.displayName || "Guest",
-      role: session.allowParticipantDrawing ? "editor" : "viewer",
+      // Whether a guest may draw is the session's live setting, which the
+      // owner can change while people are in, not something fixed at join.
+      role: "editor",
       input_enabled: true,
     });
 
@@ -205,16 +208,17 @@ export class SupabaseSessionStore implements SessionStore {
     );
 
     if (participantRow.role === "owner") {
-      const sessionRow = await this.updateSingle<BoardSessionRow>(
-        "board_sessions",
-        {
-          status: "active",
-          owner_last_seen_at: now,
-          updated_at: now,
-        },
-        { column: "id", value: sessionId },
-      );
-      return mapSession(sessionRow);
+      // An ended session stays ended: the owner's open tab keeps sending
+      // heartbeats after they end it in Settings, and must not revive it.
+      const { data: sessionRow, error } = await this.client
+        .from("board_sessions")
+        .update({ status: "active", owner_last_seen_at: now, updated_at: now })
+        .eq("id", sessionId)
+        .neq("status", "ended")
+        .select("*")
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (sessionRow) return mapSession(sessionRow as BoardSessionRow);
     }
 
     return this.getSession(sessionId);
@@ -254,6 +258,25 @@ export class SupabaseSessionStore implements SessionStore {
         status: "ended",
         updated_at: now,
       },
+      { column: "id", value: sessionId },
+    );
+    return mapSession(row);
+  }
+
+  async setParticipantDrawing(sessionId: string, allow: boolean): Promise<BoardSession> {
+    const row = await this.updateSingle<BoardSessionRow>(
+      "board_sessions",
+      { allow_participant_drawing: allow, updated_at: new Date().toISOString() },
+      { column: "id", value: sessionId },
+    );
+    return mapSession(row);
+  }
+
+  async resetJoinLinks(sessionId: string): Promise<BoardSession> {
+    const now = new Date().toISOString();
+    const row = await this.updateSingle<BoardSessionRow>(
+      "board_sessions",
+      { join_links_reset_at: now, updated_at: now },
       { column: "id", value: sessionId },
     );
     return mapSession(row);
@@ -551,6 +574,7 @@ function mapSession(row: BoardSessionRow): BoardSession {
     ...session,
     ...(row.title ? { title: row.title } : {}),
     ...(row.provider_meeting_id ? { providerMeetingId: row.provider_meeting_id } : {}),
+    ...(row.join_links_reset_at ? { joinLinksResetAt: row.join_links_reset_at } : {}),
   };
 }
 

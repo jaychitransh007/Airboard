@@ -7,6 +7,7 @@ import { useAirboardAuth } from "../../platform/auth";
 import { AIRBOARD_API_URL } from "../../platform/config";
 import { BoardViewer, decodeImage } from "../share/BoardViewer";
 import { boardImageSources, sharedBoardState } from "../share/sharedBoard";
+import { useDocumentTitle } from "./useDocumentTitle";
 
 type SavedBoard = { id: string; title: string; latest_state: unknown };
 
@@ -21,6 +22,7 @@ export function ViewOnlyBoard({ boardId }: { boardId?: string | undefined }) {
   const accessToken = auth.accessToken;
   const [board, setBoard] = useState<SavedBoard | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  useDocumentTitle(board?.title);
 
   useEffect(() => {
     if (!accessToken || !boardId) return;
@@ -50,9 +52,9 @@ export function ViewOnlyBoard({ boardId }: { boardId?: string | undefined }) {
 
   if (!boardId || failure) {
     return (
-      <div className="product-loading" role={failure ? "alert" : undefined}>
-        <strong>{boardId ? "Could not open this Airboard." : "Your role can't create boards."}</strong>
-        <span>
+      <main className="product-loading">
+        <h1>{boardId ? "Could not open this Airboard." : "Your role can't create boards."}</h1>
+        <span role={failure ? "alert" : undefined}>
           {!boardId
             ? READ_ONLY_NOTICE
             : failure === "BOARD_NOT_FOUND"
@@ -62,10 +64,10 @@ export function ViewOnlyBoard({ boardId }: { boardId?: string | undefined }) {
         <span className="product-loading-actions">
           <Link className="button button-primary" href="/app/boards">Go to my boards</Link>
         </span>
-      </div>
+      </main>
     );
   }
-  if (!board || !state) return <div className="product-loading">Opening your Airboard…</div>;
+  if (!board || !state) return <main className="product-loading"><p role="status">Opening your Airboard…</p></main>;
   return (
     <BoardViewer
       title={board.title}

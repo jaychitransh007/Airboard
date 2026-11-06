@@ -39,7 +39,7 @@ export function AuthCallback() {
   if (!auth.loading && auth.accessToken && !auth.account && auth.error) {
     return (
       <div className="auth-callback-shell">
-        <Link className="marketing-brand" href="/"><span className="brand-orbit" />Airboard</Link>
+        <Link className="marketing-brand" href="/"><span className="brand-orbit" aria-hidden="true" />Airboard</Link>
         <main className="auth-callback-card">
           <p className="eyebrow">Account setup interrupted</p>
           <h1>Your email is confirmed.</h1>
@@ -50,7 +50,7 @@ export function AuthCallback() {
     );
   }
 
-  return <div className="product-loading">Securing your Airboard account…</div>;
+  return <main className="product-loading"><p role="status">Securing your Airboard account…</p></main>;
 }
 
 function CallbackFailure({ title, detail, actionHref, actionLabel }: {
@@ -61,11 +61,11 @@ function CallbackFailure({ title, detail, actionHref, actionLabel }: {
 }) {
   return (
     <div className="auth-callback-shell">
-      <Link className="marketing-brand" href="/"><span className="brand-orbit" />Airboard</Link>
-      <main className="auth-callback-card" role="alert">
+      <Link className="marketing-brand" href="/"><span className="brand-orbit" aria-hidden="true" />Airboard</Link>
+      <main className="auth-callback-card">
         <p className="eyebrow">Confirmation link unavailable</p>
         <h1>{title}</h1>
-        <p>{detail}</p>
+        <p role="alert">{detail}</p>
         <div className="hero-actions">
           <Link className="button button-primary" href={actionHref}>{actionLabel}</Link>
           <Link className="button button-quiet" href="/support">Get help</Link>

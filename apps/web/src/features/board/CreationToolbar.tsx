@@ -3,6 +3,7 @@
 import {
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -160,6 +161,11 @@ export function CreationToolbar({
     }
     onStampSelect?.(emoji);
     selectAndClose("stamp");
+  };
+
+  const closeShapeLibrary = () => {
+    dockRef.current?.querySelector<HTMLElement>('[data-dock-id="category:shape"]')?.focus();
+    setShapeLibraryOpen(false);
   };
 
   const togglePanel = (panel: CreationPanelId) => {
@@ -461,13 +467,22 @@ export function CreationToolbar({
       </div>
 
       {shapeLibraryOpen ? (
-        <aside className="creation-shape-sidebar" aria-label="More shapes">
+        <aside
+          className="creation-shape-sidebar"
+          aria-label="More shapes"
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            event.stopPropagation();
+            closeShapeLibrary();
+          }}
+        >
           <header>
             <div>
               <strong>Shapes</strong>
               <span>FigJam catalog</span>
             </div>
-            <button type="button" aria-label="Close shapes" onClick={() => setShapeLibraryOpen(false)}>×</button>
+            <button type="button" aria-label="Close shapes" onClick={closeShapeLibrary}>×</button>
           </header>
           <label className="creation-shape-search">
             <span className="sr-only">Search shapes</span>
@@ -491,6 +506,7 @@ export function CreationToolbar({
                   {CONNECTOR_TOOLS.map((entry) => (
                     <MenuToolButton
                       compact
+                      palette
                       key={entry.id}
                       tool={entry.id}
                       active={activeTool === entry.id}
@@ -607,6 +623,18 @@ function CreationPopover({
   className?: string;
   children: React.ReactNode;
 }) {
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  // Closing the menu (Escape, or choosing an item) removes the focused item.
+  // The cleanup runs while it is still in the page, so focus can go back to
+  // the button that opened it (rendered just before it) instead of the page.
+  useLayoutEffect(() => {
+    const popover = popoverRef.current;
+    return () => {
+      if (!popover?.contains(document.activeElement)) return;
+      const trigger = popover.previousElementSibling;
+      if (trigger instanceof HTMLElement) trigger.focus();
+    };
+  }, []);
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const items = menuItems(event.currentTarget);
     const current = document.activeElement instanceof HTMLElement ? items.indexOf(document.activeElement) : -1;
@@ -616,7 +644,7 @@ function CreationPopover({
     items[next]?.focus();
   };
   return (
-    <div className={`catalog-flyout creation-popover ${className ?? ""}`} role="menu" aria-label={label} onKeyDown={keyDown}>
+    <div ref={popoverRef} className={`catalog-flyout creation-popover ${className ?? ""}`} role="menu" aria-label={label} onKeyDown={keyDown}>
       {children}
     </div>
   );
@@ -629,6 +657,7 @@ function MenuToolButton({
   dockId,
   gestureHover,
   compact = false,
+  palette = false,
   onClick,
 }: {
   tool: CreationToolId;
@@ -637,6 +666,8 @@ function MenuToolButton({
   dockId?: string;
   gestureHover?: boolean;
   compact?: boolean;
+  /** In the shape library rather than a menu: a toggle button. */
+  palette?: boolean;
   onClick: () => void;
 }) {
   const label = creationToolLabel(tool);
@@ -644,7 +675,8 @@ function MenuToolButton({
   return (
     <button
       type="button"
-      role="menuitem"
+      role={palette ? undefined : "menuitem"}
+      aria-pressed={palette ? active : undefined}
       className={`creation-menu-tool${compact ? " compact" : ""}${active ? " selected" : ""}${gestureHover ? " gesture-hover" : ""}`}
       data-dock-id={dockId ?? `creation:${tool}`}
       data-creation-tool={tool}
@@ -656,7 +688,10 @@ function MenuToolButton({
     >
       <CreationGlyph tool={tool} />
       <span>{label}</span>
-      {shortcut ? <kbd>{shortcut}</kbd> : null}
+      {/* The name already says "shortcut M". The key is drawn from the attribute so
+          the visible label ("Marker") stays the start of the name, which is what
+          speech-input users say (WCAG 2.5.3). */}
+      {shortcut ? <kbd aria-hidden="true" data-shortcut={shortcut} /> : null}
     </button>
   );
 }
@@ -665,11 +700,14 @@ function ShapeButton({
   definition,
   active,
   gestureHover,
+  palette = false,
   onClick,
 }: {
   definition: ShapeDefinition;
   active: boolean;
   gestureHover?: string | null;
+  /** In the shape library rather than a menu: a toggle button. */
+  palette?: boolean;
   onClick: () => void;
 }) {
   const tool = shapeToolId(definition.id);
@@ -678,7 +716,8 @@ function ShapeButton({
   return (
     <button
       type="button"
-      role="menuitem"
+      role={palette ? undefined : "menuitem"}
+      aria-pressed={palette ? active : undefined}
       className={`creation-shape-button${active ? " selected" : ""}${gestureHover === dockId ? " gesture-hover" : ""}`}
       data-dock-id={dockId}
       data-creation-tool={tool}
@@ -712,6 +751,7 @@ function ShapeSection({
       <div className="creation-shape-grid">
         {shapes.map((definition) => (
           <ShapeButton
+            palette
             key={definition.id}
             definition={definition}
             active={activeTool === shapeToolId(definition.id)}
@@ -746,7 +786,7 @@ function TableSizePicker({ onSelect }: { onSelect: (rows: number, columns: numbe
   return (
     <div className="creation-table-size-picker">
       <strong>{size.rows} × {size.columns}</strong>
-      <div className="creation-table-size-grid" role="grid" aria-label="Initial table size">
+      <div className="creation-table-size-grid" role="group" aria-label="Initial table size">
         {Array.from({ length: 10 }, (_, rowIndex) =>
           Array.from({ length: 10 }, (_, columnIndex) => {
             const rows = rowIndex + 1;
@@ -758,7 +798,6 @@ function TableSizePicker({ onSelect }: { onSelect: (rows: number, columns: numbe
                 type="button"
                 role="menuitem"
                 aria-label={`${rows} by ${columns} table`}
-                aria-pressed={selected}
                 data-dock-id={`creation:table:${rows}x${columns}`}
                 data-creation-tool="table"
                 className={selected ? "selected" : undefined}

@@ -12,11 +12,13 @@ export function HelpSearch({ items }: { items: readonly HelpSearchItem[] }) {
   return (
     <div className="help-search">
       <label htmlFor="help-search-input">Search Airboard help</label>
+      <span id="help-search-hint" hidden>Results appear below as you type.</span>
       <div className="help-search-field">
         <span aria-hidden="true">⌕</span>
         <input
           id="help-search-input"
           type="search"
+          aria-describedby="help-search-hint"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Try “Meet overlay”, “undo”, or an error code"
@@ -28,11 +30,16 @@ export function HelpSearch({ items }: { items: readonly HelpSearchItem[] }) {
           </button>
         ) : null}
       </div>
+      {/* Mounted before the first keystroke: a live region added together with
+          its text is often not announced. */}
+      <p className="sr-only" role="status">
+        {searching ? (results.length ? `${results.length} helpful ${results.length === 1 ? "article" : "articles"}` : "No matching article") : ""}
+      </p>
       {searching ? (
-        <div className="help-search-results" aria-live="polite">
+        <div className="help-search-results">
           {results.length ? (
             <>
-              <p>{results.length} helpful {results.length === 1 ? "article" : "articles"}</p>
+              <p aria-hidden="true">{results.length} helpful {results.length === 1 ? "article" : "articles"}</p>
               <ul>
                 {results.map((result) => (
                   <li key={result.slug}>

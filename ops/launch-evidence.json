@@ -49,7 +49,7 @@
       "status": "pending",
       "owner": "Engineering",
       "evidence": "",
-      "notes": "Required from standalone GA (moved out of the controlled pilot on 2026-11-05). Run pnpm smoke:commercial against a disposable release organization."
+      "notes": "Required from standalone GA (moved out of the controlled pilot on 2026-11-05). Run pnpm smoke:commercial against a disposable release organization. 2026-11-07: the journey ran in the browser on the live site in the owner's account: board create, commands, Airo, rename, reload, live links, view-only link, library search, Trash and restore, sessions, billing and privacy pages. Two defects were found. An Airo command's result was not saved: fixed and deployed in launch-abc3725, and confirmed on the live site. Ending a session in Settings didn't stick while the owner's tab was open: fixed in launch-8eff5db, and confirmed on the live site. Still needed: a run in a fresh account to cover sign-up itself."
     },
     "deployment-smoke": {
       "description": "Production web, API, authentication, readiness, board save/export/delete and rollback smoke checks pass.",
@@ -119,7 +119,7 @@
       "status": "pending",
       "owner": "Product",
       "evidence": "",
-      "notes": "Audit keyboard, focus, reduced motion, contrast and screen-reader paths."
+      "notes": "2026-11-06: internal audit recorded in Docs/Accessibility Audit.md. Every non-media page (public, sign-in, sharing, signed-in, admin, settings, billing, board chrome and creation menus) passes axe WCAG 2.2 AA at 1280 and 320 px, keyboard-only use with visible focus and focus return, reflow at 320 px and reduced motion; 17 failures fixed and locked in by apps/web/e2e/accessibilityAudit.spec.ts and apps/web/test/accessibilityStyles.test.mjs. Published statements (/accessibility, help 'Keyboard, pointer, and touchpad') updated to match. Open: the board editor's h1, rename focus return and the live-link error landmarks wait on changes specified in the audit doc; selection changes on the canvas aren't announced; drawing needs a pointer; no real screen-reader (VoiceOver/NVDA) pass yet."
     },
     "monitoring-alerts": {
       "description": "Web, API, database, provider, error-rate, latency and lifecycle alerts route to an accountable responder.",

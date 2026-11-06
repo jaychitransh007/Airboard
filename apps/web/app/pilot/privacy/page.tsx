@@ -1,4 +1,7 @@
+import type { Metadata } from "next";
 import { PilotInfoPage } from "../../../src/features/pilot/PilotInfoPage";
+
+export const metadata: Metadata = { title: "Meet overlay privacy" };
 
 export default function PilotPrivacyPage() {
   return (

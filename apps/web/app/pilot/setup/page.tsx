@@ -1,4 +1,7 @@
+import type { Metadata } from "next";
 import { PilotInfoPage } from "../../../src/features/pilot/PilotInfoPage";
+
+export const metadata: Metadata = { title: "Install the Meet overlay" };
 
 export default function PilotSetupPage() {
   return (

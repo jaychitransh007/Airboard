@@ -127,8 +127,8 @@ export function registerTranscriptionRoutes(
           ? { allowed: true, profileId: ticket.sub || null }
           : { allowed: false, reason: "Airboard authentication required" };
       }
-      // Older clients send the sign-in token itself as `access_token`; kept
-      // for one release so tabs opened before a deploy keep their voice.
+      // Without a ticket, only the shared API token or local development may
+      // stream: the sign-in token is no longer accepted in the URL (RGB-016).
       return authorizeRequest(request);
     };
 

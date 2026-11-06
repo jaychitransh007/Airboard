@@ -1,5 +1,8 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { HelpShell } from "../../src/features/help/HelpShell";
+
+export const metadata: Metadata = { title: "Help article not found" };
 
 export default function HelpNotFound() {
   return (

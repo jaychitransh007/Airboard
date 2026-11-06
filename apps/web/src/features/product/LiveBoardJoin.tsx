@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AirboardPrototype } from "../board/AirboardPrototype";
 import { guestDisplayName, LIVE_LINK_HOURS, liveJoinFailure } from "../board/shareLinks";
 import { useAirboardAuth } from "../../platform/auth";
+import { LiveBoardViewer } from "./LiveBoardViewer";
 import { MaintenanceBanner } from "./MaintenanceBanner";
 
 type JoinFailure = ReturnType<typeof liveJoinFailure>;
@@ -13,14 +14,33 @@ type JoinFailure = ReturnType<typeof liveJoinFailure>;
  * Opens a live board from a Share link. Guests need no account: the link's
  * join token admits them to the host's running session, and the host's saved
  * board keeps their edits. Signed-in people join under their own name and keep
- * Airo's voice and AI features.
+ * Airo's voice and AI features. The host decides in Share whether people can
+ * edit or only watch; this page follows that choice as it changes.
  */
 export function LiveBoardJoin({ sessionId, joinToken }: { sessionId: string; joinToken: string | null }) {
   const auth = useAirboardAuth();
   const [failure, setFailure] = useState<JoinFailure | null>(joinToken ? null : "expired");
+  const [mode, setMode] = useState<"view" | "edit">("view");
 
   if (failure) return <LiveJoinProblem failure={failure} />;
-  if (auth.loading) return <div className="product-loading">Joining the live board…</div>;
+  if (auth.loading || !joinToken) return <div className="product-loading">Joining the live board…</div>;
+  const displayName = guestDisplayName(auth.account?.profile.displayName);
+  if (mode === "view") {
+    return (
+      <div className="canvas-route">
+        <MaintenanceBanner />
+        <LiveBoardViewer
+          sessionId={sessionId}
+          joinToken={joinToken}
+          displayName={displayName}
+          {...(auth.accessToken ? { accessToken: auth.accessToken } : {})}
+          {...(auth.account ? { accountUserId: auth.account.profile.id } : {})}
+          onEditingAllowed={() => setMode("edit")}
+          onJoinFailed={(message) => setFailure(liveJoinFailure(message))}
+        />
+      </div>
+    );
+  }
   return (
     <div className="canvas-route">
       <MaintenanceBanner />
@@ -29,10 +49,13 @@ export function LiveBoardJoin({ sessionId, joinToken }: { sessionId: string; joi
         initialBoardSessionId={sessionId}
         liveGuest
         boardTitle="Live board"
-        participantName={guestDisplayName(auth.account?.profile.displayName)}
+        participantName={displayName}
         {...(auth.accessToken ? { accessToken: auth.accessToken } : {})}
         {...(auth.account ? { accountUserId: auth.account.profile.id } : {})}
         onLiveJoinFailed={(message) => setFailure(liveJoinFailure(message))}
+        onGuestEditingChange={(allowed) => {
+          if (!allowed) setMode("view");
+        }}
       />
     </div>
   );
@@ -43,6 +66,10 @@ function LiveJoinProblem({ failure }: { failure: JoinFailure }) {
     expired: {
       title: "This live link has expired",
       body: `Live links work for ${LIVE_LINK_HOURS} hours. Ask the person who shared it to copy a fresh one from Share.`,
+    },
+    replaced: {
+      title: "This live link was replaced",
+      body: "The person who shared it made a new link. Ask them for the new one.",
     },
     ended: {
       title: "This live session has ended",
@@ -63,9 +90,9 @@ function LiveJoinProblem({ failure }: { failure: JoinFailure }) {
   }[failure];
   const retryable = failure === "offline" || failure === "maintenance";
   return (
-    <div className="product-loading" role="alert">
-      <strong>{copy.title}</strong>
-      <span>{copy.body}</span>
+    <main className="product-loading">
+      <h1>{copy.title}</h1>
+      <span role="alert">{copy.body}</span>
       <span className="product-loading-actions">
         {retryable ? (
           <button type="button" className="button button-primary" onClick={() => window.location.reload()}>
@@ -76,6 +103,6 @@ function LiveJoinProblem({ failure }: { failure: JoinFailure }) {
           Go to Airboard
         </Link>
       </span>
-    </div>
+    </main>
   );
 }

@@ -175,6 +175,8 @@ export type BoardSession = {
   expiresAt: string;
   createdAt: string;
   updatedAt: string;
+  /** Live links issued before this stop admitting people ("New link" in Share). */
+  joinLinksResetAt?: string;
 };
 
 export type Participant = {

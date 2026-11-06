@@ -1,4 +1,7 @@
+import type { Metadata } from "next";
 import { PILOT_CONTACT, PilotInfoPage } from "../../../src/features/pilot/PilotInfoPage";
+
+export const metadata: Metadata = { title: "Preview opt out" };
 
 export default function PilotDraftOptOutPage() {
   const subject = encodeURIComponent("Remove my Airboard preview access");

@@ -31,6 +31,11 @@ export type BoardSyncCallbacks = {
   onStatus?: (status: RealtimeClientStatus) => void;
   /** Server denials: rejected events, persistence failures, auth errors. */
   onRejection?: (rejection: RealtimeServerRejection) => void;
+  /**
+   * Whether guests may edit, re-read after every (re)connect: a change the
+   * owner made while this socket was away arrives here, not as an event.
+   */
+  onSessionPermission?: (allowParticipantDrawing: boolean) => void;
 };
 
 export type BoardSyncHandle = {
@@ -39,6 +44,8 @@ export type BoardSyncHandle = {
   role: string;
   /** Share token used to invite a guest without exposing a guessable session. */
   joinToken?: string;
+  /** Whether guests may edit, as the session stood when this person connected. */
+  allowParticipantDrawing: boolean;
   /**
    * Publishes local events to peers. Returns false when the socket is not
    * open (the events were dropped — local state is still correct, but peers
@@ -95,6 +102,8 @@ export function requestBoardSessionStart(
     title?: string;
     workspaceId?: string;
     boardId?: string;
+    /** Whether people who join with the live link may edit; the API's default is yes. */
+    allowParticipantDrawing?: boolean;
   },
   fetchImpl: typeof fetch = fetch,
 ): Promise<Response> {
@@ -110,6 +119,9 @@ export function requestBoardSessionStart(
       ...(options.title ? { title: options.title } : {}),
       ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
       ...(options.boardId ? { boardId: options.boardId } : {}),
+      ...(options.allowParticipantDrawing !== undefined
+        ? { allowParticipantDrawing: options.allowParticipantDrawing }
+        : {}),
     }),
   });
 }
@@ -124,6 +136,11 @@ export async function startBoardSync(
     pendingStart?: Promise<Response> | null;
     /** Join this existing session; omit to create a new one as owner. */
     boardSessionId?: string | null;
+    /**
+     * The owner's own place in boardSessionId, kept from before a reload:
+     * rejoin as the owner (needs accessToken) instead of as a guest.
+     */
+    resumeParticipantId?: string;
     ownerUserId: string;
     accessToken?: string;
     joinToken?: string;
@@ -133,6 +150,8 @@ export async function startBoardSync(
     providerMeetingId?: string;
     displayName?: string;
     title?: string;
+    /** A new session's live-link setting: may guests edit? */
+    allowParticipantDrawing?: boolean;
   },
   callbacks: BoardSyncCallbacks,
   dependencies: BoardSyncDependencies = {},
@@ -152,10 +171,12 @@ export async function startBoardSync(
   let outcome: "created" | "joined";
   let realtimeTicket: string;
   let joinToken: string | null = null;
+  let allowParticipantDrawing = true;
 
   if (options.boardSessionId) {
+    const resuming = Boolean(options.resumeParticipantId && options.accessToken);
     const response = await fetchImpl(
-      new URL(`/sessions/${options.boardSessionId}/join`, options.apiBaseUrl).toString(),
+      new URL(`/sessions/${options.boardSessionId}/${resuming ? "resume" : "join"}`, options.apiBaseUrl).toString(),
       {
         method: "POST",
         // Signed-in people send their sign-in: when a workspace turns off
@@ -164,17 +185,18 @@ export async function startBoardSync(
           "Content-Type": "application/json",
           ...(options.accessToken ? { Authorization: `Bearer ${options.accessToken}` } : {}),
         },
-        body: JSON.stringify({
-          displayName: options.displayName ?? "Guest",
-          joinToken: options.joinToken,
-        }),
+        body: JSON.stringify(
+          resuming
+            ? { participantId: options.resumeParticipantId }
+            : { displayName: options.displayName ?? "Guest", joinToken: options.joinToken },
+        ),
       },
     );
     if (!response.ok) {
       throw new Error(await describeSessionError(response, "join"));
     }
     const payload = (await response.json()) as {
-      session: { id: string };
+      session: { id: string; allowParticipantDrawing?: boolean };
       participant: { id: string; role: string };
       state: BoardState;
       realtimeTicket: string;
@@ -182,6 +204,7 @@ export async function startBoardSync(
     boardSessionId = payload.session.id;
     participantId = payload.participant.id;
     role = payload.participant.role;
+    allowParticipantDrawing = payload.session.allowParticipantDrawing !== false;
     initialState = payload.state;
     realtimeTicket = payload.realtimeTicket;
     outcome = "joined";
@@ -193,11 +216,12 @@ export async function startBoardSync(
       throw new Error(await describeSessionError(response, "start"));
     }
     const payload = (await response.json()) as {
-      session: { id: string };
+      session: { id: string; allowParticipantDrawing?: boolean };
       ownerParticipant: { id: string; role: string };
       realtimeTicket: string;
       joinToken: string;
     };
+    allowParticipantDrawing = payload.session.allowParticipantDrawing !== false;
     boardSessionId = payload.session.id;
     participantId = payload.ownerParticipant.id;
     role = payload.ownerParticipant.role;
@@ -234,8 +258,20 @@ export async function startBoardSync(
     }
     callbacks.onRemoteEvent(event);
   });
-  if (callbacks.onStatus) {
-    client.onStatus(callbacks.onStatus);
+  if (callbacks.onStatus || callbacks.onSessionPermission) {
+    client.onStatus((status) => {
+      callbacks.onStatus?.(status);
+      if (status !== "connected" || !callbacks.onSessionPermission) return;
+      const stateUrl = new URL(`/sessions/${boardSessionId}/state`, options.apiBaseUrl);
+      stateUrl.searchParams.set("ticket", realtimeTicket);
+      void fetchImpl(stateUrl.toString())
+        .then((response) => (response.ok ? response.json() : null))
+        .then((body: { session?: { allowParticipantDrawing?: unknown } } | null) => {
+          const allow = body?.session?.allowParticipantDrawing;
+          if (typeof allow === "boolean") callbacks.onSessionPermission?.(allow);
+        })
+        .catch(() => undefined);
+    });
   }
   if (callbacks.onRejection) {
     client.onRejection(callbacks.onRejection);
@@ -261,6 +297,7 @@ export async function startBoardSync(
     participantId,
     role,
     ...(joinToken ? { joinToken } : {}),
+    allowParticipantDrawing,
     publish: (input) => {
       const events = Array.isArray(input) ? input : [input as BoardEvent];
       if (events.length === 0) {

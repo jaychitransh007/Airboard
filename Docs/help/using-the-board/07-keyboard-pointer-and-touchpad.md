@@ -6,8 +6,8 @@ categoryLabel: Using the board
 order: 7
 status: shipped
 audiences: ["everyone", "keyboard-only"]
-lastVerified: 2026-11-05
-sources: ["apps/web/src/features/board/AirboardPrototype.tsx", "Docs/Touchpad Writing Mode Implementation Notes.md"]
+lastVerified: 2026-11-06
+sources: ["apps/web/src/features/board/AirboardPrototype.tsx", "apps/web/src/features/board/creationToolCatalog.ts", "Docs/Touchpad Writing Mode Implementation Notes.md", "Docs/Accessibility Audit.md"]
 ---
 
 You can complete the core board workflow without a camera or microphone. Use
@@ -32,6 +32,25 @@ composer.
 At the first or last board object, `Tab` is allowed to leave the canvas. The
 canvas does not trap keyboard focus.
 
+## Tool shortcuts
+
+These arm a tool from the object dock while the canvas has focus.
+
+| Shortcut | Tool |
+| --- | --- |
+| `V` / `H` | Move / Hand |
+| `S` / `T` | Sticky note / Text |
+| `Shift+S` / `Shift+T` | Section / Table |
+| `R` / `O` | Square / Ellipse |
+| `X` / `L` | Bent connector / Straight connector |
+| `M` / `Shift+M` / `W` | Marker / Highlighter / Washi tape |
+| `Shift+Delete` | Eraser |
+| `E` | Stamp |
+| `` ` `` | Code block |
+
+The dock is also a toolbar: `Left` and `Right` arrows move between its
+buttons, and `Escape` closes an open tool menu and returns focus to its button.
+
 ## Pointer workflow
 
 Choose a tool from the object dock, click or drag onto the board, and use
@@ -52,3 +71,36 @@ hold `Space` to pan.
 Use the Airo composer for create, connect, rename, move, align, distribute,
 layout, group, delete, undo, and cancel commands. See
 [Commands](/help/using-the-board/commands) for examples.
+
+## Accessibility status
+
+Airboard was last checked on 6 November 2026 against WCAG 2.2 AA with
+automated rules, keyboard-only testing, and the accessibility tree that screen
+readers use. It was an internal check, not an independent audit, and Airboard
+does not yet claim conformance.
+
+What you can rely on outside the canvas:
+
+- Every page and dialog works with a keyboard, shows where focus is, and
+  returns focus to the button that opened a menu or dialog when it closes.
+- Pages have landmarks, one main heading, labelled fields, and status messages
+  that screen readers announce.
+- Pages reflow to 320 pixels wide, so you can zoom to 400%. On narrow screens
+  the **More** button in the bottom bar holds the rest of the navigation.
+- Animations switch off when your system asks for reduced motion.
+- On the board, a screen reader hears which object `Tab` selects, and can read
+  the board's words as a list.
+
+Known limitations:
+
+- Freehand drawing, erasing, and placing or resizing an object at an exact
+  spot need a pointer or touchpad. Typed commands cover creating, connecting,
+  renaming, moving, aligning, and deleting objects.
+- The toolbar for the selected object comes early in the `Tab` order, well
+  before the canvas.
+- On phone-width screens the zoom buttons are hidden; pinch or scroll to zoom.
+- Camera gestures and Airo voice need a camera and microphone.
+- Airboard has not yet been tested with VoiceOver, NVDA, or JAWS by people who
+  use them.
+
+To report a barrier, use [Contact support](/support).

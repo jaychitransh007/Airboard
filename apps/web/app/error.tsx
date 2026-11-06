@@ -15,9 +15,9 @@ export default function RouteError({
     console.error("Airboard route error", error);
   }, [error]);
   return (
-    <div className="product-loading" role="alert">
-      <strong>Something went wrong on this page.</strong>
-      <span>Try again. If it keeps happening, contact support and include the reference below.</span>
+    <main className="product-loading" id="main-content" tabIndex={-1}>
+      <h1>Something went wrong on this page.</h1>
+      <span role="alert">Try again. If it keeps happening, contact support and include the reference below.</span>
       <span className="product-loading-actions">
         <button className="button button-primary" type="button" onClick={reset}>
           Try again
@@ -27,6 +27,6 @@ export default function RouteError({
         </Link>
       </span>
       {error.digest ? <small>Reference: {error.digest}</small> : null}
-    </div>
+    </main>
   );
 }
