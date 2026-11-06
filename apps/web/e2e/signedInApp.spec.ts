@@ -65,6 +65,68 @@ test("edits to a saved board are saved as the next version", async ({ page }) =>
   expect(JSON.stringify(latest?.state)).toContain("Checkout API");
 });
 
+test("a command that changes the diagram in one batch, and its undo, are saved", async ({ page }) => {
+  const api = await signIn(page, { boards: [{ title: checkoutFlow.title, state: checkoutFlow.state }] });
+  await openSavedBoard(page, api.boardId(checkoutFlow.title));
+  // The saved status of the node the command adds (null until a save has it).
+  const savedLedger = () => {
+    const state = api.saves.at(-1)?.state as {
+      elements?: Record<string, { status: string }>;
+      strokes?: Record<string, { status: string }>;
+    } | undefined;
+    const items = [...Object.values(state?.elements ?? {}), ...Object.values(state?.strokes ?? {})];
+    const ledger = items.filter((item) => JSON.stringify(item).includes('"Ledger"'));
+    if (!ledger.length) return null;
+    return ledger.some((item) => item.status === "active" || item.status === "committed") ? "on the board" : "removed";
+  };
+
+  // Stand in for the Airo model, so the command takes the same path a real
+  // Airo plan takes: one batch, applied outside the single-edit path.
+  await page.route("**/intent/config", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    headers: { "access-control-allow-origin": "*" },
+    body: JSON.stringify({ available: true, provider: "test-provider", defaultModel: "test-model", allowedModels: ["test-model"] }),
+  }));
+  await page.route("**/intent/resolve", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    headers: { "access-control-allow-origin": "*" },
+    body: JSON.stringify({
+      plan: {
+        version: "1.1",
+        status: "resolved",
+        issueCode: "none",
+        clarificationQuestion: null,
+        missingSlots: [],
+        actions: [{ type: "create", nodeType: "database", label: "Ledger", handle: "ledger_1", placement: { kind: "auto" } }],
+      },
+      provider: "test-provider",
+      model: "test-model",
+      metadata: {
+        responseId: "resp_e2e",
+        responseModel: "test-model",
+        providerRequestId: "req_e2e",
+        clientRequestId: "airboard:e2e:client",
+        providerProcessingMs: 5,
+        totalLatencyMs: 10,
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      },
+    }),
+  }));
+  await page.reload();
+  await expect(page.getByTestId("share-board")).toBeVisible({ timeout: 30_000 });
+  await page.getByTestId("intent-command-input").fill("could you sketch a ledger store for me");
+  await page.getByTestId("intent-primary-action").click();
+  await expect(page.locator(".intent-feedback")).toContainText("Applied:", { timeout: 15_000 });
+  // Saved without any further edit: nothing else would trigger the save.
+  await expect.poll(savedLedger, { timeout: 10_000 }).toBe("on the board");
+
+  await page.locator("canvas.board-canvas").focus();
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+z" : "Control+z");
+  await expect.poll(savedLedger, { timeout: 10_000 }).toBe("removed");
+});
+
 test("a save that loses to another tab asks which version to keep", async ({ page }) => {
   const api = await signIn(page, { boards: [{ title: checkoutFlow.title, state: checkoutFlow.state }] });
   const boardId = api.boardId(checkoutFlow.title);

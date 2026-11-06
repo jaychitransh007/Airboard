@@ -108,7 +108,9 @@ test("sign-in and signup pages pass the audit for someone signed out", async ({ 
   await page.route("**/auth/development", (route) => route.fulfill({ status: 404, json: { error: "NOT_FOUND" } }));
   for (const path of ["/login", "/signup"]) {
     await page.goto(path);
-    await expect(page.getByLabel("Work email")).toBeVisible();
+    // The browser tests run without a sign-in service, so the page settles on
+    // its no-provider state; wait for that rather than the brief default.
+    await expect(page.getByText("Continue with your Google account.")).toBeVisible();
     await auditPage(page, path);
   }
 });

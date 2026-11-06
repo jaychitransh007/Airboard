@@ -5714,6 +5714,8 @@ export function AirboardPrototype({
         });
         boardRef.current = result.state;
         appendBoundedBoardEvents(boardEventLogRef.current, result.events);
+        // The undo changes the saved board too, not only the live session.
+        schedulePersistentSnapshot(result.state);
         if (result.events.length > 0) {
           boardSyncRef.current?.publish(result.events);
           if (action.originatingInteractionId) {
@@ -5776,6 +5778,7 @@ export function AirboardPrototype({
       applyLocalEvent,
       applySceneElementLifecycle,
       refreshRealtimeSpeechKeyterms,
+      schedulePersistentSnapshot,
       render,
       reportVoiceTrace,
       selectSceneElements,
@@ -7045,6 +7048,9 @@ export function AirboardPrototype({
         });
       }
       boardRef.current = nextState;
+      // Compound and Airo commands apply as one batch, outside applyLocalEvent,
+      // so they schedule the save themselves.
+      schedulePersistentSnapshot(nextState);
       if (pending.voiceTurnId && undoEvents.length > 0) {
         interactionAttributionRef.current!.record({
           interactionId: pending.voiceTurnId,
@@ -7108,6 +7114,7 @@ export function AirboardPrototype({
     refreshRealtimeSpeechKeyterms,
     render,
     reportVoiceTrace,
+    schedulePersistentSnapshot,
     updateStats,
   ]);
 
