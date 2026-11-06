@@ -7,7 +7,7 @@ order: 11
 status: development-preview
 audiences: ["everyone", "creators"]
 lastVerified: 2026-11-07
-sources: ["README.md", "apps/desktop/README.md", "apps/desktop/src/main.mjs", "apps/desktop/src/overlayWindow.mjs", "apps/desktop/src/autoUpdate.mjs"]
+sources: ["README.md", "apps/desktop/src/main.mjs", "apps/desktop/src/overlayWindow.mjs", "apps/desktop/src/autoUpdate.mjs"]
 ---
 
 The desktop overlay is a native Electron development preview. It places a

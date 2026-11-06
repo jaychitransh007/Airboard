@@ -385,7 +385,6 @@ export const HELP_ARTICLES: readonly HelpArticle[] = [
     "lastVerified": "2026-11-07",
     "sources": [
       "README.md",
-      "apps/desktop/README.md",
       "apps/desktop/src/main.mjs",
       "apps/desktop/src/overlayWindow.mjs",
       "apps/desktop/src/autoUpdate.mjs"
