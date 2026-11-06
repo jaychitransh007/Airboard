@@ -1025,7 +1025,7 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - The admin link list.
     - Photo cleaning.
     - Upload limits.
-- **2026-11-06** — Live-link controls, the accessibility audit and RGB-016 (not deployed yet):
+- **2026-11-06** — Live-link controls, the accessibility audit and RGB-016 (committed as `91d1c63`; RGB-016 held on its own branch):
   - **Live links** (threat model L-2):
     - On saved boards, people who join with the live link can only view by default. The owner picks **Can view** or **Can edit** in Share, and people already in follow at once.
     - **New link** stops older links letting anyone new in (migration `20261106170000`); people already in stay.
@@ -1039,3 +1039,25 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
       - drawing needs a pointer;
       - the selection toolbar sits early in the Tab order.
   - **RGB-016:** done on branch `codex/remove-legacy-access-token`, held until after 8 November.
+- **2026-11-06** — Deployed `launch-91d1c63` to both services (live-link controls and the accessibility fixes):
+  - **Order:**
+    - Applied migration `20261106170000_live_link_reset.sql`; the database then had every migration in the repository.
+    - Staged and promoted the API, then the web.
+  - **Staged API checks:**
+    - `/ready` reported every dependency ready.
+    - Without a sign-in, the new `/sessions/:id/resume` and `/sessions/:id/join-link` answered 401, along with every other signed-in route.
+    - No errors in its logs.
+  - **Staged web checks:**
+    - Every main page answered 200 with the security headers and its own page title.
+    - The live-link choice, New link, the replaced-link message, the view-only live board and the board's screen-reader text were in the build.
+    - In a browser, pages started with no blocked scripts or start-up errors.
+  - **After promoting:**
+    - The live `/status` shows all three Working.
+    - Neither new revision logged an error.
+    - `pnpm launch:check:deployed` reports READY, 21 of 21.
+    - The tags `launch-19ddecb-api` and `launch-19ddecb-web` were removed.
+  - **Rollback:** both services to `launch-19ddecb`, which ignores the new column.
+  - **Not yet checked in production with a signed-in account:**
+    - The Can view / Can edit switch.
+    - New link.
+    - The owner rejoining after a reload.
