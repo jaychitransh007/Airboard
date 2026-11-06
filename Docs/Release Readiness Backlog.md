@@ -1191,3 +1191,9 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - **Live journey:** on a new board, "add a user" and "add an API below the user", then "put the user and the API side by side, lined up along the top, and group them as front end".
     - It failed twice before this fix. Now Luna applied three actions: the API and User side by side with their tops lined up, in a section titled "front end".
     - A reload showed the same board. The test board is in Trash.
+- **2026-11-07** — Deployed `launch-63a10b8` to both services, so production matches `main` after PR #45 (merge `db6630a`). The web had been one shared-package change behind: the plan schema minimums from RGB-041.
+  - **Checks:** no migrations were pending. Both staged revisions passed the smoke checks: API ready, 400 for malformed JSON, 401 without a sign-in, web pages 200 with security headers.
+  - **After promotion:** the launch check reports READY, 21 of 21, and both revisions logged no errors. The signed-in board library loads. The tags `launch-637bd84-api` and `launch-460cd8d-web` were removed.
+  - **Rollback:** the API to `launch-637bd84` and the web to `launch-460cd8d`.
+  - **Project Status:** rewritten to match, including what is left for an open and a paid launch.
+
