@@ -33,6 +33,24 @@ export function resolveDesktopWebUrl({ env = {}, isPackaged, packagedWebUrl }) {
   return DEVELOPMENT_WEB_URL;
 }
 
+/**
+ * What the overlay's own web page may ask for: the camera and microphone, for
+ * hands and Airo's voice, and copying a link. Anything else, or any other
+ * origin, is refused.
+ */
+export const OVERLAY_ALLOWED_PERMISSIONS = Object.freeze(["media", "clipboard-sanitized-write"]);
+
+export function overlayPermissionAllowed(permission, requestingUrl, webOrigin) {
+  if (!OVERLAY_ALLOWED_PERMISSIONS.includes(permission)) {
+    return false;
+  }
+  try {
+    return new URL(requestingUrl).origin === webOrigin;
+  } catch {
+    return false;
+  }
+}
+
 export function buildOverlayUrl(baseUrl) {
   const url = new URL(baseUrl);
   if (url.protocol !== "http:" && url.protocol !== "https:") {

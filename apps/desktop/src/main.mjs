@@ -19,6 +19,7 @@ import {
   createOverlayWindowOptions,
   moveOverlayToDisplay,
   OVERLAY_IPC,
+  overlayPermissionAllowed,
   OVERLAY_SHORTCUTS,
   resolveDesktopWebUrl,
 } from "./overlayWindow.mjs";
@@ -211,6 +212,11 @@ async function createOverlayWindow() {
   applyOverlayWindowCapabilities(overlayWindow, { clickThrough: true });
 
   overlayWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  const { session } = overlayWindow.webContents;
+  session.setPermissionRequestHandler((_contents, permission, callback, details) =>
+    callback(overlayPermissionAllowed(permission, details.requestingUrl, webOrigin)));
+  session.setPermissionCheckHandler((_contents, permission, requestingOrigin) =>
+    overlayPermissionAllowed(permission, requestingOrigin, webOrigin));
   overlayWindow.webContents.on("will-navigate", (event, destination) => {
     if (new URL(destination).origin !== webOrigin) {
       event.preventDefault();
