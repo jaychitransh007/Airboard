@@ -1075,4 +1075,14 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - **Settings:** Sessions listed the sessions and ended one.
     - **Other pages:** Billing showed the pilot until 5 December, and Privacy & data loaded.
     - **Clipboard:** the browser blocked copying, and Share's fallback showed the link to copy by hand.
-  - **Defect found and fixed (`abc3725`, not deployed yet):** the Airo command's result reached the live session but was never saved, so the saved board and its view-only link lacked it. Commands applied as one batch (Airo plans and compound typed commands) and undoing them never scheduled a save. They do now, and a browser test that stands in for the Airo model fails without the fix.
+  - **Defect found and fixed (`abc3725`, deployed the same day):** the Airo command's result reached the live session but was never saved, so the saved board and its view-only link lacked it. Commands applied as one batch (Airo plans and compound typed commands) and undoing them never scheduled a save. They do now, and a browser test that stands in for the Airo model fails without the fix.
+- **2026-11-07** — Deployed the save fix to the web as `launch-abc3725`; the API stays on `launch-fc7bc79`:
+  - **Staged checks:** every main page answered 200 with the security headers.
+  - **After promoting:**
+    - On the live site, a free-form Airo command ("a little cache that the API reads from") applied, and a fresh tab showed it saved.
+    - Neither revision logged an error.
+    - The launch check reports READY, 21 of 21.
+    - The tag `launch-91d1c63-web` was removed.
+  - **Rollback:** the web to `launch-91d1c63`.
+  - **Second defect from the journey, fixed in `c2aa572` (not deployed yet):** ending a session in Settings didn't stick while the owner had the board open. The owner's 30-second heartbeat set it back to active, so the live link kept letting people in. A heartbeat now leaves an ended session alone; tests cover both session stores.
+  - **Cleanup:** the test board is in Trash, and its three test sessions are ended. The owner's older session from 5 November was left alone.
