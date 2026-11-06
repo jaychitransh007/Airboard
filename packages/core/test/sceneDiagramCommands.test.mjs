@@ -124,3 +124,60 @@ test("scene commands refuse objects that aren't there", () => {
   assert.throws(() => applyDiagramCommand(board(), { type: "scene.connect", fromId: "api", toId: "api" }, context));
   assert.throws(() => applyDiagramCommand(board(), { type: "scene.rename", elementId: "missing", label: "x" }, context));
 });
+
+test("align, distribute and layout arrange v2 shapes and legacy nodes together, and undo cleanly", () => {
+  let state = board();
+  state = withSceneShape(state, "web", "Web", 300);
+  state = applyDiagramCommand(state, { type: "scene.move", elementIds: ["web"], delta: { x: 0, y: 90 } }, context).state;
+  state = applyDiagramCommand(state, { type: "scene.connect", connectorId: "c1", fromId: "web", toId: "db" }, context).state;
+
+  // The first object is the anchor; the others line up with its top.
+  const aligned = applyDiagramCommand(state, { type: "objects.align", objectIds: ["api", "web", "db"], alignment: "top" }, context);
+  assert.equal(aligned.state.elements.web.transform.y, 100);
+  assert.equal(aligned.state.strokes.db.annotation.bounds.y, 100);
+  assert.notDeepEqual(aligned.state.elements.c1.start.point, state.elements.c1.start.point, "the connector follows");
+  const unaligned = applyDiagramUndo(aligned.state, aligned).state;
+  assert.equal(unaligned.elements.web.transform.y, 190);
+  assert.deepEqual(unaligned.elements.c1.start.point, state.elements.c1.start.point);
+
+  const spread = applyDiagramCommand(aligned.state, { type: "objects.align", objectIds: ["api", "web", "db"], alignment: "distribute-x" }, context).state;
+  const lefts = ["api", "web"].map((id) => spread.elements[id].transform.x);
+  const gapOne = lefts[1] - (lefts[0] + 120);
+  const gapTwo = spread.strokes.db.annotation.bounds.x - (lefts[1] + 120);
+  assert.ok(Math.abs(gapOne - gapTwo) < 0.001, `even gaps: ${gapOne} and ${gapTwo}`);
+
+  const laidOut = applyDiagramCommand(state, { type: "objects.layout", objectIds: ["web", "api"], direction: "vertical", gap: 40 }, context).state;
+  assert.equal(laidOut.elements.api.transform.x, laidOut.elements.web.transform.x);
+  assert.equal(laidOut.elements.web.transform.y, laidOut.elements.api.transform.y + 80 + 40);
+});
+
+test("a v2 shape is copied with a new id at the offset, and undo removes the copy", () => {
+  const result = applyDiagramCommand(board(), { type: "scene.duplicate", elementIds: ["api"], idMap: { api: "api-copy" }, offset: { x: 0, y: 150 } }, context);
+  const copy = result.state.elements["api-copy"];
+  assert.equal(copy.status, "active");
+  assert.equal(copy.shapeKind, "api");
+  assert.equal(richTextToPlainText(copy.content), "API");
+  assert.deepEqual([copy.transform.x, copy.transform.y], [100, 250]);
+  assert.ok(copy.zIndex > result.state.elements.api.zIndex);
+  assert.equal(applyDiagramUndo(result.state, result).state.elements["api-copy"].status, "deleted");
+  assert.throws(() => applyDiagramCommand(result.state, { type: "scene.duplicate", elementIds: ["api"], idMap: { api: "api-copy" } }, context));
+});
+
+test("grouping v2 shapes draws a section around them, as the toolbar does", () => {
+  const state = withSceneShape(board(), "web", "Web", 300);
+  const result = applyDiagramCommand(state, { type: "scene.group", sectionId: "s1", memberIds: ["api", "web"], label: "Edge" }, context);
+  const section = result.state.elements.s1;
+  assert.equal(section.kind, "section");
+  assert.equal(richTextToPlainText(section.title), "Edge");
+  assert.deepEqual(section.memberIds, ["api", "web"]);
+  assert.deepEqual(
+    [section.transform.x, section.transform.y, section.transform.width, section.transform.height],
+    [100 - 48, 100 - 48, 320 + 96, 80 + 96],
+  );
+  assert.equal(result.state.elements.api.sectionId, "s1");
+  const undone = applyDiagramUndo(result.state, result).state;
+  assert.equal(undone.elements.s1.status, "deleted");
+  assert.equal(undone.elements.api.sectionId, undefined);
+  // A legacy node's place is set by its stroke, so a section can't own it.
+  assert.throws(() => applyDiagramCommand(state, { type: "scene.group", memberIds: ["api", "db"] }, context));
+});

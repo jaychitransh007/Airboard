@@ -14,6 +14,7 @@ import {
   buildSemanticIntentContext,
   resolveSemanticPlanAction,
 } from "../src/features/board/intentPipeline.ts";
+import { commitCommandTurn } from "../src/features/board/commandTurnCoordinator.ts";
 import { computeSemanticAutoLayout } from "../src/features/board/semanticAutoLayout.ts";
 
 // RGB-039: Airo must see, and change, the shapes typed commands and the
@@ -146,9 +147,80 @@ test("the pointer and ordinals reach typed shapes", () => {
   assert.deepEqual(ordinal.commands, [{ type: "scene.rename", elementId: "user", label: "Shopper" }]);
 });
 
-test("Airo says plainly what it can't do to typed shapes yet, rather than guessing", () => {
-  const resolution = resolve(mixedBoard(), { type: "align", targets: [label("User"), label("API")], alignment: "top" });
-  assert.match(resolution.error, /can't align shapes added from the toolbar or with typed commands yet/);
+/** Resolves a plan action and applies its commands, as one Airo turn would. */
+function applyAction(state, action) {
+  const resolution = resolve(state, action);
+  assert.ok(!("error" in resolution), JSON.stringify(resolution));
+  const turn = commitCommandTurn({
+    snapshot: { boardState: state, selectionIds: [] },
+    currentState: state,
+    currentSelectionIds: [],
+    commands: resolution.commands,
+    ...(resolution.selectionAfter ? { requestedSelectionIds: resolution.selectionAfter } : {}),
+    contextForCommand: () => commandContext,
+  });
+  assert.equal(turn.status, "applied");
+  return { resolution, turn, state: turn.state };
+}
+
+test("Airo lines up and spreads out typed shapes with its own nodes", () => {
+  const { state, turn } = applyAction(mixedBoard(), { type: "align", targets: [label("User"), label("API"), label("Database")], alignment: "bottom" });
+  const bottom = (id) => state.elements[id].transform.y + state.elements[id].transform.height;
+  assert.equal(bottom("api"), bottom("user"));
+  assert.equal(state.strokes.db.annotation.bounds.y + state.strokes.db.annotation.bounds.height, bottom("user"));
+  // The typed shapes stay selected for a follow-up such as "now move them left".
+  assert.deepEqual(turn.selectionIds, ["user", "api", "db"]);
+
+  let spread = mixedBoard();
+  spread = applyDiagramCommand(spread, { type: "scene.move", elementIds: ["api"], delta: { x: -250, y: 0 } }, commandContext).state;
+  const distributed = applyAction(spread, { type: "distribute", targets: [label("User"), label("API"), label("Database")], axis: "horizontal" }).state;
+  const right = (id) => distributed.elements[id].transform.x + distributed.elements[id].transform.width;
+  const gapOne = distributed.elements.api.transform.x - right("user");
+  const gapTwo = distributed.strokes.db.annotation.bounds.x - right("api");
+  assert.ok(Math.abs(gapOne - gapTwo) < 0.001, `even gaps: ${gapOne} and ${gapTwo}`);
+});
+
+test("Airo lays typed shapes out in a column, and their connector follows", () => {
+  const before = mixedBoard();
+  const { resolution, state } = applyAction(before, { type: "layout", targets: [label("User"), label("API")], direction: "top_to_bottom" });
+  assert.ok(resolution.commands.every(({ type }) => type === "scene.move"), JSON.stringify(resolution.commands));
+  assert.equal(state.elements.user.transform.x, state.elements.api.transform.x);
+  assert.ok(state.elements.api.transform.y > state.elements.user.transform.y + 80);
+  assert.notDeepEqual(state.elements["user-api"].end.point, before.elements["user-api"].end.point);
+});
+
+test("Airo copies a typed shape where it's asked to", () => {
+  const before = mixedBoard();
+  const { resolution, state } = applyAction(before, {
+    type: "duplicate", targets: [label("API")], placement: { kind: "offset", direction: "below", distance: "large" },
+  });
+  assert.deepEqual(resolution.commands.map(({ type }) => type), ["scene.duplicate"]);
+  const copyId = resolution.selectionAfter[0];
+  const copy = state.elements[copyId];
+  assert.equal(richTextToPlainText(copy.content), "API");
+  assert.deepEqual([copy.transform.x, copy.transform.y], [400, 100 + 180]);
+
+  // Mixed copies: each kind through its own command, at the same offset.
+  const mixed = applyAction(before, {
+    type: "duplicate", targets: [label("API"), label("Database")], placement: { kind: "offset", direction: "right", distance: "small" },
+  });
+  assert.deepEqual(mixed.resolution.commands.map(({ type }) => type), ["objects.duplicate", "scene.duplicate"]);
+  const [apiCopy, dbCopy] = mixed.resolution.selectionAfter;
+  assert.equal(mixed.state.elements[apiCopy].transform.x, 400 + 48);
+  assert.equal(mixed.state.strokes[dbCopy].annotation.bounds.x, before.strokes.db.annotation.bounds.x + 48);
+});
+
+test("Airo groups typed shapes in a section, and says why it can't mix them with its own nodes", () => {
+  const { resolution, state } = applyAction(mixedBoard(), { type: "group", targets: [label("User"), label("API")], label: "Front end", handle: "g_1" });
+  const [command] = resolution.commands;
+  assert.equal(command.type, "scene.group");
+  const section = state.elements[command.sectionId];
+  assert.equal(richTextToPlainText(section.title), "Front end");
+  assert.deepEqual(section.memberIds, ["user", "api"]);
+  assert.deepEqual(resolution.selectionAfter, ["user", "api"]);
+
+  const mixed = resolve(mixedBoard(), { type: "group", targets: [label("API"), label("Database")], label: null, handle: "g_2" });
+  assert.match(mixed.error, /can't group its own diagram shapes with shapes added from the toolbar/);
 });
 
 test("automatic placement keeps new nodes off typed shapes", () => {

@@ -31,9 +31,9 @@ command recovery requires a separately configured intent provider. If those
 providers are unavailable, pointer, keyboard, and typed canonical commands
 remain available.
 
-Airo can connect, rename, move and delete shapes added from the toolbar or with
-typed commands. It can't yet align, distribute, lay out, duplicate or group
-them; use the toolbar for those.
+Airo changes shapes added from the toolbar or with typed commands as it changes
+its own. It can't yet group them together with its own diagram shapes; use the
+toolbar for that.
 
 ## Default service limits
 
