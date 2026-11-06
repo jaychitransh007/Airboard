@@ -182,3 +182,11 @@ test("the request acts in the default organization, else the oldest active membe
   assert.equal(signInMembership([team, personal], suspended.organization_id), null);
   assert.equal(signInMembership([], null), null);
 });
+
+test("a sign-in token in the URL is ignored; only the Authorization header counts", async () => {
+  const client = fakeClient();
+  const auth = new AuthService(CONFIG, client);
+  assert.equal(await auth.authenticate({ headers: {}, query: { access_token: "valid-token" } }), null);
+  assert.equal(client.calls.profileReads.length, 0);
+  assert.ok(await auth.authenticate({ ...bearer(), query: { access_token: "forged-token" } }));
+});
