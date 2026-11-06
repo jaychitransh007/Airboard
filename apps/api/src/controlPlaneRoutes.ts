@@ -582,7 +582,7 @@ export function registerControlPlaneRoutes(
   });
 
   registerIntegrationRoutes(server, config, auth);
-  registerBoardContentRoutes(server, auth);
+  registerBoardContentRoutes(server, auth, { rateLimitKeySecret: config.sessionSigningSecret });
   registerBoardShareRoutes(server, config, auth, (context, request, action, targetType, targetId, metadata) =>
     writeAudit(auth, context, request, action, targetType, targetId, metadata));
   registerOrganizationRoutes(server, config, auth);

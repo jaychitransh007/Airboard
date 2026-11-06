@@ -197,6 +197,7 @@ export async function buildServer(
       windowMs: 60_000,
       max,
       client: auth.client,
+      keySecret: config.sessionSigningSecret,
       onError: (error) => server.log.warn({ err: error, bucket }, "shared rate limit could not be counted"),
     });
   const sessionStartLimiter = sharedLimit("session_start", config.rateLimits.sessionStartPerMinute);

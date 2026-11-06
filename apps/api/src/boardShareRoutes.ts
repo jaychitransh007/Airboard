@@ -38,7 +38,7 @@ type ShareRow = { id: string; created_at: string; expires_at: string | null; rev
  */
 export function registerBoardShareRoutes(
   server: FastifyInstance,
-  config: Pick<ApiConfig, "appUrl" | "trustedProxyHops">,
+  config: Pick<ApiConfig, "appUrl" | "trustedProxyHops" | "sessionSigningSecret">,
   auth: AuthService,
   audit: Audit,
 ): void {
@@ -48,6 +48,7 @@ export function registerBoardShareRoutes(
     windowMs: 60_000,
     max: 120,
     client: auth.client,
+    keySecret: config.sessionSigningSecret,
     onError: (error) => server.log.warn({ err: error }, "shared board rate limit could not be counted"),
   });
 

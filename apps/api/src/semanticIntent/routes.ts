@@ -42,6 +42,7 @@ export function registerSemanticIntentRoutes(
     windowMs: 60_000,
     max: config.rateLimits.intentPerMinute,
     client: auth?.client ?? null,
+    keySecret: config.sessionSigningSecret,
     onError: (error) => server.log.warn({ err: error }, "shared Airo rate limit could not be counted"),
   });
   const usage = createDailyUsage(auth?.client ?? null, config.dailyUsage, (error) =>

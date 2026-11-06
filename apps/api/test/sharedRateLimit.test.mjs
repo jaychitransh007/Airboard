@@ -43,7 +43,7 @@ function sharedTable() {
 test("instances sharing the count allow max requests in all, not max each", async () => {
   const table = sharedTable();
   const instances = [1, 2, 3].map(() =>
-    createSharedRateLimiter({ bucket: "intent", windowMs: 60_000, max: 3, client: table.client }));
+    createSharedRateLimiter({ bucket: "intent", windowMs: 60_000, max: 3, client: table.client, keySecret: "test-secret" }));
   const results = [];
   for (const instance of instances) {
     for (let i = 0; i < 3; i += 1) results.push(await instance.allow("profile:a"));
@@ -55,22 +55,24 @@ test("instances sharing the count allow max requests in all, not max each", asyn
 
 test("the shared count sees a hash of the caller, never the address or id", async () => {
   const table = sharedTable();
-  const limiter = createSharedRateLimiter({ bucket: "board_read", windowMs: 60_000, max: 5, client: table.client });
+  const limiter = createSharedRateLimiter({ bucket: "board_read", windowMs: 60_000, max: 5, client: table.client, keySecret: "test-secret" });
   await limiter.allow("ip:203.0.113.7");
   assert.deepEqual(table.calls, [{
     name: "consume_rate_limit",
     p_bucket: "board_read",
-    p_key_hash: hashRateLimitKey("ip:203.0.113.7"),
+    p_key_hash: hashRateLimitKey("ip:203.0.113.7", "test-secret"),
     p_window_seconds: 60,
     p_max: 5,
   }]);
   assert.match(table.calls[0].p_key_hash, /^[0-9a-f]{64}$/);
   assert.ok(!JSON.stringify(table.calls).includes("203.0.113.7"));
+  // Keyed with the server secret, so hashing every address can't undo it.
+  assert.notEqual(hashRateLimitKey("ip:203.0.113.7", "test-secret"), hashRateLimitKey("ip:203.0.113.7", "other-secret"));
 });
 
 test("the local window refuses a flood without asking the database", async () => {
   const table = sharedTable();
-  const limiter = createSharedRateLimiter({ bucket: "intent", windowMs: 60_000, max: 2, client: table.client });
+  const limiter = createSharedRateLimiter({ bucket: "intent", windowMs: 60_000, max: 2, client: table.client, keySecret: "test-secret" });
   assert.equal(await limiter.allow("profile:a"), true);
   assert.equal(await limiter.allow("profile:a"), true);
   assert.equal(await limiter.allow("profile:a"), false);
@@ -84,6 +86,7 @@ test("a failed count lets the request through and is reported", async () => {
     windowMs: 60_000,
     max: 2,
     client: { rpc: result },
+    keySecret: "test-secret",
     onError: (error) => errors.push(error),
   });
   assert.equal(await failing(async () => ({ data: null, error: { message: "database unavailable" } })).allow("profile:a"), true);
@@ -92,14 +95,14 @@ test("a failed count lets the request through and is reported", async () => {
 });
 
 test("without a database only the local window applies", async () => {
-  const limiter = createSharedRateLimiter({ bucket: "intent", windowMs: 60_000, max: 2, client: null });
+  const limiter = createSharedRateLimiter({ bucket: "intent", windowMs: 60_000, max: 2, client: null, keySecret: "test-secret" });
   assert.deepEqual([await limiter.allow("k"), await limiter.allow("k"), await limiter.allow("k")], [true, true, false]);
 });
 
 test("a route refuses with 429 when the shared count is full", async (t) => {
   const server = Fastify();
   t.after(() => server.close());
-  registerBoardShareRoutes(server, { appUrl: "http://localhost:3000", trustedProxyHops: 0 }, {
+  registerBoardShareRoutes(server, { appUrl: "http://localhost:3000", trustedProxyHops: 0, sessionSigningSecret: "test-secret" }, {
     client: { rpc: async () => ({ data: false, error: null }) },
   }, async () => undefined);
   const response = await server.inject({ method: "GET", url: `/shared-boards/${"A".repeat(43)}` });

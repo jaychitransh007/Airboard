@@ -20,6 +20,7 @@ export function registerVoiceTraceRoutes(
     windowMs: 60_000,
     max: config.rateLimits.voiceTracePerMinute,
     client: auth?.client ?? null,
+    keySecret: config.sessionSigningSecret,
     onError: (error) => server.log.warn({ err: error }, "shared voice trace rate limit could not be counted"),
   });
   server.post<{ Body: unknown }>("/voice/trace", async (request, reply) => {

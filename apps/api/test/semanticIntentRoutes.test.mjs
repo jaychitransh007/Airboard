@@ -71,6 +71,7 @@ const closedContext = {
 function makeConfig() {
   return {
     allowedOrigins: [origin],
+    sessionSigningSecret: "test-signing-secret",
     localEntitlements: true,
     rateLimits: { intentPerMinute: 100 },
     semanticIntent: {

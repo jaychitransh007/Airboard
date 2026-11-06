@@ -65,6 +65,7 @@ export function registerTranscriptionRoutes(
     windowMs: 60_000,
     max: config.rateLimits?.transcriptionConnectionsPerMinute ?? 60,
     client: auth?.client ?? null,
+    keySecret: config.sessionSigningSecret,
     onError: (error) => server.log.warn({ err: error }, "shared voice connection rate limit could not be counted"),
   });
   // During a provider outage, refuse at once rather than holding every

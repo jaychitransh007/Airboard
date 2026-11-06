@@ -34,8 +34,10 @@ type JsonRecord = Record<string, unknown>;
 export type BoardContentRouteOptions = {
   /** Bytes of board assets one organization may keep (default 2 GiB). */
   organizationAssetQuotaBytes?: number;
-  /** Upload starts one person may make per minute on each instance (default 30). */
+  /** Upload starts one person may make per minute, across instances (default 30). */
   uploadStartsPerMinute?: number;
+  /** Keys the shared rate-limit hash: the session signing secret. */
+  rateLimitKeySecret?: string;
 };
 
 /**
@@ -54,6 +56,7 @@ export function registerBoardContentRoutes(
     windowMs: 60_000,
     max: options.uploadStartsPerMinute ?? UPLOAD_STARTS_PER_MINUTE,
     client: auth.client,
+    keySecret: options.rateLimitKeySecret ?? "",
     onError: (error) => server.log.warn({ err: error }, "shared upload rate limit could not be counted"),
   });
 

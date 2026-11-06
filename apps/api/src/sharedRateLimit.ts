@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHmac } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createRateLimiter } from "./security";
 
@@ -15,9 +15,10 @@ export type SharedRateLimiter = {
  * counted in Postgres (consume_rate_limit), so three instances still allow
  * `max` requests per window, not three times `max`.
  *
- * Keys are hashed before they leave the process, so no address or account id
- * is stored. A failed count lets the request through: a database blip must
- * not turn the API off, and the local window still applies.
+ * Keys are hashed with a server secret before they leave the process, so no
+ * address or account id is stored, and an IP address can't be recovered by
+ * hashing every address. A failed count lets the request through: a database
+ * blip must not turn the API off, and the local window still applies.
  */
 export function createSharedRateLimiter(options: {
   /** Names the limit in the shared table, e.g. "intent". */
@@ -25,9 +26,11 @@ export function createSharedRateLimiter(options: {
   windowMs: number;
   max: number;
   client: Pick<SupabaseClient, "rpc"> | null;
+  /** Keys the hash; the same on every instance (the session signing secret). */
+  keySecret: string;
   onError?: (error: unknown) => void;
 }): SharedRateLimiter {
-  const { bucket, windowMs, max, client, onError = () => undefined } = options;
+  const { bucket, windowMs, max, client, keySecret, onError = () => undefined } = options;
   const local = createRateLimiter({ windowMs, max });
   const windowSeconds = Math.max(1, Math.round(windowMs / 1000));
   return {
@@ -37,7 +40,7 @@ export function createSharedRateLimiter(options: {
       try {
         const { data, error } = await client.rpc("consume_rate_limit", {
           p_bucket: bucket,
-          p_key_hash: hashRateLimitKey(key),
+          p_key_hash: hashRateLimitKey(key, keySecret),
           p_window_seconds: windowSeconds,
           p_max: max,
         });
@@ -51,6 +54,6 @@ export function createSharedRateLimiter(options: {
   };
 }
 
-export function hashRateLimitKey(key: string): string {
-  return createHash("sha256").update(`airboard-rate-limit:${key}`).digest("hex");
+export function hashRateLimitKey(key: string, keySecret: string): string {
+  return createHmac("sha256", keySecret).update(`airboard-rate-limit:${key}`).digest("hex");
 }
