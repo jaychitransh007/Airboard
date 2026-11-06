@@ -101,6 +101,26 @@ const SHAPE_TERMS = BOARD_SHAPE_CATALOG.flatMap((entry) =>
   })),
 ).sort((a, b) => b.term.length - a.term.length);
 
+/**
+ * A create may describe its shape in a few words ("a payment service", "the
+ * orders queue"). A longer lead-in, or one with a conjunction, pronoun,
+ * relation or second verb in it, is a sentence that merely ends in a shape
+ * name, such as "put the user and the API side by side and group them as
+ * front end". That is for Airo to plan, not a create (RGB-040).
+ */
+const MAX_SHAPE_DESCRIPTION_WORDS = 3;
+const NOT_A_SHAPE_DESCRIPTION = new Set([
+  "and", "or", "but", "then", "so", "them", "it", "its", "they", "their", "those", "these",
+  "to", "with", "from", "into", "onto", "between", "by", "as", "along", "of", "for", "next", "side",
+  "add", "put", "make", "create", "insert", "group", "line", "lined", "align", "connect", "connected",
+  "move", "rename", "delete", "remove", "label", "call", "called", "named",
+]);
+
+function describesShape(words: string): boolean {
+  const list = words.split(" ").filter(Boolean);
+  return list.length <= MAX_SHAPE_DESCRIPTION_WORDS && !list.some((word) => NOT_A_SHAPE_DESCRIPTION.has(word));
+}
+
 /** Deterministic Airo grammar for v2 board elements and selected-object edits. */
 export function parseBoardSceneIntent(rawInput: string): BoardSceneIntent | null {
   const sourceWithPlacement = stripDisfluencies(stripWakeWord(rawInput))
@@ -216,7 +236,9 @@ export function parseBoardSceneIntent(rawInput: string): BoardSceneIntent | null
   if (shapeCreate) {
     const phrase = shapeCreate[1] ?? "";
     const exact = canonicalShapeKind(phrase);
-    const contained = SHAPE_TERMS.find(({ term }) => phrase === term || phrase.endsWith(` ${term}`));
+    const contained = SHAPE_TERMS.find(({ term }) =>
+      phrase === term ||
+      (phrase.endsWith(` ${term}`) && describesShape(phrase.slice(0, -term.length - 1))));
     const shapeKind = (exact ?? contained?.kind) as ShapeKind | null;
     if (shapeKind) {
       return {
