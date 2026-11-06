@@ -208,16 +208,17 @@ export class SupabaseSessionStore implements SessionStore {
     );
 
     if (participantRow.role === "owner") {
-      const sessionRow = await this.updateSingle<BoardSessionRow>(
-        "board_sessions",
-        {
-          status: "active",
-          owner_last_seen_at: now,
-          updated_at: now,
-        },
-        { column: "id", value: sessionId },
-      );
-      return mapSession(sessionRow);
+      // An ended session stays ended: the owner's open tab keeps sending
+      // heartbeats after they end it in Settings, and must not revive it.
+      const { data: sessionRow, error } = await this.client
+        .from("board_sessions")
+        .update({ status: "active", owner_last_seen_at: now, updated_at: now })
+        .eq("id", sessionId)
+        .neq("status", "ended")
+        .select("*")
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (sessionRow) return mapSession(sessionRow as BoardSessionRow);
     }
 
     return this.getSession(sessionId);

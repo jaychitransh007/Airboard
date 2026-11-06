@@ -1188,3 +1188,23 @@ test("the hourly job sweeps abandoned uploads in every organization and fails th
   assert.deepEqual(failed.json().abandonedUploads, { removed: 0, failures: 1 });
   assert.ok(client.tables.board_assets.some((row) => row.id === "stale-c"), "kept for the next run");
 });
+
+test("the database store keeps an ended session ended when its owner's tab heartbeats", async () => {
+  const SESSION = "aaaaaaaa-1111-4111-8111-111111111111";
+  const OWNER_PARTICIPANT = "bbbbbbbb-1111-4111-8111-111111111111";
+  const session = (status) => ({
+    id: SESSION, owner_user_id: PROFILE, provider: "standalone", provider_meeting_id: null, title: "Airboard",
+    status, allow_participant_drawing: false, owner_last_seen_at: "2026-11-07T00:00:00.000Z",
+    expires_at: new Date(Date.now() + 3_600_000).toISOString(), created_at: "2026-11-07T00:00:00.000Z", updated_at: "2026-11-07T00:00:00.000Z",
+  });
+  const client = createFakeSupabase({
+    board_sessions: [session("ended")],
+    participants: [{ id: OWNER_PARTICIPANT, board_session_id: SESSION, user_id: PROFILE, role: "owner", display_name: "Owner", input_enabled: true }],
+  });
+  const store = new SupabaseSessionStore(client);
+  assert.equal((await store.heartbeat(SESSION, OWNER_PARTICIPANT)).status, "ended");
+  assert.equal(client.tables.board_sessions[0].status, "ended");
+
+  client.tables.board_sessions[0].status = "owner_disconnected";
+  assert.equal((await store.heartbeat(SESSION, OWNER_PARTICIPANT)).status, "active", "a disconnected owner coming back revives it");
+});

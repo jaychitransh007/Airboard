@@ -266,3 +266,18 @@ test("the owner switches guests between viewing and editing while they are in", 
   assert.ok(await waitFor(() => guest.messages.some((m) => m.type === "board.event" && m.event.type === "element.deleted")), "an editing guest's edit lands");
   assert.equal(guest.messages.filter((m) => m.type === "event.rejected").length, rejectedBefore);
 });
+
+test("ending a session sticks: the owner's open tab can't revive it with heartbeats", async (t) => {
+  const { app, store } = await server(t, {});
+  const started = (await start(app, "owner")).json();
+  store.endSession(started.session.id);
+  const beat = await app.inject({
+    method: "POST",
+    url: `/sessions/${started.session.id}/heartbeat`,
+    payload: { realtimeTicket: started.realtimeTicket },
+  });
+  assert.equal(beat.statusCode, 200, beat.body);
+  assert.equal(beat.json().session.status, "ended");
+  assert.equal(store.getSession(started.session.id).status, "ended");
+  assert.equal((await join(app, started.session.id, started.joinToken)).statusCode, 404, "nobody new joins an ended session");
+});

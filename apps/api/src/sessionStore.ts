@@ -127,7 +127,8 @@ export class InMemorySessionStore implements SessionStore {
       });
     }
 
-    if (participant?.role === "owner") {
+    // An ended session stays ended, however long the owner's tab keeps beating.
+    if (participant?.role === "owner" && record.session.status !== "ended") {
       record.session = {
         ...record.session,
         status: "active",
