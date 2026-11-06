@@ -26,7 +26,8 @@ export function menuItems(menu: HTMLElement): HTMLElement[] {
  * Keyboard behaviour for a menu opened by a button: focus moves to the first
  * item when it opens, arrow keys and Home/End move between items, Escape
  * closes it and returns focus to the button, and Tab closes it so focus moves
- * on as usual.
+ * on as usual. Choosing an item that closes the menu also returns focus to the
+ * button, unless the item moved focus on itself (into a dialog, say).
  */
 export function useMenuKeyboard(menuRef: RefObject<HTMLElement | null>, open: boolean, close: () => void): void {
   const closeRef = useRef(close);
@@ -62,7 +63,20 @@ export function useMenuKeyboard(menuRef: RefObject<HTMLElement | null>, open: bo
       event.preventDefault();
       items[next]?.focus();
     };
+    // The chosen item leaves with the menu, which would drop focus on the page.
+    const onChoose = (event: MouseEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest('[role="menuitem"]')) return;
+      window.requestAnimationFrame(() => {
+        const trigger = triggerRef.current;
+        const focusLost = !document.activeElement || document.activeElement === document.body;
+        if (focusLost && trigger?.isConnected) trigger.focus();
+      });
+    };
     menu.addEventListener("keydown", onKeyDown);
-    return () => menu.removeEventListener("keydown", onKeyDown);
+    menu.addEventListener("click", onChoose);
+    return () => {
+      menu.removeEventListener("keydown", onKeyDown);
+      menu.removeEventListener("click", onChoose);
+    };
   }, [menuRef, open]);
 }

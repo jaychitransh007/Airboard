@@ -25,6 +25,7 @@ ID before retrying.
 | `BOARD_ACCESS_DENIED` | The signed-in identity cannot access the board. | Check the selected organization and ask the board owner or administrator. |
 | `MAINTENANCE` | Airboard is read-only for a short upgrade. Boards still open, but changes, live boards and new sessions are paused. | Wait a few minutes and try again; the banner disappears when it's over. |
 | `BOARD_READ_ONLY_ROLE` | Your role in this workspace is Viewer or Billing, which can open boards but not change, share or start live sessions on them. | Ask a workspace admin to change your role if you need to edit. |
+| `JOIN_LINK_REPLACED` | The host made a new live link, so this one no longer lets anyone new in. | Ask the host for the new link. |
 | `EXTERNAL_GUESTS_DISABLED` | The board's workspace has turned off guests, so only its signed-in members can join live boards, and view-only links don't work. | Sign in with the account the workspace invited, or ask its admin. |
 | `VOICE_DISABLED_BY_ADMIN` | A workspace admin turned off voice commands. | Use typed commands, or ask your admin. |
 | `ASSET_QUOTA_EXCEEDED` | The workspace has used its 2 GB of board images and videos. | Delete boards you no longer need and empty them from Trash, or contact support. |

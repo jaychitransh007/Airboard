@@ -15,6 +15,7 @@ import { AIRBOARD_API_URL } from "../../platform/config";
 import { prepareDurableBoard } from "./boardPreparation";
 import { PilotExtensionButton } from "./OneTapRequestButton";
 import { ViewOnlyBoard } from "./ViewOnlyBoard";
+import { useDocumentTitle } from "./useDocumentTitle";
 
 const SAVE_RETRY_BASE_MS = 1_000;
 const SAVE_RETRY_MAX_MS = 30_000;
@@ -46,6 +47,7 @@ function EditableAirboard({ boardId, templateId }: { boardId?: string; templateI
   const [saveNotice, setSaveNotice] = useState<SaveNotice | null>(null);
   const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "error">("saved");
   const [board, setBoard] = useState<DurableBoard | null>(null);
+  useDocumentTitle(board?.title);
   const versionRef = useRef(0);
   const saveRequestRef = useRef(0);
   const saveChainRef = useRef(Promise.resolve());
@@ -70,7 +72,8 @@ function EditableAirboard({ boardId, templateId }: { boardId?: string; templateI
     // canvas mounts. An address that names a session to rejoin skips this.
     pendingSessionStartRef.current = null;
     if (boardId && !new URLSearchParams(window.location.search).get("boardSessionId") && !rememberedLiveSession(boardId)) {
-      const pending = requestBoardSessionStart({ apiBaseUrl: AIRBOARD_API_URL, accessToken, boardId, title: "Airboard" });
+      // People who join with the live link watch until the owner lets them edit.
+      const pending = requestBoardSessionStart({ apiBaseUrl: AIRBOARD_API_URL, accessToken, boardId, title: "Airboard", allowParticipantDrawing: false });
       pending.catch(() => undefined);
       pendingSessionStartRef.current = pending;
     }
@@ -301,7 +304,7 @@ function EditableAirboard({ boardId, templateId }: { boardId?: string; templateI
     };
   }, [accessToken, durableBoardId]);
   if (error) return <BoardUnavailable code={error} />;
-  if (!ready || !auth.accessToken || !auth.account || !board) return <div className="product-loading">Opening your Airboard…</div>;
+  if (!ready || !auth.accessToken || !auth.account || !board) return <main className="product-loading"><p role="status">Opening your Airboard…</p></main>;
   const shareAccess: BoardShareAccess = {
     visibility: board.visibility ?? "private",
     canChange: board.owner_profile_id === auth.account.profile.id,
@@ -334,19 +337,19 @@ function EditableAirboard({ boardId, templateId }: { boardId?: string; templateI
 function BoardUnavailable({ code }: { code: string }) {
   if (code === "ACTIVE_ENTITLEMENT_REQUIRED") {
     return (
-      <div className="product-loading">
-        <strong>Your pilot access has ended.</strong>
+      <main className="product-loading">
+        <h1>Your pilot access has ended.</h1>
         <span>Your saved boards are still in your library. Starting a new board needs an active pilot. Ask us and we&apos;ll extend it.</span>
         <span className="product-loading-actions">
           <PilotExtensionButton primary />
           <Link className="button button-quiet" href="/app/boards">Go to my boards</Link>
         </span>
-      </div>
+      </main>
     );
   }
   return (
-    <div className="product-loading">
-      <strong>Could not open this Airboard.</strong>
+    <main className="product-loading">
+      <h1>Could not open this Airboard.</h1>
       <span>
         {code === "NETWORK_UNAVAILABLE"
           ? "Airboard can't be reached right now. Check your connection and try again."
@@ -361,7 +364,7 @@ function BoardUnavailable({ code }: { code: string }) {
         <Link className="button button-quiet" href="/app/boards">Go to my boards</Link>
       </span>
       <small>Reference: {code}</small>
-    </div>
+    </main>
   );
 }
 

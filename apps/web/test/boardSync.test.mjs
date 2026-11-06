@@ -38,7 +38,8 @@ class FakeClient {
     this.eventListener = listener;
     return () => {};
   }
-  onStatus() {
+  onStatus(listener) {
+    this.statusListener = listener;
     return () => {};
   }
   onRejection() {
@@ -311,4 +312,107 @@ test("a session start sent while the board loads is used instead of a new one, a
   assert.equal(second.handle.boardSessionId, "early-session");
   assert.equal(calls.filter((call) => call.url.includes("/sessions/start")).length, 0);
   assert.equal(sent.length, 1);
+});
+
+test("a saved board's session starts view-only for guests, and the handle reports the setting", async () => {
+  const { fetchImpl, calls } = fakeFetchRouter([
+    {
+      match: "/sessions/start",
+      body: {
+        session: { id: "session-v", allowParticipantDrawing: false },
+        ownerParticipant: { id: "owner-p", role: "owner" },
+        realtimeTicket: "realtime-v",
+        joinToken: "join-v",
+      },
+    },
+  ]);
+  const result = await startBoardSync(
+    { apiBaseUrl: "https://api.test", ownerUserId: "owner-1", accessToken: "token", boardId: "board-1", allowParticipantDrawing: false },
+    { onRemoteEvent() {} },
+    { fetchImpl, createClient: (options) => new FakeClient(options), ...noTimers },
+  );
+  assert.equal(JSON.parse(calls[0].init.body).allowParticipantDrawing, false);
+  assert.equal(result.handle.allowParticipantDrawing, false);
+});
+
+test("after a reload the owner resumes their own place instead of joining as a guest", async () => {
+  const { fetchImpl, calls } = fakeFetchRouter([
+    {
+      match: "/sessions/session-r/resume",
+      body: {
+        session: { id: "session-r", allowParticipantDrawing: true },
+        participant: { id: "owner-p", role: "owner" },
+        state: createInitialBoardState("session-r"),
+        realtimeTicket: "realtime-r",
+      },
+    },
+  ]);
+  const result = await startBoardSync(
+    {
+      apiBaseUrl: "https://api.test",
+      ownerUserId: "owner-1",
+      accessToken: "token",
+      boardSessionId: "session-r",
+      joinToken: "join-r",
+      resumeParticipantId: "owner-p",
+    },
+    { onRemoteEvent() {} },
+    { fetchImpl, createClient: (options) => new FakeClient(options), ...noTimers },
+  );
+  assert.match(calls[0].url, /\/sessions\/session-r\/resume$/);
+  assert.equal(calls[0].init.headers.Authorization, "Bearer token");
+  assert.deepEqual(JSON.parse(calls[0].init.body), { participantId: "owner-p" });
+  assert.equal(result.outcome, "joined");
+  assert.equal(result.handle.role, "owner");
+  assert.equal(result.handle.allowParticipantDrawing, true);
+});
+
+test("a guest's join sends their sign-in when they have one", async () => {
+  const { fetchImpl, calls } = fakeFetchRouter([
+    {
+      match: "/sessions/session-g/join",
+      body: {
+        session: { id: "session-g", allowParticipantDrawing: false },
+        participant: { id: "guest-p", role: "editor" },
+        state: createInitialBoardState("session-g"),
+        realtimeTicket: "realtime-g",
+      },
+    },
+  ]);
+  const result = await startBoardSync(
+    { apiBaseUrl: "https://api.test", ownerUserId: "member-1", accessToken: "token", boardSessionId: "session-g", joinToken: "join-g" },
+    { onRemoteEvent() {} },
+    { fetchImpl, createClient: (options) => new FakeClient(options), ...noTimers },
+  );
+  assert.equal(calls[0].init.headers.Authorization, "Bearer token");
+  assert.equal(JSON.parse(calls[0].init.body).joinToken, "join-g");
+  assert.equal(result.handle.allowParticipantDrawing, false);
+});
+
+test("after each connect a guest re-reads whether they may edit, so a change made while away is not missed", async () => {
+  const clients = [];
+  const { fetchImpl, calls } = fakeFetchRouter([
+    {
+      match: "/sessions/session-p/join",
+      body: {
+        session: { id: "session-p", allowParticipantDrawing: false },
+        participant: { id: "guest-p", role: "editor" },
+        state: createInitialBoardState("session-p"),
+        realtimeTicket: "realtime-p",
+      },
+    },
+    { match: "/sessions/session-p/state", body: { session: { id: "session-p", allowParticipantDrawing: true } } },
+  ]);
+  const seen = [];
+  await startBoardSync(
+    { apiBaseUrl: "https://api.test", ownerUserId: "guest", boardSessionId: "session-p", joinToken: "join-p" },
+    { onRemoteEvent() {}, onSessionPermission: (allow) => seen.push(allow) },
+    { fetchImpl, createClient: (options) => { const client = new FakeClient(options); clients.push(client); return client; }, ...noTimers },
+  );
+  clients[0].statusListener("connecting");
+  clients[0].statusListener("connected");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(seen, [true]);
+  assert.match(calls.at(-1).url, /\/sessions\/session-p\/state\?ticket=realtime-p$/);
 });

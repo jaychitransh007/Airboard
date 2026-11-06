@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAirboardAuth } from "../../platform/auth";
 import {
   fetchAuthProviderAvailability,
@@ -28,6 +28,16 @@ export function AuthPage({ mode }: { mode: "login" | "signup" }) {
     emailMagicLink: true,
   });
   const options = signInOptions(providers);
+  // The form and the "check your inbox" panel replace each other; keyboard
+  // focus follows to whichever is shown, instead of falling back to the page.
+  const sentRef = useRef<HTMLDivElement | null>(null);
+  const emailRef = useRef<HTMLInputElement | null>(null);
+  const focusAfterSwapRef = useRef(false);
+  useEffect(() => {
+    if (!focusAfterSwapRef.current) return;
+    focusAfterSwapRef.current = false;
+    (sentTo ? sentRef.current : emailRef.current)?.focus();
+  }, [sentTo]);
   const next = safeAppPath(search.get("next"));
   const reason = search.get("reason");
 
@@ -75,6 +85,7 @@ export function AuthPage({ mode }: { mode: "login" | "signup" }) {
     try {
       sessionStorage.setItem("airboard.auth.next", next);
       await auth.signInWithMagicLink(address, next);
+      focusAfterSwapRef.current = true;
       setSentTo(address);
       setResendIn(MAGIC_LINK_RESEND_SECONDS);
     } catch (error) {
@@ -91,8 +102,8 @@ export function AuthPage({ mode }: { mode: "login" | "signup" }) {
 
   return (
     <div className="auth-shell">
-      <Link className="marketing-brand" href="/"><span className="brand-orbit" />Airboard</Link>
-      <div className="auth-layout">
+      <Link className="marketing-brand" href="/"><span className="brand-orbit" aria-hidden="true" />Airboard</Link>
+      <main className="auth-layout" id="main-content" tabIndex={-1}>
         <section className="auth-message">
           <p className="eyebrow">{mode === "signup" ? "Join the controlled pilot" : "Welcome back"}</p>
           <h1>{mode === "signup" ? "Make the idea visible." : "Continue your Airboard."}</h1>
@@ -120,7 +131,7 @@ export function AuthPage({ mode }: { mode: "login" | "signup" }) {
           ) : null}
           {options.showDivider ? <div className="auth-divider"><span>or</span></div> : null}
           {!options.showEmailForm ? null : sentTo ? (
-            <div className="auth-sent" role="status">
+            <div className="auth-sent" role="status" ref={sentRef} tabIndex={-1}>
               <h3>Check your inbox</h3>
               <p>We sent a sign-in link to <strong>{sentTo}</strong>.</p>
               <p>Open it on this device, in this browser—the link only works where you asked for it, and only once.</p>
@@ -136,7 +147,7 @@ export function AuthPage({ mode }: { mode: "login" | "signup" }) {
                 </button>
                 <button
                   className="auth-sent-change"
-                  onClick={() => { setSentTo(null); setMessage(null); }}
+                  onClick={() => { focusAfterSwapRef.current = true; setSentTo(null); setMessage(null); }}
                   type="button"
                 >
                   Use a different email
@@ -146,7 +157,7 @@ export function AuthPage({ mode }: { mode: "login" | "signup" }) {
           ) : (
             <form onSubmit={magic}>
               <label htmlFor="auth-email">Work email</label>
-              <input id="auth-email" type="email" required autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@company.com" />
+              <input ref={emailRef} id="auth-email" type="email" required autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@company.com" />
               <button className="button button-primary" disabled={busy} type="submit">{reason ? "Email me a new secure link" : "Email me a sign-in link"}</button>
             </form>
           )}
@@ -160,7 +171,7 @@ export function AuthPage({ mode }: { mode: "login" | "signup" }) {
           </p>
           <small>By continuing, you accept the <Link href="/terms">Terms</Link> and acknowledge the <Link href="/privacy">Privacy Notice</Link>.</small>
         </section>
-      </div>
+      </main>
     </div>
   );
 }

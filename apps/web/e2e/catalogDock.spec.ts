@@ -212,17 +212,17 @@ test("the shape popover and persistent library expose the complete catalog", asy
     Airboard: 4,
   };
   for (const [name, count] of Object.entries(expectedCounts)) {
-    await expect(shapeSection(sidebar, name).getByRole("menuitem")).toHaveCount(count);
+    await expect(shapeSection(sidebar, name).getByRole("button")).toHaveCount(count);
   }
 
   const search = sidebar.getByRole("searchbox", { name: "Search shapes" });
   await search.fill("wallet");
   await expect(sections).toHaveCount(1);
-  await expect(shapeSection(sidebar, "Advanced").getByRole("menuitem", { name: "Wallet" })).toBeVisible();
+  await expect(shapeSection(sidebar, "Advanced").getByRole("button", { name: "Wallet" })).toBeVisible();
 
   await search.fill("");
-  await shapeSection(sidebar, "Basic").getByRole("menuitem", { name: "Star" }).click();
-  await expect(shapeSection(sidebar, "Recent").getByRole("menuitem").first()).toHaveAttribute(
+  await shapeSection(sidebar, "Basic").getByRole("button", { name: "Star" }).click();
+  await expect(shapeSection(sidebar, "Recent").getByRole("button").first()).toHaveAttribute(
     "aria-label",
     "Star",
   );
@@ -396,7 +396,7 @@ test("creation popovers and the shape library become reachable drawers on narrow
   await expectInsideViewport(sidebar, viewport.width, viewport.height);
   await shapeSection(sidebar, "Airboard").scrollIntoViewIfNeeded();
   await expect(shapeSection(sidebar, "Airboard")).toBeVisible();
-  await expect(shapeSection(sidebar, "Airboard").getByRole("menuitem")).toHaveCount(4);
+  await expect(shapeSection(sidebar, "Airboard").getByRole("button")).toHaveCount(4);
 });
 
 test("the responsive shape drawer remains beside Airo", async ({ page }) => {

@@ -37,6 +37,7 @@ test("join failures map to the next step a guest can take", () => {
   // During a short upgrade the API refuses the join with MAINTENANCE.
   assert.equal(liveJoinFailure("Board session join failed: MAINTENANCE"), "maintenance");
   assert.equal(liveJoinFailure("Board session join failed: EXTERNAL_GUESTS_DISABLED"), "members_only");
+  assert.equal(liveJoinFailure("Board session join failed: JOIN_LINK_REPLACED"), "replaced");
 });
 
 test("a board address carrying a live session falls back to the live route", () => {
@@ -68,8 +69,8 @@ test("a saved board's live session is remembered per tab, never in the address",
   };
   try {
     assert.equal(rememberedLiveSession("board-1"), null);
-    rememberLiveSession("board-1", { boardSessionId: "session-1", joinToken: "token-1" });
-    assert.deepEqual(rememberedLiveSession("board-1"), { boardSessionId: "session-1", joinToken: "token-1" });
+    rememberLiveSession("board-1", { boardSessionId: "session-1", joinToken: "token-1", participantId: "owner-p" });
+    assert.deepEqual(rememberedLiveSession("board-1"), { boardSessionId: "session-1", joinToken: "token-1", participantId: "owner-p" });
     assert.equal(rememberedLiveSession("board-2"), null, "each board remembers its own");
     store.set("airboard.liveSession.board-3", "{not json");
     assert.equal(rememberedLiveSession("board-3"), null, "unreadable memory counts as none");

@@ -44,6 +44,10 @@ export function BoardViewer({
   const viewRef = useRef<BoardViewport>(IDENTITY_VIEWPORT);
   const imagesRef = useRef<Record<string, CanvasImageSource>>({});
   const dragRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  // A live board changes under the viewer; frame it once, then leave the view alone.
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const framedRef = useRef(false);
 
   const limits = useCallback((): ViewportLimits => {
     const canvas = canvasRef.current;
@@ -57,19 +61,20 @@ export function BoardViewer({
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    renderBoard(canvas, state, {
+    renderBoard(canvas, stateRef.current, {
       background: "white",
       view: viewRef.current,
       hideCursors: true,
       resolvedImages: imagesRef.current,
     });
-  }, [state]);
+  }, []);
 
   const fit = useCallback(() => {
-    const bounds = sharedBoardBounds(state);
+    const bounds = sharedBoardBounds(stateRef.current);
+    framedRef.current = Boolean(bounds);
     viewRef.current = bounds ? fitViewportToBounds(bounds, limits()) : IDENTITY_VIEWPORT;
     draw();
-  }, [state, draw, limits]);
+  }, [draw, limits]);
 
   const zoom = (factor: number) => {
     const canvas = canvasRef.current;
@@ -87,6 +92,12 @@ export function BoardViewer({
     observer.observe(canvas);
     return () => observer.disconnect();
   }, [fit]);
+
+  // Each change redraws; the first content to arrive on an empty board is framed.
+  useEffect(() => {
+    if (framedRef.current) draw();
+    else fit();
+  }, [state, draw, fit]);
 
   // Pictures redraw the board as each one decodes.
   useEffect(() => {

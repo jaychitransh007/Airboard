@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { registerHooks } from "node:module";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import WebSocket from "ws";
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -16,9 +17,11 @@ registerHooks({
   },
 });
 
+const { BOARD_SCENE_VERSION, createEventEnvelope } = await import("@airboard/core");
 const { loadConfig } = await import("../src/config.ts");
-const { buildServer, JOIN_LINK_TTL_SECONDS } = await import("../src/server.ts");
+const { buildServer, JOIN_LINK_TTL_SECONDS, joinLinkReplaced } = await import("../src/server.ts");
 const { InMemorySessionStore } = await import("../src/sessionStore.ts");
+const { singleInstanceFanOut } = await import("../src/boardEventFanOut.ts");
 const { verifySignedToken } = await import("../src/signedTokens.ts");
 const {
   activeMembership,
@@ -84,12 +87,11 @@ function fakeAuth(client) {
 async function server(t, tables, options) {
   const config = loadConfig({ NODE_ENV: "test", AIRBOARD_LOCAL_ENTITLEMENTS: "true" });
   const client = fakeClient(tables, options);
-  const app = await buildServer(config, {
-    store: new InMemorySessionStore({ ownerGraceSeconds: 180, localEntitlements: true }),
-    auth: fakeAuth(client),
-  });
+  const store = new InMemorySessionStore({ ownerGraceSeconds: 180, localEntitlements: true });
+  // The fake database has no realtime channel, so live boards stay on one instance.
+  const app = await buildServer(config, { store, auth: fakeAuth(client), fanOut: singleInstanceFanOut });
   t.after(() => app.close());
-  return { app, config, client };
+  return { app, config, client, store };
 }
 
 const start = (app, as) =>
@@ -166,4 +168,101 @@ test("a policy switch is off only when the row says so", async () => {
   const client = fakeClient({ organization_memberships: [{ organization_id: ORG, profile_id: MEMBER, role: "viewer", status: "active" }] });
   assert.deepEqual(await activeMembership(client, ORG, MEMBER), { role: "viewer" });
   assert.equal(await activeMembership(client, ORG, OUTSIDER), null);
+});
+
+const post = (app, url, as, payload = {}) =>
+  app.inject({ method: "POST", url, headers: as ? { authorization: `Bearer ${as}` } : {}, payload });
+
+test("New link stops older live links from letting people in; only the owner can make one", async (t) => {
+  const { app } = await server(t, {});
+  const { session, joinToken: first } = (await start(app, "owner")).json();
+  assert.equal((await join(app, session.id, first)).statusCode, 200);
+
+  assert.equal((await post(app, `/sessions/${session.id}/join-link`)).statusCode, 401);
+  assert.equal((await post(app, `/sessions/${session.id}/join-link`, "member")).statusCode, 404, "someone else's session");
+
+  // Tokens are dated to the second, so wait for the next one before replacing.
+  await new Promise((resolve) => setTimeout(resolve, 1_100));
+  const replaced = await post(app, `/sessions/${session.id}/join-link`, "owner");
+  assert.equal(replaced.statusCode, 200, replaced.body);
+  const refused = await join(app, session.id, first);
+  assert.equal(refused.statusCode, 401);
+  assert.equal(refused.json().error, "JOIN_LINK_REPLACED");
+  assert.equal((await join(app, session.id, replaced.json().joinToken)).statusCode, 200);
+});
+
+test("after a reload the owner rejoins their session as its owner, never as a guest", async (t) => {
+  const { app, config } = await server(t, {});
+  const started = (await start(app, "owner")).json();
+  const guest = (await join(app, started.session.id, started.joinToken)).json();
+  const resume = (as, participantId) => post(app, `/sessions/${started.session.id}/resume`, as, { participantId });
+
+  const resumed = await resume("owner", started.ownerParticipant.id);
+  assert.equal(resumed.statusCode, 200, resumed.body);
+  assert.equal(resumed.json().participant.role, "owner");
+  const ticket = verifySignedToken(config.sessionSigningSecret, resumed.json().realtimeTicket, "realtime");
+  assert.equal(ticket.participantId, started.ownerParticipant.id);
+
+  assert.equal((await resume("owner", guest.participant.id)).statusCode, 404, "a guest's place is not the owner's");
+  assert.equal((await resume("member", started.ownerParticipant.id)).statusCode, 404, "someone else");
+  assert.equal((await resume(undefined, started.ownerParticipant.id)).statusCode, 401);
+});
+
+test("a link is replaced only when it was issued before the reset, to the second", () => {
+  assert.equal(joinLinkReplaced(1_000, undefined), false);
+  assert.equal(joinLinkReplaced(999, new Date(1_000_500).toISOString()), true);
+  assert.equal(joinLinkReplaced(1_000, new Date(1_000_500).toISOString()), false);
+});
+
+function openSocket(port, ticket) {
+  const socket = new WebSocket(`ws://127.0.0.1:${port}/ws?ticket=${encodeURIComponent(ticket)}&sceneVersion=${BOARD_SCENE_VERSION}`);
+  const messages = [];
+  socket.on("message", (data) => messages.push(JSON.parse(String(data))));
+  socket.on("error", () => undefined);
+  t_sockets.push(socket);
+  return { socket, messages };
+}
+const t_sockets = [];
+const waitFor = async (predicate) => {
+  for (let i = 0; i < 300 && !predicate(); i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  return predicate();
+};
+
+test("the owner switches guests between viewing and editing while they are in", async (t) => {
+  const { app } = await server(t, {});
+  t.after(() => t_sockets.forEach((socket) => socket.close()));
+  await app.listen({ host: "127.0.0.1", port: 0 });
+  const port = app.server.address().port;
+  const startedResponse = await start(app, "owner");
+  const started = startedResponse.json();
+  const joined = (await join(app, started.session.id, started.joinToken)).json();
+  assert.equal(joined.participant.role, "editor", "a guest's editing follows the session's switch");
+
+  const owner = openSocket(port, started.realtimeTicket);
+  const guest = openSocket(port, joined.realtimeTicket);
+  assert.ok(await waitFor(() => [owner, guest].every((c) => c.messages.some((m) => m.type === "board.initialized"))));
+  const edit = () => guest.socket.send(JSON.stringify({ type: "board.event", event: {
+    ...createEventEnvelope({ boardSessionId: started.session.id, actorParticipantId: joined.participant.id }),
+    type: "element.deleted",
+    elementId: "missing",
+  } }));
+  const setEditing = (allow) => owner.socket.send(JSON.stringify({ type: "board.event", event: {
+    ...createEventEnvelope({ boardSessionId: started.session.id, actorParticipantId: started.ownerParticipant.id }),
+    type: "permission.changed",
+    allowParticipantDrawing: allow,
+  } }));
+
+  setEditing(false);
+  assert.ok(await waitFor(() => guest.messages.some((m) => m.type === "board.event" && m.event.type === "permission.changed")), "guests hear the change");
+  await new Promise((resolve) => setTimeout(resolve, 1_100)); // past the socket's one-second permission cache
+  edit();
+  assert.ok(await waitFor(() => guest.messages.some((m) => m.type === "event.rejected")), "a viewing guest's edit is refused");
+
+  setEditing(true);
+  assert.ok(await waitFor(() => guest.messages.filter((m) => m.type === "board.event" && m.event.type === "permission.changed").length === 2));
+  await new Promise((resolve) => setTimeout(resolve, 1_100));
+  const rejectedBefore = guest.messages.filter((m) => m.type === "event.rejected").length;
+  edit();
+  assert.ok(await waitFor(() => guest.messages.some((m) => m.type === "board.event" && m.event.type === "element.deleted")), "an editing guest's edit lands");
+  assert.equal(guest.messages.filter((m) => m.type === "event.rejected").length, rejectedBefore);
 });

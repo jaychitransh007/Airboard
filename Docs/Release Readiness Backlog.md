@@ -1025,3 +1025,17 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - The admin link list.
     - Photo cleaning.
     - Upload limits.
+- **2026-11-06** — Live-link controls, the accessibility audit and RGB-016 (not deployed yet):
+  - **Live links** (threat model L-2):
+    - On saved boards, people who join with the live link can only view by default. The owner picks **Can view** or **Can edit** in Share, and people already in follow at once.
+    - **New link** stops older links letting anyone new in (migration `20261106170000`); people already in stay.
+    - After a reload, the owner rejoins their session as its owner, not as a guest, and keeps the same link.
+  - **Accessibility audit** (`Docs/Accessibility Audit.md`):
+    - 17 failures fixed across the public site, the app, the board's chrome and the live and shared boards.
+    - The board now tells a screen reader which object Tab selects and lists the board's words.
+    - Locked in by `e2e/accessibilityAudit.spec.ts` and `test/accessibilityStyles.test.mjs`.
+    - Still open:
+      - no real screen-reader pass;
+      - drawing needs a pointer;
+      - the selection toolbar sits early in the Tab order.
+  - **RGB-016:** done on branch `codex/remove-legacy-access-token`, held until after 8 November.

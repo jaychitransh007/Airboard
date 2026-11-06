@@ -1,4 +1,7 @@
+import type { Metadata } from "next";
 import { PILOT_CONTACT, PilotInfoPage } from "../../../src/features/pilot/PilotInfoPage";
+
+export const metadata: Metadata = { title: "Meet overlay support" };
 
 export default function PilotSupportPage() {
   const subject = encodeURIComponent("Airboard Meet overlay support request");

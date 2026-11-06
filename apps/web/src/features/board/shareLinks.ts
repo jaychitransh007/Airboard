@@ -43,9 +43,10 @@ export function guestDisplayName(value: string | null | undefined): string {
  * session, the host's workspace admits only its members, Airboard is down for
  * a short upgrade, or the network is down; each needs a different next step.
  */
-export function liveJoinFailure(message: string | undefined): "expired" | "ended" | "members_only" | "maintenance" | "offline" {
+export function liveJoinFailure(message: string | undefined): "expired" | "replaced" | "ended" | "members_only" | "maintenance" | "offline" {
   if (!message) return "offline";
   if (/MAINTENANCE/.test(message)) return "maintenance";
+  if (/JOIN_LINK_REPLACED/.test(message)) return "replaced";
   if (/EXTERNAL_GUESTS_DISABLED/.test(message)) return "members_only";
   if (/JOIN_TOKEN|HTTP_401/.test(message)) return "expired";
   if (/NOT_JOINABLE|NOT_FOUND|HTTP_404/.test(message)) return "ended";
@@ -67,7 +68,12 @@ export function liveStartFailure(message: string | undefined): LiveStartFailure 
 
 const LIVE_SESSION_KEY_PREFIX = "airboard.liveSession.";
 
-export type RememberedLiveSession = { boardSessionId: string; joinToken: string };
+export type RememberedLiveSession = {
+  boardSessionId: string;
+  joinToken: string;
+  /** The owner's own place in the session, so a reload rejoins as its owner. */
+  participantId?: string;
+};
 
 /**
  * The owner's live session for a saved board, kept for this tab only so a
@@ -86,8 +92,10 @@ export function rememberedLiveSession(boardId: string): RememberedLiveSession | 
   try {
     const value = JSON.parse(window.sessionStorage.getItem(`${LIVE_SESSION_KEY_PREFIX}${boardId}`) ?? "null") as unknown;
     if (value && typeof value === "object") {
-      const { boardSessionId, joinToken } = value as Record<string, unknown>;
-      if (typeof boardSessionId === "string" && typeof joinToken === "string") return { boardSessionId, joinToken };
+      const { boardSessionId, joinToken, participantId } = value as Record<string, unknown>;
+      if (typeof boardSessionId === "string" && typeof joinToken === "string") {
+        return { boardSessionId, joinToken, ...(typeof participantId === "string" ? { participantId } : {}) };
+      }
     }
   } catch {
     // Unreadable or blocked storage counts as nothing remembered.

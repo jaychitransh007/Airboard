@@ -22,7 +22,7 @@ import type { SessionStore } from "./store";
 import { registerTranscriptionRoutes } from "./transcription/routes";
 import { VoiceTraceBuffer } from "./voiceTrace/buffer";
 import { registerVoiceTraceRoutes } from "./voiceTrace/routes";
-import { AuthService } from "./auth";
+import { AuthService, type AuthContext } from "./auth";
 import { canEditBoards } from "./boardAccess";
 import { activeMembership, organizationPolicy } from "./organizationPolicy";
 import { registerControlPlaneRoutes } from "./controlPlaneRoutes";
@@ -286,6 +286,26 @@ export async function buildServer(
     },
   }));
 
+  /** The session, if the signed-in caller started it. */
+  const ownedSession = async (
+    sessionId: string,
+    request: FastifyRequest,
+  ): Promise<
+    | { refused: { status: number; error: string } }
+    | { refused: null; session: BoardSession; account: AuthContext }
+  > => {
+    const account = await auth.authenticate(request);
+    if (!account) return { refused: { status: 401, error: "OWNER_AUTH_REQUIRED" } };
+    let session: BoardSession;
+    try {
+      session = await store.getSession(sessionId);
+    } catch {
+      return { refused: { status: 404, error: "SESSION_NOT_FOUND" } };
+    }
+    if (session.ownerUserId !== account.profileId) return { refused: { status: 404, error: "SESSION_NOT_FOUND" } };
+    return { refused: null, session, account };
+  };
+
   server.post<{
     Body: {
       provider?: MeetingProvider;
@@ -379,6 +399,15 @@ export async function buildServer(
       }
     }
     try {
+      // "New link" stops older links from admitting anyone new.
+      const current = await store.getSession(request.params.sessionId);
+      if (joinLinkReplaced(join.iat, current.joinLinksResetAt)) {
+        return reply.code(401).send({ error: "JOIN_LINK_REPLACED" });
+      }
+    } catch (error) {
+      return reply.code(404).send({ error: error instanceof Error ? error.message : "NOT_FOUND" });
+    }
+    try {
       const result = await store.joinSession({
         sessionId: request.params.sessionId,
         displayName: request.body.displayName ?? "Guest",
@@ -398,6 +427,53 @@ export async function buildServer(
     } catch (error) {
       return reply.code(404).send({ error: error instanceof Error ? error.message : "NOT_FOUND" });
     }
+  });
+
+  // The session's owner, signed in, back in their own session after a reload:
+  // they rejoin as its owner rather than as a guest of their own board.
+  server.post<{
+    Params: { sessionId: string };
+    Body: { participantId?: string };
+  }>("/sessions/:sessionId/resume", async (request, reply) => {
+    const owned = await ownedSession(request.params.sessionId, request);
+    if (owned.refused) return reply.code(owned.refused.status).send({ error: owned.refused.error });
+    const participantId = typeof request.body?.participantId === "string" ? request.body.participantId : "";
+    const participant = participantId ? await store.getParticipant(owned.session.id, participantId) : null;
+    if (!participant || participant.role !== "owner" || !canJoinBoard(owned.session)) {
+      return reply.code(404).send({ error: "SESSION_NOT_JOINABLE" });
+    }
+    return {
+      session: owned.session,
+      participant,
+      sceneVersion: BOARD_SCENE_VERSION,
+      state: await store.getState(owned.session.id),
+      realtimeTicket: issueSignedToken(config.sessionSigningSecret, {
+        purpose: "realtime",
+        sub: owned.account.profileId,
+        organizationId: owned.account.organizationId,
+        sessionId: owned.session.id,
+        participantId: participant.id,
+        ttlSeconds: 30 * 60,
+      }),
+    };
+  });
+
+  // "New link" in Share: links issued before now stop admitting new people;
+  // everyone already in keeps going. Ending the session removes them too.
+  server.post<{ Params: { sessionId: string } }>("/sessions/:sessionId/join-link", async (request, reply) => {
+    const owned = await ownedSession(request.params.sessionId, request);
+    if (owned.refused) return reply.code(owned.refused.status).send({ error: owned.refused.error });
+    if (!canJoinBoard(owned.session)) return reply.code(409).send({ error: "SESSION_NOT_JOINABLE" });
+    await store.resetJoinLinks(owned.session.id);
+    return {
+      joinToken: issueSignedToken(config.sessionSigningSecret, {
+        purpose: "join",
+        sub: owned.account.profileId,
+        organizationId: owned.account.organizationId,
+        sessionId: owned.session.id,
+        ttlSeconds: JOIN_LINK_TTL_SECONDS,
+      }),
+    };
   });
 
   server.post<{
@@ -762,6 +838,17 @@ export async function buildServer(
           }
           return;
         }
+        // The owner's Share switch: whether guests may edit takes effect for
+        // every socket at its next permission check.
+        const permission = [...events].reverse().find((event) => event.type === "permission.changed");
+        if (permission && permission.type === "permission.changed") {
+          try {
+            await store.setParticipantDrawing(boardSessionId, permission.allowParticipantDrawing);
+            cachedAuth = null;
+          } catch (error) {
+            server.log.error({ err: error, boardSessionId }, "guest editing change failed");
+          }
+        }
         for (const event of events) {
           broadcast(room, { type: "board.event", event });
         }
@@ -821,4 +908,11 @@ function safeParse(data: string): any {
   } catch {
     return null;
   }
+}
+
+/** A live link issued (to the second) before the owner's last "New link". */
+export function joinLinkReplaced(issuedAtSeconds: number, resetAt: string | undefined): boolean {
+  if (!resetAt) return false;
+  const resetSeconds = Math.floor(Date.parse(resetAt) / 1_000);
+  return Number.isFinite(resetSeconds) && issuedAtSeconds < resetSeconds;
 }

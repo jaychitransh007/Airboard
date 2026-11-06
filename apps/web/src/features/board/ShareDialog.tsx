@@ -21,12 +21,22 @@ export type BoardShareAccess = {
   viewLinks?: ViewLinkControls;
 };
 
+/** The owner's controls for the running live session's link. */
+export type LiveLinkControls = {
+  /** Whether people who join with the live link can edit, or only watch. */
+  guestsCanEdit: boolean;
+  onGuestsCanEditChange: (allow: boolean) => Promise<void> | void;
+  /** Replaces the live link: the old one stops letting new people in. */
+  onNewLink: () => Promise<void>;
+};
+
 type CopyTarget = "live" | "board";
 
 export function ShareDialog({
   boardTitle,
   liveLink,
   liveUnavailable,
+  liveControls,
   access,
   onDownloadPng,
   onCopyImage,
@@ -37,6 +47,7 @@ export function ShareDialog({
   liveLink: string | null;
   /** Why the live session could not start, so no link is coming; null while it may. */
   liveUnavailable: LiveStartFailure | null;
+  liveControls?: LiveLinkControls;
   access?: BoardShareAccess;
   onDownloadPng: () => void;
   onCopyImage: () => void;
@@ -45,6 +56,7 @@ export function ShareDialog({
   const [copied, setCopied] = useState<CopyTarget | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
   const [visibilityStatus, setVisibilityStatus] = useState<"idle" | "saving" | "error">("idle");
+  const [liveStatus, setLiveStatus] = useState<"idle" | "busy" | "renewed" | "error">("idle");
   const firstActionRef = useRef<HTMLButtonElement | null>(null);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -93,6 +105,29 @@ export function ShareDialog({
 
   const shared = access ? access.visibility !== "private" : false;
 
+  const setGuestsCanEdit = async (allow: boolean) => {
+    if (!liveControls || liveStatus === "busy" || liveControls.guestsCanEdit === allow) return;
+    setLiveStatus("busy");
+    try {
+      await liveControls.onGuestsCanEditChange(allow);
+      setLiveStatus("idle");
+    } catch {
+      setLiveStatus("error");
+    }
+  };
+
+  const renewLiveLink = async () => {
+    if (!liveControls || liveStatus === "busy") return;
+    setLiveStatus("busy");
+    setCopied(null);
+    try {
+      await liveControls.onNewLink();
+      setLiveStatus("renewed");
+    } catch {
+      setLiveStatus("error");
+    }
+  };
+
   return (
     <div
       className="board-lifecycle-backdrop"
@@ -119,11 +154,41 @@ export function ShareDialog({
         </header>
 
         <section className="share-dialog-section" aria-labelledby="share-live-title">
-          <h3 id="share-live-title">Edit together now</h3>
+          <h3 id="share-live-title">Work together now</h3>
           <p>
-            Anyone with this link can join and edit with you, no account needed. New people can
-            join for {LIVE_LINK_HOURS} hours; ending the session in Settings → Sessions stops it at once.
+            Anyone with this link can join, no account needed.{liveControls ? null : " They can edit with you."} New
+            people can join for {LIVE_LINK_HOURS} hours; ending the session in Settings → Sessions stops it at once.
           </p>
+          {liveControls && liveLink ? (
+            <div className="share-dialog-choices" role="radiogroup" aria-label="What people with the live link can do">
+              <label className={!liveControls.guestsCanEdit ? "selected" : undefined}>
+                <input
+                  type="radio"
+                  name="live-access"
+                  checked={!liveControls.guestsCanEdit}
+                  disabled={liveStatus === "busy"}
+                  onChange={() => void setGuestsCanEdit(false)}
+                />
+                <span>
+                  <strong>Can view</strong>
+                  <small>They watch the board change as you work.</small>
+                </span>
+              </label>
+              <label className={liveControls.guestsCanEdit ? "selected" : undefined}>
+                <input
+                  type="radio"
+                  name="live-access"
+                  checked={liveControls.guestsCanEdit}
+                  disabled={liveStatus === "busy"}
+                  onChange={() => void setGuestsCanEdit(true)}
+                />
+                <span>
+                  <strong>Can edit</strong>
+                  <small>They draw and change the board with you.</small>
+                </span>
+              </label>
+            </div>
+          ) : null}
           <div className="share-dialog-row">
             <button
               ref={firstActionRef}
@@ -140,7 +205,22 @@ export function ShareDialog({
                     ? "Live link unavailable"
                     : "Connecting…"}
             </button>
+            {liveControls && liveLink ? (
+              <button type="button" disabled={liveStatus === "busy"} onClick={() => void renewLiveLink()}>
+                New link
+              </button>
+            ) : null}
           </div>
+          {liveStatus === "renewed" ? (
+            <p className="share-dialog-note" role="status">
+              New link ready to copy. The old link no longer lets anyone in; people already here stay.
+            </p>
+          ) : null}
+          {liveStatus === "error" ? (
+            <p className="share-dialog-note board-lifecycle-error" role="alert">
+              That didn&apos;t go through. Check your connection and try again.
+            </p>
+          ) : null}
           {!liveLink && liveUnavailable === "pilot_ended" ? (
             <p className="share-dialog-note">
               Your free pilot has ended, so you can&apos;t start live sessions. This board still

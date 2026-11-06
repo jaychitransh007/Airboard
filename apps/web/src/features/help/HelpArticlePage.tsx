@@ -23,14 +23,15 @@ export function HelpArticlePage({ article }: { article: HelpArticle }) {
   return (
     <HelpShell>
       <div className="help-article-shell">
-        <aside className="help-article-nav" aria-label="Help topics">
+        {/* One navigation landmark for every topic, not one unnamed one per category. */}
+        <nav className="help-article-nav" aria-label="Help topics">
           <Link className="help-nav-home" href="/help">
             ← Help home
           </Link>
           {categories.map((category) => (
             <section key={category.id}>
               <h2>{category.label}</h2>
-              <nav>
+              <div className="help-topic-links">
                 {category.articles.map((candidate) => (
                   <Link
                     className={candidate.slug === article.slug ? "active" : ""}
@@ -41,10 +42,10 @@ export function HelpArticlePage({ article }: { article: HelpArticle }) {
                     {candidate.title}
                   </Link>
                 ))}
-              </nav>
+              </div>
             </section>
           ))}
-        </aside>
+        </nav>
 
         <article className="help-article">
           <nav className="help-breadcrumbs" aria-label="Breadcrumb">
@@ -107,7 +108,7 @@ export function HelpArticlePage({ article }: { article: HelpArticle }) {
 
         <aside className="help-on-this-page">
           <strong>On this page</strong>
-          <nav>
+          <nav aria-label="On this page">
             {article.headings.map((heading) => (
               <a className={heading.depth === 3 ? "nested" : ""} href={`#${heading.id}`} key={heading.id}>
                 {heading.label}
@@ -138,6 +139,8 @@ function MarkdownBody({ body }: { body: string }) {
       remarkPlugins={[remarkGfm]}
       components={{
         h2: ({ children }) => <h2 id={headingId(children)}>{children}</h2>,
+        // Narrow screens scroll wide tables sideways; a tab stop lets the keyboard do it too.
+        table: ({ children }) => <table tabIndex={0}>{children}</table>,
         h3: ({ children }) => <h3 id={headingId(children)}>{children}</h3>,
         a: ({ href = "", children }) =>
           href.startsWith("/") ? (

@@ -17,10 +17,30 @@ export function wrappedFocusIndex(count: number, currentIndex: number, backwards
 }
 
 /**
+ * Where focus should go back to when a dialog closes. A dialog opened from a
+ * menu item outlives the item, which leaves with its menu, so it goes back to
+ * the button that opened the menu instead. Call this before the menu closes,
+ * while that button still says it is expanded.
+ */
+export function dialogReturnTarget(active: Element | null, root: ParentNode = document): HTMLElement | null {
+  if (!(active instanceof HTMLElement)) return null;
+  const menu = active.closest('[role="menu"]');
+  if (!menu) return active;
+  const triggers = [...root.querySelectorAll<HTMLElement>('[aria-haspopup="menu"][aria-expanded="true"]')];
+  return (
+    triggers.find((trigger) => menu.id !== "" && trigger.getAttribute("aria-controls") === menu.id) ??
+    triggers.find((trigger) => trigger.parentElement?.contains(menu)) ??
+    active
+  );
+}
+
+/**
  * Keyboard behaviour for a modal dialog while it is open: focus moves in
  * (unless something inside already has it), Tab stays inside, Escape calls
  * `onEscape` when given (and goes no further, so the canvas doesn't react
- * too), and focus returns to where it was when the dialog closes.
+ * too), and focus returns to where it was when the dialog closes (or, if
+ * that control has gone, such as a deleted board's card, to the page's main
+ * content).
  */
 export function useModalFocus(
   dialogRef: RefObject<HTMLElement | null>,
@@ -34,7 +54,7 @@ export function useModalFocus(
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const wasOpenRef = useRef(false);
   if (open && !wasOpenRef.current && typeof document !== "undefined") {
-    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    returnFocusRef.current = dialogReturnTarget(document.activeElement);
   }
   wasOpenRef.current = open;
 
@@ -67,6 +87,7 @@ export function useModalFocus(
     return () => {
       document.removeEventListener("keydown", onKeyDown, true);
       if (previous?.isConnected) previous.focus();
+      else if (!document.activeElement || document.activeElement === document.body) document.getElementById("main-content")?.focus();
     };
   }, [dialogRef, open]);
 }

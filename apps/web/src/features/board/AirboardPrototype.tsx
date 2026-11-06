@@ -6,6 +6,7 @@ import {
   applyDiagramCommand,
   applyDiagramUndo,
   applyBoardEvent,
+  boardPreview,
   createBoardSceneElement,
   createDefaultTableData,
   createEraseAction,
@@ -139,7 +140,7 @@ import {
   stickyHeightForText,
 } from "./sceneContextToolbarHelpers";
 import { SceneTextEditor } from "./SceneTextEditor";
-import { ShareDialog, type BoardShareAccess } from "./ShareDialog";
+import { ShareDialog, type BoardShareAccess, type LiveLinkControls } from "./ShareDialog";
 import { forgetLiveSession, liveBoardLink, liveStartFailure, rememberedLiveSession, rememberLiveSession, type LiveStartFailure } from "./shareLinks";
 import { blockedMediaHelp, deniedMediaHelp } from "./mediaPermissionHelp";
 import { boardTemplate } from "./boardTemplates";
@@ -641,6 +642,9 @@ function mediaUploadFailure(code: string): string {
   return code ? `Media upload failed: ${code}` : "Media upload failed.";
 }
 
+/** The most board words listed for screen readers beside the canvas. */
+const BOARD_TEXT_LIST_LIMIT = 200;
+
 const EXPORTS_BLOCKED_MESSAGE = "Your workspace admin turned off downloading and copying boards.";
 
 export function AirboardPrototype({
@@ -669,6 +673,7 @@ export function AirboardPrototype({
   liveGuest = false,
   participantName,
   onLiveJoinFailed,
+  onGuestEditingChange,
   organizationPolicy,
 }: {
   surface: Surface;
@@ -729,6 +734,11 @@ export function AirboardPrototype({
   participantName?: string;
   /** Live-link guests leave the board when joining fails rather than edit a local copy. */
   onLiveJoinFailed?: (message: string) => void;
+  /**
+   * Live-link guests: whether the host lets them edit, on joining and each
+   * time the host changes it in Share. The page swaps to a view-only board.
+   */
+  onGuestEditingChange?: (allowed: boolean) => void;
   /**
    * The signed-in person's Admin → Organization policy. Camera, gestures and
    * downloads never reach the API, so the board itself honours those switches;
@@ -1077,6 +1087,11 @@ export function AirboardPrototype({
   // would not re-render when the session becomes available.
   const [activeBoardSessionId, setActiveBoardSessionId] = useState<string | null>(null);
   const [activeJoinToken, setActiveJoinToken] = useState<string | null>(null);
+  // The owner's Share setting for people who join with the live link.
+  const [guestsCanEdit, setGuestsCanEdit] = useState(false);
+  const [liveSessionRole, setLiveSessionRole] = useState<string | null>(null);
+  const onGuestEditingChangeRef = useRef(onGuestEditingChange);
+  onGuestEditingChangeRef.current = onGuestEditingChange;
   // Lightboard (neon-on-dark) appearance. Defaults here; stored preferences
   // load after mount so server and client render the same initial tree.
   const [boardTheme, setBoardTheme] = useState<"classic" | "lightboard">(
@@ -1161,6 +1176,15 @@ export function AirboardPrototype({
   const [shareOpen, setShareOpen] = useState(false);
   const [liveStartProblem, setLiveStartProblem] = useState<LiveStartFailure | null>(null);
   const [titleEditing, setTitleEditing] = useState(false);
+  // Enter or Escape in the rename field hands focus back to the title.
+  const titleButtonRef = useRef<HTMLButtonElement | null>(null);
+  const restoreTitleFocusRef = useRef(false);
+  useEffect(() => {
+    if (!titleEditing && restoreTitleFocusRef.current) {
+      restoreTitleFocusRef.current = false;
+      titleButtonRef.current?.focus();
+    }
+  }, [titleEditing]);
   const [titleDraft, setTitleDraft] = useState(boardTitle);
   const [titleStatus, setTitleStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [titleError, setTitleError] = useState<string | null>(null);
@@ -1264,6 +1288,20 @@ export function AirboardPrototype({
   const selectedSceneElement = selectedElementId
     ? boardRef.current.elements[selectedElementId] ?? null
     : null;
+  // Screen readers can't see the canvas: they hear what is selected, and can
+  // read the board's words in a list beside it.
+  const selectedAnnotationStroke = selectedAnnotationId ? boardRef.current.strokes[selectedAnnotationId] : undefined;
+  const selectionAnnouncement = selectedSceneElement
+    ? `Selected “${sceneElementReferenceLabel(selectedSceneElement)}”.`
+    : selectedAnnotationStroke
+      ? `Selected “${selectedAnnotationStroke.annotation?.label?.trim() || selectedAnnotationStroke.annotation?.type || "drawing"}”.`
+      : "";
+  const boardTextForScreenReaders = useMemo(
+    () => boardPreview(boardRef.current).text.slice(0, BOARD_TEXT_LIST_LIMIT),
+    // sceneRenderVersion is the trigger: the board itself lives in a ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sceneRenderVersion],
+  );
   const playbackViewport = useMemo(
     () => ({ ...boardViewportRef.current }),
     // viewportRevision is the trigger: the viewport itself lives in a ref.
@@ -3772,6 +3810,8 @@ export function AirboardPrototype({
       remembered?.boardSessionId ??
       null;
     const requestedJoinToken = addressParams.get("joinToken") ?? remembered?.joinToken ?? null;
+    // Back in the session they started: rejoin as its owner, not as a guest.
+    const resumeParticipantId = remembered?.participantId && effectiveAccessToken ? remembered.participantId : null;
     boardSyncStatusRef.current = "connecting";
     setBoardSyncStatus("connecting");
 
@@ -3806,6 +3846,9 @@ export function AirboardPrototype({
         ownerUserId: accountUserId ?? OWNER_USER_ID,
         ...(effectiveAccessToken ? { accessToken: effectiveAccessToken } : {}),
         ...(requestedJoinToken ? { joinToken: requestedJoinToken } : {}),
+        ...(resumeParticipantId ? { resumeParticipantId } : {}),
+        // A saved board's live link lets people watch until its owner lets them edit.
+        ...(persistentBoardId ? { allowParticipantDrawing: false } : {}),
         provider: meetingProvider,
         ...(providerMeetingId ? { providerMeetingId } : {}),
         ...(persistentWorkspaceId ? { workspaceId: persistentWorkspaceId } : {}),
@@ -3816,8 +3859,17 @@ export function AirboardPrototype({
       {
         onRemoteEvent: (event) => {
           if (!cancelled) {
+            if (event.type === "permission.changed") {
+              setGuestsCanEdit(event.allowParticipantDrawing);
+              onGuestEditingChangeRef.current?.(event.allowParticipantDrawing);
+            }
             applyRemoteEventRef.current(event);
           }
+        },
+        onSessionPermission: (allow) => {
+          if (cancelled) return;
+          setGuestsCanEdit(allow);
+          onGuestEditingChangeRef.current?.(allow);
         },
         onStatus: (status) => {
           if (cancelled) {
@@ -3848,6 +3900,9 @@ export function AirboardPrototype({
         boardSessionIdRef.current = result.handle.boardSessionId;
         setActiveBoardSessionId(result.handle.boardSessionId);
         setActiveJoinToken(result.handle.joinToken ?? requestedJoinToken);
+        setGuestsCanEdit(result.handle.allowParticipantDrawing);
+        setLiveSessionRole(result.handle.role);
+        if (result.handle.role !== "owner") onGuestEditingChangeRef.current?.(result.handle.allowParticipantDrawing);
         if (result.outcome === "joined") {
           boardRef.current = result.initialState;
           undoStackRef.current = [];
@@ -3861,11 +3916,13 @@ export function AirboardPrototype({
           render();
           updateStats();
           frameHiddenContentRef.current(copilotStartsOpen());
-          setCommandFeedback("Joined the live board session.");
+          setCommandFeedback(
+            result.handle.role === "owner" ? "Back in your live board session." : "Joined the live board session.",
+          );
         } else {
           boardSyncSeedEligibleRef.current = true;
           trySeed();
-          setCommandFeedback("Live board ready. Use Share to invite people to edit with you.");
+          setCommandFeedback("Live board ready. Use Share to invite people to work with you.");
         }
         const url = new URL(window.location.href);
         const joinToken = result.handle.joinToken ?? requestedJoinToken;
@@ -3873,7 +3930,11 @@ export function AirboardPrototype({
           // Keep the live link out of the address bar and history: copying a
           // saved board's address must not hand out edit access.
           if (joinToken) {
-            rememberLiveSession(persistentBoardId, { boardSessionId: result.handle.boardSessionId, joinToken });
+            rememberLiveSession(persistentBoardId, {
+              boardSessionId: result.handle.boardSessionId,
+              joinToken,
+              ...(result.handle.role === "owner" ? { participantId: result.handle.participantId } : {}),
+            });
           }
           url.searchParams.delete("boardSessionId");
           url.searchParams.delete("joinToken");
@@ -8686,6 +8747,42 @@ export function AirboardPrototype({
 
   const closeShareDialog = useCallback(() => setShareOpen(false), []);
 
+  // The owner's live-link controls in Share: whether guests may edit, and a
+  // fresh link that stops the old one admitting anyone new.
+  const liveLinkControls = useMemo<LiveLinkControls | undefined>(() => {
+    if (!persistentBoardId || !activeBoardSessionId || liveSessionRole !== "owner" || !effectiveAccessToken) {
+      return undefined;
+    }
+    return {
+      guestsCanEdit,
+      onGuestsCanEditChange: (allow) => {
+        const sync = boardSyncRef.current;
+        const sent = sync?.publish({
+          ...createEventEnvelope({ boardSessionId: sync.boardSessionId, actorParticipantId: sync.participantId }),
+          type: "permission.changed",
+          allowParticipantDrawing: allow,
+        });
+        if (!sent) throw new Error("LIVE_SESSION_OFFLINE");
+        setGuestsCanEdit(allow);
+      },
+      onNewLink: async () => {
+        const response = await fetch(
+          new URL(`/sessions/${encodeURIComponent(activeBoardSessionId)}/join-link`, AIRBOARD_API_URL).toString(),
+          { method: "POST", headers: { Authorization: `Bearer ${effectiveAccessToken}` } },
+        );
+        const body = (await response.json().catch(() => null)) as { joinToken?: unknown } | null;
+        if (!response.ok || typeof body?.joinToken !== "string") throw new Error("JOIN_LINK_RENEW_FAILED");
+        setActiveJoinToken(body.joinToken);
+        const participantId = boardSyncRef.current?.participantId;
+        rememberLiveSession(persistentBoardId, {
+          boardSessionId: activeBoardSessionId,
+          joinToken: body.joinToken,
+          ...(participantId ? { participantId } : {}),
+        });
+      },
+    };
+  }, [activeBoardSessionId, effectiveAccessToken, guestsCanEdit, liveSessionRole, persistentBoardId]);
+
   const exportPng = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) {
@@ -10685,6 +10782,7 @@ export function AirboardPrototype({
           liveUnavailable={
             !activeBoardSessionId && boardSyncStatus === "offline" ? liveStartProblem ?? "offline" : null
           }
+          {...(liveLinkControls ? { liveControls: liveLinkControls } : {})}
           {...(shareAccess ? { access: shareAccess } : {})}
           onDownloadPng={exportPng}
           onCopyImage={copyBoardImage}
@@ -10704,6 +10802,7 @@ export function AirboardPrototype({
               </Link>
               <span className="canvas-brand-orbit" aria-hidden="true" />
               <div className="canvas-title-stack">
+                <h1 className="canvas-title-heading">
                 {titleEditing ? (
                   <input
                     className="canvas-title-input"
@@ -10722,15 +10821,18 @@ export function AirboardPrototype({
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
                         event.preventDefault();
+                        restoreTitleFocusRef.current = true;
                         void commitTitleEdit();
                       } else if (event.key === "Escape") {
                         event.preventDefault();
+                        restoreTitleFocusRef.current = true;
                         cancelTitleEdit();
                       }
                     }}
                   />
                 ) : (
                   <button
+                    ref={titleButtonRef}
                     type="button"
                     className="canvas-title-button"
                     aria-label={`Rename canvas ${boardTitle}`}
@@ -10741,6 +10843,7 @@ export function AirboardPrototype({
                     {boardTitle}
                   </button>
                 )}
+                </h1>
                 <span
                   className={`canvas-save-state ${
                     liveGuest
@@ -11542,7 +11645,8 @@ export function AirboardPrototype({
           <canvas
             ref={canvasRef}
             role="application"
-            aria-label="Airboard diagram canvas. Press Tab or Shift+Tab to cycle through objects and Enter or F2 to edit the selected object's label. Type commands such as add, move, or delete in the Intent Canvas field to create and change objects."
+            aria-label="Airboard diagram canvas. Press Tab or Shift+Tab to cycle through objects and Enter or F2 to edit the selected object's label. Type commands such as add, move, or delete in the Type a board command field to create and change objects."
+            aria-describedby="board-canvas-text"
             className={`board-canvas ${inputMode === "touchpad" ? "touchpad-mode" : ""} ${
               inputMode === "gesture" ? "gesture-mode" : ""
             } ${activeCreationTool === "hand" || temporaryHandActive ? "hand-mode" : ""}`}
@@ -11584,6 +11688,15 @@ export function AirboardPrototype({
             }}
             onWheel={handleWheel}
           />
+          <p className="sr-only" role="status">{selectionAnnouncement}</p>
+          <section id="board-canvas-text" className="sr-only">
+            <h2>Text on this board</h2>
+            {boardTextForScreenReaders.length ? (
+              <ul>{boardTextForScreenReaders.map((line, index) => <li key={`${index}-${line}`}>{line}</li>)}</ul>
+            ) : (
+              <p>The board has no text yet.</p>
+            )}
+          </section>
           {!broadcastSafe ? (
             <div className="scene-playback-layer">
               <ScenePlaybackOverlay
