@@ -943,3 +943,9 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - **Checked that they catch breakage:** letting anyone make links, and sending the wrong save version, each made the relevant tests fail.
   - **Fix found by the new accessibility test:** the role pickers on Admin › Members had no accessible name ("Invite as", and "Role for <name>" on each member), and the email field relied on its placeholder. All three now have labels.
   - **Result:** 85 browser tests pass, and the 8 new ones passed 24 of 24 across three repeats.
+- **2026-11-06** — Deployed `launch-2f31bf2` to the web only (Admin › Members role pickers and email field labelled):
+  - **Unchanged:** the API stays on `launch-010a9b7`.
+  - **Staged checks:** `/`, `/login`, `/signup`, `/app`, `/app/boards`, `/app/admin/members`, `/s/<token>` and `/help` answered 200. The staged JavaScript contained the new "Invite as" label, and the live one didn't yet.
+  - **After promoting:** the live JavaScript has the label. On the canonical URL, `/s/<unknown token>` reaches the API and shows "This link no longer works". `pnpm launch:check:deployed` reports READY, 21 of 21.
+  - **Tags:** the `launch-7fa8ff1-web` tag was removed.
+  - **Rollback:** the web to `launch-7fa8ff1`.
