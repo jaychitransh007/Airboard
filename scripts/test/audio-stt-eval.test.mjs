@@ -42,6 +42,15 @@ import {
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
+
+// Trades the evaluation's sign-in token for a voice ticket, like the API does.
+const ticketRequests = [];
+async function ticketFetch(url, init) {
+  ticketRequests.push({ url, ...init });
+  assert.match(url, /\/transcription\/ticket$/);
+  return { ok: true, status: 200, json: async () => ({ ticket: "synthetic-ticket", expiresInSeconds: 60 }) };
+}
+
 test("canary selection is stable and covers diverse live-audio facets first", () => {
   const scenarios = [
     {
@@ -530,6 +539,7 @@ test("live WebSocket adapter streams verified WAV frames through the same oracle
         },
         accessToken: "synthetic-eval-token",
         apiToken: "synthetic-shared-token",
+        fetchImpl: ticketFetch,
         frameDelayMs: 0,
         origin: "http://localhost:3000",
         timeoutMs: 1_000,
@@ -550,10 +560,9 @@ test("live WebSocket adapter streams verified WAV frames through the same oracle
 
   assert.equal(report.passed, true);
   assert.ok(socket);
-  assert.equal(
-    new URL(requestedUrl).searchParams.get("access_token"),
-    "synthetic-eval-token",
-  );
+  assert.equal(new URL(requestedUrl).searchParams.get("ticket"), "synthetic-ticket");
+  assert.equal(new URL(requestedUrl).searchParams.get("access_token"), null, "the sign-in token never goes in a URL");
+  assert.equal(ticketRequests.at(-1).headers.authorization, "Bearer synthetic-eval-token");
   assert.equal(
     new URL(requestedUrl).searchParams.get("token"),
     "synthetic-shared-token",
@@ -614,6 +623,7 @@ test("Meet replay traverses the production bridge protocol and realtime PCM path
         },
         accessToken: "synthetic-eval-token",
         apiToken: "synthetic-shared-token",
+        fetchImpl: ticketFetch,
         frameDelayMs: 0,
         origin: "http://localhost:3000",
         timeoutMs: 1_000,
@@ -639,10 +649,9 @@ test("Meet replay traverses the production bridge protocol and realtime PCM path
   assert.equal(report.results[0].diagnostics.bridgeChunksSent, 2);
   assert.equal(report.results[0].diagnostics.bridgeSamplesSent, 1_600);
   assert.equal(report.results[0].diagnostics.bridgeStopObserved, true);
-  assert.equal(
-    new URL(requestedUrl).searchParams.get("access_token"),
-    "synthetic-eval-token",
-  );
+  assert.equal(new URL(requestedUrl).searchParams.get("ticket"), "synthetic-ticket");
+  assert.equal(new URL(requestedUrl).searchParams.get("access_token"), null, "the sign-in token never goes in a URL");
+  assert.equal(ticketRequests.at(-1).headers.authorization, "Bearer synthetic-eval-token");
   assert.equal(
     new URL(requestedUrl).searchParams.get("token"),
     "synthetic-shared-token",

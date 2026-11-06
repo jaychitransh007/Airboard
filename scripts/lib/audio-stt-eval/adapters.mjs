@@ -151,17 +151,19 @@ async function streamLiveGatewayScenario({
   apiBaseUrl,
   accessToken,
   apiToken,
+  fetchImpl = fetch,
   timeoutMs = 30_000,
   frameDelayMs = REALTIME_TRANSCRIPTION_FRAME_DURATION_MS,
   maxBufferedBytes = DEFAULT_REALTIME_TRANSCRIPTION_MAX_BUFFERED_BYTES,
   origin = "http://localhost:3000",
 }) {
-  const socketUrl = buildLiveGatewaySocketUrl(
-    scenario.source.url ?? url,
-    scenario.source.apiBaseUrl ?? apiBaseUrl,
+  const socketUrl = await authorizedLiveGatewaySocketUrl({
+    url: scenario.source.url ?? url,
+    apiBaseUrl: scenario.source.apiBaseUrl ?? apiBaseUrl,
     accessToken,
     apiToken,
-  );
+    fetchImpl,
+  });
   const socket = createWebSocket(socketUrl, { origin });
   const events = [];
   const effectiveTimeoutMs = Math.max(
@@ -370,17 +372,19 @@ async function streamMeetBridgeScenario({
   apiBaseUrl,
   accessToken,
   apiToken,
+  fetchImpl = fetch,
   timeoutMs = 30_000,
   frameDelayMs = REALTIME_TRANSCRIPTION_FRAME_DURATION_MS,
   maxBufferedBytes = DEFAULT_REALTIME_TRANSCRIPTION_MAX_BUFFERED_BYTES,
   origin = "http://localhost:3000",
 }) {
-  const socketUrl = buildLiveGatewaySocketUrl(
-    scenario.source.url ?? url,
-    scenario.source.apiBaseUrl ?? apiBaseUrl,
+  const socketUrl = await authorizedLiveGatewaySocketUrl({
+    url: scenario.source.url ?? url,
+    apiBaseUrl: scenario.source.apiBaseUrl ?? apiBaseUrl,
     accessToken,
     apiToken,
-  );
+    fetchImpl,
+  });
   const effectiveTimeoutMs = Math.max(
     timeoutMs,
     frameDelayMs > 0
@@ -647,10 +651,32 @@ async function streamMeetBridgeScenario({
   });
 }
 
+/**
+ * The gateway socket URL for a signed-in evaluation: the sign-in token is
+ * traded for a one-minute voice ticket first, as the app does, so it never
+ * goes in a URL.
+ */
+async function authorizedLiveGatewaySocketUrl({ url, apiBaseUrl, accessToken, apiToken, fetchImpl }) {
+  if (!accessToken) return buildLiveGatewaySocketUrl(url, apiBaseUrl, null, apiToken);
+  const ticketUrl = new URL(buildLiveGatewaySocketUrl(url, apiBaseUrl, null, null));
+  ticketUrl.protocol = ticketUrl.protocol === "wss:" ? "https:" : "http:";
+  ticketUrl.pathname = "/transcription/ticket";
+  ticketUrl.search = "";
+  const response = await fetchImpl(ticketUrl.toString(), {
+    method: "POST",
+    headers: { authorization: `Bearer ${accessToken}` },
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok || typeof body?.ticket !== "string") {
+    throw new Error(`Voice ticket request failed (${response.status}): ${body?.error ?? "no ticket"}`);
+  }
+  return buildLiveGatewaySocketUrl(url, apiBaseUrl, body.ticket, apiToken);
+}
+
 export function buildLiveGatewaySocketUrl(
   explicitUrl,
   apiBaseUrl,
-  accessToken,
+  ticket,
   apiToken,
 ) {
   let value;
@@ -667,8 +693,8 @@ export function buildLiveGatewaySocketUrl(
   if (!["ws:", "wss:"].includes(parsed.protocol)) {
     throw new Error("Live STT evaluation URL must use ws:// or wss://.");
   }
-  if (accessToken) {
-    parsed.searchParams.set("access_token", accessToken);
+  if (ticket) {
+    parsed.searchParams.set("ticket", ticket);
   }
   if (apiToken) {
     parsed.searchParams.set("token", apiToken);

@@ -137,9 +137,9 @@ export class AuthService {
     request: RequestLike,
     options: { allowInstallation?: boolean } = {},
   ): Promise<AuthContext | null> {
-    const query = request.query as Record<string, unknown> | undefined;
-    const queryToken = typeof query?.access_token === "string" ? query.access_token : null;
-    const token = bearerToken(request.headers) ?? queryToken;
+    // Only the Authorization header: a sign-in token in a URL would land in
+    // browser history and request logs (RGB-016). Sockets use short tickets.
+    const token = bearerToken(request.headers);
     if (!token) {
       return null;
     }
