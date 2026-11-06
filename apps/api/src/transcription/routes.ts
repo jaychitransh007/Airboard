@@ -17,6 +17,7 @@ import type {
 import type { AuthService } from "../auth";
 import { clientKey, configuredApiTokenAllowed, createCircuitBreaker, createRateLimiter, originAllowed } from "../security";
 import { issueSignedToken, verifySignedToken } from "../signedTokens";
+import { createDailyUsage } from "../dailyUsage";
 
 const MAX_PCM16_FRAME_BYTES = 256 * 1024;
 const MAX_STARTUP_BUFFER_BYTES = 384 * 1024;
@@ -28,6 +29,11 @@ type ActiveTranscription = {
 };
 
 const TRANSCRIPTION_TICKET_TTL_SECONDS = 60;
+// Voice is charged against the person's daily allowance in blocks paid ahead,
+// so a stream costs at most one block more than it used.
+const VOICE_CHARGE_SECONDS = 15;
+const DAILY_VOICE_LIMIT_MESSAGE =
+  "You've used today's Airo voice minutes. Typed commands still work, and voice comes back at midnight UTC.";
 
 type TranscriptionAuthorization =
   | { allowed: true; profileId: string | null }
@@ -47,6 +53,10 @@ export function registerTranscriptionRoutes(
   // Live stream slots per signed-in profile, so one account cannot occupy
   // every maxConcurrentStreams slot.
   const streamsByProfile = new Map<string, number>();
+  // Daily voice minutes per person, counted in the database across instances.
+  const usage = createDailyUsage(config.dailyUsage ? (auth?.client ?? null) : null, config.dailyUsage, (error) =>
+    server.log.warn({ err: error }, "daily voice allowance could not be counted"),
+  );
   // Connection attempts per caller address; stream caps bound the rest.
   const connectionLimiter = createRateLimiter({
     windowMs: 60_000,
@@ -127,6 +137,7 @@ export function registerTranscriptionRoutes(
     let streamSlotHeld = false;
     let streamOwner: string | null = null;
     let sessionLimitTimer: ReturnType<typeof setTimeout> | null = null;
+    let voiceChargeTimer: ReturnType<typeof setInterval> | null = null;
     let audioWindowStartedAt = Date.now();
     let audioBytesInWindow = 0;
     let stopActive: (reason: "completed" | "aborted") => void = () => undefined;
@@ -135,6 +146,10 @@ export function registerTranscriptionRoutes(
       if (sessionLimitTimer) {
         clearTimeout(sessionLimitTimer);
         sessionLimitTimer = null;
+      }
+      if (voiceChargeTimer) {
+        clearInterval(voiceChargeTimer);
+        voiceChargeTimer = null;
       }
       if (streamSlotHeld) {
         streamSlotHeld = false;
@@ -329,6 +344,31 @@ export function registerTranscriptionRoutes(
       openingAbortController = abortController;
       startupFrames = [];
       startupBytes = 0;
+      // The first block is paid before the provider opens; while the stream
+      // runs, each next block is paid ahead and the stream ends when today's
+      // minutes are used up.
+      const owner = streamOwner;
+      if (owner) {
+        if ((await usage.consume(owner, "voice_seconds", VOICE_CHARGE_SECONDS)) === "exhausted") {
+          if (openingToken === token) {
+            openingToken = null;
+            openingAbortController = null;
+            startupFrames = [];
+            startupBytes = 0;
+            releaseStreamSlot();
+            sendError(clientSocket, "DAILY_VOICE_LIMIT", DAILY_VOICE_LIMIT_MESSAGE, true);
+          }
+          return;
+        }
+        if (openingToken !== token || closed) return;
+        voiceChargeTimer = setInterval(() => {
+          void usage.consume(owner, "voice_seconds", VOICE_CHARGE_SECONDS).then((result) => {
+            if (result !== "exhausted" || !voiceChargeTimer) return;
+            sendError(clientSocket, "DAILY_VOICE_LIMIT", DAILY_VOICE_LIMIT_MESSAGE, true);
+            stopActive("aborted");
+          });
+        }, VOICE_CHARGE_SECONDS * 1_000);
+      }
       try {
         const session = await provider.open(
           resolved.value,

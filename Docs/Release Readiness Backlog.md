@@ -71,7 +71,7 @@ These are fixable in the repo and each would make a public "supported product" c
 ### Backend robustness (mediums/lows)
 | ID | Title | Status | Owner | Verification | Evidence | Recommendation |
 |----|-------|--------|-------|--------------|----------|----------------|
-| RGB-019 | Provider concurrency caps & rate limits are per-process (multiply by instance count) | Partly done 2026-11-04: limits are per instance | Engineering | Reported | Per-process maps for rate limiter / concurrency | Move to a shared store if provider spend/quota must be bounded globally. |
+| RGB-019 | Provider concurrency caps & rate limits are per-process (multiply by instance count) | Mostly done 2026-11-06 (not deployed): daily voice and Airo allowances per person are held in the database across instances; per-minute limits and stream caps stay per instance | Engineering | Reported | Per-process maps for rate limiter / concurrency | Move to a shared store if provider spend/quota must be bounded globally. |
 | RGB-020 | Boot does not fail-fast on missing Supabase config; `/ready` returns 200 when DB unconfigured | Done 2026-11-05 | Engineering | Reported | `apps/api/src` config/boot path | Fail-fast in production on required env; make `/ready` reflect DB reachability. |
 | RGB-021 | Board WS has no per-connection event rate limit, no batch-size cap, no explicit `maxPayload` | Done 2026-11-05 | Engineering | Reported | `server.ts` WS handler | Add per-connection event rate limit + payload/batch caps. |
 | RGB-022 | No retry / circuit-breaking for OpenAI intent or Deepgram; an outage burns concurrency slots on timeouts | Done 2026-11-05 | Engineering | Reported | intent/transcription paths | Add bounded retry + circuit breaker. |
@@ -949,3 +949,26 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - **After promoting:** the live JavaScript has the label. On the canonical URL, `/s/<unknown token>` reaches the API and shows "This link no longer works". `pnpm launch:check:deployed` reports READY, 21 of 21.
   - **Tags:** the `launch-7fa8ff1-web` tag was removed.
   - **Rollback:** the web to `launch-7fa8ff1`.
+- **2026-11-06** — The two High risks from the draft threat model: provider spend (X-1) and live-board connection flooding (L-4). Not yet deployed; the release needs migration `20261106120000_daily_usage.sql` first:
+  - **Daily allowances per person (`apps/api/src/dailyUsage.ts`):**
+    - The allowances are 500 Airo commands that reach the model (`AIRBOARD_DAILY_AIRO_COMMANDS`) and 240 voice minutes (`AIRBOARD_DAILY_VOICE_MINUTES`) per person per UTC day.
+    - They are counted in Postgres (`daily_usage`, through `consume_daily_usage`), so they hold across API instances. The function adds usage only when the total stays within the limit, in one statement. Against Postgres 17, 20 concurrent charges at a limit of 10 left exactly 10.
+    - Built-in commands are free. Voice is paid ahead in 15-second blocks, and a stream stops with `DAILY_VOICE_LIMIT` when the minutes run out; Airo answers `DAILY_AIRO_LIMIT`. The browser and the help's error codes explain both.
+    - If the count itself fails, the request goes through and a warning is logged. Per-minute limits and provider spend caps still apply.
+    - The allowance is per person rather than per workspace, so a team isn't capped by its busiest member. Throwaway accounts are limited the same way either way.
+  - **Live-board connection caps (`apps/api/src/server.ts`):**
+    - Each instance allows 3 open board sockets per participant, 30 per address and 50 per board (`AIRBOARD_BOARD_SOCKETS_PER_*`).
+    - A refused socket closes with 1013 `BOARD_CONNECTION_LIMIT`, and the client retries with backoff. Before this, one caller could fill all 240 request slots (80 per instance × 3) for up to an hour each.
+  - **Cursor moves are no longer stored:** they are relayed live, to this instance's sockets and through the cross-instance fan-out, without a sequence number. Board changes are stored and numbered as before. This removes several database writes a second per person drawing.
+  - **Still open from the threat model:**
+    - Hard monthly spend limits in the OpenAI and Deepgram dashboards (founder).
+    - How trials are granted at public launch (founder).
+    - A retention period for `board_events`. That is a data-retention decision, not made here.
+  - **Tests:**
+    - The three socket caps, each one refusing on its own.
+    - Cursor moves reaching another participant without being stored.
+    - Airo's allowance checked before the model is called, with a failed count letting the command through.
+    - Voice stopping mid-stream when the minutes run out, with mocked 15-second timers.
+    - The config defaults.
+    - The migration was run twice on Postgres 17 and passed its guard check.
+    - All checks and 89 browser tests pass.

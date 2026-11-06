@@ -22,6 +22,7 @@ import type {
   SemanticIntentRequest,
 } from "./types";
 import type { AuthService } from "../auth";
+import { createDailyUsage } from "../dailyUsage";
 
 const DETERMINISTIC_SEMANTIC_PROVIDER = "airboard-deterministic";
 const EXISTING_BOARD_FAN_IN_MODEL = "existing-board-fan-in-v1";
@@ -39,6 +40,9 @@ export function registerSemanticIntentRoutes(
     windowMs: 60_000,
     max: config.rateLimits.intentPerMinute,
   });
+  const usage = createDailyUsage(auth?.client ?? null, config.dailyUsage, (error) =>
+    server.log.warn({ err: error }, "daily Airo allowance could not be counted"),
+  );
 
   server.get("/intent/config", async () => publicSemanticIntentConfig(config.semanticIntent));
 
@@ -157,15 +161,26 @@ export function registerSemanticIntentRoutes(
     if (!provider) {
       return reply.code(503).send({ error: "SEMANTIC_INTENT_UNAVAILABLE" });
     }
-    if (activeRequests >= config.semanticIntent.maxConcurrentRequests) {
-      return reply.code(429).send({ error: "SEMANTIC_INTENT_CAPACITY_REACHED" });
-    }
     // During a provider outage, answer at once; the app falls back to its
     // built-in command grammar.
     const breakerWaitMs = breaker.retryAfterMs();
     if (breakerWaitMs !== null) {
       reply.header("Retry-After", Math.max(1, Math.ceil(breakerWaitMs / 1_000)));
       return reply.code(503).send({ error: "SEMANTIC_INTENT_UNAVAILABLE", retryAfterMs: breakerWaitMs });
+    }
+
+    // A person's daily allowance holds across instances, so one account cannot
+    // run up the model bill. Built-in commands never reach here.
+    if (context && (await usage.consume(context.profileId, "airo_commands", 1)) === "exhausted") {
+      return reply.code(429).send({
+        error: "DAILY_AIRO_LIMIT",
+        message: "You've reached today's Airo limit. Built-in commands still work, and the limit resets at midnight UTC.",
+      });
+    }
+
+    // Checked right before counting the request, with no wait in between.
+    if (activeRequests >= config.semanticIntent.maxConcurrentRequests) {
+      return reply.code(429).send({ error: "SEMANTIC_INTENT_CAPACITY_REACHED" });
     }
 
     const abortController = new AbortController();

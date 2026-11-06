@@ -436,6 +436,8 @@ function describeSemanticIntentError(code: string, serverMessage?: string): stri
       return "Your pilot access has ended, so Airo can't interpret new requests. Typed commands and pointer edits still work.";
     case "RATE_LIMITED":
       return "Airo is receiving a lot of requests. Wait a moment and try again.";
+    case "DAILY_AIRO_LIMIT":
+      return "You've reached today's Airo limit. Built-in commands still work, and the limit resets at midnight UTC.";
     default:
       return serverMessage || "Airo could not semantically interpret that command.";
   }

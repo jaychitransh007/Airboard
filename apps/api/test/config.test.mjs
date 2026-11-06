@@ -82,3 +82,18 @@ test("email sign-in links are off in production unless switched on", () => {
   assert.equal(loadConfig({ AIRBOARD_EMAIL_SIGN_IN_ENABLED: "false" }).emailSignInEnabled, false);
 });
 
+
+test("daily allowances and board socket caps have defaults and can be tuned", () => {
+  const defaults = loadConfig({});
+  assert.deepEqual(defaults.dailyUsage, { airoCommands: 500, voiceSeconds: 240 * 60 });
+  assert.deepEqual(defaults.boardSockets, { perParticipant: 3, perCaller: 30, perSession: 50 });
+
+  const tuned = loadConfig({
+    AIRBOARD_DAILY_AIRO_COMMANDS: "1000",
+    AIRBOARD_DAILY_VOICE_MINUTES: "60",
+    AIRBOARD_BOARD_SOCKETS_PER_CALLER: "10",
+  });
+  assert.deepEqual(tuned.dailyUsage, { airoCommands: 1000, voiceSeconds: 3600 });
+  assert.equal(tuned.boardSockets.perCaller, 10);
+  assert.throws(() => loadConfig({ AIRBOARD_DAILY_VOICE_MINUTES: "0" }), /AIRBOARD_DAILY_VOICE_MINUTES/);
+});

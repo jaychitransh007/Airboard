@@ -1,5 +1,6 @@
 import type { TranscriptionRuntimeConfig } from "./transcription/types";
 import type { SemanticIntentRuntimeConfig } from "./semanticIntent/types";
+import type { DailyUsageLimits } from "./dailyUsage";
 import { normalizeChromeExtensionPackageId } from "./chromeInstallationIdentity.ts";
 import { parseChromeExtensionCompatibleVersions } from "./chromeExtensionCompatibility.ts";
 
@@ -45,6 +46,14 @@ export type ApiConfig = {
     /** Board events one socket may send in 10 seconds (drawing sends one per pointer move). */
     boardEventsPerTenSeconds: number;
   };
+  /** Open board sockets each instance allows at once, so one caller cannot hold every connection. */
+  boardSockets: {
+    perParticipant: number;
+    perCaller: number;
+    perSession: number;
+  };
+  /** Per-person daily allowances for the paid providers, held in the database across instances. */
+  dailyUsage: DailyUsageLimits;
   supabaseUrl?: string;
   supabaseServiceRoleKey?: string;
   stripe: {
@@ -191,6 +200,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
         1_000_000,
         "AIRBOARD_RATE_LIMIT_BOARD_EVENTS_PER_10_SECONDS",
       ),
+    },
+    boardSockets: {
+      // Several tabs of one person on one board, plus a reconnect overlap.
+      perParticipant: parseNumber(env.AIRBOARD_BOARD_SOCKETS_PER_PARTICIPANT, 3, 1, 100, "AIRBOARD_BOARD_SOCKETS_PER_PARTICIPANT"),
+      // An office behind one address can hold a few meetings at once; each
+      // instance takes 80 requests, sockets included.
+      perCaller: parseNumber(env.AIRBOARD_BOARD_SOCKETS_PER_CALLER, 30, 1, 1_000, "AIRBOARD_BOARD_SOCKETS_PER_CALLER"),
+      perSession: parseNumber(env.AIRBOARD_BOARD_SOCKETS_PER_SESSION, 50, 1, 1_000, "AIRBOARD_BOARD_SOCKETS_PER_SESSION"),
+    },
+    dailyUsage: {
+      airoCommands: parseNumber(env.AIRBOARD_DAILY_AIRO_COMMANDS, 500, 1, 1_000_000, "AIRBOARD_DAILY_AIRO_COMMANDS"),
+      voiceSeconds:
+        60 * parseNumber(env.AIRBOARD_DAILY_VOICE_MINUTES, 240, 1, 24 * 60, "AIRBOARD_DAILY_VOICE_MINUTES"),
     },
     ...(env.SUPABASE_URL ? { supabaseUrl: env.SUPABASE_URL } : {}),
     ...(env.SUPABASE_SERVICE_ROLE_KEY
