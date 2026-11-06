@@ -4,6 +4,7 @@ export * from "./diagramCommands.ts";
 export * from "./events.ts";
 export * from "./existingBoardFanIn.ts";
 export * from "./permissions.ts";
+export * from "./sceneDiagramCommands.ts";
 export * from "./sceneElements.ts";
 export * from "./sceneIntent.ts";
 export * from "./sceneValidation.ts";

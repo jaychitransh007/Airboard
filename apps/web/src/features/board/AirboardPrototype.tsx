@@ -8,6 +8,7 @@ import {
   applyBoardEvent,
   boardPreview,
   createBoardSceneElement,
+  isSceneOnlyElement,
   createDefaultTableData,
   createEraseAction,
   createEventEnvelope,
@@ -1055,6 +1056,15 @@ export function AirboardPrototype({
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   const [selectedElementIds, setSelectedElementIds] = useState<string[]>([]);
   const selectedElementIdsRef = useRef<string[]>([]);
+  /**
+   * What Airo counts as selected: its own nodes and the shapes the toolbar or
+   * typed commands made (RGB-039). Every snapshot and every staleness check
+   * uses this same list, so a selected shape never looks like a change.
+   */
+  const currentSemanticSelectionIds = useCallback(() => [
+    ...selectedAnnotationIdsRef.current,
+    ...selectedElementIdsRef.current.filter((id) => isSceneOnlyElement(boardRef.current, id)),
+  ], []);
   const [hoverElementId, setHoverElementId] = useState<string | null>(null);
   const [editingElementId, setEditingElementId] = useState<string | null>(null);
   const [sceneRenderVersion, setSceneRenderVersion] = useState(0);
@@ -6043,7 +6053,7 @@ export function AirboardPrototype({
           requestText,
           message,
           baseState,
-          baseSelectionIds: [...selectedAnnotationIdsRef.current],
+          baseSelectionIds: currentSemanticSelectionIds(),
           requiresExplicitConfirmation: false,
           commands,
           selectionAfter: workingSelectionIds,
@@ -6086,6 +6096,7 @@ export function AirboardPrototype({
       }
     },
     [
+      currentSemanticSelectionIds,
       appendCopilotActivity,
       cancelPendingIntent,
       hoverStrokeId,
@@ -6658,7 +6669,7 @@ export function AirboardPrototype({
       }
 
       const requestBoardState = boardRef.current;
-      const requestSelectionIds = [...selectedAnnotationIdsRef.current];
+      const requestSelectionIds = currentSemanticSelectionIds();
       const pendingClarificationRecord =
         pendingSemanticClarificationRef.current;
       const pendingClarificationIsCurrent =
@@ -6741,7 +6752,7 @@ export function AirboardPrototype({
           boardRef.current,
           requestBoardState,
         );
-        const currentSelectionIds = selectedAnnotationIdsRef.current;
+        const currentSelectionIds = currentSemanticSelectionIds();
         const selectionChangedDuringPlanning =
           currentSelectionIds.length !== requestSelectionIds.length ||
           currentSelectionIds.some((strokeId, index) => strokeId !== requestSelectionIds[index]);
@@ -6927,6 +6938,7 @@ export function AirboardPrototype({
       }
     },
     [
+      currentSemanticSelectionIds,
       appendCopilotActivity,
       effectiveAccessToken,
       executeSceneIntent,
@@ -7001,7 +7013,7 @@ export function AirboardPrototype({
           selectionIds: pending.baseSelectionIds,
         },
         currentState: boardRef.current,
-        currentSelectionIds: selectedAnnotationIdsRef.current,
+        currentSelectionIds: currentSemanticSelectionIds(),
         commands: pending.commands,
         ...(pending.selectionAfter
           ? { requestedSelectionIds: pending.selectionAfter }
@@ -7109,6 +7121,7 @@ export function AirboardPrototype({
       setCommandFeedback(error instanceof Error ? error.message : "The diagram command failed.");
     }
   }, [
+    currentSemanticSelectionIds,
     appendCopilotActivity,
     cancelPendingIntent,
     refreshRealtimeSpeechKeyterms,

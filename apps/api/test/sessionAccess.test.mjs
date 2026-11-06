@@ -281,3 +281,18 @@ test("ending a session sticks: the owner's open tab can't revive it with heartbe
   assert.equal(store.getSession(started.session.id).status, "ended");
   assert.equal((await join(app, started.session.id, started.joinToken)).statusCode, 404, "nobody new joins an ended session");
 });
+
+test("a body that isn't JSON is a bad request, not a server error", async (t) => {
+  const { app } = await server(t, {});
+  const response = await app.inject({
+    method: "POST",
+    url: "/sessions/start",
+    headers: { "content-type": "application/json", authorization: "Bearer owner" },
+    payload: '{"a":1}{"b":2}',
+  });
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.json().code, "INVALID_JSON_BODY");
+  // An empty JSON body still reads as an empty object.
+  const empty = await app.inject({ method: "POST", url: "/sessions/start", headers: { "content-type": "application/json", authorization: "Bearer owner" }, payload: "" });
+  assert.equal(empty.statusCode, 200, empty.body);
+});

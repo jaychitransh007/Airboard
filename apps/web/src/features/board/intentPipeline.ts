@@ -11,8 +11,11 @@ import {
   AIRBOARD_SEMANTIC_NODE_CAPABILITIES,
   connectorEndpointMatchesBinding,
   connectorGeometryMatchesBindings,
+  isSceneOnlyElement,
   nodeVisualDefaultSize,
   pointOnNodeBoundary,
+  richTextToPlainText,
+  sceneConnectorsBetween,
   type AnnotationNodeType,
   type AnnotationPoint,
   type BoardState,
@@ -27,6 +30,12 @@ import { findAnnotationObjectAtPoint } from "@airboard/drawing-engine";
 import { normalizeSpokenNumberAliases } from "./desiredGraphCorrection.ts";
 import type { IntentCanvasOperation } from "./intentCanvasParser.ts";
 import type { SemanticIntentContext } from "./semanticIntent.ts";
+import {
+  sceneNodeAtPoint,
+  semanticBoardNodes,
+  semanticObjectBounds,
+  type SemanticBoardNode,
+} from "./semanticBoardObjects.ts";
 
 /**
  * Cursor-presence events replace the BoardState object dozens of times per
@@ -189,6 +198,21 @@ export function resolveSemanticPlanAction(
           ...(repairKinds.length > 0 ? { repairKinds } : {}),
         };
       }
+      // A v2 shape (typed command or toolbar) can only take a v2 connector.
+      if (isSceneOnlyElement(context.boardState, from.id) || isSceneOnlyElement(context.boardState, to.id)) {
+        const relabel = action.label !== null && existing.length === 1 ? existing[0]! : null;
+        return {
+          commands: [
+            relabel
+              ? relabel.scene
+                ? { type: "scene.rename", elementId: relabel.id, label: action.label! }
+                : { type: "object.rename", objectId: relabel.id, label: action.label! }
+              : sceneConnectCommand(from.id, to.id, action.label),
+          ],
+          selectionAfter: [from.id, to.id],
+          ...(repairKinds.length > 0 ? { repairKinds } : {}),
+        };
+      }
       if (matchingExisting.length === 1) {
         return {
           commands: [
@@ -279,6 +303,20 @@ export function resolveSemanticPlanAction(
             };
       }
       const source = sourceConnections.connections[0]!;
+      if (source.scene) {
+        return {
+          commands: [
+            desiredAlreadyExists
+              ? { type: "scene.delete", elementIds: [source.id] }
+              : {
+                  type: "scene.connector.reverse",
+                  connectorId: source.id,
+                  ...(action.label !== null ? { label: action.label } : {}),
+                },
+          ],
+          selectionAfter: [endpoints.toId, endpoints.fromId],
+        };
+      }
       if (desiredAlreadyExists) {
         return {
           commands: [
@@ -312,11 +350,13 @@ export function resolveSemanticPlanAction(
         ? connection
         : {
             commands: [
-              {
-                type: "objects.delete",
-                objectIds: [connection.id],
-                cascadeConnectors: false,
-              },
+              connection.scene
+                ? { type: "scene.delete", elementIds: [connection.id] }
+                : {
+                    type: "objects.delete",
+                    objectIds: [connection.id],
+                    cascadeConnectors: false,
+                  },
             ],
             selectionAfter: [],
           };
@@ -332,7 +372,11 @@ export function resolveSemanticPlanAction(
         if (to.id === from.id) {
           return { error: "A decision branch cannot point back to its source object." };
         }
-        commands.push(semanticConnectCommand(from.id, to.id, branch.label, context.strokeColor));
+        commands.push(
+          isSceneOnlyElement(context.boardState, from.id) || isSceneOnlyElement(context.boardState, to.id)
+            ? sceneConnectCommand(from.id, to.id, branch.label)
+            : semanticConnectCommand(from.id, to.id, branch.label, context.strokeColor),
+        );
         targetIds.push(to.id);
       }
       if (new Set(targetIds).size !== targetIds.length) {
@@ -345,19 +389,32 @@ export function resolveSemanticPlanAction(
       return "error" in target
         ? target
         : {
-            commands: [{ type: "object.rename", objectId: target.id, label: action.label }],
+            commands: [
+              isSceneOnlyElement(context.boardState, target.id)
+                ? { type: "scene.rename", elementId: target.id, label: action.label }
+                : { type: "object.rename", objectId: target.id, label: action.label },
+            ],
             selectionAfter: [target.id],
           };
     }
     case "delete": {
       const targets = resolveMany(action.targets);
-      return "error" in targets
-        ? targets
-        : { commands: [{ type: "objects.delete", objectIds: targets.ids }], selectionAfter: [] };
+      if ("error" in targets) return targets;
+      const { legacy, scene } = splitByWorld(context.boardState, targets.ids);
+      return {
+        commands: [
+          ...(legacy.length > 0 ? [{ type: "objects.delete", objectIds: legacy } as const] : []),
+          ...(scene.length > 0 ? [{ type: "scene.delete", elementIds: scene } as const] : []),
+        ],
+        selectionAfter: [],
+      };
     }
     case "duplicate": {
       const targets = resolveMany(action.targets);
       if ("error" in targets) return targets;
+      if (targets.ids.some((id) => isSceneOnlyElement(context.boardState, id))) {
+        return { error: sceneNotYetMessage("duplicate") };
+      }
       const idMap = Object.fromEntries(targets.ids.map((id) => [id, crypto.randomUUID()]));
       const duplicatedIds = targets.ids.map((id) => idMap[id]!).filter(Boolean);
       const placement = semanticPlacementCommands(
@@ -394,11 +451,17 @@ export function resolveSemanticPlanAction(
         false,
       );
       if ("error" in placement) return placement;
-      return { commands: placement.commands, selectionAfter: targets.ids };
+      return {
+        commands: placement.commands.flatMap((command) => splitMoveByWorld(context.boardState, command)),
+        selectionAfter: targets.ids,
+      };
     }
     case "align": {
       const targets = resolveMany(action.targets);
       if ("error" in targets) return targets;
+      if (targets.ids.some((id) => isSceneOnlyElement(context.boardState, id))) {
+        return { error: sceneNotYetMessage("align") };
+      }
       if (targets.ids.length < 2) return { error: "Align requires at least two objects." };
       const alignment = {
         left: "left",
@@ -416,6 +479,9 @@ export function resolveSemanticPlanAction(
     case "distribute": {
       const targets = resolveMany(action.targets);
       if ("error" in targets) return targets;
+      if (targets.ids.some((id) => isSceneOnlyElement(context.boardState, id))) {
+        return { error: sceneNotYetMessage("distribute") };
+      }
       if (targets.ids.length < 3) return { error: "Distribution requires at least three objects." };
       return {
         commands: [
@@ -431,6 +497,9 @@ export function resolveSemanticPlanAction(
     case "layout": {
       const targets = resolveMany(action.targets);
       if ("error" in targets) return targets;
+      if (targets.ids.some((id) => isSceneOnlyElement(context.boardState, id))) {
+        return { error: sceneNotYetMessage("lay out") };
+      }
       if (targets.ids.length < 2) return { error: "Layout requires at least two objects." };
       return {
         commands: createLayoutCommands(context.boardState, targets.ids, action.direction),
@@ -440,6 +509,9 @@ export function resolveSemanticPlanAction(
     case "group": {
       const targets = resolveMany(action.targets);
       if ("error" in targets) return targets;
+      if (targets.ids.some((id) => isSceneOnlyElement(context.boardState, id))) {
+        return { error: sceneNotYetMessage("group") };
+      }
       const groupId = crypto.randomUUID();
       return {
         commands: [
@@ -493,10 +565,47 @@ function semanticConnectCommand(
   };
 }
 
+function sceneConnectCommand(fromId: string, toId: string, label: string | null): DiagramCommand {
+  return {
+    type: "scene.connect",
+    connectorId: crypto.randomUUID(),
+    fromId,
+    toId,
+    ...(label ? { label } : {}),
+  };
+}
+
+function sceneNotYetMessage(verb: string): string {
+  return `Airo can't ${verb} shapes added from the toolbar or with typed commands yet. Select them and use the toolbar.`;
+}
+
+/** Legacy nodes take stroke commands; v2 shapes take scene commands. */
+function splitByWorld(state: BoardState, ids: readonly string[]): { legacy: string[]; scene: string[] } {
+  const scene = ids.filter((id) => isSceneOnlyElement(state, id));
+  return { legacy: ids.filter((id) => !scene.includes(id)), scene };
+}
+
+/** A move of mixed objects: the same shift for each kind, through its own command. */
+function splitMoveByWorld(state: BoardState, command: DiagramCommand): DiagramCommand[] {
+  if (command.type !== "objects.move") return [command];
+  const { legacy, scene } = splitByWorld(state, command.objectIds);
+  if (scene.length === 0) return [command];
+  const bounds = semanticSelectionBounds(state, command.objectIds);
+  const delta = command.delta ?? (command.to && bounds
+    ? { x: command.to.x - bounds.x, y: command.to.y - bounds.y }
+    : { x: 0, y: 0 });
+  return [
+    ...(legacy.length > 0 ? [{ type: "objects.move", objectIds: legacy, delta } as const] : []),
+    { type: "scene.move", elementIds: scene, delta },
+  ];
+}
+
 type DirectedSemanticConnection = {
   id: string;
   label: string | null;
   geometryAttached: boolean;
+  /** A v2 connector, changed through scene commands. */
+  scene?: boolean;
 };
 
 function findDirectedSemanticConnections(
@@ -532,6 +641,12 @@ function findDirectedSemanticConnections(
         geometryAttached,
       }];
     })
+    .concat(sceneConnectorsBetween(state, fromId, toId).map((connector) => ({
+      id: connector.id,
+      label: richTextToPlainText(connector.label).trim() || null,
+      geometryAttached: true,
+      scene: true,
+    })))
     .sort((left, right) => left.id.localeCompare(right.id));
 }
 
@@ -584,7 +699,7 @@ function resolveSemanticConnectionReference(
   reference: SemanticConnectionReference,
   context: SemanticIntentResolutionContext,
   planHandles: ReadonlyMap<string, string[]>,
-): { id: string; fromId: string; toId: string } | { error: string } {
+): { id: string; fromId: string; toId: string; scene?: boolean } | { error: string } {
   const endpoints = resolveSemanticConnectionEndpoints(reference, context, planHandles);
   if ("error" in endpoints) return endpoints;
   const selected = selectSemanticConnections(
@@ -598,7 +713,7 @@ function resolveSemanticConnectionReference(
   if ("error" in selected) return selected;
   const connection = selected.connections[0];
   return connection
-    ? { id: connection.id, ...endpoints }
+    ? { id: connection.id, ...endpoints, ...(connection.scene ? { scene: true } : {}) }
     : { error: "No connector matches the stated direction, label, and occurrence." };
 }
 
@@ -736,16 +851,8 @@ function resolveSemanticReference(
   context: SemanticIntentResolutionContext,
   planHandles: ReadonlyMap<string, string[]>,
 ): { ids: string[] } | { error: string } {
-  const isNode = (id: string | null | undefined): id is string => {
-    const annotation = id ? context.boardState.strokes[id]?.annotation : undefined;
-    return Boolean(
-      id &&
-        context.boardState.strokes[id]?.status === "committed" &&
-        annotation?.bounds &&
-        annotation.type !== "connector" &&
-        annotation.type !== "arrow",
-    );
-  };
+  const nodeIds = new Set(semanticBoardNodes(context.boardState).map(({ id }) => id));
+  const isNode = (id: string | null | undefined): id is string => Boolean(id && nodeIds.has(id));
   switch (reference.kind) {
     case "current_selection": {
       const ids = context.selectionIds.filter(isNode);
@@ -757,8 +864,10 @@ function resolveSemanticReference(
         return { error: "No live pointer target is available. Point at an object and try again." };
       }
       const hit = findAnnotationObjectAtPoint(context.boardState, context.pointer);
-      return isNode(hit?.id)
-        ? { ids: [hit.id] }
+      if (isNode(hit?.id)) return { ids: [hit.id] };
+      const sceneHit = sceneNodeAtPoint(context.boardState, context.pointer);
+      return sceneHit
+        ? { ids: [sceneHit.id] }
         : { error: "The pointer is not currently over a diagram object." };
     }
     case "plan_handle": {
@@ -797,42 +906,10 @@ function resolveSemanticReference(
   }
 }
 
-type SpatialSemanticNode = {
-  id: string;
-  label: string;
-  nodeType: string;
-  bounds: NonNullable<StrokeAnnotation["bounds"]>;
-};
+type SpatialSemanticNode = SemanticBoardNode;
 
 function spatialSemanticNodes(state: BoardState): SpatialSemanticNode[] {
-  return Object.values(state.strokes)
-    .flatMap((stroke): SpatialSemanticNode[] => {
-      const annotation = stroke.annotation;
-      if (
-        stroke.status !== "committed" ||
-        !annotation?.bounds ||
-        annotation.type === "connector" ||
-        annotation.type === "arrow"
-      ) {
-        return [];
-      }
-      const nodeType = annotation.nodeType ?? annotation.type;
-      return [
-        {
-          id: stroke.id,
-          label: annotation.label?.trim() || nodeType,
-          nodeType,
-          bounds: annotation.bounds,
-        },
-      ];
-    })
-    .sort((left, right) => {
-      const leftY = left.bounds.y + left.bounds.height / 2;
-      const rightY = right.bounds.y + right.bounds.height / 2;
-      const leftX = left.bounds.x + left.bounds.width / 2;
-      const rightX = right.bounds.x + right.bounds.width / 2;
-      return leftY - rightY || leftX - rightX || left.id.localeCompare(right.id);
-    });
+  return semanticBoardNodes(state);
 }
 
 function resolveSemanticCreateCenter(
@@ -855,15 +932,7 @@ function resolveSemanticCreateCenter(
     };
     const stepX = size.width + 96;
     const stepY = size.height + 96;
-    const occupiedBounds = Object.values(context.boardState.strokes)
-      .filter(
-        (stroke) =>
-          stroke.status === "committed" &&
-          stroke.annotation?.bounds &&
-          stroke.annotation.type !== "connector" &&
-          stroke.annotation.type !== "arrow",
-      )
-      .map((stroke) => stroke.annotation!.bounds!);
+    const occupiedBounds = semanticBoardNodes(context.boardState).map(({ bounds }) => bounds);
     const offsets = semanticAutoPlacementOffsets(planHandles.size + occupiedBounds.length + 1);
     for (const offset of offsets) {
       const point = {
@@ -921,7 +990,7 @@ function resolveSemanticCreateCenter(
   }
   const anchor = resolveSingleSemanticReference(placement.anchor, context, planHandles);
   if ("error" in anchor) return anchor;
-  const bounds = context.boardState.strokes[anchor.id]?.annotation?.bounds;
+  const bounds = semanticObjectBounds(context.boardState, anchor.id);
   if (!bounds) return { error: "The relative-placement anchor has no bounds." };
   const center = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
   const gapX = bounds.width / 2 + 126;
@@ -983,7 +1052,7 @@ function semanticPlacementCommands(
   } else {
     const anchor = resolveSingleSemanticReference(placement.anchor, context, planHandles);
     if ("error" in anchor) return anchor;
-    const anchorBounds = context.boardState.strokes[anchor.id]?.annotation?.bounds;
+    const anchorBounds = semanticObjectBounds(context.boardState, anchor.id);
     if (!anchorBounds) return { error: "The relative-placement anchor has no bounds." };
     const anchorCenter = {
       x: anchorBounds.x + anchorBounds.width / 2,
@@ -1037,7 +1106,7 @@ function semanticSelectionBounds(
   ids: string[],
 ): NonNullable<StrokeAnnotation["bounds"]> | null {
   const bounds = ids.flatMap((id) => {
-    const value = state.strokes[id]?.annotation?.bounds;
+    const value = semanticObjectBounds(state, id);
     return value ? [value] : [];
   });
   if (bounds.length === 0) return null;
@@ -2072,44 +2141,21 @@ export function buildSemanticIntentContext(
   pointerAvailable: boolean,
 ): SemanticIntentContext {
   const selectedIds = new Set(selectedStrokeIds);
-  const nodeStrokes = Object.values(boardState.strokes)
-    .filter((stroke) => {
-      const annotation = stroke.annotation;
-      return Boolean(
-        stroke.status === "committed" &&
-          annotation?.bounds &&
-          annotation.type !== "connector" &&
-          annotation.type !== "arrow",
-      );
-    })
-    .sort((left, right) => {
-      const leftBounds = left.annotation!.bounds!;
-      const rightBounds = right.annotation!.bounds!;
-      const leftY = leftBounds.y + leftBounds.height / 2;
-      const rightY = rightBounds.y + rightBounds.height / 2;
-      const leftX = leftBounds.x + leftBounds.width / 2;
-      const rightX = rightBounds.x + rightBounds.width / 2;
-      return leftY - rightY || leftX - rightX || left.id.localeCompare(right.id);
-    })
-    .slice(0, 80);
+  // Airo's own nodes and the shapes typed commands and the toolbar make,
+  // in reading order (RGB-039).
+  const nodes = semanticBoardNodes(boardState).slice(0, 80);
   const ordinalsByType = new Map<string, number>();
   const summariesById = new Map<string, SemanticIntentContext["objects"][number]>();
 
-  for (const stroke of nodeStrokes) {
-    const annotation = stroke.annotation;
-    const bounds = annotation?.bounds;
-    if (!annotation || !bounds) {
-      continue;
-    }
-    const nodeType = annotation.nodeType?.trim() || annotation.type;
+  for (const node of nodes) {
+    const { bounds, nodeType } = node;
     const ordinal = (ordinalsByType.get(nodeType) ?? 0) + 1;
     ordinalsByType.set(nodeType, ordinal);
-    const label = annotation.label?.trim() || `${nodeType} ${ordinal}`;
     const summary = {
-      label: label.slice(0, 120),
+      label: (node.label || `${nodeType} ${ordinal}`).slice(0, 120),
       nodeType: nodeType.slice(0, 40),
       ordinal,
-      selected: selectedIds.has(stroke.id),
+      selected: selectedIds.has(node.id),
       position: {
         x: Math.round(bounds.x + bounds.width / 2),
         y: Math.round(bounds.y + bounds.height / 2),
@@ -2119,7 +2165,7 @@ export function buildSemanticIntentContext(
         height: Math.round(bounds.height),
       },
     };
-    summariesById.set(stroke.id, summary);
+    summariesById.set(node.id, summary);
   }
 
   const objects = [...summariesById.values()];
@@ -2153,6 +2199,32 @@ export function buildSemanticIntentContext(
       from: { label: from.label, nodeType: from.nodeType, ordinal: from.ordinal },
       to: { label: to.label, nodeType: to.nodeType, ordinal: to.ordinal },
       ...(annotation.label?.trim() ? { label: annotation.label.trim().slice(0, 80) } : {}),
+      occurrence,
+    });
+  }
+  // v2 connectors, whichever kind of object each end is bound to.
+  for (const element of Object.values(boardState.elements).sort((left, right) => left.id.localeCompare(right.id))) {
+    if (
+      element.kind !== "connector" ||
+      element.status !== "active" ||
+      element.legacyStrokeId ||
+      !element.start.binding ||
+      !element.end.binding ||
+      edges.length >= 120
+    ) {
+      continue;
+    }
+    const from = summariesById.get(element.start.binding.elementId);
+    const to = summariesById.get(element.end.binding.elementId);
+    if (!from || !to) continue;
+    const occurrenceKey = `${element.start.binding.elementId}\u0000${element.end.binding.elementId}`;
+    const occurrence = (edgeOccurrences.get(occurrenceKey) ?? 0) + 1;
+    edgeOccurrences.set(occurrenceKey, occurrence);
+    const label = richTextToPlainText(element.label).trim();
+    edges.push({
+      from: { label: from.label, nodeType: from.nodeType, ordinal: from.ordinal },
+      to: { label: to.label, nodeType: to.nodeType, ordinal: to.ordinal },
+      ...(label ? { label: label.slice(0, 80) } : {}),
       occurrence,
     });
   }

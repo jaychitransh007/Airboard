@@ -7,6 +7,7 @@ import {
   type SemanticObjectReference,
   type SemanticPlanAction,
 } from "@airboard/core";
+import { sceneOnlyNodes } from "./semanticBoardObjects.ts";
 
 /**
  * Minimum clear space between automatically placed node bounds. This is a
@@ -367,6 +368,13 @@ function existingNodeBounds(state: BoardState): AnnotationBounds[] {
         ? [{ ...annotation.bounds }]
         : [];
     })
+    // Shapes made by typed commands or the toolbar take up room too.
+    .concat(sceneOnlyNodes(state).map(({ transform }) => ({
+      x: transform.x,
+      y: transform.y,
+      width: transform.width,
+      height: transform.height,
+    })))
     .sort(
       (left, right) =>
         left.y - right.y ||

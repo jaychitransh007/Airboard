@@ -6,8 +6,8 @@ categoryLabel: Using the board
 order: 5
 status: shipped
 audiences: ["everyone"]
-lastVerified: 2026-11-05
-sources: ["apps/web/src/features/board/voiceCommandRouter.ts", "apps/web/src/features/board/palmVoiceGestureTracker.ts", "apps/web/src/features/board/holdToEditTracker.ts", "apps/web/src/features/board/realtimeSpeech.ts"]
+lastVerified: 2026-11-07
+sources: ["apps/web/src/features/board/voiceCommandRouter.ts", "apps/web/src/features/board/palmVoiceGestureTracker.ts", "apps/web/src/features/board/holdToEditTracker.ts", "apps/web/src/features/board/realtimeSpeech.ts", "apps/web/src/features/board/semanticBoardObjects.ts", "packages/core/src/sceneDiagramCommands.ts"]
 ---
 
 Airo turns finalized speech into the same command pipeline used by typed input.
@@ -44,6 +44,17 @@ Examples:
 - `connect to the database`
 
 Release the key or hand pose when you finish.
+
+## Shapes already on the board
+
+Airo sees every shape on the board, including those you added from the toolbar
+or with a typed command such as `add a user`. Ask it to connect to, rename,
+move or delete them by their label, and it reuses them rather than drawing a
+second copy.
+
+Airo can't yet line up, spread out, tidy, copy or group shapes added from the
+toolbar or with typed commands. It says so instead of guessing; select them
+and use the toolbar.
 
 ## If speech is misheard
 

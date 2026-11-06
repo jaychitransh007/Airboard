@@ -1,5 +1,16 @@
 import { applyBoardEvent, reduceBoardEvents } from "./boardReducer.ts";
 import { nodeVisualDefaultSize, pointOnNodeBoundary } from "./nodeVisuals.ts";
+import {
+  connectElements,
+  deleteElements,
+  moveElements,
+  refreshAttachedConnectors,
+  removeAttachedConnectors,
+  renameElement,
+  reverseConnector,
+  type SceneElementEvent,
+  type SceneEventSink,
+} from "./sceneDiagramCommands.ts";
 import type {
   AnnotationBounds,
   AnnotationNodeType,
@@ -187,7 +198,34 @@ export type LayoutObjectsCommand = {
   origin?: AnnotationPoint;
 };
 
+/**
+ * Commands on v2 scene elements: objects made by typed commands or the toolbar,
+ * which the stroke commands above can't reach. Ids may also name legacy nodes'
+ * mirrored elements, so a connector can join one of each.
+ */
+export type SceneConnectCommand = {
+  type: "scene.connect";
+  connectorId?: string;
+  fromId: string;
+  toId: string;
+  label?: string;
+};
+export type SceneRenameCommand = { type: "scene.rename"; elementId: string; label: string };
+export type SceneMoveCommand = { type: "scene.move"; elementIds: string[]; delta: AnnotationPoint };
+/** Deletes v2 elements and any v2 connector attached to them. */
+export type SceneDeleteCommand = { type: "scene.delete"; elementIds: string[] };
+export type SceneReverseConnectorCommand = {
+  type: "scene.connector.reverse";
+  connectorId: string;
+  label?: string;
+};
+
 export type DiagramCommand =
+  | SceneConnectCommand
+  | SceneRenameCommand
+  | SceneMoveCommand
+  | SceneDeleteCommand
+  | SceneReverseConnectorCommand
   | CreateNodeCommand
   | ConnectNodesCommand
   | AttachConnectionCommand
@@ -239,7 +277,8 @@ type EventPayload =
     }
   | { type: "stroke.label_updated"; strokeId: string; label: string }
   | { type: "stroke.deleted"; strokeIds: string[] }
-  | { type: "stroke.restored"; strokeIds: string[] };
+  | { type: "stroke.restored"; strokeIds: string[] }
+  | SceneElementEvent;
 
 const DEFAULT_GROUP_PADDING = 28;
 const DEFAULT_LAYOUT_GAP = 48;
@@ -295,6 +334,31 @@ export function planDiagramCommand(
     case "objects.layout":
       planLayoutObjects(planner, command);
       break;
+    case "scene.connect":
+      connectElements(planner.sceneSink(), command);
+      break;
+    case "scene.rename":
+      renameElement(planner.sceneSink(), command.elementId, command.label);
+      break;
+    case "scene.move":
+      moveElements(planner.sceneSink(), command.elementIds, command.delta);
+      break;
+    case "scene.delete":
+      deleteElements(planner.sceneSink(), command.elementIds);
+      break;
+    case "scene.connector.reverse":
+      reverseConnector(planner.sceneSink(), command.connectorId, command.label);
+      break;
+  }
+  // v2 connectors are drawn from stored end points: keep any attached to a
+  // legacy node in step when that node moves.
+  if (
+    command.type === "objects.move" ||
+    command.type === "object.resize" ||
+    command.type === "objects.align" ||
+    command.type === "objects.layout"
+  ) {
+    refreshAttachedConnectors(planner.sceneSink(), planner.touchedStrokeIds());
   }
 
   return planner.plan();
@@ -476,6 +540,15 @@ class CommandPlanner {
     );
   }
 
+  touchedStrokeIds(): string[] {
+    return [...this.affectedStrokeIds];
+  }
+
+  /** The planner as a sink for v2 scene element events. */
+  sceneSink(): SceneEventSink {
+    return new PlannerSceneSink(this);
+  }
+
   plan(): DiagramCommandPlan {
     return {
       events: this.events,
@@ -498,6 +571,38 @@ class CommandPlanner {
     return sequence === undefined
       ? ({ ...envelope, ...payload } as BoardEvent)
       : ({ ...envelope, ...payload, sequence } as BoardEvent);
+  }
+}
+
+class PlannerSceneSink implements SceneEventSink {
+  private readonly planner: CommandPlanner;
+
+  constructor(planner: CommandPlanner) {
+    this.planner = planner;
+  }
+
+  get state(): BoardState {
+    return this.planner.state;
+  }
+
+  get boardSessionId(): string {
+    return this.planner.context.boardSessionId;
+  }
+
+  get userId(): string {
+    return this.planner.context.userId;
+  }
+
+  get createdAt(): string {
+    return this.planner.createdAt;
+  }
+
+  objectId(explicitId?: string): string {
+    return this.planner.objectId(explicitId);
+  }
+
+  add(payload: SceneElementEvent, inverse: SceneElementEvent): void {
+    this.planner.add(payload, inverse);
   }
 }
 
@@ -881,6 +986,7 @@ function planDeleteObjects(planner: CommandPlanner, command: DeleteObjectsComman
     );
   }
   planner.delete([...ids]);
+  if (command.cascadeConnectors !== false) removeAttachedConnectors(planner.sceneSink(), ids);
 }
 
 function planDuplicateObjects(planner: CommandPlanner, command: DuplicateObjectsCommand): void {
@@ -1375,6 +1481,12 @@ function eventStrokeIds(event: BoardEvent): string[] {
     case "stroke.deleted":
     case "stroke.restored":
       return event.strokeIds;
+    case "element.created":
+      return [event.element.id];
+    case "element.patched":
+    case "element.deleted":
+    case "element.restored":
+      return [event.elementId];
     default:
       return [];
   }

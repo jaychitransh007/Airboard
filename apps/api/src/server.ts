@@ -180,8 +180,9 @@ export async function buildServer(
       }
       try {
         done(null, body ? JSON.parse(String(body)) : {});
-      } catch (error) {
-        done(error as Error, undefined);
+      } catch {
+        // A body that isn't JSON is the caller's mistake: 400, not 500.
+        done(Object.assign(new Error("The request body is not valid JSON."), { statusCode: 400, code: "INVALID_JSON_BODY" }), undefined);
       }
     },
   );
