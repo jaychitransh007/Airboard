@@ -68,13 +68,16 @@ test("the replay gate catches a new false accept, a stale recording and an impro
   assert.equal((await replaySemanticNegativeAnswers(corpus, otherModel)).stale.length, corpus.cases.length);
 
   // A listed case that stops misbehaving must leave the list.
-  const fixedCase = known.cases[0].caseId;
-  const fixed = structuredClone(recordings);
-  const fixedAnswer = fixed.answers.find((entry) => entry.caseId === fixedCase);
-  fixedAnswer.response.output[0].arguments = quietCase.response.output[0].arguments;
+  const listedQuiet = {
+    ...known,
+    cases: [
+      ...known.cases,
+      { caseId: quietCase.caseId, outcome: "asks_clarification", answer: "clarification/ambiguous_reference" },
+    ],
+  };
   assert.match(
-    compareWithKnownFalseAccepts(await replaySemanticNegativeAnswers(corpus, fixed), known).join("\n"),
-    new RegExp(`${fixedCase} is listed as ${known.cases[0].outcome} but is now quiet`),
+    compareWithKnownFalseAccepts(await replaySemanticNegativeAnswers(corpus, recordings), listedQuiet).join("\n"),
+    new RegExp(`${quietCase.caseId} is listed as asks_clarification but is now quiet`),
   );
 });
 

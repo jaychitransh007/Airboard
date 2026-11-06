@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0",
-  "semanticPromptVersion": "2.11",
+  "semanticPromptVersion": "2.12",
   "description": "Airboard semantic voice-intent regression corpus for production plan contract 1.1 and semantic prompt 2.8. Every case is an independently replayable finalized voice turn.",
   "cases": [
     {
@@ -385,7 +385,7 @@
         "connectorLabelGroups": [
           ["request", "requests", "makes a request"],
           ["trigger", "triggers", "fire", "fires", "gets fired", "invoke", "invokes"],
-          ["redirect", "redirects", "land", "lands", "navigate", "navigates", "open", "opens"]
+          ["redirect", "redirects", "land", "lands", "lands to", "lands on", "navigate", "navigates", "open", "opens"]
         ],
         "finalState": {
           "nodeCountDelta": 4,
