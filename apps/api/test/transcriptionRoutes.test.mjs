@@ -273,6 +273,8 @@ test("voice stops when a person's daily minutes run out", { timeout: 5_000 }, as
     client: {
       ...signedIn.client,
       async rpc(name, params) {
+        // The shared per-minute connection limit is counted separately.
+        if (name === "consume_rate_limit") return { data: true, error: null };
         charges.push({ name, ...params });
         if (blocksLeft <= 0) return { data: null, error: null };
         blocksLeft -= 1;

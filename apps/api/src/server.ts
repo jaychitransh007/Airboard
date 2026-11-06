@@ -14,7 +14,8 @@ import {
 import Fastify, { type FastifyRequest } from "fastify";
 import type { WebSocket } from "ws";
 import type { ApiConfig } from "./config";
-import { clientKey, createEventBudget, createRateLimiter, secretsMatch } from "./security";
+import { clientKey, createEventBudget, secretsMatch } from "./security";
+import { createSharedRateLimiter } from "./sharedRateLimit";
 import { validateSessionStartBody } from "./sessionStartValidation";
 import { registerSemanticIntentRoutes } from "./semanticIntent/routes";
 import { createSessionStore } from "./storeFactory";
@@ -189,18 +190,18 @@ export async function buildServer(
   // The largest legitimate message is a compound board batch of a few
   // hundred KB; audio frames are far smaller.
   await server.register(websocket, { options: { maxPayload: MAX_SOCKET_MESSAGE_BYTES } });
-  const sessionStartLimiter = createRateLimiter({
-    windowMs: 60_000,
-    max: config.rateLimits.sessionStartPerMinute,
-  });
-  const boardConnectionLimiter = createRateLimiter({
-    windowMs: 60_000,
-    max: config.rateLimits.boardConnectionsPerMinute,
-  });
-  const boardReadLimiter = createRateLimiter({
-    windowMs: 60_000,
-    max: config.rateLimits.boardReadsPerMinute,
-  });
+  // Per-minute limits, counted across instances (see sharedRateLimit.ts).
+  const sharedLimit = (bucket: string, max: number) =>
+    createSharedRateLimiter({
+      bucket,
+      windowMs: 60_000,
+      max,
+      client: auth.client,
+      onError: (error) => server.log.warn({ err: error, bucket }, "shared rate limit could not be counted"),
+    });
+  const sessionStartLimiter = sharedLimit("session_start", config.rateLimits.sessionStartPerMinute);
+  const boardConnectionLimiter = sharedLimit("board_connection", config.rateLimits.boardConnectionsPerMinute);
+  const boardReadLimiter = sharedLimit("board_read", config.rateLimits.boardReadsPerMinute);
   const callerKey = (request: FastifyRequest) =>
     clientKey(request, { trustedProxyHops: config.trustedProxyHops });
   // Board sockets open on this instance. Each Cloud Run instance takes a fixed
@@ -327,12 +328,12 @@ export async function buildServer(
       return reply.code(403).send({ error: "BOARD_READ_ONLY_ROLE" });
     }
     if (
-      !sessionStartLimiter.allow(
+      !(await sessionStartLimiter.allow(
         clientKey(request, {
           profileId: account.profileId,
           trustedProxyHops: config.trustedProxyHops,
         }),
-      )
+      ))
     ) {
       return reply.code(429).send({ error: "RATE_LIMITED" });
     }
@@ -481,7 +482,7 @@ export async function buildServer(
     Params: { sessionId: string };
     Body: { realtimeTicket: string };
   }>("/sessions/:sessionId/heartbeat", async (request, reply) => {
-    if (!boardReadLimiter.allow(callerKey(request))) {
+    if (!(await boardReadLimiter.allow(callerKey(request)))) {
       return reply.code(429).send({ error: "RATE_LIMITED" });
     }
     const ticket = verifySignedToken(
@@ -505,7 +506,7 @@ export async function buildServer(
     Params: { sessionId: string };
     Querystring: { ticket?: string };
   }>("/sessions/:sessionId/state", async (request, reply) => {
-    if (!boardReadLimiter.allow(callerKey(request))) {
+    if (!(await boardReadLimiter.allow(callerKey(request)))) {
       return reply.code(429).send({ error: "RATE_LIMITED" });
     }
     const ticket = request.query.ticket
@@ -526,10 +527,8 @@ export async function buildServer(
   });
 
   server.get("/ws", { websocket: true }, (socket, request) => {
-    if (!boardConnectionLimiter.allow(callerKey(request))) {
-      socket.close(1013, "RATE_LIMITED");
-      return;
-    }
+    // Counted now, awaited before the socket joins its room below.
+    const admitted = boardConnectionLimiter.allow(callerKey(request));
     const eventLimiter = createEventBudget({ windowMs: 10_000, max: config.rateLimits.boardEventsPerTenSeconds });
     // Board events are writes, so live boards pause with everything else.
     if (config.readOnly) {
@@ -666,6 +665,10 @@ export async function buildServer(
     // and be joinable, and the participant must belong to it. This is the gate
     // that stops an unauthenticated party from streaming into a guessed board.
     void (async () => {
+      if (!(await admitted)) {
+        socket.close(1013, "RATE_LIMITED");
+        return;
+      }
       try {
         const auth = await resolveAuth();
         if (!auth) {

@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import type { ApiConfig } from "../config";
 import { VoiceTraceBuffer } from "./buffer";
-import { clientKey, configuredApiTokenAllowed, createRateLimiter, originAllowed } from "../security";
+import { clientKey, configuredApiTokenAllowed, originAllowed } from "../security";
+import { createSharedRateLimiter } from "../sharedRateLimit";
 import { computeVoiceMetrics } from "./metrics";
 import { parseVoiceTraceAppend, parseVoiceTurnId } from "./protocol";
 import { redactDiagnosticData, redactVoiceTraceContent } from "./redaction";
@@ -14,9 +15,12 @@ export function registerVoiceTraceRoutes(
   auth?: AuthService,
 ): VoiceTraceBuffer {
   const ownersByTurn = new Map<string, string>();
-  const traceLimiter = createRateLimiter({
+  const traceLimiter = createSharedRateLimiter({
+    bucket: "voice_trace",
     windowMs: 60_000,
     max: config.rateLimits.voiceTracePerMinute,
+    client: auth?.client ?? null,
+    onError: (error) => server.log.warn({ err: error }, "shared voice trace rate limit could not be counted"),
   });
   server.post<{ Body: unknown }>("/voice/trace", async (request, reply) => {
     if (!originAllowed(request.headers.origin, config.allowedOrigins)) {
@@ -29,12 +33,12 @@ export function registerVoiceTraceRoutes(
       return reply.code(401).send({ error: "AUTH_REQUIRED" });
     }
     if (
-      !traceLimiter.allow(
+      !(await traceLimiter.allow(
         clientKey(request, {
           profileId: context?.profileId,
           trustedProxyHops: config.trustedProxyHops,
         }),
-      )
+      ))
     ) {
       return reply.code(429).send({ error: "RATE_LIMITED" });
     }

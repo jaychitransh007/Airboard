@@ -15,7 +15,8 @@ import type {
   TranscriptionServerMessage,
 } from "./types";
 import type { AuthService } from "../auth";
-import { clientKey, configuredApiTokenAllowed, createCircuitBreaker, createRateLimiter, originAllowed } from "../security";
+import { clientKey, configuredApiTokenAllowed, createCircuitBreaker, originAllowed } from "../security";
+import { createSharedRateLimiter } from "../sharedRateLimit";
 import { issueSignedToken, verifySignedToken } from "../signedTokens";
 import { createDailyUsage } from "../dailyUsage";
 import { organizationPolicy } from "../organizationPolicy";
@@ -59,9 +60,12 @@ export function registerTranscriptionRoutes(
     server.log.warn({ err: error }, "daily voice allowance could not be counted"),
   );
   // Connection attempts per caller address; stream caps bound the rest.
-  const connectionLimiter = createRateLimiter({
+  const connectionLimiter = createSharedRateLimiter({
+    bucket: "transcription_connection",
     windowMs: 60_000,
     max: config.rateLimits?.transcriptionConnectionsPerMinute ?? 60,
+    client: auth?.client ?? null,
+    onError: (error) => server.log.warn({ err: error }, "shared voice connection rate limit could not be counted"),
   });
   // During a provider outage, refuse at once rather than holding every
   // start open for the connect timeout.
@@ -114,10 +118,8 @@ export function registerTranscriptionRoutes(
       socket.close(1008, "Origin is not allowed");
       return;
     }
-    if (!connectionLimiter.allow(clientKey(request, { trustedProxyHops: config.trustedProxyHops ?? 0 }))) {
-      socket.close(1013, "RATE_LIMITED");
-      return;
-    }
+    // Counted now, awaited before the stream is authorized below.
+    const admitted = connectionLimiter.allow(clientKey(request, { trustedProxyHops: config.trustedProxyHops ?? 0 }));
     const authorize = async (): Promise<TranscriptionAuthorization> => {
       const query = request.query as Record<string, unknown> | undefined;
       if (typeof query?.ticket === "string") {
@@ -534,23 +536,29 @@ export function registerTranscriptionRoutes(
       }
       receive(rawMessage, isBinary);
     });
-    void authorize().then(
-      (authorization) => {
-        if (!authorization.allowed) {
-          socket.close(1008, authorization.reason);
-          return;
-        }
-        streamOwner = authorization.profileId;
-        authorized = true;
-        for (const pending of pendingMessages.splice(0)) receive(pending.rawMessage, pending.isBinary);
-      },
-      (error: unknown) => {
-        // A failed profile/entitlement lookup must not become an unhandled
-        // rejection; the client sees a retryable server-side close instead.
-        request.log.error({ err: error }, "transcription authorization failed");
-        socket.close(1011, "AUTHORIZATION_UNAVAILABLE");
-      },
-    );
+    void admitted.then((allowed) => {
+      if (!allowed) {
+        socket.close(1013, "RATE_LIMITED");
+        return;
+      }
+      void authorize().then(
+        (authorization) => {
+          if (!authorization.allowed) {
+            socket.close(1008, authorization.reason);
+            return;
+          }
+          streamOwner = authorization.profileId;
+          authorized = true;
+          for (const pending of pendingMessages.splice(0)) receive(pending.rawMessage, pending.isBinary);
+        },
+        (error: unknown) => {
+          // A failed profile/entitlement lookup must not become an unhandled
+          // rejection; the client sees a retryable server-side close instead.
+          request.log.error({ err: error }, "transcription authorization failed");
+          socket.close(1011, "AUTHORIZATION_UNAVAILABLE");
+        },
+      );
+    });
 
     clientSocket.on("close", () => {
       closed = true;

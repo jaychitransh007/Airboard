@@ -436,12 +436,18 @@ test("a person's daily Airo allowance is checked before the model is called", as
   t.after(() => provider.close());
 
   const charges = [];
+  const rateCounts = [];
   let remaining = 1;
   let failCount = false;
   const auth = {
     ...fakeAuth({ entitledOrganizations: ["org-a"] }),
     client: {
       async rpc(name, params) {
+        // The shared per-minute limit is counted separately from the allowance.
+        if (name === "consume_rate_limit") {
+          rateCounts.push(params);
+          return { data: true, error: null };
+        }
         charges.push({ name, ...params });
         if (failCount) return { data: null, error: { message: "database unavailable" } };
         if (remaining <= 0) return { data: null, error: null };
@@ -474,6 +480,12 @@ test("a person's daily Airo allowance is checked before the model is called", as
   // Built-in answers cost nothing.
   assert.equal((await send(fanInTranscript)).statusCode, 200);
   assert.equal(charges.length, 0);
+  // Every request is counted against the shared per-minute limit, by a hash
+  // of the caller rather than its profile id.
+  assert.equal(rateCounts.length, 1);
+  assert.equal(rateCounts[0].p_bucket, "intent");
+  assert.match(rateCounts[0].p_key_hash, /^[0-9a-f]{64}$/);
+  assert.ok(!JSON.stringify(rateCounts[0]).includes("profile-a"));
 
   // The first model call is charged and reaches the model.
   assert.equal((await send("make the planner talk to the dataset")).json().error, "SEMANTIC_INTENT_PROVIDER_UNAVAILABLE");
