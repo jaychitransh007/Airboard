@@ -1084,5 +1084,18 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - The launch check reports READY, 21 of 21.
     - The tag `launch-91d1c63-web` was removed.
   - **Rollback:** the web to `launch-91d1c63`.
-  - **Second defect from the journey, fixed in `c2aa572` (not deployed yet):** ending a session in Settings didn't stick while the owner had the board open. The owner's 30-second heartbeat set it back to active, so the live link kept letting people in. A heartbeat now leaves an ended session alone; tests cover both session stores.
+  - **Second defect from the journey, fixed in `c2aa572` (deployed in `launch-8eff5db`):** ending a session in Settings didn't stick while the owner had the board open. The owner's 30-second heartbeat set it back to active, so the live link kept letting people in. A heartbeat now leaves an ended session alone; tests cover both session stores.
   - **Cleanup:** the test board is in Trash, and its three test sessions are ended. The owner's older session from 5 November was left alone.
+- **2026-11-07** — Deployed `launch-8eff5db` to both services: the ended-session fix (API) and the 320px card fix (web, which had failed PR #43's CI on Linux fonts):
+  - **Staged API checks:**
+    - Every dependency was ready, and every signed-in route refused requests without a sign-in, the same as the live API.
+    - Malformed JSON is answered with 500 rather than 400 on the live API too. That's an existing quirk, noted as a follow-up.
+  - **Staged web checks:**
+    - Every main page answered 200 with the security headers.
+    - The new card styles were in the stylesheet.
+  - **After promoting:**
+    - On the live site, a session ended in Settings stayed ended 45 seconds later, with the owner's board tab still open.
+    - No errors were logged after the malformed test requests.
+    - The launch check reports READY, 21 of 21.
+    - The tags `launch-fc7bc79-api` and `launch-abc3725-web` were removed.
+  - **Cleanup:** the test board is back in Trash and its sessions are ended.

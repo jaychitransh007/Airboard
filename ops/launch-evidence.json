@@ -49,7 +49,7 @@
       "status": "pending",
       "owner": "Engineering",
       "evidence": "",
-      "notes": "Required from standalone GA (moved out of the controlled pilot on 2026-11-05). Run pnpm smoke:commercial against a disposable release organization. 2026-11-07: the journey ran in the browser on the live site in the owner's account: board create, commands, Airo, rename, reload, live links, view-only link, library search, Trash and restore, sessions, billing and privacy pages. Two defects were found. An Airo command's result was not saved: fixed and deployed in launch-abc3725, and confirmed on the live site. Ending a session in Settings didn't stick while the owner's tab was open: fixed in c2aa572, not deployed. Still needed: deploy that fix, and a run in a fresh account to cover sign-up itself."
+      "notes": "Required from standalone GA (moved out of the controlled pilot on 2026-11-05). Run pnpm smoke:commercial against a disposable release organization. 2026-11-07: the journey ran in the browser on the live site in the owner's account: board create, commands, Airo, rename, reload, live links, view-only link, library search, Trash and restore, sessions, billing and privacy pages. Two defects were found. An Airo command's result was not saved: fixed and deployed in launch-abc3725, and confirmed on the live site. Ending a session in Settings didn't stick while the owner's tab was open: fixed in launch-8eff5db, and confirmed on the live site. Still needed: a run in a fresh account to cover sign-up itself."
     },
     "deployment-smoke": {
       "description": "Production web, API, authentication, readiness, board save/export/delete and rollback smoke checks pass.",
