@@ -150,7 +150,7 @@ test("live semantic runner retries one transient failure and emits privacy-safe 
       report.summary.semanticPlannerLatencyP95Ms,
     true,
   );
-  assert.equal(report.versions.prompt, "2.12");
+  assert.equal(report.versions.prompt, "2.13");
   assert.equal(report.results[0].groundingStatus, "applied");
   assert.equal(report.results[0].groundedCommands.length, 1);
   assert.equal(report.results[0].eventDelta.length, 2);

@@ -1,6 +1,6 @@
 {
   "schemaVersion": "airboard-semantic-negative-known.v1",
-  "description": "Meeting talk the production model (gpt-5.6-luna) does not leave alone. Empty since 2026-11-06: with prompt 2.12 on the priority tier, Luna leaves all 60 cases alone. scripts/eval-semantic-negatives.mjs --replay fails on any case not listed here with its outcome, so a case may be added only by a reviewed change. Tracked as RGB-038 in Docs/Release Readiness Backlog.md.",
+  "description": "Meeting talk the production model (gpt-5.6-luna) does not leave alone. Empty since 2026-11-06: with prompt 2.12, and again with 2.13 (2026-11-07), on the priority tier, Luna leaves all 60 cases alone. scripts/eval-semantic-negatives.mjs --replay fails on any case not listed here with its outcome, so a case may be added only by a reviewed change. Tracked as RGB-038 in Docs/Release Readiness Backlog.md.",
   "model": "gpt-5.6-luna",
   "cases": []
 }
