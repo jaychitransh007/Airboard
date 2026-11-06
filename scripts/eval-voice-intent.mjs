@@ -427,8 +427,11 @@ function validateExpectedOutcome(plan, expected) {
   if (plan.status !== expected.status) {
     failures.push(`expected status ${expected.status}, received ${String(plan.status)}`);
   }
-  if (expected.issueCode !== undefined && plan.issueCode !== expected.issueCode) {
-    failures.push(`expected issueCode ${expected.issueCode}, received ${String(plan.issueCode)}`);
+  // A clarification shows the model's own question, so a case may accept more
+  // than one issue code when they lead to the same behaviour.
+  const acceptedIssueCodes = [expected.issueCode, ...(expected.issueCodeAlternatives ?? [])];
+  if (expected.issueCode !== undefined && !acceptedIssueCodes.includes(plan.issueCode)) {
+    failures.push(`expected issueCode ${acceptedIssueCodes.join(" or ")}, received ${String(plan.issueCode)}`);
   }
   if (!Array.isArray(plan.actions)) return failures;
 
@@ -1052,6 +1055,14 @@ function validateCorpus(corpus, fixturePath) {
       !VALID_ISSUE_CODES.has(fixtureCase.expected.issueCode)
     ) {
       throw new Error(`${fixturePath} case ${fixtureCase.id} has an invalid expected issueCode`);
+    }
+    if (
+      fixtureCase.expected.issueCodeAlternatives !== undefined &&
+      (fixtureCase.expected.issueCode === undefined ||
+        !Array.isArray(fixtureCase.expected.issueCodeAlternatives) ||
+        fixtureCase.expected.issueCodeAlternatives.some((code) => !VALID_ISSUE_CODES.has(code)))
+    ) {
+      throw new Error(`${fixturePath} case ${fixtureCase.id} has invalid issueCodeAlternatives`);
     }
     if (
       fixtureCase.expected.missingSlotsIncludes !== undefined &&

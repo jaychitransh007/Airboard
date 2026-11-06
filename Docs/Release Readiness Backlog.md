@@ -912,3 +912,16 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - **Tags:** the `launch-7fa8ff1-api` tag was removed.
   - **Rollback:** the API to `launch-7fa8ff1`.
   - **Not yet checked in production:** a spoken command in a live meeting, which needs a signed-in board.
+- **2026-11-06** — The two real voice commands that always failed were test mistakes; all 38 now pass:
+  - **"Airo remove Cache"** on a board with a Cache service and a Cache database:
+    - Airo correctly asks which Cache and deletes nothing.
+    - The test numbered the Cache database as database 2. Production and the test tool both number boxes in reading order, which makes it database 1, so the check looked for a box that doesn't exist.
+  - **"Airo delete Payments API"** on a board with only an Orders API:
+    - Airo asks "I can't find Payments API. Did you mean Orders API?" and deletes nothing.
+    - The model files this as `ambiguous_reference` about 2 times in 3 and `missing_context` otherwise. The app shows Airo's own question either way, so the difference isn't visible.
+    - A case may now list `issueCodeAlternatives`; `scripts/eval-voice-intent.mjs` checks the field and rejects unknown codes. This case accepts both codes and keeps `missing_context` as its main code for coverage.
+  - **Test boards now match what production sends:** seven cases listed boxes out of reading order, and five of them numbered boxes out of reading order too. Every board in `evals/voice-intent/v1.json` now lists and numbers its boxes, and its selection, as `intentPipeline.ts` does.
+  - **Measured with Luna:**
+    - Every changed case passed 5 of 5, and the grid case 10 of 10.
+    - The full set passed 76 of 76 runs (38 cases, twice).
+    - The speed check failed on that run, at a p95 of 2,615 ms against 2,500 ms. It has ranged from 2.0 to 3.2 s across today's runs with no code change, and it is not a CI gate.
