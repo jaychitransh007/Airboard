@@ -46,6 +46,9 @@ function createFakeSupabase(tables, options = {}) {
     storage: {
       from(bucket) {
         return {
+          async createSignedUrl(path, ttl) {
+            return { data: { signedUrl: `https://storage.airboard.test/${path}?ttl=${ttl}` }, error: null };
+          },
           async remove(paths) {
             storageCalls.push({ bucket, paths: [...paths] });
             return fakeClient.storageError
@@ -736,6 +739,113 @@ test("email sign-in is offered only where this deployment switches it on", async
   };
   assert.deepEqual(await providers(false), { google: true, microsoft: false, emailMagicLink: false });
   assert.deepEqual(await providers(true), { google: true, microsoft: false, emailMagicLink: true });
+});
+
+function shareTables() {
+  return {
+    boards: [
+      boardRow({
+        title: "Checkout flow",
+        owner_profile_id: PROFILE,
+        latest_state: {
+          elements: { a: { id: "a", kind: "shape" } },
+          strokes: {},
+          participants: { p1: { displayName: "Priya Raman" } },
+          cursors: { p1: { x: 1, y: 2 } },
+          activeStrokes: { s1: {} },
+        },
+      }),
+      boardRow({ id: "44444444-4444-4444-8444-444444444444", owner_profile_id: "77777777-7777-4777-8777-777777777777" }),
+    ],
+    board_shares: [],
+    board_assets: [
+      { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", board_id: BOARD, organization_id: ORG, status: "ready", storage_path: `${ORG}/${BOARD}/a/one.png` },
+      { id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", board_id: "44444444-4444-4444-8444-444444444444", organization_id: ORG, status: "ready", storage_path: "other.png" },
+    ],
+    audit_events: [],
+  };
+}
+
+test("a board's owner makes a view-only link that opens the board without an account", async (t) => {
+  const { createHash } = await import("node:crypto");
+  const client = createFakeSupabase(shareTables());
+  const server = await buildApp(t, client, { appUrl: "https://app.airboard.test", trustedProxyHops: 0 });
+  const owner = { authorization: "Bearer owner" };
+
+  const created = await server.inject({ method: "POST", url: `/boards/${BOARD}/share-links`, headers: owner, payload: {} });
+  assert.equal(created.statusCode, 201, created.body);
+  const token = /^https:\/\/app\.airboard\.test\/s\/([A-Za-z0-9_-]{43})$/.exec(created.json().url)?.[1];
+  assert.ok(token, created.json().url);
+  const stored = client.tables.board_shares[0];
+  assert.equal(stored.token_hash, createHash("sha256").update(token).digest("hex"));
+  assert.equal(stored.role, "viewer");
+  assert.equal(JSON.stringify(stored).includes(token), false, "only the hash is kept");
+  const days = (new Date(created.json().link.expiresAt).getTime() - Date.now()) / 86_400_000;
+  assert.ok(days > 6.9 && days <= 7, "links last seven days unless asked otherwise");
+
+  const listed = await server.inject({ method: "GET", url: `/boards/${BOARD}/share-links`, headers: owner });
+  assert.deepEqual(listed.json().links.map((link) => Object.keys(link).sort()), [["createdAt", "expiresAt", "id"]]);
+
+  const viewed = await server.inject({ method: "GET", url: `/shared-boards/${token}` });
+  assert.equal(viewed.statusCode, 200, viewed.body);
+  assert.equal(viewed.json().title, "Checkout flow");
+  assert.deepEqual(viewed.json().state.elements, { a: { id: "a", kind: "shape" } });
+  // Who joined a live session is not part of a public link.
+  assert.deepEqual(viewed.json().state.participants, {});
+  assert.deepEqual(viewed.json().state.cursors, {});
+  assert.deepEqual(viewed.json().state.activeStrokes, {});
+  assert.equal(JSON.stringify(viewed.json()).includes("Priya"), false);
+  assert.equal(viewed.headers["cache-control"], "no-store");
+  assert.match(viewed.headers["x-robots-tag"], /noindex/);
+
+  // Its pictures load through the link; another board's do not.
+  const image = await server.inject({ method: "GET", url: `/shared-boards/${token}/assets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/content` });
+  assert.equal(image.statusCode, 302);
+  assert.match(image.headers.location, /one\.png\?ttl=60$/);
+  const other = await server.inject({ method: "GET", url: `/shared-boards/${token}/assets/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/content` });
+  assert.equal(other.statusCode, 404);
+
+  // Turning it off closes the link at once.
+  const linkId = created.json().link.id;
+  assert.equal((await server.inject({ method: "DELETE", url: `/boards/${BOARD}/share-links/${linkId}`, headers: owner })).statusCode, 204);
+  assert.equal((await server.inject({ method: "GET", url: `/shared-boards/${token}` })).statusCode, 404);
+  assert.deepEqual((await server.inject({ method: "GET", url: `/boards/${BOARD}/share-links`, headers: owner })).json().links, []);
+  assert.deepEqual(client.tables.audit_events.map((event) => event.action), ["board.share_link_created", "board.share_link_revoked"]);
+});
+
+test("view-only links refuse other people's boards, expired or unknown links and deleted boards", async (t) => {
+  const client = createFakeSupabase(shareTables());
+  const server = await buildApp(t, client, { appUrl: "https://app.airboard.test", trustedProxyHops: 0 });
+  const owner = { authorization: "Bearer owner" };
+
+  assert.equal((await server.inject({ method: "POST", url: `/boards/${BOARD}/share-links`, payload: {} })).statusCode, 401);
+  assert.equal((await server.inject({ method: "POST", url: "/boards/44444444-4444-4444-8444-444444444444/share-links", headers: owner, payload: {} })).statusCode, 404, "only the owner shares a board");
+  assert.equal((await server.inject({ method: "POST", url: `/boards/${BOARD}/share-links`, headers: owner, payload: { expiresInDays: 365 } })).statusCode, 400);
+
+  const forever = await server.inject({ method: "POST", url: `/boards/${BOARD}/share-links`, headers: owner, payload: { expiresInDays: null } });
+  assert.equal(forever.json().link.expiresAt, null);
+  const token = forever.json().url.split("/s/")[1];
+
+  assert.equal((await server.inject({ method: "GET", url: "/shared-boards/not-a-token" })).statusCode, 404);
+  assert.equal((await server.inject({ method: "GET", url: `/shared-boards/${"A".repeat(43)}` })).statusCode, 404);
+
+  client.tables.board_shares[0].expires_at = new Date(Date.now() - 1_000).toISOString();
+  assert.equal((await server.inject({ method: "GET", url: `/shared-boards/${token}` })).statusCode, 404, "an expired link");
+  client.tables.board_shares[0].expires_at = null;
+  client.tables.boards[0].deleted_at = new Date().toISOString();
+  assert.equal((await server.inject({ method: "GET", url: `/shared-boards/${token}` })).statusCode, 404, "a board in Trash");
+});
+
+test("a board holds at most 20 live view-only links", async (t) => {
+  const tables = shareTables();
+  tables.board_shares = Array.from({ length: 20 }, (_, index) => ({
+    id: `link-${index}`, board_id: BOARD, token_hash: `hash-${index}`, role: "viewer",
+    expires_at: null, revoked_at: null, created_at: new Date().toISOString(),
+  }));
+  const server = await buildApp(t, createFakeSupabase(tables), { appUrl: "https://app.airboard.test", trustedProxyHops: 0 });
+  const response = await server.inject({ method: "POST", url: `/boards/${BOARD}/share-links`, headers: { authorization: "Bearer owner" }, payload: {} });
+  assert.equal(response.statusCode, 409);
+  assert.equal(response.json().error, "SHARE_LINK_LIMIT");
 });
 
 test("/me reports a pilot that ended instead of hiding it", () => {

@@ -28,6 +28,7 @@ import {
 import { bearerToken, issueSignedToken, verifySignedToken } from "./signedTokens";
 import { secretsMatch } from "./security";
 import { registerBoardContentRoutes, removeBoardAssetObjects } from "./boardContentRoutes";
+import { registerBoardShareRoutes } from "./boardShareRoutes";
 import { BoardAssetLifecycleError } from "./boardAssetLifecycle";
 import { boardAccessFilter, writeAccessibleBoard } from "./boardAccess";
 
@@ -582,6 +583,8 @@ export function registerControlPlaneRoutes(
 
   registerIntegrationRoutes(server, config, auth);
   registerBoardContentRoutes(server, auth);
+  registerBoardShareRoutes(server, config, auth, (context, request, action, targetType, targetId, metadata) =>
+    writeAudit(auth, context, request, action, targetType, targetId, metadata));
   registerOrganizationRoutes(server, config, auth);
   registerPrivacyAndTelemetryRoutes(server, auth);
   registerBillingRoutes(server, config, auth);

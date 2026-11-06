@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BOARD_SCENE_VERSION, type BoardState } from "@airboard/core";
 import { AirboardPrototype } from "../board/AirboardPrototype";
 import type { BoardShareAccess, BoardVisibility } from "../board/ShareDialog";
+import type { ViewLink, ViewLinkControls } from "../board/ViewLinksSection";
 import { requestBoardSessionStart } from "../board/boardSync";
 import { liveLinkFromBoardAddress, savedBoardLink } from "../board/shareLinks";
 import { AirboardApiError, airboardApi } from "../../platform/api";
@@ -273,6 +274,21 @@ export function AuthenticatedAirboard({ boardId, templateId }: { boardId?: strin
     });
     router.replace("/app/boards?deleted=1");
   }, [auth.accessToken, board, router, saveBoardState]);
+  const accessToken = auth.accessToken;
+  const durableBoardId = board?.id;
+  // Stable across renders, so the Share dialog loads the links once per opening.
+  const viewLinks = useMemo<ViewLinkControls | undefined>(() => {
+    if (!accessToken || !durableBoardId) return undefined;
+    const base = `/boards/${encodeURIComponent(durableBoardId)}/share-links`;
+    return {
+      list: async () => (await airboardApi<{ links: ViewLink[] }>(base, { accessToken })).links,
+      create: (expiresInDays) =>
+        airboardApi<{ link: ViewLink; url: string }>(base, { method: "POST", accessToken, body: JSON.stringify({ expiresInDays }) }),
+      revoke: async (id) => {
+        await airboardApi(`${base}/${encodeURIComponent(id)}`, { method: "DELETE", accessToken });
+      },
+    };
+  }, [accessToken, durableBoardId]);
   if (error) return <BoardUnavailable code={error} />;
   if (!ready || !auth.accessToken || !auth.account || !board) return <div className="product-loading">Opening your Airboard…</div>;
   const shareAccess: BoardShareAccess = {
@@ -282,6 +298,7 @@ export function AuthenticatedAirboard({ boardId, templateId }: { boardId?: strin
     workspaceName: auth.account.organization.name,
     boardLink: savedBoardLink(window.location.origin, board.id),
     onChange: changeVisibility,
+    ...(viewLinks ? { viewLinks } : {}),
   };
   return (
     <>
