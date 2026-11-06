@@ -133,7 +133,7 @@
       "status": "pending",
       "owner": "Operations",
       "evidence": "",
-      "notes": "2026-11-06: /status now shows live checks plus incidents from GitHub issues labelled `incident` (label created); process and templates in Docs/Status and Incident Updates.md. Still needed: deploy the web and the owner's acceptance of the posting targets."
+      "notes": "2026-11-06: deployed in launch-09f196e. /status shows live checks plus incidents from GitHub issues labelled `incident` (label created); process and templates in Docs/Status and Incident Updates.md. Still needed: the owner's acceptance of the posting targets."
     },
     "support-sla": {
       "description": "Published support hours and response targets match actual staffing.",

@@ -4,7 +4,7 @@ How Airboard tells customers something is wrong, and evidence for the
 standalone-GA gate `public-status-process`.
 
 **Owner:** the founder, who is the release and support owner.
-**Status (6 November 2026):** the page and the process are built, but not yet deployed or accepted by the owner.
+**Status (6 November 2026):** the page is live (`launch-09f196e`). The owner has not yet accepted the process.
 
 ## Where customers look
 

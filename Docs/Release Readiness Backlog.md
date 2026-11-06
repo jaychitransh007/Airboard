@@ -71,7 +71,7 @@ These are fixable in the repo and each would make a public "supported product" c
 ### Backend robustness (mediums/lows)
 | ID | Title | Status | Owner | Verification | Evidence | Recommendation |
 |----|-------|--------|-------|--------------|----------|----------------|
-| RGB-019 | Provider concurrency caps & rate limits are per-process (multiply by instance count) | Mostly done 2026-11-06 (not deployed): daily voice and Airo allowances per person are held in the database across instances; per-minute limits and stream caps stay per instance | Engineering | Reported | Per-process maps for rate limiter / concurrency | Move to a shared store if provider spend/quota must be bounded globally. |
+| RGB-019 | Provider concurrency caps & rate limits are per-process (multiply by instance count) | Mostly done and deployed 2026-11-06 (`launch-09f196e`): daily voice and Airo allowances per person are held in the database across instances; per-minute limits and stream caps stay per instance | Engineering | Reported | Per-process maps for rate limiter / concurrency | Move to a shared store if provider spend/quota must be bounded globally. |
 | RGB-020 | Boot does not fail-fast on missing Supabase config; `/ready` returns 200 when DB unconfigured | Done 2026-11-05 | Engineering | Reported | `apps/api/src` config/boot path | Fail-fast in production on required env; make `/ready` reflect DB reachability. |
 | RGB-021 | Board WS has no per-connection event rate limit, no batch-size cap, no explicit `maxPayload` | Done 2026-11-05 | Engineering | Reported | `server.ts` WS handler | Add per-connection event rate limit + payload/batch caps. |
 | RGB-022 | No retry / circuit-breaking for OpenAI intent or Deepgram; an outage burns concurrency slots on timeouts | Done 2026-11-05 | Engineering | Reported | intent/transcription paths | Add bounded retry + circuit breaker. |
@@ -949,7 +949,7 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - **After promoting:** the live JavaScript has the label. On the canonical URL, `/s/<unknown token>` reaches the API and shows "This link no longer works". `pnpm launch:check:deployed` reports READY, 21 of 21.
   - **Tags:** the `launch-7fa8ff1-web` tag was removed.
   - **Rollback:** the web to `launch-7fa8ff1`.
-- **2026-11-06** — The two High risks from the draft threat model: provider spend (X-1) and live-board connection flooding (L-4). Not yet deployed; the release needs migration `20261106120000_daily_usage.sql` first:
+- **2026-11-06** — The two High risks from the draft threat model: provider spend (X-1) and live-board connection flooding (L-4). Deployed as `launch-09f196e`; see the deploy entry below:
   - **Daily allowances per person (`apps/api/src/dailyUsage.ts`):**
     - The allowances are 500 Airo commands that reach the model (`AIRBOARD_DAILY_AIRO_COMMANDS`) and 240 voice minutes (`AIRBOARD_DAILY_VOICE_MINUTES`) per person per UTC day.
     - They are counted in Postgres (`daily_usage`, through `consume_daily_usage`), so they hold across API instances. The function adds usage only when the total stays within the limit, in one statement. Against Postgres 17, 20 concurrent charges at a limit of 10 left exactly 10.
@@ -972,3 +972,20 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - The config defaults.
     - The migration was run twice on Postgres 17 and passed its guard check.
     - All checks and 89 browser tests pass.
+- **2026-11-06** — Deployed `launch-09f196e` to both services. It carries the daily allowances, the socket caps and cursor moves no longer stored, the incident status page, the browser matrix setting and help, and the Airo limit message:
+  - **Order:**
+    - Applied migration `20261106120000_daily_usage.sql` with `release.sh migrate`; afterwards the database had every migration in the repository.
+    - Staged and promoted the API, then staged and promoted the web.
+  - **Staged API checks:**
+    - `/ready` reported the database and `boardFanOut` ready, and `/intent/config` lists only Luna.
+    - Unauthenticated Airo and share-link calls answered 401, and an unknown share link 404.
+    - The only warnings in the revision's logs were those test requests.
+  - **Staged web checks:** `/`, `/status`, `/login`, `/app`, `/app/boards`, two help pages and `/s/<token>` answered 200. The new status page, the `DAILY_AIRO_LIMIT` message and the supported-browsers help were in the staged build.
+  - **After promoting:**
+    - The live `/status` shows Website, Boards and Airo, and Saved boards as Working, and "No incidents in the last 90 days", read from GitHub.
+    - `pnpm launch:check:deployed` reports READY, 21 of 21.
+    - The old tags `launch-010a9b7-api` and `launch-2f31bf2-web` were removed.
+  - **Rollback:** the web to `launch-2f31bf2` and the API to `launch-010a9b7`. The old API ignores the new table.
+  - **Not yet checked in production:**
+    - A signed-in command hitting the allowance.
+    - A voice stream being charged.
