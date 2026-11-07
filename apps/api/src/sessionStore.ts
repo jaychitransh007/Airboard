@@ -190,8 +190,11 @@ export class InMemorySessionStore implements SessionStore {
     return this.appendEvents(sessionId, [event])[0]!;
   }
 
-  appendEvents(sessionId: string, events: BoardEvent[]): BoardEvent[] {
+  appendEvents(sessionId: string, incoming: BoardEvent[]): BoardEvent[] {
     const record = this.requireSession(sessionId);
+    // A board resending changes after a cut connection: keep what is stored.
+    const storedIds = new Set(record.events.map((event) => event.id));
+    const events = incoming.filter((event) => !storedIds.has(event.id));
     // Compute the whole batch on locals and commit only after every event has
     // applied cleanly, so a mid-batch throw leaves the record untouched. This
     // upholds the all-or-nothing contract the Supabase store also honors.

@@ -64,6 +64,7 @@ These are fixable in the repo and each would make a public "supported product" c
 | RGB-042 | Airo voice reached only about 4 people at a time, and switched off for good at 30 minutes, on every deploy, on a network drop or when Deepgram closed the stream (found 2026-11-07 in the MLP launch audit) | Done and deployed 2026-11-07 (`launch-306c7a5`) | Engineering | Verified in tests (real voice client against the real API routes) and in production smoke checks; not yet tried with a real microphone | `apps/api/src/config.ts` `maxConcurrentStreams` defaulted to 4 per instance and production never set it; `realtimeSpeech.ts` ended the session on any close; Cloud Run concurrency 80 counted each voice user's two sockets | 50 voice streams per instance (Deepgram allows 150 per project; 3 instances), API concurrency 250, and the browser reconnects on its own with the microphone kept open. Still owed by the founder: confirm the Deepgram key is on the account's main project (secondary self-serve projects get one stream) and set Deepgram and OpenAI spend limits. |
 | RGB-043 | A brand-new user who opened Templates before making a board was told "Your pilot access has ended": Templates created boards without starting the free trial (found 2026-11-07 in the MLP launch audit) | Done and deployed 2026-11-07 (web `launch-4ae4227`; founder's decision for minimum scope): Templates removed from the app and the public site | Product / Engineering | Verified in tests | `ProductSection.tsx` Templates posted to `/boards` without `/trial/activate`; `boardTemplates.ts` built the diagram on mount | None. Every new board starts from New Airboard, which starts the trial. |
 | RGB-044 | Nothing capped total provider spend: each Google account got its own free daily allowance, so many accounts together could run up the OpenAI and Deepgram bills, and voice streams didn't opt out of Deepgram's model-improvement programme (threat model X-1, V-4) | Done and deployed 2026-11-07 (`launch-99ae9d0`; console limits still owed by the founder) | Engineering / Founder | Verified in tests, on a local database and in production | `apps/api/src/dailyUsage.ts` counted only per person; `deepgramFluxProtocol.ts` set no `mip_opt_out` | A service-wide daily ceiling (5,000 Airo model commands, 3,000 voice minutes, tunable) and `mip_opt_out=true` on every Deepgram stream. Still owed by the founder: spend limits in the OpenAI and Deepgram consoles, which need the founder's sign-in. |
+| RGB-045 | Live sessions broke within an hour: a 30-minute realtime ticket was reused for every reconnect and heartbeat, Cloud Run cuts every WebSocket at 60 minutes, an expired ticket was refused for good, the session locked 3 minutes later, guests' edits stopped reaching the host's saved board, viewers froze, and the host still saw "Saved" (found 2026-11-07 in the MLP launch audit) | Done 2026-11-07, not deployed yet | Engineering | Verified in tests and against a local database | `boardSync.ts` reused `realtimeTicket`; `realtime-client` stopped on any 1008; no catch-up after a reconnect | Ticket refresh with a body-only refresh token, strict in-order catch-up after every admission, resend of changes a cut lost, per-socket ordered handling on the server, and live-link status for host, guests and viewers. |
 | RGB-014 | New `catalogDock` E2E is uncommitted & never run; CI can't show E2E is a required merge check | Done 2026-11-05 | Engineering | Verified | `apps/web/e2e/catalogDock.spec.ts` (uncommitted, +235 lines); Playwright not in the fast verify path | Run it before committing the dock diff; make the E2E job a required check on the release branch. |
 
 ### Security hardening (mediums)
@@ -1276,4 +1277,29 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - The new revision logged no "could not be counted" warning, so the API's service role called the new function successfully.
     - The test board is in Trash. The `launch-306c7a5-api` and `launch-4ae4227-web` tags were removed.
   - **Rollback:** the API to `launch-306c7a5` and the web to `launch-4ae4227`. The old API ignores the new table.
+- **2026-11-07** — RGB-045 (not deployed yet): live sessions survive the 60-minute WebSocket cut and the 30-minute ticket.
+  - **Server:**
+    - `/start`, `/join` and `/resume` also return a `refreshToken`. It lasts 12 hours and only ever travels in JSON bodies.
+    - `POST /sessions/:id/ticket` trades it for a fresh 30-minute ticket while the session is open. An owner must also be signed in, and their refresh revives a locked (not ended) session, as their heartbeat does. The URL-borne ticket itself renews nothing.
+    - `POST /sessions/:id/events` pages missed events, 1,000 at a time.
+    - The socket closes with `TICKET_EXPIRED` for an expired ticket and `SESSION_LOCKED` for a locked session. It closes with 1011, after a 5-second pause, for a database error, and those now answer 503 instead of "not found".
+    - Each socket's messages are handled in the order they arrived.
+    - The stores skip an event id they already have, so a resend is stored once.
+  - **Realtime client:** it reports "connected" only when the server admits the socket (`board.initialized`), sends nothing before that, and refreshes and reconnects on `TICKET_EXPIRED`.
+  - **Board sync:**
+    - The ticket is renewed every 20 minutes.
+    - Changes apply strictly in sequence. One that arrives early waits for the missing one, which is fetched if it doesn't come within 1.5 seconds.
+    - Every admission catches up page by page. Changes sent but never echoed are resent, and changes made while away, paused or catching up are sent afterwards in batches of at most 500.
+    - A locked session pauses guests until the owner is back. A guest more than 20 pages behind reloads the whole board; the owner always replays, so their saved board never loses content.
+  - **Status:**
+    - The host sees "Saved · Live link reconnecting…" or "Saved · Live session ended".
+    - Editing guests see "Reconnecting…", "Waiting for the host to come back…" or "This live session has ended".
+    - The view-only page shows the same as a spoken status.
+  - **Reviews:** three independent passes. The first two found the out-of-order drops across API instances, a lock treated as the end, the deploy window, a leaked ticket renewing access, catch-up gaps after failures, the owner's whole-board reload and changes lost at the cut, all fixed and retested. The third found concurrent handling of one socket's batches, replays of refused batches, a small echo window and outbox overflow, all fixed and tested.
+  - **Tests:**
+    - API 216: ticket refresh and refresh tokens, owner sign-in and revival, `SESSION_LOCKED`, 503s, catch-up paging, `TICKET_EXPIRED`, resend dedupe and in-order storage.
+    - Web 441: catch-up order, resend, pause, older-API fallbacks, the permission switch, refused batches, a full outbox and failed catch-ups.
+    - Realtime client 10.
+    - Against a real local Supabase: a resent batch stored only its new event, and a missing session read as not found.
+  - **Deploy order:** the API first, then the web. The new API works with the old web, which never calls the new routes.
 

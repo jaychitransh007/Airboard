@@ -21,7 +21,13 @@ class FakeSocket {
       listener(event);
     }
   }
+  // Opens and is admitted, as the server does once the ticket checks out.
   open() {
+    this.openOnly();
+    this.message({ type: "board.initialized" });
+  }
+  // Opens, but the server hasn't checked the ticket yet.
+  openOnly() {
     this.readyState = 1;
     this.emit("open");
   }
@@ -145,3 +151,86 @@ test("reconnect: false disables retry entirely", () => {
   sockets[0].emit("close", { code: 1006 });
   assert.equal(timers.length, 0);
 });
+
+test("an expired ticket is refreshed and the socket reconnects with the fresh one", async () => {
+  const refreshed = [];
+  const { client, sockets, timers } = makeClient({
+    realtimeTicket: "ticket-1",
+    refreshTicket: async () => {
+      refreshed.push("called");
+      return "ticket-2";
+    },
+  });
+  const statuses = [];
+  client.onStatus((s) => statuses.push(s));
+  client.connect();
+  sockets[0].open();
+  // The API cut the socket at its hour limit; the reconnect found the ticket expired.
+  sockets[0].emit("close", { code: 1008, reason: "TICKET_EXPIRED" });
+  assert.equal(statuses.at(-1), "reconnecting", "not rejected");
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(refreshed, ["called"]);
+  assert.equal(timers.length, 1, "reconnect scheduled after the refresh");
+  timers[0].cb();
+  assert.match(sockets[1].url, /ticket=ticket-2/);
+  sockets[1].open();
+  assert.equal(statuses.at(-1), "connected");
+});
+
+test("a refresh that finds the session over ends the connection; repeated expiries give up", async () => {
+  const over = makeClient({ realtimeTicket: "ticket-1", refreshTicket: async () => null });
+  const overStatuses = [];
+  over.client.onStatus((s) => overStatuses.push(s));
+  over.client.connect();
+  over.sockets[0].emit("close", { code: 1008, reason: "TICKET_EXPIRED" });
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(overStatuses.at(-1), "rejected");
+  assert.equal(over.timers.length, 0);
+
+  // A fresh ticket that keeps coming back expired (a clock problem) stops after three tries.
+  let tries = 0;
+  const looping = makeClient({ realtimeTicket: "ticket-1", refreshTicket: async () => `ticket-${(tries += 1) + 1}` });
+  const loopStatuses = [];
+  looping.client.onStatus((s) => loopStatuses.push(s));
+  looping.client.connect();
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    looping.sockets.at(-1).emit("close", { code: 1008, reason: "TICKET_EXPIRED" });
+    await Promise.resolve();
+    await Promise.resolve();
+    looping.timers.at(-1)?.cb();
+  }
+  assert.equal(tries, 3);
+  assert.equal(loopStatuses.at(-1), "rejected");
+
+  // Without a refresher, an expired ticket is a refusal like any other.
+  const plain = makeClient({ realtimeTicket: "ticket-1" });
+  const plainStatuses = [];
+  plain.client.onStatus((s) => plainStatuses.push(s));
+  plain.client.connect();
+  plain.sockets[0].emit("close", { code: 1008, reason: "TICKET_EXPIRED" });
+  assert.equal(plainStatuses.at(-1), "rejected");
+});
+
+test("setRealtimeTicket changes the ticket the next connect presents", () => {
+  const { client, sockets } = makeClient({ realtimeTicket: "ticket-1" });
+  client.connect();
+  client.setRealtimeTicket("ticket-9");
+  client.connect();
+  assert.match(sockets[1].url, /ticket=ticket-9/);
+});
+
+test("connected waits for the server to admit the socket; nothing is sent before that", () => {
+  const { client, sockets } = makeClient({ realtimeTicket: "ticket-1" });
+  const statuses = [];
+  client.onStatus((s) => statuses.push(s));
+  client.connect();
+  sockets[0].openOnly();
+  assert.notEqual(statuses.at(-1), "connected");
+  assert.equal(client.sendEvents([{ id: "e1", type: "element.deleted" }]), false, "the server isn't listening yet");
+  sockets[0].message({ type: "board.initialized" });
+  assert.equal(statuses.at(-1), "connected");
+  assert.equal(client.sendEvents([{ id: "e1", type: "element.deleted" }]), true);
+});
+

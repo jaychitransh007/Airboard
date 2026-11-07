@@ -34,6 +34,12 @@ export type RealtimeClientOptions = {
   /** Defaults to the current scene protocol and is required by v2 servers. */
   sceneVersion?: BoardSceneVersion;
   reconnect?: boolean;
+  /**
+   * Trades the current ticket for a fresh one when the server closes with
+   * TICKET_EXPIRED; null means the session can no longer be joined. Without
+   * it, an expired ticket ends the connection like any other refusal.
+   */
+  refreshTicket?: () => Promise<string | null>;
 };
 
 type WebSocketLike = {
@@ -52,6 +58,10 @@ export type RealtimeClientDependencies = {
 const WEB_SOCKET_OPEN = 1;
 /** The server closes with 1008 (policy violation) on auth/session denials. */
 const CLOSE_CODE_POLICY_VIOLATION = 1008;
+/** The close reason for a genuine ticket that has only run out. */
+const TICKET_EXPIRED_REASON = "TICKET_EXPIRED";
+/** Fresh tickets that still came back expired in a row before giving up. */
+const MAX_TICKET_REFRESHES_WITHOUT_OPEN = 3;
 
 /**
  * Client for the Airboard board-event websocket.
@@ -71,6 +81,11 @@ export class AirboardRealtimeClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private manuallyClosed = false;
   private rejectedByServer = false;
+  private ticketRefreshesWithoutOpen = 0;
+  // Set by the server's board.initialized frame. Until then the server isn't
+  // listening to this socket, so nothing is sent.
+  private admitted = false;
+  private realtimeTicket: string | undefined;
   private readonly options: RealtimeClientOptions;
   private readonly createWebSocket: (url: string) => WebSocketLike;
   private readonly setTimer: (cb: () => void, ms: number) => ReturnType<typeof setTimeout>;
@@ -78,6 +93,7 @@ export class AirboardRealtimeClient {
 
   constructor(options: RealtimeClientOptions, dependencies: RealtimeClientDependencies = {}) {
     this.options = options;
+    this.realtimeTicket = options.realtimeTicket;
     this.createWebSocket =
       dependencies.createWebSocket ??
       ((url) => new WebSocket(url) as unknown as WebSocketLike);
@@ -98,14 +114,15 @@ export class AirboardRealtimeClient {
     this.clearReconnect();
     this.manuallyClosed = false;
     this.rejectedByServer = false;
+    this.admitted = false;
     this.setStatus(this.reconnectAttempt > 0 ? "reconnecting" : "connecting");
     const url = new URL(this.options.url);
     url.searchParams.set(
       "sceneVersion",
       String(this.options.sceneVersion ?? BOARD_SCENE_VERSION),
     );
-    if (this.options.realtimeTicket) {
-      url.searchParams.set("ticket", this.options.realtimeTicket);
+    if (this.realtimeTicket) {
+      url.searchParams.set("ticket", this.realtimeTicket);
     } else {
       // Compatibility for dependency-injected local tests. Production session
       // responses always include a ticket and the API rejects bare ids.
@@ -115,13 +132,9 @@ export class AirboardRealtimeClient {
 
     const socket = this.createWebSocket(url.toString());
     this.socket = socket;
-    socket.addEventListener("open", () => {
-      if (this.socket !== socket) {
-        return;
-      }
-      this.reconnectAttempt = 0;
-      this.setStatus("connected");
-    });
+    // The socket opens before the server checks its ticket, so "connected"
+    // waits for the server's board.initialized frame.
+    socket.addEventListener("open", () => undefined);
     socket.addEventListener("message", (message: MessageEvent) => {
       if (this.socket !== socket) {
         return;
@@ -130,6 +143,18 @@ export class AirboardRealtimeClient {
     });
     socket.addEventListener("close", (event: CloseEvent) => {
       if (this.socket !== socket) {
+        return;
+      }
+      this.admitted = false;
+      if (
+        !this.rejectedByServer &&
+        event?.code === CLOSE_CODE_POLICY_VIOLATION &&
+        event.reason === TICKET_EXPIRED_REASON &&
+        this.options.refreshTicket &&
+        this.ticketRefreshesWithoutOpen < MAX_TICKET_REFRESHES_WITHOUT_OPEN &&
+        !this.manuallyClosed
+      ) {
+        this.refreshAndReconnect(socket, this.options.refreshTicket);
         return;
       }
       if (this.rejectedByServer || event?.code === CLOSE_CODE_POLICY_VIOLATION) {
@@ -150,6 +175,11 @@ export class AirboardRealtimeClient {
     });
   }
 
+  /** The ticket the next (re)connect presents. */
+  setRealtimeTicket(ticket: string): void {
+    this.realtimeTicket = ticket;
+  }
+
   close(): void {
     this.manuallyClosed = true;
     this.clearReconnect();
@@ -159,7 +189,7 @@ export class AirboardRealtimeClient {
   }
 
   get isConnected(): boolean {
-    return this.socket?.readyState === WEB_SOCKET_OPEN;
+    return this.admitted && this.socket?.readyState === WEB_SOCKET_OPEN;
   }
 
   /** Returns false when the socket is not open — the event was NOT sent. */
@@ -196,7 +226,7 @@ export class AirboardRealtimeClient {
   }
 
   private sendFrame(frame: object): boolean {
-    if (this.socket?.readyState !== WEB_SOCKET_OPEN) {
+    if (!this.admitted || this.socket?.readyState !== WEB_SOCKET_OPEN) {
       return false;
     }
     this.socket.send(JSON.stringify(frame));
@@ -208,6 +238,13 @@ export class AirboardRealtimeClient {
       return;
     }
     switch (payload.type) {
+      case "board.initialized":
+        // The server admitted this socket: its ticket and session were good.
+        this.admitted = true;
+        this.reconnectAttempt = 0;
+        this.ticketRefreshesWithoutOpen = 0;
+        this.setStatus("connected");
+        return;
       case "board.event":
         this.emitEvent(payload.event as BoardEvent);
         return;
@@ -256,6 +293,30 @@ export class AirboardRealtimeClient {
     for (const listener of this.statusListeners) {
       listener(status);
     }
+  }
+
+  private refreshAndReconnect(socket: WebSocketLike, refreshTicket: () => Promise<string | null>): void {
+    this.setStatus("reconnecting");
+    void refreshTicket().then(
+      (ticket) => {
+        if (this.manuallyClosed || this.socket !== socket) return;
+        if (!ticket) {
+          this.rejectedByServer = true;
+          this.setStatus("rejected");
+          return;
+        }
+        // Only a fresh ticket that the server then also calls expired counts
+        // toward giving up; a failed refresh just waits for the next try.
+        this.ticketRefreshesWithoutOpen += 1;
+        this.realtimeTicket = ticket;
+        this.scheduleReconnect();
+      },
+      () => {
+        // The refresh itself failed (network): try again on the usual backoff.
+        if (this.manuallyClosed || this.socket !== socket) return;
+        this.scheduleReconnect();
+      },
+    );
   }
 
   private scheduleReconnect(): void {

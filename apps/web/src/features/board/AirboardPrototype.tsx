@@ -578,6 +578,11 @@ const CAMERA_PROMPT_HINT =
  * forgotten, and streaming an empty room spends voice minutes.
  */
 const VOICE_QUIET_PAUSE_MS = 20 * 60_000;
+
+/** The live socket dropped after connecting and is trying again on its own. */
+function liveLinkDropped(status: string): boolean {
+  return status === "reconnecting" || status === "closed" || status === "error";
+}
 const CATALOG_DROP_EXIT_PX = 12;
 const CATALOG_DROP_MIN_TRAVEL_PX = 24;
 const UNDO_TOAST_VISIBLE_MS = 6_000;
@@ -1807,6 +1812,32 @@ export function AirboardPrototype({
     ],
   );
   const applyRemoteEventRef = useRef(applyRemoteEvent);
+  /**
+   * After a reconnect that missed too much to replay, the session's whole
+   * state replaces the local board. The host saves it, so the guests' changes
+   * made meanwhile reach the saved board.
+   */
+  const applyResyncedBoard = useCallback(
+    (state: BoardState) => {
+      boardRef.current = state;
+      undoStackRef.current = [];
+      setSelectedAnnotationId(null);
+      setSelectedAnnotationIds([]);
+      setSelectedElementId(null);
+      setSelectedElementIds([]);
+      setEditingElementId(null);
+      setSceneRenderVersion((version) => version + 1);
+      refreshRealtimeSpeechKeyterms(state, []);
+      render();
+      updateStats();
+      schedulePersistentSnapshot(state);
+    },
+    [refreshRealtimeSpeechKeyterms, render, schedulePersistentSnapshot, updateStats],
+  );
+  const applyResyncedBoardRef = useRef(applyResyncedBoard);
+  useEffect(() => {
+    applyResyncedBoardRef.current = applyResyncedBoard;
+  }, [applyResyncedBoard]);
   useEffect(() => {
     applyRemoteEventRef.current = applyRemoteEvent;
   }, [applyRemoteEvent]);
@@ -3832,6 +3863,8 @@ export function AirboardPrototype({
         ...(!requestedSessionId && pendingSessionStart ? { pendingStart: pendingSessionStart } : {}),
         ownerUserId: accountUserId ?? OWNER_USER_ID,
         ...(effectiveAccessToken ? { accessToken: effectiveAccessToken } : {}),
+        // The owner's ticket refresh carries their current sign-in.
+        getAccessToken: () => latestAccessTokenRef.current,
         ...(requestedJoinToken ? { joinToken: requestedJoinToken } : {}),
         ...(resumeParticipantId ? { resumeParticipantId } : {}),
         // A saved board's live link lets people watch until its owner lets them edit.
@@ -3857,6 +3890,9 @@ export function AirboardPrototype({
           if (cancelled) return;
           setGuestsCanEdit(allow);
           onGuestEditingChangeRef.current?.(allow);
+        },
+        onResync: (state) => {
+          if (!cancelled) applyResyncedBoardRef.current(state);
         },
         onStatus: (status) => {
           if (cancelled) {
@@ -10922,7 +10958,9 @@ export function AirboardPrototype({
                     liveGuest
                       ? boardSyncStatus === "connected"
                         ? "saved"
-                        : boardSyncStatus === "connecting" || boardSyncStatus === "reconnecting"
+                        : boardSyncStatus === "connecting" ||
+                            boardSyncStatus === "paused" ||
+                            liveLinkDropped(boardSyncStatus)
                           ? "saving"
                           : "error"
                       : titleStatus === "saving"
@@ -10939,19 +10977,34 @@ export function AirboardPrototype({
                       ? "Live · changes save to the host's board"
                       : boardSyncStatus === "connecting"
                         ? "Connecting…"
-                        : boardSyncStatus === "reconnecting"
-                          ? "Reconnecting…"
-                          : "Not connected"
-                    : titleError ??
-                  (titleStatus === "saving"
-                    ? "Renaming…"
-                    : titleStatus === "saved"
-                      ? "Renamed"
-                  : persistentSaveStatus === "saving"
-                    ? "Saving…"
-                    : persistentSaveStatus === "error"
-                      ? "Save interrupted"
-                      : "Saved")}
+                        : boardSyncStatus === "ended"
+                          ? "This live session has ended"
+                          : boardSyncStatus === "paused"
+                            ? "Waiting for the host to come back…"
+                            : liveLinkDropped(boardSyncStatus)
+                              ? "Reconnecting…"
+                              : "Not connected"
+                    : `${
+                        titleError ??
+                        (titleStatus === "saving"
+                          ? "Renaming…"
+                          : titleStatus === "saved"
+                            ? "Renamed"
+                            : persistentSaveStatus === "saving"
+                              ? "Saving…"
+                              : persistentSaveStatus === "error"
+                                ? "Save interrupted"
+                                : "Saved")
+                      }${
+                        // The host's board saves either way; say when guests stop seeing it.
+                        !activeBoardSessionId
+                          ? ""
+                          : boardSyncStatus === "ended" || boardSyncStatus === "rejected"
+                            ? " · Live session ended"
+                            : liveLinkDropped(boardSyncStatus) || boardSyncStatus === "paused"
+                              ? " · Live link reconnecting…"
+                              : ""
+                      }`}
                 </span>
               </div>
             </div>

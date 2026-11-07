@@ -58,6 +58,58 @@ const MAX_EVENTS_PER_BATCH = 500;
  * (Settings → Sessions) stops a link at once.
  */
 export const JOIN_LINK_TTL_SECONDS = 2 * 60 * 60;
+/**
+ * A realtime ticket admits one live-board socket and travels in its URL, so
+ * it stays short. The board trades it for a fresh one before it runs out
+ * (POST /sessions/:id/ticket), so a session outlives any one ticket.
+ */
+const REALTIME_TICKET_TTL_SECONDS = 30 * 60;
+/**
+ * A live session's refresh token, which trades for fresh realtime tickets,
+ * outlives the session's whole six-hour life. It only travels in JSON bodies.
+ */
+const REALTIME_REFRESH_TTL_SECONDS = 12 * 60 * 60;
+/** How long past expiry a genuine ticket is still recognised as expired rather than forged. */
+const EXPIRED_TICKET_RECOGNITION_SECONDS = 12 * 60 * 60;
+/** Most missed events one catch-up page returns (PostgREST's row cap); the board pages on. */
+const MAX_CATCH_UP_EVENTS = 1_000;
+
+/** A session the store says doesn't exist answers 404; a failing store, 503 to retry. */
+function sessionLookupStatus(error: unknown): { status: number; error: string } {
+  return error instanceof Error && error.message === "SESSION_NOT_FOUND"
+    ? { status: 404, error: "SESSION_NOT_FOUND" }
+    : { status: 503, error: "SESSION_LOOKUP_FAILED" };
+}
+
+/** Closes a socket a few seconds from now, so a client that retries at once can't flood the store. */
+function closeAfterPause(socket: { close(code: number, reason: string): void }, code: number, reason: string): void {
+  const timer = setTimeout(() => {
+    try {
+      socket.close(code, reason);
+    } catch {
+      // Already closed.
+    }
+  }, 5_000);
+  (timer as { unref?: () => void }).unref?.();
+}
+
+/** One participant's realtime ticket and the refresh token that renews it. */
+function liveCredentials(
+  secret: string,
+  claims: { sub: string; organizationId?: string; sessionId: string; participantId: string },
+): { realtimeTicket: string; refreshToken: string } {
+  return {
+    realtimeTicket: issueSignedToken(secret, { purpose: "realtime", ...claims, ttlSeconds: REALTIME_TICKET_TTL_SECONDS }),
+    refreshToken: issueSignedToken(secret, { purpose: "realtime_refresh", ...claims, ttlSeconds: REALTIME_REFRESH_TTL_SECONDS }),
+  };
+}
+
+/** Why a session can't be joined: locked until its owner returns, or over. */
+function notJoinableReason(session: BoardSession): "SESSION_LOCKED" | "SESSION_NOT_JOINABLE" {
+  return session.status === "locked" && new Date(session.expiresAt).getTime() > Date.now()
+    ? "SESSION_LOCKED"
+    : "SESSION_NOT_JOINABLE";
+}
 
 export async function buildServer(
   config: ApiConfig,
@@ -354,13 +406,11 @@ export async function buildServer(
       return {
         ...result,
         sceneVersion: BOARD_SCENE_VERSION,
-        realtimeTicket: issueSignedToken(config.sessionSigningSecret, {
-          purpose: "realtime",
+        ...liveCredentials(config.sessionSigningSecret, {
           sub: account.profileId,
           organizationId: account.organizationId,
           sessionId: result.session.id,
           participantId: result.ownerParticipant.id,
-          ttlSeconds: 30 * 60,
         }),
         joinToken: issueSignedToken(config.sessionSigningSecret, {
           purpose: "join",
@@ -418,13 +468,11 @@ export async function buildServer(
       return {
         ...result,
         sceneVersion: BOARD_SCENE_VERSION,
-        realtimeTicket: issueSignedToken(config.sessionSigningSecret, {
-          purpose: "realtime",
+        ...liveCredentials(config.sessionSigningSecret, {
           sub: result.participant.id,
           ...(join.organizationId ? { organizationId: join.organizationId } : {}),
           sessionId: result.session.id,
           participantId: result.participant.id,
-          ttlSeconds: 30 * 60,
         }),
       };
     } catch (error) {
@@ -450,13 +498,11 @@ export async function buildServer(
       participant,
       sceneVersion: BOARD_SCENE_VERSION,
       state: await store.getState(owned.session.id),
-      realtimeTicket: issueSignedToken(config.sessionSigningSecret, {
-        purpose: "realtime",
+      ...liveCredentials(config.sessionSigningSecret, {
         sub: owned.account.profileId,
         organizationId: owned.account.organizationId,
         sessionId: owned.session.id,
         participantId: participant.id,
-        ttlSeconds: 30 * 60,
       }),
     };
   });
@@ -477,6 +523,102 @@ export async function buildServer(
         ttlSeconds: JOIN_LINK_TTL_SECONDS,
       }),
     };
+  });
+
+  // Trades a refresh token (never in a URL, unlike the realtime ticket) for a
+  // fresh realtime ticket while its holder is still in a session that is
+  // open. The board does this before its ticket runs out, so live sync and the
+  // heartbeat keep working for the whole meeting; ending the session stops it.
+  // The owner must also be signed in: their return revives a session locked
+  // while they were away, as their heartbeat does.
+  server.post<{
+    Params: { sessionId: string };
+    Body: { refreshToken?: unknown };
+  }>("/sessions/:sessionId/ticket", async (request, reply) => {
+    if (!(await boardReadLimiter.allow(callerKey(request)))) {
+      return reply.code(429).send({ error: "RATE_LIMITED" });
+    }
+    const presented = typeof request.body?.refreshToken === "string" ? request.body.refreshToken : "";
+    const ticket = presented ? verifySignedToken(config.sessionSigningSecret, presented, "realtime_refresh") : null;
+    if (!ticket?.participantId || ticket.sessionId !== request.params.sessionId) {
+      return reply.code(401).send({ error: "REFRESH_TOKEN_REQUIRED" });
+    }
+    let session: BoardSession;
+    let participant: Participant | null;
+    try {
+      session = await store.getSession(request.params.sessionId);
+      participant = await store.getParticipant(session.id, ticket.participantId);
+    } catch (error) {
+      const refusal = sessionLookupStatus(error);
+      return reply.code(refusal.status).send({ error: refusal.error });
+    }
+    if (!participant || participant.boardSessionId !== session.id) {
+      return reply.code(404).send({ error: "PARTICIPANT_NOT_IN_SESSION" });
+    }
+    if (participant.role === "owner") {
+      const account = await auth.authenticate(request, { allowInstallation: true });
+      if (!account || account.profileId !== session.ownerUserId) {
+        return reply.code(401).send({ error: "OWNER_AUTH_REQUIRED" });
+      }
+      if (session.status !== "ended") {
+        try {
+          session = await store.heartbeat(session.id, participant.id);
+        } catch {
+          return reply.code(503).send({ error: "SESSION_LOOKUP_FAILED" });
+        }
+      }
+    }
+    if (!canJoinBoard(session)) {
+      return reply.code(409).send({ error: notJoinableReason(session) });
+    }
+    return {
+      realtimeTicket: issueSignedToken(config.sessionSigningSecret, {
+        purpose: "realtime",
+        sub: ticket.sub,
+        ...(ticket.organizationId ? { organizationId: ticket.organizationId } : {}),
+        sessionId: session.id,
+        participantId: participant.id,
+        ttlSeconds: REALTIME_TICKET_TTL_SECONDS,
+      }),
+      expiresInSeconds: REALTIME_TICKET_TTL_SECONDS,
+    };
+  });
+
+  // The events a board missed while its socket was away, after the last
+  // sequence it applied, a page of at most MAX_CATCH_UP_EVENTS at a time; the
+  // board asks again until it reaches latestSequence. The ticket goes in the
+  // body, not the URL.
+  server.post<{
+    Params: { sessionId: string };
+    Body: { realtimeTicket?: unknown; after?: unknown };
+  }>("/sessions/:sessionId/events", async (request, reply) => {
+    if (!(await boardReadLimiter.allow(callerKey(request)))) {
+      return reply.code(429).send({ error: "RATE_LIMITED" });
+    }
+    const presented = typeof request.body?.realtimeTicket === "string" ? request.body.realtimeTicket : "";
+    const ticket = presented ? verifySignedToken(config.sessionSigningSecret, presented, "realtime") : null;
+    if (!ticket || ticket.sessionId !== request.params.sessionId) {
+      return reply.code(401).send({ error: "REALTIME_TICKET_REQUIRED" });
+    }
+    const after = request.body?.after;
+    if (typeof after !== "number" || !Number.isSafeInteger(after) || after < 0) {
+      return reply.code(400).send({ error: "INVALID_AFTER" });
+    }
+    try {
+      const latestSequence = await store.getLatestSequence(request.params.sessionId);
+      if (latestSequence <= after) return { events: [], latestSequence };
+      return {
+        events: await store.getEventsInRange(
+          request.params.sessionId,
+          after + 1,
+          Math.min(latestSequence, after + MAX_CATCH_UP_EVENTS),
+        ),
+        latestSequence,
+      };
+    } catch (error) {
+      const refusal = sessionLookupStatus(error);
+      return reply.code(refusal.status).send({ error: refusal.error });
+    }
   });
 
   server.post<{
@@ -559,7 +701,14 @@ export async function buildServer(
     const participantId = ticket?.participantId ?? null;
 
     if (!boardSessionId || !participantId) {
-      socket.close(1008, "A valid realtime ticket is required");
+      // A genuine ticket that has only run out: the board trades it for a
+      // fresh one and reconnects, rather than giving up.
+      const expired =
+        ticketValue &&
+        verifySignedToken(config.sessionSigningSecret, ticketValue, "realtime", {
+          acceptExpiredForSeconds: EXPIRED_TICKET_RECOGNITION_SECONDS,
+        });
+      socket.close(1008, expired ? "TICKET_EXPIRED" : "A valid realtime ticket is required");
       return;
     }
 
@@ -677,11 +826,15 @@ export async function buildServer(
           return;
         }
         if (!canJoinBoard(auth.session)) {
-          denyAndClose(1008, "SESSION_NOT_JOINABLE");
+          denyAndClose(1008, notJoinableReason(auth.session));
           return;
         }
-      } catch {
-        denyAndClose(1008, "SESSION_NOT_FOUND");
+      } catch (error) {
+        // A failing store is temporary: close so the board retries (1011),
+        // rather than refuse it for good (1008). The pause first keeps older
+        // boards, which retry within a second, off a database that's struggling.
+        if (sessionLookupStatus(error).status === 404) denyAndClose(1008, "SESSION_NOT_FOUND");
+        else closeAfterPause(socket, 1011, "SESSION_LOOKUP_FAILED");
         return;
       }
 
@@ -705,7 +858,11 @@ export async function buildServer(
         cancelOwnerAbsenceLock();
       }
 
-      socket.on("message", async (rawMessage) => {
+      // One socket's messages are handled in the order they arrived: two
+      // batches sent back to back must be stored in that order, or a change
+      // can land before the one it depends on.
+      let messageQueue: Promise<void> = Promise.resolve();
+      const handleMessage = async (rawMessage: { toString(): string }) => {
         const payload = safeParse(rawMessage.toString());
         // Accept a single event or a compound batch. A batch is authorized and
         // appended atomically so its events keep a contiguous sequence block.
@@ -763,8 +920,9 @@ export async function buildServer(
         let auth: { session: BoardSession; participant: Participant } | null;
         try {
           auth = await resolveAuth();
-        } catch {
-          denyAndClose(1008, "SESSION_NOT_FOUND");
+        } catch (error) {
+          if (sessionLookupStatus(error).status === 404) denyAndClose(1008, "SESSION_NOT_FOUND");
+          else closeAfterPause(socket, 1011, "SESSION_LOOKUP_FAILED");
           return;
         }
 
@@ -858,6 +1016,11 @@ export async function buildServer(
           broadcast(room, { type: "board.event", event });
         }
         fanOut.publish(boardSessionId, events);
+      };
+      socket.on("message", (rawMessage) => {
+        messageQueue = messageQueue
+          .then(() => handleMessage(rawMessage))
+          .catch((error: unknown) => server.log.error({ err: error, boardSessionId }, "board message failed"));
       });
 
       socket.on("close", () => {

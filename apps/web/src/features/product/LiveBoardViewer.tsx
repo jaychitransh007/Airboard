@@ -3,11 +3,27 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { applyBoardEvent, type BoardState } from "@airboard/core";
-import { startBoardSync, type BoardSyncHandle } from "../board/boardSync";
+import { startBoardSync, type BoardSyncHandle, type BoardSyncStatus } from "../board/boardSync";
 import { AIRBOARD_API_URL } from "../../platform/config";
 import { BoardViewer } from "../share/BoardViewer";
 
 const NO_IMAGES = [] as const;
+
+const VIEW_ONLY_NOTICE = "The host has set this live board to view only. You can edit if they let people edit.";
+
+/** What a viewer reads while the live link is down or over; null while it is live. */
+function liveNotice(status: BoardSyncStatus | null): string | null {
+  if (status === "ended" || status === "rejected") {
+    return "This live session has ended. The board shows how it was left.";
+  }
+  if (status === "paused") {
+    return "Waiting for the host to come back… The board picks up where it left off.";
+  }
+  if (status === "reconnecting" || status === "closed" || status === "error") {
+    return "Reconnecting to the live board… Changes will appear once it's back.";
+  }
+  return null;
+}
 
 /**
  * A live board its host has set to "Can view": the board as it changes, to
@@ -32,6 +48,7 @@ export function LiveBoardViewer({
   onJoinFailed: (message: string) => void;
 }) {
   const [state, setState] = useState<BoardState | null>(null);
+  const [status, setStatus] = useState<BoardSyncStatus | null>(null);
   const callbacksRef = useRef({ onEditingAllowed, onJoinFailed });
   callbacksRef.current = { onEditingAllowed, onJoinFailed };
 
@@ -58,6 +75,12 @@ export function LiveBoardViewer({
         },
         onSessionPermission: (allow) => {
           if (!cancelled && allow) callbacksRef.current.onEditingAllowed();
+        },
+        onStatus: (next) => {
+          if (!cancelled) setStatus(next);
+        },
+        onResync: (resynced) => {
+          if (!cancelled) setState(resynced);
         },
       },
     )
@@ -88,7 +111,7 @@ export function LiveBoardViewer({
       title="Live board"
       state={state}
       images={NO_IMAGES}
-      notice="The host has set this live board to view only. You can edit if they let people edit."
+      notice={<span role="status">{liveNotice(status) ?? VIEW_ONLY_NOTICE}</span>}
       actions={<Link className="button" href="/">Leave</Link>}
     />
   );
