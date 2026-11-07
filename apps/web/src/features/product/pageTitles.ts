@@ -16,7 +16,6 @@ export const SETTINGS_SECTIONS = [
 ] as const;
 
 const APP_SECTION_TITLES: Record<string, string> = {
-  templates: "Templates",
   activity: "Activity",
   shared: "Shared boards",
   trash: "Trash",

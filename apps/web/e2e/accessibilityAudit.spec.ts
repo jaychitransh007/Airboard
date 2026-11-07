@@ -148,7 +148,6 @@ const SIGNED_IN_PAGES = [
   "/app/boards",
   "/app/shared",
   "/app/trash",
-  "/app/templates",
   "/app/activity",
   "/app/integrations",
   "/app/billing",
@@ -302,7 +301,10 @@ test("at 320px the More menu reaches every page the sidebar holds", async ({ pag
   await page.keyboard.press("Enter");
   await expect(more).toHaveAttribute("aria-expanded", "true");
   const menu = page.getByRole("list", { name: "More pages" });
-  for (const name of ["Integrations", "Activity", "Members", "Policies", "Audit log", "Help center", "Plan & billing", "Settings"]) {
+  // The bar holds the first four main pages (Integrations is the fourth in a
+  // team workspace); More holds the rest.
+  await expect(bar.getByRole("link", { name: "Integrations", exact: true })).toBeVisible();
+  for (const name of ["Activity", "Members", "Policies", "Audit log", "Help center", "Plan & billing", "Settings"]) {
     await expect(menu.getByRole("link", { name, exact: true })).toBeVisible();
   }
   await expect(bar.getByRole("button", { name: "Sign out" })).toBeVisible();

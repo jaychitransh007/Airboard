@@ -18,7 +18,7 @@ This document describes the implemented customer journey, its operating data, an
 
 ### Public
 
-- `/`, `/product`, `/pricing`, `/enterprise`, `/templates`, `/demo`, `/download`
+- `/`, `/product`, `/pricing`, `/enterprise`, `/demo`, `/download`
 - `/integrations` and `/integrations/google-meet|zoom|teams|standalone`
 - `/use-cases/sales|engineering|teaching|consulting|workshops`
 - `/security`, `/help`, `/help/:category/:article`, `/support`, `/status`, `/changelog`
@@ -29,7 +29,7 @@ This document describes the implemented customer journey, its operating data, an
 ### Authenticated product
 
 - `/onboarding`, `/app`, `/app/boards`, `/app/boards/:id`, `/app/boards/new`, `/app/boards/live`
-- `/app/templates`, `/app/activity`, `/app/integrations`, `/app/billing`
+- `/app/activity`, `/app/integrations`, `/app/billing`
 - `/app/settings/profile|preferences|connected-apps|notifications|privacy-data|sessions`
 - `/app/admin/overview|members|policies|identity-directory|installations|audit-logs`
 

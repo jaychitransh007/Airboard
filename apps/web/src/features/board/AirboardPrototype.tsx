@@ -144,7 +144,6 @@ import { SceneTextEditor } from "./SceneTextEditor";
 import { ShareDialog, type BoardShareAccess, type LiveLinkControls } from "./ShareDialog";
 import { forgetLiveSession, liveBoardLink, liveStartFailure, rememberedLiveSession, rememberLiveSession, type LiveStartFailure } from "./shareLinks";
 import { blockedMediaHelp, deniedMediaHelp } from "./mediaPermissionHelp";
-import { boardTemplate } from "./boardTemplates";
 import { ScenePlaybackOverlay } from "./ScenePlaybackOverlay";
 import {
   ALL_SHAPES,
@@ -676,7 +675,6 @@ export function AirboardPrototype({
   boardTitle = "Untitled Airboard",
   persistentSaveStatus = "saved",
   initialPreferences,
-  initialTemplateId,
   shareAccess,
   liveGuest = false,
   participantName,
@@ -732,8 +730,6 @@ export function AirboardPrototype({
     videoEnabled?: boolean;
     audioEnabled?: boolean;
   };
-  /** Starter template to build once on a new, empty board (see boardTemplates). */
-  initialTemplateId?: string;
   /** Who can open the saved board; drives the Share dialog's access section. */
   shareAccess?: BoardShareAccess;
   /** Joined from a live link: no saved board, so the chrome shows live status instead. */
@@ -3315,48 +3311,6 @@ export function AirboardPrototype({
     },
     [currentViewportLimits, render],
   );
-
-  // Build a chosen starter template on mount, before the live session opens, so
-  // the session receives it in its single opening snapshot rather than as a
-  // burst of edits that contend for the server's sequence. It runs the
-  // template's ordinary Airo commands, then frames the result beside the panel.
-  const templateAppliedRef = useRef(false);
-  useEffect(() => {
-    const template = boardTemplate(initialTemplateId);
-    if (!template || templateAppliedRef.current) return;
-    templateAppliedRef.current = true;
-    const startedEmpty = !Object.values(boardRef.current.elements).some(
-      (element) => element.status === "active",
-    );
-    if (startedEmpty) {
-      for (const command of template.commands) {
-        const intent = parseBoardSceneIntent(command);
-        if (intent) executeSceneIntent(intent);
-      }
-      setSelectedElementId(null);
-      setSelectedElementIds([]);
-      const placed = Object.values(boardRef.current.elements).filter(
-        (element) => element.status === "active" && element.kind !== "connector",
-      );
-      if (placed.length > 0) {
-        const limits = currentViewportLimits();
-        applyViewport(fitViewportToBounds(sceneElementUnionBounds(placed, 0), limits, {
-          rightInset: copilotRightInset(copilotStartsOpen(), limits.canvasWidth),
-        }));
-      }
-      setCommandFeedback(`Built the ${template.title} template. Double-click anything to change its text.`);
-    }
-    const url = new URL(window.location.href);
-    if (url.searchParams.has("template")) {
-      url.searchParams.delete("template");
-      window.history.replaceState(window.history.state, "", url);
-    }
-  }, [
-    applyViewport,
-    currentViewportLimits,
-    executeSceneIntent,
-    initialTemplateId,
-  ]);
 
   // A board opens framed on its content when part of it would start off
   // screen, as boards made on a laptop do on a phone. Content already in view
