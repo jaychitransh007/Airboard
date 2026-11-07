@@ -63,7 +63,7 @@ These are fixable in the repo and each would make a public "supported product" c
 | RGB-041 | Airo throws away a whole plan when the model asks to spread out only two shapes (found 2026-11-07 on the live site: "put the user and the API side by side, lined up along the top, and group them as front end" twice gave "the intent provider returned an invalid plan", logged as "Expected 3 to 20 object references") | Done and deployed 2026-11-07 (API `launch-637bd84`): the tool schema gives align and layout at least 2 targets and distribute at least 3 (or the selection alone), matching the validator, and prompt 2.13 says two shapes side by side is a layout or an align | Engineering | Verified on the live site | `packages/core/src/semanticPlan.ts`: the JSON schema gives `distribute` the generic reference list (`minItems: 1`), while `validateSemanticPlan` requires 3; `apps/api/src/semanticIntent/openaiResponses.ts` prompt | None. |
 | RGB-042 | Airo voice reached only about 4 people at a time, and switched off for good at 30 minutes, on every deploy, on a network drop or when Deepgram closed the stream (found 2026-11-07 in the MLP launch audit) | Done and deployed 2026-11-07 (`launch-306c7a5`) | Engineering | Verified in tests (real voice client against the real API routes) and in production smoke checks; not yet tried with a real microphone | `apps/api/src/config.ts` `maxConcurrentStreams` defaulted to 4 per instance and production never set it; `realtimeSpeech.ts` ended the session on any close; Cloud Run concurrency 80 counted each voice user's two sockets | 50 voice streams per instance (Deepgram allows 150 per project; 3 instances), API concurrency 250, and the browser reconnects on its own with the microphone kept open. Still owed by the founder: confirm the Deepgram key is on the account's main project (secondary self-serve projects get one stream) and set Deepgram and OpenAI spend limits. |
 | RGB-043 | A brand-new user who opened Templates before making a board was told "Your pilot access has ended": Templates created boards without starting the free trial (found 2026-11-07 in the MLP launch audit) | Done and deployed 2026-11-07 (web `launch-4ae4227`; founder's decision for minimum scope): Templates removed from the app and the public site | Product / Engineering | Verified in tests | `ProductSection.tsx` Templates posted to `/boards` without `/trial/activate`; `boardTemplates.ts` built the diagram on mount | None. Every new board starts from New Airboard, which starts the trial. |
-| RGB-044 | Nothing capped total provider spend: each Google account got its own free daily allowance, so many accounts together could run up the OpenAI and Deepgram bills, and voice streams didn't opt out of Deepgram's model-improvement programme (threat model X-1, V-4) | Done 2026-11-07, not deployed yet | Engineering / Founder | Verified in tests and on a local database | `apps/api/src/dailyUsage.ts` counted only per person; `deepgramFluxProtocol.ts` set no `mip_opt_out` | A service-wide daily ceiling (5,000 Airo model commands, 3,000 voice minutes, tunable) and `mip_opt_out=true` on every Deepgram stream. Still owed by the founder: spend limits in the OpenAI and Deepgram consoles, which need the founder's sign-in. |
+| RGB-044 | Nothing capped total provider spend: each Google account got its own free daily allowance, so many accounts together could run up the OpenAI and Deepgram bills, and voice streams didn't opt out of Deepgram's model-improvement programme (threat model X-1, V-4) | Done and deployed 2026-11-07 (`launch-99ae9d0`; console limits still owed by the founder) | Engineering / Founder | Verified in tests, on a local database and in production | `apps/api/src/dailyUsage.ts` counted only per person; `deepgramFluxProtocol.ts` set no `mip_opt_out` | A service-wide daily ceiling (5,000 Airo model commands, 3,000 voice minutes, tunable) and `mip_opt_out=true` on every Deepgram stream. Still owed by the founder: spend limits in the OpenAI and Deepgram consoles, which need the founder's sign-in. |
 | RGB-014 | New `catalogDock` E2E is uncommitted & never run; CI can't show E2E is a required merge check | Done 2026-11-05 | Engineering | Verified | `apps/web/e2e/catalogDock.spec.ts` (uncommitted, +235 lines); Playwright not in the fast verify path | Run it before committing the dock diff; make the E2E job a required check on the release branch. |
 
 ### Security hardening (mediums)
@@ -1246,7 +1246,7 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - The owner's signed-in sidebar shows Overview, Boards, Integrations and Activity.
     - The `launch-306c7a5-web` tag was removed.
   - **Rollback:** the web to `launch-306c7a5`.
-- **2026-11-07** — RGB-044 (not deployed yet): a ceiling on total provider spend, and voice audio opted out of Deepgram's model training.
+- **2026-11-07** — RGB-044: a ceiling on total provider spend, and voice audio opted out of Deepgram's model training.
   - **Service-wide daily ceiling:**
     - Migration `20261107150000_service_daily_usage` adds `service_daily_usage` and `consume_daily_usage_with_service_limit`.
     - In one transaction, the function charges the person's allowance and the service's daily total together, both or neither. A person refused for their own allowance never counts against the service. A person refused for the service gets their own charge back.
@@ -1261,3 +1261,19 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - **Still needed, founder's sign-in:**
     - A monthly spend limit in the OpenAI console (Settings → Limits).
     - A budget or no automatic top-up in the Deepgram console.
+- **2026-11-07** — Deployed RGB-044: both services serve `launch-99ae9d0`, after migration `20261107150000_service_daily_usage` was applied to Mumbai, with the founder's approval.
+  - **Migration:**
+    - Only that file was pending.
+    - With the public publishable key, PostgREST refuses both the new function and the table with 42501 permission denied.
+  - **Staged API:**
+    - It reported ready, refused signed-out calls with 401 and malformed JSON with 400.
+    - It kept concurrency 250 and max 3 instances.
+  - **Staged web:** it served its pages with the security headers, and its bundle carries the SERVICE_AIRO_LIMIT message and the SERVICE_VOICE_LIMIT final code.
+  - **Promotion:** web first, then the API.
+  - **After promotion:**
+    - The launch check reports READY, 21 of 21.
+    - On a test board in the owner's account, "add a user" and then "could you put an API to the right of the user and connect them" reached Luna through `/intent/resolve` (200, "semantic intent completed"). The board showed the API to the right of the user, connected.
+    - The new revision logged no "could not be counted" warning, so the API's service role called the new function successfully.
+    - The test board is in Trash. The `launch-306c7a5-api` and `launch-4ae4227-web` tags were removed.
+  - **Rollback:** the API to `launch-306c7a5` and the web to `launch-4ae4227`. The old API ignores the new table.
+
