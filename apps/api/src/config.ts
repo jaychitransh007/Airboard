@@ -54,6 +54,8 @@ export type ApiConfig = {
   };
   /** Per-person daily allowances for the paid providers, held in the database across instances. */
   dailyUsage: DailyUsageLimits;
+  /** Daily totals for everyone together, a ceiling on provider spend however many accounts sign up. */
+  serviceDailyUsage: DailyUsageLimits;
   supabaseUrl?: string;
   supabaseServiceRoleKey?: string;
   stripe: {
@@ -213,6 +215,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       airoCommands: parseNumber(env.AIRBOARD_DAILY_AIRO_COMMANDS, 500, 1, 1_000_000, "AIRBOARD_DAILY_AIRO_COMMANDS"),
       voiceSeconds:
         60 * parseNumber(env.AIRBOARD_DAILY_VOICE_MINUTES, 240, 1, 24 * 60, "AIRBOARD_DAILY_VOICE_MINUTES"),
+    },
+    // However many accounts sign up, Airo and voice together stop here each
+    // UTC day. 3,000 voice minutes is about US$23 a day at Deepgram's Flux
+    // rate of US$0.0077 a minute. Raise these as real use grows.
+    serviceDailyUsage: {
+      airoCommands: parseNumber(
+        env.AIRBOARD_SERVICE_DAILY_AIRO_COMMANDS,
+        5_000,
+        1,
+        10_000_000,
+        "AIRBOARD_SERVICE_DAILY_AIRO_COMMANDS",
+      ),
+      voiceSeconds:
+        60 *
+        parseNumber(env.AIRBOARD_SERVICE_DAILY_VOICE_MINUTES, 3_000, 1, 10_000_000, "AIRBOARD_SERVICE_DAILY_VOICE_MINUTES"),
     },
     ...(env.SUPABASE_URL ? { supabaseUrl: env.SUPABASE_URL } : {}),
     ...(env.SUPABASE_SERVICE_ROLE_KEY

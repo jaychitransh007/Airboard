@@ -228,6 +228,7 @@ test("builds a Flux V2 URL and Configure message with repeated keyterms", () => 
   assert.equal(url.searchParams.get("sample_rate"), "16000");
   assert.deepEqual(url.searchParams.getAll("keyterm"), ["Airo", "payment service"]);
   assert.deepEqual(url.searchParams.getAll("language_hint"), ["en"]);
+  assert.equal(url.searchParams.get("mip_opt_out"), "true", "meeting audio stays out of Deepgram's model training");
 
   assert.deepEqual(buildDeepgramFluxConfigureMessage(options, tuning), {
     type: "Configure",

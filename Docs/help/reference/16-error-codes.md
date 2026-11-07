@@ -51,6 +51,8 @@ ID before retrying.
 | `TRANSCRIPTION_RECONNECT_FAILED` | Airo's voice connection dropped and couldn't come back. | Check your network, then press ⏻ (Resume voice) on the Airo panel. Typed commands still work. |
 | `DAILY_VOICE_LIMIT` | You've used today's Airo voice minutes. Each person has a daily allowance. | Use typed commands; voice comes back at midnight UTC. |
 | `DAILY_AIRO_LIMIT` | You've reached today's limit for Airo commands that need its language model. | Built-in commands still work; the limit resets at midnight UTC. |
+| `SERVICE_VOICE_LIMIT` | Airo voice has reached its daily limit for everyone in the pilot. | Use typed commands; voice comes back at midnight UTC. |
+| `SERVICE_AIRO_LIMIT` | Airo has reached its daily limit, for everyone in the pilot, of commands that need its language model. | Built-in commands still work; Airo is back at midnight UTC. |
 | `TRANSCRIPTION_PROVIDER_UNAVAILABLE` | The transcription provider could not be reached. | Airo retries on its own for up to about a minute; meanwhile use typed commands. |
 | `SEMANTIC_INTENT_UNAVAILABLE` | Natural-language recovery is unavailable. | Use a canonical command; deterministic commands still work. |
 | `SEMANTIC_INTENT_RATE_LIMITED` | The semantic provider is temporarily rate limited. | Wait and retry, or use a shorter canonical command. |

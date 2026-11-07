@@ -97,3 +97,13 @@ test("daily allowances and board socket caps have defaults and can be tuned", ()
   assert.equal(tuned.boardSockets.perCaller, 10);
   assert.throws(() => loadConfig({ AIRBOARD_DAILY_VOICE_MINUTES: "0" }), /AIRBOARD_DAILY_VOICE_MINUTES/);
 });
+
+test("the whole service has daily Airo and voice ceilings that can be tuned", () => {
+  assert.deepEqual(loadConfig({}).serviceDailyUsage, { airoCommands: 5_000, voiceSeconds: 3_000 * 60 });
+  const tuned = loadConfig({
+    AIRBOARD_SERVICE_DAILY_AIRO_COMMANDS: "20000",
+    AIRBOARD_SERVICE_DAILY_VOICE_MINUTES: "6000",
+  });
+  assert.deepEqual(tuned.serviceDailyUsage, { airoCommands: 20_000, voiceSeconds: 6_000 * 60 });
+  assert.throws(() => loadConfig({ AIRBOARD_SERVICE_DAILY_VOICE_MINUTES: "0" }), /AIRBOARD_SERVICE_DAILY_VOICE_MINUTES/);
+});

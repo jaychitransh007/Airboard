@@ -18,7 +18,7 @@ import type { AuthService } from "../auth";
 import { clientKey, configuredApiTokenAllowed, createCircuitBreaker, originAllowed } from "../security";
 import { createSharedRateLimiter } from "../sharedRateLimit";
 import { issueSignedToken, verifySignedToken } from "../signedTokens";
-import { createDailyUsage } from "../dailyUsage";
+import { createDailyUsage, type UsageVerdict } from "../dailyUsage";
 import { organizationPolicy } from "../organizationPolicy";
 
 const MAX_PCM16_FRAME_BYTES = 256 * 1024;
@@ -36,6 +36,8 @@ const TRANSCRIPTION_TICKET_TTL_SECONDS = 60;
 const VOICE_CHARGE_SECONDS = 15;
 const DAILY_VOICE_LIMIT_MESSAGE =
   "You've used today's Airo voice minutes. Typed commands still work, and voice comes back at midnight UTC.";
+const SERVICE_VOICE_LIMIT_MESSAGE =
+  "Airo voice has reached today's limit for everyone in the pilot. Typed commands still work, and voice is back at midnight UTC.";
 
 type TranscriptionAuthorization =
   | { allowed: true; profileId: string | null }
@@ -56,8 +58,18 @@ export function registerTranscriptionRoutes(
   // every maxConcurrentStreams slot.
   const streamsByProfile = new Map<string, number>();
   // Daily voice minutes per person, counted in the database across instances.
-  const usage = createDailyUsage(config.dailyUsage ? (auth?.client ?? null) : null, config.dailyUsage, (error) =>
-    server.log.warn({ err: error }, "daily voice allowance could not be counted"),
+  const usage = createDailyUsage(
+    config.dailyUsage ? (auth?.client ?? null) : null,
+    config.dailyUsage,
+    (error) => server.log.warn({ err: error }, "daily voice allowance could not be counted"),
+    {
+      ...(config.serviceDailyUsage ? { service: config.serviceDailyUsage } : {}),
+      onServiceLimitReached: () =>
+        server.log.warn(
+          { limitMinutes: (config.serviceDailyUsage?.voiceSeconds ?? 0) / 60 },
+          "the service's daily voice limit is reached",
+        ),
+    },
   );
   // Connection attempts per caller address; stream caps bound the rest.
   const connectionLimiter = createSharedRateLimiter({
@@ -357,22 +369,24 @@ export function registerTranscriptionRoutes(
       // minutes are used up.
       const owner = streamOwner;
       if (owner) {
-        if ((await usage.consume(owner, "voice_seconds", VOICE_CHARGE_SECONDS)) === "exhausted") {
+        const refusal = voiceLimitRefusal(await usage.consume(owner, "voice_seconds", VOICE_CHARGE_SECONDS));
+        if (refusal) {
           if (openingToken === token) {
             openingToken = null;
             openingAbortController = null;
             startupFrames = [];
             startupBytes = 0;
             releaseStreamSlot();
-            sendError(clientSocket, "DAILY_VOICE_LIMIT", DAILY_VOICE_LIMIT_MESSAGE, true);
+            sendError(clientSocket, refusal.code, refusal.message, true);
           }
           return;
         }
         if (openingToken !== token || closed) return;
         voiceChargeTimer = setInterval(() => {
           void usage.consume(owner, "voice_seconds", VOICE_CHARGE_SECONDS).then((result) => {
-            if (result !== "exhausted" || !voiceChargeTimer) return;
-            sendError(clientSocket, "DAILY_VOICE_LIMIT", DAILY_VOICE_LIMIT_MESSAGE, true);
+            const ended = voiceLimitRefusal(result);
+            if (!ended || !voiceChargeTimer) return;
+            sendError(clientSocket, ended.code, ended.message, true);
             stopActive("aborted");
           });
         }, VOICE_CHARGE_SECONDS * 1_000);
@@ -610,6 +624,13 @@ function rawDataToUint8Array(raw: RawData): Uint8Array {
     return new Uint8Array(raw);
   }
   return raw;
+}
+
+// The person's own allowance, or the service's daily total, is used up.
+function voiceLimitRefusal(verdict: UsageVerdict): { code: string; message: string } | null {
+  if (verdict === "exhausted") return { code: "DAILY_VOICE_LIMIT", message: DAILY_VOICE_LIMIT_MESSAGE };
+  if (verdict === "service_exhausted") return { code: "SERVICE_VOICE_LIMIT", message: SERVICE_VOICE_LIMIT_MESSAGE };
+  return null;
 }
 
 function ticketRefusalStatus(reason: string): number {

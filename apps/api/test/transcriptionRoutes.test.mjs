@@ -71,7 +71,7 @@ const fakeProvider = {
   },
 };
 
-async function startServer(t, { auth, transcription = {}, provider = fakeProvider, dailyUsage } = {}) {
+async function startServer(t, { auth, transcription = {}, provider = fakeProvider, dailyUsage, serviceDailyUsage } = {}) {
   const server = Fastify();
   t.after(() => server.close());
   await server.register(websocket);
@@ -89,6 +89,7 @@ async function startServer(t, { auth, transcription = {}, provider = fakeProvide
         ...transcription,
       },
       ...(dailyUsage ? { dailyUsage } : {}),
+      ...(serviceDailyUsage ? { serviceDailyUsage } : {}),
     },
     auth,
     { provider },
@@ -130,7 +131,7 @@ function connect(url, user) {
     if (socket.readyState === WebSocket.OPEN) send();
     else socket.once("open", send);
   };
-  return { socket, closed, nextMessage, start };
+  return { socket, closed, nextMessage, start, messages };
 }
 
 test("transcription sockets close with ACTIVE_ENTITLEMENT_REQUIRED for unentitled accounts", { timeout: 5_000 }, async (t) => {
@@ -331,6 +332,72 @@ test("voice stops when a person's daily minutes run out", { timeout: 5_000 }, as
   assert.equal(refused.code, "DAILY_VOICE_LIMIT");
   assert.match(refused.message, /midnight UTC/);
   client.socket.close();
+});
+
+test("voice stops for everyone when the service's daily minutes run out", { timeout: 5_000 }, async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const calls = [];
+  let serviceBlocksLeft = 2;
+  const signedIn = fakeAuth({ entitledOrganizations: ["org-a", "org-b"] });
+  const auth = {
+    ...signedIn,
+    client: {
+      ...signedIn.client,
+      async rpc(name, params) {
+        if (name === "consume_rate_limit") return { data: true, error: null };
+        // Each person still has plenty of their own minutes.
+        calls.push({ name, ...params });
+        if (serviceBlocksLeft <= 0) return { data: "service_exhausted", error: null };
+        serviceBlocksLeft -= 1;
+        return { data: "allowed", error: null };
+      },
+    },
+  };
+  let opens = 0;
+  const countingProvider = {
+    ...fakeProvider,
+    async open(...args) {
+      opens += 1;
+      return fakeProvider.open(...args);
+    },
+  };
+  const url = await startServer(t, {
+    auth,
+    provider: countingProvider,
+    dailyUsage: { airoCommands: 500, voiceSeconds: 600 },
+    serviceDailyUsage: { airoCommands: 500, voiceSeconds: 30 },
+  });
+
+  const client = connect(url, "a");
+  client.start();
+  await client.nextMessage("transcription.ready");
+  assert.deepEqual(calls, [{
+    name: "consume_daily_usage_with_service_limit",
+    p_profile_id: "profile-a",
+    p_metric: "voice_seconds",
+    p_amount: 15,
+    p_limit: 600,
+    p_service_limit: 30,
+  }]);
+
+  // The second block uses the service's last minutes; the third ends the stream.
+  t.mock.timers.tick(15_000);
+  await new Promise((resolve) => setImmediate(resolve));
+  t.mock.timers.tick(15_000);
+  const limit = await client.nextMessage("transcription.error");
+  assert.equal(limit.code, "SERVICE_VOICE_LIMIT");
+  assert.equal(limit.fatal, true);
+  assert.match(limit.message, /everyone in the pilot/);
+  await client.nextMessage("transcription.stopped");
+  client.socket.close();
+
+  // Someone else is refused before Deepgram is ever dialled.
+  const other = connect(url, "b");
+  other.start();
+  assert.equal((await other.nextMessage("transcription.error")).code, "SERVICE_VOICE_LIMIT");
+  assert.equal(opens, 1);
+  assert.equal(other.messages.some((message) => message.type === "transcription.ready"), false);
+  other.socket.close();
 });
 
 test("an admin who turns voice off stops new voice tickets for the whole organization", { timeout: 5_000 }, async (t) => {
