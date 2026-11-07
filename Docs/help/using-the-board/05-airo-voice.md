@@ -17,6 +17,12 @@ shows whether realtime voice is available in the current environment. While
 Airo listens, its panel shrinks to a strip in the corner with what it heard,
 what it is doing and a line to type into; **⤢** shows its full activity.
 
+Voice stays on for the whole meeting. If the connection drops, for example on
+a network blip, Airo reconnects on its own and says when it is listening
+again. If nobody has spoken for about 20 minutes, voice pauses so a forgotten
+tab doesn't keep streaming; hold an open palm, or press **⏻** (Resume voice) on the
+Airo panel, to wake it.
+
 ## Address Airo
 
 Use either explicit method:

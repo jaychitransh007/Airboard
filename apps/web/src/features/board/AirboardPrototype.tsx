@@ -144,7 +144,6 @@ import { SceneTextEditor } from "./SceneTextEditor";
 import { ShareDialog, type BoardShareAccess, type LiveLinkControls } from "./ShareDialog";
 import { forgetLiveSession, liveBoardLink, liveStartFailure, rememberedLiveSession, rememberLiveSession, type LiveStartFailure } from "./shareLinks";
 import { blockedMediaHelp, deniedMediaHelp } from "./mediaPermissionHelp";
-import { boardTemplate } from "./boardTemplates";
 import { ScenePlaybackOverlay } from "./ScenePlaybackOverlay";
 import {
   ALL_SHAPES,
@@ -190,6 +189,7 @@ import {
   fetchRealtimeTranscriptionConfig,
   supportsRealtimeSpeech,
   type RealtimeSpeechMetadata,
+  type RealtimeSpeechReconnectCause,
   type RealtimeSpeechSession,
   type RealtimeTranscriptionConfig,
 } from "./realtimeSpeech";
@@ -572,6 +572,17 @@ const CATALOG_DRAG_MIME = "application/x-airboard-tool";
 const CAMERA_PROMPT_HINT_DELAY_MS = 1_500;
 const CAMERA_PROMPT_HINT =
   "Your browser is asking to use the camera. Choose Allow in its prompt near the address bar. No prompt? Another app or tab may be using the camera.";
+/**
+ * When a voice stream reaches the server's time limit and nobody has spoken
+ * for this long, voice pauses instead of reconnecting: the tab is probably
+ * forgotten, and streaming an empty room spends voice minutes.
+ */
+const VOICE_QUIET_PAUSE_MS = 20 * 60_000;
+
+/** The live socket dropped after connecting and is trying again on its own. */
+function liveLinkDropped(status: string): boolean {
+  return status === "reconnecting" || status === "closed" || status === "error";
+}
 const CATALOG_DROP_EXIT_PX = 12;
 const CATALOG_DROP_MIN_TRAVEL_PX = 24;
 const UNDO_TOAST_VISIBLE_MS = 6_000;
@@ -669,7 +680,6 @@ export function AirboardPrototype({
   boardTitle = "Untitled Airboard",
   persistentSaveStatus = "saved",
   initialPreferences,
-  initialTemplateId,
   shareAccess,
   liveGuest = false,
   participantName,
@@ -725,8 +735,6 @@ export function AirboardPrototype({
     videoEnabled?: boolean;
     audioEnabled?: boolean;
   };
-  /** Starter template to build once on a new, empty board (see boardTemplates). */
-  initialTemplateId?: string;
   /** Who can open the saved board; drives the Share dialog's access section. */
   shareAccess?: BoardShareAccess;
   /** Joined from a live link: no saved board, so the chrome shows live status instead. */
@@ -898,6 +906,22 @@ export function AirboardPrototype({
   const headlessCameraRequestedRef = useRef(false);
   const headlessVoiceRequestedCredentialRef = useRef<string | null>(null);
   const headlessVoiceCredentialRef = useRef<string | undefined>(effectiveAccessToken);
+  // The latest sign-in token, so a voice reconnect after a token refresh
+  // still gets a ticket.
+  const latestAccessTokenRef = useRef<string | undefined>(effectiveAccessToken);
+  // Voice ended on its own in a way trying again can fix (it paused after a
+  // quiet stretch, or gave up reconnecting), so an open palm or the Airo
+  // power button brings it back. The ref serves callbacks; the state, labels.
+  const voiceDroppedRef = useRef(false);
+  const [voiceDropped, setVoiceDropped] = useState(false);
+  const markVoiceDropped = useCallback((dropped: boolean) => {
+    voiceDroppedRef.current = dropped;
+    setVoiceDropped(dropped);
+  }, []);
+  const startVoiceCommandRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    latestAccessTokenRef.current = effectiveAccessToken;
+  }, [effectiveAccessToken]);
   const headlessVoiceRetryAttemptRef = useRef(0);
   const headlessVoiceRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const headlessSpeechConfigRetryAttemptRef = useRef(0);
@@ -1788,6 +1812,32 @@ export function AirboardPrototype({
     ],
   );
   const applyRemoteEventRef = useRef(applyRemoteEvent);
+  /**
+   * After a reconnect that missed too much to replay, the session's whole
+   * state replaces the local board. The host saves it, so the guests' changes
+   * made meanwhile reach the saved board.
+   */
+  const applyResyncedBoard = useCallback(
+    (state: BoardState) => {
+      boardRef.current = state;
+      undoStackRef.current = [];
+      setSelectedAnnotationId(null);
+      setSelectedAnnotationIds([]);
+      setSelectedElementId(null);
+      setSelectedElementIds([]);
+      setEditingElementId(null);
+      setSceneRenderVersion((version) => version + 1);
+      refreshRealtimeSpeechKeyterms(state, []);
+      render();
+      updateStats();
+      schedulePersistentSnapshot(state);
+    },
+    [refreshRealtimeSpeechKeyterms, render, schedulePersistentSnapshot, updateStats],
+  );
+  const applyResyncedBoardRef = useRef(applyResyncedBoard);
+  useEffect(() => {
+    applyResyncedBoardRef.current = applyResyncedBoard;
+  }, [applyResyncedBoard]);
   useEffect(() => {
     applyRemoteEventRef.current = applyRemoteEvent;
   }, [applyRemoteEvent]);
@@ -3293,48 +3343,6 @@ export function AirboardPrototype({
     [currentViewportLimits, render],
   );
 
-  // Build a chosen starter template on mount, before the live session opens, so
-  // the session receives it in its single opening snapshot rather than as a
-  // burst of edits that contend for the server's sequence. It runs the
-  // template's ordinary Airo commands, then frames the result beside the panel.
-  const templateAppliedRef = useRef(false);
-  useEffect(() => {
-    const template = boardTemplate(initialTemplateId);
-    if (!template || templateAppliedRef.current) return;
-    templateAppliedRef.current = true;
-    const startedEmpty = !Object.values(boardRef.current.elements).some(
-      (element) => element.status === "active",
-    );
-    if (startedEmpty) {
-      for (const command of template.commands) {
-        const intent = parseBoardSceneIntent(command);
-        if (intent) executeSceneIntent(intent);
-      }
-      setSelectedElementId(null);
-      setSelectedElementIds([]);
-      const placed = Object.values(boardRef.current.elements).filter(
-        (element) => element.status === "active" && element.kind !== "connector",
-      );
-      if (placed.length > 0) {
-        const limits = currentViewportLimits();
-        applyViewport(fitViewportToBounds(sceneElementUnionBounds(placed, 0), limits, {
-          rightInset: copilotRightInset(copilotStartsOpen(), limits.canvasWidth),
-        }));
-      }
-      setCommandFeedback(`Built the ${template.title} template. Double-click anything to change its text.`);
-    }
-    const url = new URL(window.location.href);
-    if (url.searchParams.has("template")) {
-      url.searchParams.delete("template");
-      window.history.replaceState(window.history.state, "", url);
-    }
-  }, [
-    applyViewport,
-    currentViewportLimits,
-    executeSceneIntent,
-    initialTemplateId,
-  ]);
-
   // A board opens framed on its content when part of it would start off
   // screen, as boards made on a laptop do on a phone. Content already in view
   // keeps the viewport the person expects.
@@ -3855,6 +3863,8 @@ export function AirboardPrototype({
         ...(!requestedSessionId && pendingSessionStart ? { pendingStart: pendingSessionStart } : {}),
         ownerUserId: accountUserId ?? OWNER_USER_ID,
         ...(effectiveAccessToken ? { accessToken: effectiveAccessToken } : {}),
+        // The owner's ticket refresh carries their current sign-in.
+        getAccessToken: () => latestAccessTokenRef.current,
         ...(requestedJoinToken ? { joinToken: requestedJoinToken } : {}),
         ...(resumeParticipantId ? { resumeParticipantId } : {}),
         // A saved board's live link lets people watch until its owner lets them edit.
@@ -3880,6 +3890,9 @@ export function AirboardPrototype({
           if (cancelled) return;
           setGuestsCanEdit(allow);
           onGuestEditingChangeRef.current?.(allow);
+        },
+        onResync: (state) => {
+          if (!cancelled) applyResyncedBoardRef.current(state);
         },
         onStatus: (status) => {
           if (cancelled) {
@@ -7291,6 +7304,13 @@ export function AirboardPrototype({
       voiceRouter.openGate(gate);
       syncVoiceGateUi();
       const micArmed = Boolean(speechSessionRef.current);
+      if (!micArmed && voiceDroppedRef.current && startVoiceCommandRef.current) {
+        // Voice paused or dropped on its own; an open palm means the person
+        // wants to talk, so wake it. The gate stays open for the command.
+        startVoiceCommandRef.current();
+        setCommandFeedback("Waking Airo's voice… speak once it's listening.");
+        return;
+      }
       if (gate.mode === "ptt") {
         setCommandFeedback(
           micArmed
@@ -7739,6 +7759,7 @@ export function AirboardPrototype({
       // can report "stopped" synchronously. That intentional stop must never be
       // mistaken for an unexpected provider close by the headless retry path.
       activeSession.stop();
+      markVoiceDropped(false);
       voiceRouter.reset();
       setVoiceGate(null);
       setSpeechArmed(false);
@@ -7847,8 +7868,14 @@ export function AirboardPrototype({
           : "browser_media",
     });
 
+    markVoiceDropped(false);
     if (speechEngine === "realtime") {
       let realtimeSession: RealtimeSpeechSession | null = null;
+      // Why this session's stream is reconnecting, until it listens again,
+      // and whether it has listened yet: a retry before the first listen is
+      // still the first connection, with its first-run hint.
+      let reconnectCause: RealtimeSpeechReconnectCause | null = null;
+      let listenedOnce = false;
       realtimeSession = createRealtimeSpeechSession(
         {
           onReady: (metadata) => {
@@ -7879,6 +7906,16 @@ export function AirboardPrototype({
                 void refreshStandaloneMediaPermissions();
               }
               setSpeechRecognitionStatus("waiting");
+              const resumedFrom = listenedOnce ? reconnectCause : null;
+              reconnectCause = null;
+              listenedOnce = true;
+              if (resumedFrom) {
+                // A time-limit rollover is silent; after a drop, say voice is back.
+                if (resumedFrom !== "rollover") {
+                  setCommandFeedback("Airo is listening again.");
+                }
+                return;
+              }
               const metadata = realtimeSession?.getMetadata();
               setCommandFeedback(
                 `Airo is listening${metadata ? ` via ${metadata.provider} / ${metadata.model}` : ""}. Say “Airo, add a user.”`,
@@ -7924,6 +7961,20 @@ export function AirboardPrototype({
               finalizationReported: true,
             });
           },
+          onReconnecting: (cause) => {
+            reconnectCause = cause;
+            setSpeechRecognitionStatus("waiting");
+            if (cause === "busy") {
+              setCommandFeedback(
+                "Airo's voice is busy right now. Retrying in a moment; typed commands still work.",
+              );
+            } else if (cause === "dropped") {
+              setCommandFeedback("Reconnecting Airo's voice…");
+            }
+          },
+          onReconnected: (metadata) => {
+            setRealtimeSpeechMetadata(metadata);
+          },
           onProviderStatus: (event) => {
             if (event.provider && event.model) {
               setRealtimeSpeechMetadata((current) => ({
@@ -7951,7 +8002,7 @@ export function AirboardPrototype({
               "Your network is slow, so some microphone audio was dropped. A command may be cut off — pause briefly and say it again.",
             );
           },
-          onEnd: (reason) => {
+          onEnd: (reason, detail) => {
             // A rotated credential or model switch may already have installed
             // a replacement session. The stale callback must not attribute its
             // close to the new voice turn or reset the new session's router/UI.
@@ -7970,6 +8021,17 @@ export function AirboardPrototype({
             speechSessionRef.current = null;
             setSpeechListening(false);
             setSpeechArmed(false);
+            // Only an end that trying again can fix lets a palm or the power
+            // button bring voice back; a used-up allowance, an admin's switch
+            // or a blocked microphone must not restart it on every palm.
+            markVoiceDropped(detail?.wakeable === true);
+            if (reason === "paused") {
+              setSpeechRecognitionStatus("idle");
+              setCommandFeedback(
+                "Airo's voice paused after a long quiet stretch. Hold an open palm or press ⏻ to resume; typed commands still work.",
+              );
+              return;
+            }
             const shouldRetryHeadless =
               shouldRetryHeadlessMeetVoiceAfterEnd(
                 headlessMeetOverlay,
@@ -7997,6 +8059,12 @@ export function AirboardPrototype({
         {
           apiBaseUrl: AIRBOARD_API_URL,
           ...(effectiveAccessToken ? { accessToken: effectiveAccessToken } : {}),
+          getAccessToken: () => latestAccessTokenRef.current,
+          // Server restarts, network drops, a busy server and the per-stream
+          // time limit replace the stream instead of ending voice, and a
+          // forgotten, quiet tab stops streaming. The Meet overlay keeps its
+          // own retry loop (scheduleHeadlessVoiceRetry) instead.
+          ...(headlessMeetOverlay ? {} : { reconnect: true, quietPauseMs: VOICE_QUIET_PAUSE_MS }),
           language: typeof navigator === "undefined" ? "en-US" : navigator.language,
           model:
             selectedSpeechModelRef.current ||
@@ -8196,6 +8264,7 @@ export function AirboardPrototype({
     dispatchVoiceDecision,
     effectiveAccessToken,
     headlessMeetOverlay,
+    markVoiceDropped,
     realtimeTranscriptionConfig?.defaultModel,
     realtimeTranscriptionConfig?.dynamicKeyterms,
     refreshStandaloneMediaPermissions,
@@ -8212,6 +8281,10 @@ export function AirboardPrototype({
     voiceCaptureAvailable,
     voiceRouter,
   ]);
+
+  useEffect(() => {
+    startVoiceCommandRef.current = startVoiceCommand;
+  }, [startVoiceCommand]);
 
   const toggleVoiceInput = useCallback(() => {
     if (standaloneEditor && (speechSessionRef.current || speechArmed)) {
@@ -8546,6 +8619,7 @@ export function AirboardPrototype({
     // Turning Airo on starts from the strip; turning it off leaves the full panel.
     setCopilotExpanded(false);
     if (airoInputsActive) {
+      markVoiceDropped(false);
       if (airoVoiceAvailable && speechArmed) {
         toggleVoiceInput();
       }
@@ -8570,11 +8644,18 @@ export function AirboardPrototype({
     airoInputsActive,
     airoVoiceAvailable,
     cameraStatus,
+    markVoiceDropped,
     setCopilotVisibility,
     speechArmed,
     toggleCameraInput,
     toggleVoiceInput,
   ]);
+
+  // Hands stayed on while voice paused or gave up reconnecting: the power
+  // button resumes voice instead of turning everything off. The board menu
+  // still turns everything off.
+  const airoVoiceResumable =
+    airoInputsActive && voiceDropped && airoVoiceAvailable && !speechArmed;
 
   useEffect(() => {
     if (
@@ -10877,7 +10958,9 @@ export function AirboardPrototype({
                     liveGuest
                       ? boardSyncStatus === "connected"
                         ? "saved"
-                        : boardSyncStatus === "connecting" || boardSyncStatus === "reconnecting"
+                        : boardSyncStatus === "connecting" ||
+                            boardSyncStatus === "paused" ||
+                            liveLinkDropped(boardSyncStatus)
                           ? "saving"
                           : "error"
                       : titleStatus === "saving"
@@ -10894,19 +10977,34 @@ export function AirboardPrototype({
                       ? "Live · changes save to the host's board"
                       : boardSyncStatus === "connecting"
                         ? "Connecting…"
-                        : boardSyncStatus === "reconnecting"
-                          ? "Reconnecting…"
-                          : "Not connected"
-                    : titleError ??
-                  (titleStatus === "saving"
-                    ? "Renaming…"
-                    : titleStatus === "saved"
-                      ? "Renamed"
-                  : persistentSaveStatus === "saving"
-                    ? "Saving…"
-                    : persistentSaveStatus === "error"
-                      ? "Save interrupted"
-                      : "Saved")}
+                        : boardSyncStatus === "ended"
+                          ? "This live session has ended"
+                          : boardSyncStatus === "paused"
+                            ? "Waiting for the host to come back…"
+                            : liveLinkDropped(boardSyncStatus)
+                              ? "Reconnecting…"
+                              : "Not connected"
+                    : `${
+                        titleError ??
+                        (titleStatus === "saving"
+                          ? "Renaming…"
+                          : titleStatus === "saved"
+                            ? "Renamed"
+                            : persistentSaveStatus === "saving"
+                              ? "Saving…"
+                              : persistentSaveStatus === "error"
+                                ? "Save interrupted"
+                                : "Saved")
+                      }${
+                        // The host's board saves either way; say when guests stop seeing it.
+                        !activeBoardSessionId
+                          ? ""
+                          : boardSyncStatus === "ended" || boardSyncStatus === "rejected"
+                            ? " · Live session ended"
+                            : liveLinkDropped(boardSyncStatus) || boardSyncStatus === "paused"
+                              ? " · Live link reconnecting…"
+                              : ""
+                      }`}
                 </span>
               </div>
             </div>
@@ -11171,15 +11269,23 @@ export function AirboardPrototype({
                     <button
                       type="button"
                       className={`canvas-copilot-power${airoInputsActive ? " on" : ""}`}
-                      aria-pressed={airoInputsActive}
+                      aria-pressed={airoVoiceResumable ? undefined : airoInputsActive}
                       disabled={cameraStatus === "starting" || cameraStatus === "tracker_loading"}
                       aria-label={
-                        airoInputsActive
-                          ? "Turn off Airo voice and hand tracking"
-                          : "Enable Airo voice and hand tracking"
+                        airoVoiceResumable
+                          ? "Resume Airo voice"
+                          : airoInputsActive
+                            ? "Turn off Airo voice and hand tracking"
+                            : "Enable Airo voice and hand tracking"
                       }
-                      title={airoInputsActive ? "Turn off voice and hands" : "Turn on voice and hands"}
-                      onClick={toggleAiroInputs}
+                      title={
+                        airoVoiceResumable
+                          ? "Resume voice"
+                          : airoInputsActive
+                            ? "Turn off voice and hands"
+                            : "Turn on voice and hands"
+                      }
+                      onClick={airoVoiceResumable ? toggleVoiceInput : toggleAiroInputs}
                     >
                       ⏻
                     </button>

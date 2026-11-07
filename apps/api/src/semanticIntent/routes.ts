@@ -45,8 +45,15 @@ export function registerSemanticIntentRoutes(
     keySecret: config.sessionSigningSecret,
     onError: (error) => server.log.warn({ err: error }, "shared Airo rate limit could not be counted"),
   });
-  const usage = createDailyUsage(auth?.client ?? null, config.dailyUsage, (error) =>
-    server.log.warn({ err: error }, "daily Airo allowance could not be counted"),
+  const usage = createDailyUsage(
+    auth?.client ?? null,
+    config.dailyUsage,
+    (error) => server.log.warn({ err: error }, "daily Airo allowance could not be counted"),
+    {
+      ...(config.serviceDailyUsage ? { service: config.serviceDailyUsage } : {}),
+      onServiceLimitReached: () =>
+        server.log.warn({ limit: config.serviceDailyUsage?.airoCommands }, "the service's daily Airo limit is reached"),
+    },
   );
 
   server.get("/intent/config", async () => publicSemanticIntentConfig(config.semanticIntent));
@@ -174,23 +181,34 @@ export function registerSemanticIntentRoutes(
       return reply.code(503).send({ error: "SEMANTIC_INTENT_UNAVAILABLE", retryAfterMs: breakerWaitMs });
     }
 
-    // A person's daily allowance holds across instances, so one account cannot
-    // run up the model bill. Built-in commands never reach here.
-    if (context && (await usage.consume(context.profileId, "airo_commands", 1)) === "exhausted") {
-      return reply.code(429).send({
-        error: "DAILY_AIRO_LIMIT",
-        message: "You've reached today's Airo limit. Built-in commands still work, and the limit resets at midnight UTC.",
-      });
-    }
-
-    // Checked right before counting the request, with no wait in between.
+    // Claim a provider slot before charging, so a request refused as busy
+    // costs no one's allowance.
     if (activeRequests >= config.semanticIntent.maxConcurrentRequests) {
       return reply.code(429).send({ error: "SEMANTIC_INTENT_CAPACITY_REACHED" });
+    }
+    activeRequests += 1;
+
+    // A person's daily allowance and the service's daily total hold across
+    // instances, so neither one account nor many can run up the model bill.
+    // Built-in commands never reach here.
+    const allowance = context ? await usage.consume(context.profileId, "airo_commands", 1) : "allowed";
+    if (allowance !== "allowed") {
+      activeRequests = Math.max(0, activeRequests - 1);
+      return reply.code(429).send(
+        allowance === "exhausted"
+          ? {
+              error: "DAILY_AIRO_LIMIT",
+              message: "You've reached today's Airo limit. Built-in commands still work, and the limit resets at midnight UTC.",
+            }
+          : {
+              error: "SERVICE_AIRO_LIMIT",
+              message: "Airo has reached today's limit for everyone in the pilot. Built-in commands still work, and Airo is back at midnight UTC.",
+            },
+      );
     }
 
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), config.semanticIntent.timeoutMs);
-    activeRequests += 1;
     try {
       const resolution = await provider.resolve(parsed.value, model, abortController.signal);
       breaker.recordSuccess();

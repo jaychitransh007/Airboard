@@ -286,7 +286,8 @@ export class SupabaseSessionStore implements SessionStore {
     return (await this.appendEvents(sessionId, [event]))[0]!;
   }
 
-  async appendEvents(sessionId: string, events: BoardEvent[]): Promise<BoardEvent[]> {
+  async appendEvents(sessionId: string, incoming: BoardEvent[]): Promise<BoardEvent[]> {
+    let events = incoming;
     if (events.length === 0) {
       return [];
     }
@@ -325,6 +326,20 @@ export class SupabaseSessionStore implements SessionStore {
       if (error.code !== "23505") {
         throw new Error(error.message ?? "INSERT_FAILED:board_events");
       }
+      // An event id already stored: a board resending changes after a cut
+      // connection. Keep what is stored, append the rest.
+      if (`${error.message ?? ""} ${error.details ?? ""}`.includes("board_events_pkey")) {
+        const { data: stored, error: lookupError } = await this.client
+          .from("board_events")
+          .select("id")
+          .eq("board_session_id", sessionId)
+          .in("id", events.map((event) => event.id));
+        if (lookupError) throw new Error("BOARD_EVENT_LOOKUP_FAILED");
+        const storedIds = new Set(((stored ?? []) as Array<{ id: string }>).map((row) => row.id));
+        events = events.filter((event) => !storedIds.has(event.id));
+        if (events.length === 0) return [];
+        continue;
+      }
       lastError = error;
     }
 
@@ -358,7 +373,12 @@ export class SupabaseSessionStore implements SessionStore {
       .eq("id", sessionId)
       .single();
 
-    if (error || !data) {
+    // No row is "not found"; any other failure is the database, which a
+    // caller may retry.
+    if (error && error.code !== "PGRST116") {
+      throw new Error("SESSION_LOOKUP_FAILED");
+    }
+    if (!data) {
       throw new Error("SESSION_NOT_FOUND");
     }
 

@@ -449,6 +449,8 @@ test("a person's daily Airo allowance is checked before the model is called", as
           rateCounts.push(params);
           return { data: true, error: null };
         }
+        // The service-wide total is covered by its own test.
+        if (name === "consume_service_daily_usage") return { data: 1, error: null };
         charges.push({ name, ...params });
         if (failCount) return { data: null, error: { message: "database unavailable" } };
         if (remaining <= 0) return { data: null, error: null };
@@ -509,4 +511,94 @@ test("a person's daily Airo allowance is checked before the model is called", as
   failCount = true;
   assert.equal((await send("make the planner talk to the dataset")).json().error, "SEMANTIC_INTENT_PROVIDER_UNAVAILABLE");
   assert.equal(providerCalls, 2);
+});
+
+test("the service's daily Airo total stops every account once reached, and refused people never count against it", async (t) => {
+  const { createServer } = await import("node:http");
+  let providerCalls = 0;
+  const provider = createServer((_request, response) => {
+    providerCalls += 1;
+    response.writeHead(500, { "content-type": "application/json" });
+    response.end(JSON.stringify({ error: { code: "server_error" } }));
+  });
+  await new Promise((resolve) => provider.listen(0, "127.0.0.1", resolve));
+  t.after(() => provider.close());
+
+  // Mirrors consume_daily_usage_with_service_limit: both totals or neither.
+  const calls = [];
+  let serviceLeft = 2;
+  const personalLeft = new Map([["profile-a", 1], ["profile-b", 5]]);
+  const auth = {
+    ...fakeAuth({ entitledOrganizations: ["org-a", "org-b"] }),
+    client: {
+      async rpc(name, params) {
+        if (name === "consume_rate_limit") return { data: true, error: null };
+        calls.push({ name, ...params });
+        const left = personalLeft.get(params.p_profile_id) ?? 0;
+        if (left <= 0) return { data: "exhausted", error: null };
+        if (serviceLeft <= 0) return { data: "service_exhausted", error: null };
+        personalLeft.set(params.p_profile_id, left - 1);
+        serviceLeft -= 1;
+        return { data: "allowed", error: null };
+      },
+    },
+  };
+  const server = Fastify();
+  t.after(() => server.close());
+  const config = productionConfig();
+  const semanticIntent = {
+    ...config.semanticIntent,
+    provider: "openai",
+    apiKey: "test-key",
+    endpoint: `http://127.0.0.1:${provider.address().port}/v1/responses`,
+  };
+  registerSemanticIntentRoutes(server, {
+    ...config,
+    dailyUsage: { airoCommands: 300, voiceSeconds: 600 },
+    serviceDailyUsage: { airoCommands: 2, voiceSeconds: 600 },
+    semanticIntent,
+  }, undefined, auth);
+  const send = (user, target = server) =>
+    target.inject({
+      method: "POST",
+      url: "/intent/resolve",
+      headers: { origin, authorization: `Bearer user:${user}` },
+      payload: requestBody("make the planner talk to the dataset"),
+    });
+
+  // a's one command counts; a's refused ones don't touch the service total.
+  assert.equal((await send("a")).json().error, "SEMANTIC_INTENT_PROVIDER_UNAVAILABLE");
+  assert.deepEqual(calls[0], {
+    name: "consume_daily_usage_with_service_limit",
+    p_profile_id: "profile-a",
+    p_metric: "airo_commands",
+    p_amount: 1,
+    p_limit: 300,
+    p_service_limit: 2,
+  });
+  for (let attempt = 0; attempt < 3; attempt += 1) assert.equal((await send("a")).json().error, "DAILY_AIRO_LIMIT");
+  assert.equal(serviceLeft, 1);
+
+  // b takes the last command of the day; after that nobody reaches the model,
+  // and b keeps the rest of b's own allowance.
+  assert.equal((await send("b")).json().error, "SEMANTIC_INTENT_PROVIDER_UNAVAILABLE");
+  const refused = await send("b");
+  assert.equal(refused.statusCode, 429);
+  assert.equal(refused.json().error, "SERVICE_AIRO_LIMIT");
+  assert.match(refused.json().message, /everyone in the pilot/);
+  assert.equal(personalLeft.get("profile-b"), 4);
+  assert.equal(providerCalls, 2);
+
+  // A request refused as busy charges nothing.
+  const busy = Fastify();
+  t.after(() => busy.close());
+  registerSemanticIntentRoutes(busy, {
+    ...config,
+    dailyUsage: { airoCommands: 300, voiceSeconds: 600 },
+    serviceDailyUsage: { airoCommands: 2, voiceSeconds: 600 },
+    semanticIntent: { ...semanticIntent, maxConcurrentRequests: 0 },
+  }, undefined, auth);
+  const before = calls.length;
+  assert.equal((await send("b", busy)).json().error, "SEMANTIC_INTENT_CAPACITY_REACHED");
+  assert.equal(calls.length, before);
 });

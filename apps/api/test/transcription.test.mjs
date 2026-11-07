@@ -228,6 +228,7 @@ test("builds a Flux V2 URL and Configure message with repeated keyterms", () => 
   assert.equal(url.searchParams.get("sample_rate"), "16000");
   assert.deepEqual(url.searchParams.getAll("keyterm"), ["Airo", "payment service"]);
   assert.deepEqual(url.searchParams.getAll("language_hint"), ["en"]);
+  assert.equal(url.searchParams.get("mip_opt_out"), "true", "meeting audio stays out of Deepgram's model training");
 
   assert.deepEqual(buildDeepgramFluxConfigureMessage(options, tuning), {
     type: "Configure",
@@ -331,5 +332,15 @@ test("caps each profile at two concurrent streams unless configured", () => {
   assert.throws(
     () => loadTranscriptionConfig({ AIRBOARD_TRANSCRIPTION_MAX_STREAMS_PER_PROFILE: "0" }),
     /AIRBOARD_TRANSCRIPTION_MAX_STREAMS_PER_PROFILE/,
+  );
+});
+
+test("each instance carries 50 voice streams by default, so three instances stay inside Deepgram's 150", () => {
+  const defaults = loadTranscriptionConfig({});
+  assert.equal(defaults.maxConcurrentStreams, 50);
+  assert.equal(defaults.maxSessionMs, 30 * 60 * 1_000);
+  assert.equal(
+    loadTranscriptionConfig({ AIRBOARD_TRANSCRIPTION_MAX_CONCURRENT_STREAMS: "12" }).maxConcurrentStreams,
+    12,
   );
 });

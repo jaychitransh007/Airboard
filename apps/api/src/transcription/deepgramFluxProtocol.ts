@@ -42,6 +42,9 @@ export function buildDeepgramFluxUrl(
   if (options.language && options.model === "flux-general-multi") {
     url.searchParams.append("language_hint", options.language);
   }
+  // Keep people's meeting audio out of Deepgram's Model Improvement Program:
+  // Deepgram then keeps it only long enough to transcribe it.
+  url.searchParams.set("mip_opt_out", "true");
   return url.toString();
 }
 

@@ -621,7 +621,7 @@
       "rationale": "A partial catalog activation cannot select a tool or consume the one-shot latch."
     },
     {
-      "evidenceId": "test:apps/web/test/boardSync.test.mjs#publish reports drops while disconnected and does not poison echo dedup",
+      "evidenceId": "test:apps/web/test/boardSync.test.mjs#board changes made while disconnected wait and go out on reconnect; cursor moves are dropped",
       "capabilities": [
         "channel:remote"
       ],

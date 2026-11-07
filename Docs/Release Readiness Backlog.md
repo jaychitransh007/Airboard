@@ -61,6 +61,10 @@ These are fixable in the repo and each would make a public "supported product" c
 | RGB-039 | Airo can't see or change shapes made by typed commands or the toolbar, so it draws duplicates (found 2026-11-07 in the live journey: "the API" became a second API box) | Done and deployed 2026-11-07 (`launch-376f31e`, then `launch-bd5de96`): Airo sees typed and toolbar shapes and can connect, rename, move, line up, spread out, tidy, copy, group and delete them | Engineering | Verified on the live site | `buildSemanticIntentContext`, `resolveSemanticReference` and `spatialSemanticNodes` in `apps/web/src/features/board/intentPipeline.ts` read only legacy annotation strokes; `applyDiagramCommand` in `packages/core/src/diagramCommands.ts` writes only strokes. Typed commands such as "add a user" and the toolbar create v2 scene elements, which none of these read | Grouping Airo's own nodes together with typed shapes still says "not yet", because a section can't own a legacy node. |
 | RGB-040 | The built-in typed-command parser treats any sentence that starts with add, create, insert, make or put as "add a shape" and finds a shape name anywhere in it (found 2026-11-07 on the live site: "put the user and the API side by side … and group them as front end" added a Front End shape instead of reaching Airo) | Done and deployed 2026-11-07 (web `launch-460cd8d`): a create accepts at most three describing words before the shape name, none of them a conjunction, pronoun, relation or second verb; anything longer goes to Airo | Engineering | Verified on the live site | `packages/core/src/sceneIntent.ts` (`CREATE` and the `shapeCreate` pattern) | None. |
 | RGB-041 | Airo throws away a whole plan when the model asks to spread out only two shapes (found 2026-11-07 on the live site: "put the user and the API side by side, lined up along the top, and group them as front end" twice gave "the intent provider returned an invalid plan", logged as "Expected 3 to 20 object references") | Done and deployed 2026-11-07 (API `launch-637bd84`): the tool schema gives align and layout at least 2 targets and distribute at least 3 (or the selection alone), matching the validator, and prompt 2.13 says two shapes side by side is a layout or an align | Engineering | Verified on the live site | `packages/core/src/semanticPlan.ts`: the JSON schema gives `distribute` the generic reference list (`minItems: 1`), while `validateSemanticPlan` requires 3; `apps/api/src/semanticIntent/openaiResponses.ts` prompt | None. |
+| RGB-042 | Airo voice reached only about 4 people at a time, and switched off for good at 30 minutes, on every deploy, on a network drop or when Deepgram closed the stream (found 2026-11-07 in the MLP launch audit) | Done and deployed 2026-11-07 (`launch-306c7a5`) | Engineering | Verified in tests (real voice client against the real API routes) and in production smoke checks; not yet tried with a real microphone | `apps/api/src/config.ts` `maxConcurrentStreams` defaulted to 4 per instance and production never set it; `realtimeSpeech.ts` ended the session on any close; Cloud Run concurrency 80 counted each voice user's two sockets | 50 voice streams per instance (Deepgram allows 150 per project; 3 instances), API concurrency 250, and the browser reconnects on its own with the microphone kept open. Still owed by the founder: confirm the Deepgram key is on the account's main project (secondary self-serve projects get one stream) and set Deepgram and OpenAI spend limits. |
+| RGB-043 | A brand-new user who opened Templates before making a board was told "Your pilot access has ended": Templates created boards without starting the free trial (found 2026-11-07 in the MLP launch audit) | Done and deployed 2026-11-07 (web `launch-4ae4227`; founder's decision for minimum scope): Templates removed from the app and the public site | Product / Engineering | Verified in tests | `ProductSection.tsx` Templates posted to `/boards` without `/trial/activate`; `boardTemplates.ts` built the diagram on mount | None. Every new board starts from New Airboard, which starts the trial. |
+| RGB-044 | Nothing capped total provider spend: each Google account got its own free daily allowance, so many accounts together could run up the OpenAI and Deepgram bills, and voice streams didn't opt out of Deepgram's model-improvement programme (threat model X-1, V-4) | Done and deployed 2026-11-07 (`launch-99ae9d0`; console limits still owed by the founder) | Engineering / Founder | Verified in tests, on a local database and in production | `apps/api/src/dailyUsage.ts` counted only per person; `deepgramFluxProtocol.ts` set no `mip_opt_out` | A service-wide daily ceiling (5,000 Airo model commands, 3,000 voice minutes, tunable) and `mip_opt_out=true` on every Deepgram stream. Still owed by the founder: spend limits in the OpenAI and Deepgram consoles, which need the founder's sign-in. |
+| RGB-045 | Live sessions broke within an hour: a 30-minute realtime ticket was reused for every reconnect and heartbeat, Cloud Run cuts every WebSocket at 60 minutes, an expired ticket was refused for good, the session locked 3 minutes later, guests' edits stopped reaching the host's saved board, viewers froze, and the host still saw "Saved" (found 2026-11-07 in the MLP launch audit) | Done and deployed 2026-11-07 (`launch-b8b681e`) | Engineering | Verified in tests, against a local database and on production routes; a real 60-minute session not yet observed | `boardSync.ts` reused `realtimeTicket`; `realtime-client` stopped on any 1008; no catch-up after a reconnect | Ticket refresh with a body-only refresh token, strict in-order catch-up after every admission, resend of changes a cut lost, per-socket ordered handling on the server, and live-link status for host, guests and viewers. |
 | RGB-014 | New `catalogDock` E2E is uncommitted & never run; CI can't show E2E is a required merge check | Done 2026-11-05 | Engineering | Verified | `apps/web/e2e/catalogDock.spec.ts` (uncommitted, +235 lines); Playwright not in the fast verify path | Run it before committing the dock diff; make the E2E job a required check on the release branch. |
 
 ### Security hardening (mediums)
@@ -1196,4 +1200,119 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
   - **After promotion:** the launch check reports READY, 21 of 21, and both revisions logged no errors. The signed-in board library loads. The tags `launch-637bd84-api` and `launch-460cd8d-web` were removed.
   - **Rollback:** the API to `launch-637bd84` and the web to `launch-460cd8d`.
   - **Project Status:** rewritten to match, including what is left for an open and a paid launch.
+- **2026-11-07** — RGB-042 fixed (not deployed yet): Airo voice reaches 50 people per API instance and comes back on its own.
+  - **Found in the MLP launch audit:**
+    - Production used the default of 4 voice streams per instance, so the fifth person anywhere got "at capacity".
+    - Voice ended for good at the 30-minute stream limit, on every deploy (the API closes sockets with 1012), on a network drop or when Deepgram closed or reset the stream. Getting it back took two clicks of the Airo button.
+  - **Server:**
+    - `AIRBOARD_TRANSCRIPTION_MAX_CONCURRENT_STREAMS` now defaults to 50. Deepgram allows 150 live streams per project on Pay As You Go (Flux included), and the API runs at most 3 instances.
+    - `release.sh stage api` deploys with Cloud Run concurrency 250 (was 80). Each voice user holds a board socket and a voice socket, so at 80 an instance filled at about 40 voice users and blocked typed commands with it.
+    - A local load test of the real routes relaying to a stand-in for Deepgram: 50 streams used about 5–8% of one core and 155 MB; 100 streams about 8–14% and 150 MB.
+    - The time-limit message now says a new stream opens automatically.
+  - **Browser (`realtimeSpeech.ts`, `reconnect` option):**
+    - A dropped stream is replaced with a fresh ticket from the latest sign-in token while the microphone stays open. This covers a deploy, a network drop, Deepgram closing or resetting the stream, a busy server (capacity, provider breaker, rate limit) and a sign-in token that expired during a long sleep.
+    - Waits grow from 1 to 30 seconds, each spread between half and all of the step so clients dropped together don't return together, over 7 attempts that outlast the API's 30-second provider breaker. A stream that stayed up 30 seconds starts a fresh run, so a stream that keeps dropping gives up instead of paying for a new provider stream every second.
+    - At the 30-minute limit, voice rolls over at once if anyone spoke in the last 20 minutes; otherwise it pauses, so a forgotten tab stops streaming. An open palm, or **⏻**, which reads "Resume voice" while hands stay on, wakes it. Refusals no new stream can fix (daily allowance, admin switch, ended access, blocked microphone) still end voice and never restart it on a palm.
+    - The Meet overlay keeps its own retry loop.
+  - **Help:** the error-code table and the Airo voice article describe the rollover, the pause and the new codes.
+  - **Review:** three independent reviewers, each finding challenged by a verifier. Six findings held up and were fixed: Deepgram errors mid-stream, an expired token during a reconnect, the power button restarting voice instead of turning it off, palm restarts after a final refusal, a first-run hint lost after a busy start, and reconnect waits in lockstep. Known limit: background talk near a forgotten tab counts as speech, so such a tab keeps streaming until the daily allowance runs out.
+  - **Tests:**
+    - New voice client tests: drop and reconnect, rollover and pause, busy retries and give-up, final refusals, stopping mid-reconnect, flapping, provider errors and expired sign-in, spread waits.
+    - New API tests: the default of 50, and a time-limited stream freeing its slot for the same person's replacement.
+    - A contract test runs the real browser voice client against the real API routes through a rollover and a simulated deploy.
+- **2026-11-07** — Deployed RGB-042: both services serve `launch-306c7a5`.
+  - **Checks:**
+    - No migrations were pending.
+    - The staged API reported ready, with boardFanOut ready and transcription on. It refused signed-out calls with 401 and malformed JSON with 400.
+    - The staged revision runs with concurrency 250, max 3 instances, and no override of the voice stream limit, so the new default of 50 applies.
+    - The staged web served its pages with the security headers, and its bundle carries the reconnect code and the "Resume Airo voice" label.
+  - **Promotion:** web first, so the reconnecting client was live before the API changed; then the API.
+  - **After promotion:**
+    - The launch check reports READY, 21 of 21, and the new revisions logged no errors or 5xx responses.
+    - The `launch-63a10b8-api` and `launch-63a10b8-web` tags were removed.
+  - **Not yet checked live:** a real voice session, because voice needs a real microphone and a signed-in person. That stays part of the real-device test in the launch list.
+  - **Rollback:** both services to `launch-63a10b8`. API concurrency stays at 250 unless it is set back to 80.
+- **2026-11-07** — Templates removed for minimum scope, at the founder's request (RGB-043):
+  - **Removed:** the Templates sidebar and phone-menu item, the `/app/templates` page, the public `/templates` page, the "Starter templates" changelog entry, the `?template=` board link and the code that built a template on a new board (`boardTemplates.ts` and its test).
+  - **Effect:** a new board always starts empty from New Airboard, which starts the free trial. The MLP audit's dead end, where a new user who opened Templates first was told their pilot had ended, can no longer happen. Old Templates links now show the existing "page not found" screens.
+  - **Kept:** typed commands, Airo and the first-board guide, which are how a new user builds a diagram.
+- **2026-11-07** — Deployed RGB-043: the web serves `launch-4ae4227`; the API stays on `launch-306c7a5`, because it didn't change.
+  - **Checks:**
+    - The staged web served its pages with the security headers, and `/templates` returned 404.
+    - The changelog no longer mentions templates.
+    - Its bundle has no template code and still carries the RGB-042 voice fix.
+    - The full browser suite passed (170, 2 skipped by design) after the phone More-menu test was updated.
+  - **After promotion:**
+    - The launch check reports READY, 21 of 21, and the new revision logged no errors.
+    - The owner's signed-in sidebar shows Overview, Boards, Integrations and Activity.
+    - The `launch-306c7a5-web` tag was removed.
+  - **Rollback:** the web to `launch-306c7a5`.
+- **2026-11-07** — RGB-044: a ceiling on total provider spend, and voice audio opted out of Deepgram's model training.
+  - **Service-wide daily ceiling:**
+    - Migration `20261107150000_service_daily_usage` adds `service_daily_usage` and `consume_daily_usage_with_service_limit`.
+    - In one transaction, the function charges the person's allowance and the service's daily total together, both or neither. A person refused for their own allowance never counts against the service. A person refused for the service gets their own charge back.
+    - The defaults are 5,000 Airo model commands and 3,000 voice minutes a day for everyone together (`AIRBOARD_SERVICE_DAILY_AIRO_COMMANDS`, `AIRBOARD_SERVICE_DAILY_VOICE_MINUTES`). 3,000 minutes is about US$23 a day at Deepgram's Flux rate of US$0.0077 a minute.
+    - Past the ceiling, Airo answers `SERVICE_AIRO_LIMIT` and built-in commands keep working. Voice answers `SERVICE_VOICE_LIMIT` and doesn't retry. Each instance logs a warning the first time a day it reaches either ceiling.
+    - An Airo command turned away because an instance is busy now claims its slot before charging, so it costs no one's allowance.
+  - **Deepgram:** every stream URL carries `mip_opt_out=true` (a documented Flux `/v2/listen` parameter), so meeting audio stays out of Deepgram's Model Improvement Program. OpenAI requests already use `store: false`.
+  - **Review:** two independent reviewers, each finding challenged by a verifier. Three findings held up and were fixed: busy refusals counting against the total, a person charged when the service refused them, and a voice test that didn't check Deepgram was never dialled.
+  - **Known limit:** a 15-second voice block charged just before a failed Deepgram open isn't given back. That needs a Deepgram outage, and the API's circuit breaker stops new opens after three failures.
+  - **Local database:** the migration applied twice without error. Every outcome was checked: allowed, the person's own limit, the service limit with the charge given back, and a block larger than the ceiling. anon cannot call the function.
+  - **Tests:** a service-wide ceiling test each for Airo and voice, a test that a busy refusal charges nothing, config defaults, and the opt-out parameter. API 209, web 426, scripts 196.
+  - **Still needed, founder's sign-in:**
+    - A monthly spend limit in the OpenAI console (Settings → Limits).
+    - A budget or no automatic top-up in the Deepgram console.
+- **2026-11-07** — Deployed RGB-044: both services serve `launch-99ae9d0`, after migration `20261107150000_service_daily_usage` was applied to Mumbai, with the founder's approval.
+  - **Migration:**
+    - Only that file was pending.
+    - With the public publishable key, PostgREST refuses both the new function and the table with 42501 permission denied.
+  - **Staged API:**
+    - It reported ready, refused signed-out calls with 401 and malformed JSON with 400.
+    - It kept concurrency 250 and max 3 instances.
+  - **Staged web:** it served its pages with the security headers, and its bundle carries the SERVICE_AIRO_LIMIT message and the SERVICE_VOICE_LIMIT final code.
+  - **Promotion:** web first, then the API.
+  - **After promotion:**
+    - The launch check reports READY, 21 of 21.
+    - On a test board in the owner's account, "add a user" and then "could you put an API to the right of the user and connect them" reached Luna through `/intent/resolve` (200, "semantic intent completed"). The board showed the API to the right of the user, connected.
+    - The new revision logged no "could not be counted" warning, so the API's service role called the new function successfully.
+    - The test board is in Trash. The `launch-306c7a5-api` and `launch-4ae4227-web` tags were removed.
+  - **Rollback:** the API to `launch-306c7a5` and the web to `launch-4ae4227`. The old API ignores the new table.
+- **2026-11-07** — RGB-045: live sessions survive the 60-minute WebSocket cut and the 30-minute ticket.
+  - **Server:**
+    - `/start`, `/join` and `/resume` also return a `refreshToken`. It lasts 12 hours and only ever travels in JSON bodies.
+    - `POST /sessions/:id/ticket` trades it for a fresh 30-minute ticket while the session is open. An owner must also be signed in, and their refresh revives a locked (not ended) session, as their heartbeat does. The URL-borne ticket itself renews nothing.
+    - `POST /sessions/:id/events` pages missed events, 1,000 at a time.
+    - The socket closes with `TICKET_EXPIRED` for an expired ticket and `SESSION_LOCKED` for a locked session. It closes with 1011, after a 5-second pause, for a database error, and those now answer 503 instead of "not found".
+    - Each socket's messages are handled in the order they arrived.
+    - The stores skip an event id they already have, so a resend is stored once.
+  - **Realtime client:** it reports "connected" only when the server admits the socket (`board.initialized`), sends nothing before that, and refreshes and reconnects on `TICKET_EXPIRED`.
+  - **Board sync:**
+    - The ticket is renewed every 20 minutes.
+    - Changes apply strictly in sequence. One that arrives early waits for the missing one, which is fetched if it doesn't come within 1.5 seconds.
+    - Every admission catches up page by page. Changes sent but never echoed are resent, and changes made while away, paused or catching up are sent afterwards in batches of at most 500.
+    - A locked session pauses guests until the owner is back. A guest more than 20 pages behind reloads the whole board; the owner always replays, so their saved board never loses content.
+  - **Status:**
+    - The host sees "Saved · Live link reconnecting…" or "Saved · Live session ended".
+    - Editing guests see "Reconnecting…", "Waiting for the host to come back…" or "This live session has ended".
+    - The view-only page shows the same as a spoken status.
+  - **Reviews:** three independent passes. The first two found the out-of-order drops across API instances, a lock treated as the end, the deploy window, a leaked ticket renewing access, catch-up gaps after failures, the owner's whole-board reload and changes lost at the cut, all fixed and retested. The third found concurrent handling of one socket's batches, replays of refused batches, a small echo window and outbox overflow, all fixed and tested.
+  - **Tests:**
+    - API 216: ticket refresh and refresh tokens, owner sign-in and revival, `SESSION_LOCKED`, 503s, catch-up paging, `TICKET_EXPIRED`, resend dedupe and in-order storage.
+    - Web 441: catch-up order, resend, pause, older-API fallbacks, the permission switch, refused batches, a full outbox and failed catch-ups.
+    - Realtime client 10.
+    - Against a real local Supabase: a resent batch stored only its new event, and a missing session read as not found.
+  - **Deploy order:** the API first, then the web. The new API works with the old web, which never calls the new routes.
+- **2026-11-07** — Deployed RGB-045: both services serve `launch-b8b681e`. No migration was needed. The API was promoted before the web, so the new web never ran against an API without its routes.
+  - **Staged checks:**
+    - The API reported ready; refused a forged refresh token (`REFRESH_TOKEN_REQUIRED`) and a forged catch-up ticket (`REALTIME_TICKET_REQUIRED`); closed a forged socket ticket with 1008; and answered 401 signed out and 400 for malformed JSON.
+    - The web served its pages with the security headers, and its bundle carries the new live-link status and the "waiting for the host" notice.
+    - The full browser suite passed except one Help Center search test, which timed out in a slow run and passed three times out of three on its own.
+  - **After promotion:**
+    - The launch check reports READY, 21 of 21, and the new revisions logged no errors.
+    - On a test board in the owner's account, `/resume` handed out a refresh token.
+    - `/ticket` refused the owner's refresh token without sign-in (`OWNER_AUTH_REQUIRED`), gave a fresh 30-minute ticket with sign-in, and refused the URL-borne ticket (`REFRESH_TOKEN_REQUIRED`).
+    - "add a user" was stored as sequence 1, and `/events` returned it.
+    - The status line read "Saved", and the test board is in Trash.
+  - **Not yet seen live:** a session kept open past the 60-minute cut. The behaviour is covered by tests.
+  - **Rollback:** the web to `launch-99ae9d0` first, then the API. The `launch-99ae9d0-*` tags were removed.
 

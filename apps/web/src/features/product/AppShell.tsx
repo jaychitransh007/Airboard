@@ -11,7 +11,6 @@ import { isImmersiveBoardPath } from "./productRouting";
 const MAIN_NAV = [
   ["/app", "Overview", "⌂"],
   ["/app/boards", "Boards", "◇"],
-  ["/app/templates", "Templates", "✦"],
   ["/app/integrations", "Integrations", "∞"],
   ["/app/activity", "Activity", "∿"],
 ] as const;

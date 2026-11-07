@@ -51,7 +51,7 @@ and team workspaces).
 | --- | --- |
 | Public | `/`, `/product`, `/pricing`, `/security`, `/accessibility`, `/privacy`, `/integrations`, `/integrations/google-meet`, `/use-cases/product-teams`, `/status`, `/support`, `/contact-sales`, `/help` and three articles, every `/pilot/*` page, the 404 pages (site and help), `/invite/<token>`, `/login` and `/signup` signed out, `/auth/callback` |
 | Sharing | `/s/<token>` (a working link and an expired one), `/live/<id>` (the expired-link error) |
-| Signed in | Overview, Boards, Shared, Trash, Templates, Activity, Integrations, Plan & billing, all six Settings sections, all six Admin sections, a personal workspace's Admin page, an unknown section, `/onboarding` |
+| Signed in | Overview, Boards, Shared, Trash, Activity, Integrations, Plan & billing, all six Settings sections, all six Admin sections, a personal workspace's Admin page, an unknown section, `/onboarding` |
 | Board | The editor's chrome: top bar, rename, Share dialog, ••• menu, Move to Trash dialog, Airo composer, the creation toolbar, every creation menu and the shape library, zoom; the Viewer's view-only board |
 | Cookie banner | First visit, at 1280 and 320 px |
 

@@ -7,7 +7,12 @@ export type AirboardTokenPurpose =
   | "installation_link"
   | "installation"
   /** Opens one voice-transcription socket; lives a minute, so it can sit in a URL. */
-  | "transcription";
+  | "transcription"
+  /**
+   * Trades for fresh realtime tickets for a whole live session. Only ever in
+   * JSON bodies, never a URL, unlike the realtime ticket it renews.
+   */
+  | "realtime_refresh";
 
 export type AirboardSignedToken = {
   v: 1;
@@ -49,6 +54,11 @@ export function verifySignedToken(
   secret: string,
   token: string,
   expectedPurpose?: AirboardTokenPurpose,
+  /**
+   * Still accept a genuine token this many seconds past its expiry. Only for
+   * trading an expired capability for a fresh one, never for using it.
+   */
+  { acceptExpiredForSeconds = 0 }: { acceptExpiredForSeconds?: number } = {},
 ): AirboardSignedToken | null {
   const [encoded, providedSignature, extra] = token.split(".");
   if (!encoded || !providedSignature || extra) {
@@ -73,7 +83,7 @@ export function verifySignedToken(
       typeof parsed.iat !== "number" ||
       typeof parsed.exp !== "number" ||
       typeof parsed.jti !== "string" ||
-      parsed.exp <= now ||
+      parsed.exp + acceptExpiredForSeconds <= now ||
       parsed.iat > now + 60 ||
       (expectedPurpose && parsed.purpose !== expectedPurpose)
     ) {

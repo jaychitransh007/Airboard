@@ -42,7 +42,7 @@ export function headlessMeetVoiceRetryDelayMs(failedAttempts: number): number {
 
 export function shouldRetryHeadlessMeetVoiceAfterEnd(
   headlessMeetOverlay: boolean,
-  reason: "stopped" | "aborted" | "error" | "closed",
+  reason: "stopped" | "aborted" | "error" | "closed" | "paused",
 ): boolean {
   return (
     headlessMeetOverlay &&

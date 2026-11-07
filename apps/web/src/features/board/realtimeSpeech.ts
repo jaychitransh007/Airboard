@@ -52,16 +52,35 @@ export type RealtimeSpeechProviderEvent = {
   message?: string;
 };
 
-export type RealtimeSpeechEndReason = "stopped" | "aborted" | "error" | "closed";
+/** "paused": the stream reached its time limit after a long quiet stretch. */
+export type RealtimeSpeechEndReason = "stopped" | "aborted" | "error" | "closed" | "paused";
+
+/**
+ * Why a live session is opening a replacement stream: "rollover" when a stream
+ * in use reaches the server's time limit, "dropped" for a network drop, server
+ * restart or provider close, "busy" when the server or provider is at capacity.
+ */
+export type RealtimeSpeechReconnectCause = "rollover" | "dropped" | "busy";
 
 export type RealtimeSpeechCallbacks = {
+  /** The first stream is ready; replacement streams report onReconnected instead. */
   onReady?: (metadata: RealtimeSpeechMetadata) => void;
+  /** The stream dropped; listening pauses until onReconnected. */
+  onReconnecting?: (cause: RealtimeSpeechReconnectCause, attempt: number) => void;
+  /** A replacement stream is ready, and listening resumes. */
+  onReconnected?: (metadata: RealtimeSpeechMetadata) => void;
   onListening?: (listening: boolean) => void;
   onInterim?: (transcript: string, event: RealtimeSpeechTranscriptEvent) => void;
   onFinal: (transcript: string, event: RealtimeSpeechTranscriptEvent) => void;
   onProviderStatus?: (event: RealtimeSpeechProviderEvent) => void;
   onError?: (message: string, code?: string) => void;
-  onEnd?: (reason: RealtimeSpeechEndReason) => void;
+  /**
+   * `wakeable` is true when trying again later may work: the session paused
+   * after a quiet stretch, or gave up reconnecting. It is false for a refusal
+   * a new session can't fix, such as a used-up daily allowance or a blocked
+   * microphone.
+   */
+  onEnd?: (reason: RealtimeSpeechEndReason, detail?: { wakeable: boolean }) => void;
   /**
    * Fired once per sustained congestion episode when audio frames are being
    * dropped to keep latency bounded. Lets the UI warn that a command may be cut
@@ -92,6 +111,23 @@ export type RealtimeSpeechOptions = {
   /** Audio frames are dropped above this socket backlog to keep latency bounded. */
   maxBufferedBytes?: number;
   stopTimeoutMs?: number;
+  /**
+   * Survive a dropped stream (server restart, network drop, provider close,
+   * busy server, the server's per-stream time limit) by opening a new one
+   * with a fresh ticket while the microphone stays open.
+   */
+  reconnect?: boolean;
+  /** The current access token, so a reconnect after a token refresh still gets a ticket. */
+  getAccessToken?: () => string | undefined;
+  /**
+   * When the server's time limit ends a stream and no speech was heard for
+   * this long, end the session as "paused" instead of reconnecting, so a
+   * forgotten tab stops streaming. Without it, a time-limited stream always
+   * reconnects.
+   */
+  quietPauseMs?: number;
+  /** Reconnect attempts in a row before giving up. */
+  maxReconnectAttempts?: number;
 };
 
 export type RealtimeSpeechSession = {
@@ -195,6 +231,9 @@ export type RealtimeSpeechDependencies = {
   revokeAudioWorkletModuleUrl?: (url: string) => void;
   setTimeout?: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>;
   clearTimeout?: (timer: ReturnType<typeof setTimeout>) => void;
+  now?: () => number;
+  /** A number in [0, 1) that spreads reconnect delays. */
+  random?: () => number;
 };
 
 type ServerMessage = {
@@ -227,6 +266,33 @@ const DROPPED_FRAME_WARNING_THRESHOLD = 8;
 const MAX_REALTIME_KEYTERMS = 100;
 const MAX_REALTIME_KEYTERM_LENGTH = 100;
 const MAX_REALTIME_KEYTERM_CHARACTERS = 1_000;
+
+// The longest wait before each reconnect attempt in a row; each wait is
+// between half and all of it, so clients dropped together (a deploy, a
+// provider blip) don't all return in the same instant. Together they outlast
+// the API's 30-second provider circuit breaker. A rollover reconnects at once.
+const RECONNECT_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000, 20_000, 30_000];
+const DEFAULT_MAX_RECONNECT_ATTEMPTS = RECONNECT_DELAYS_MS.length;
+// Refusals no new stream can fix, even once a stream has worked.
+const FINAL_TRANSCRIPTION_CODES = new Set([
+  "ACTIVE_ENTITLEMENT_REQUIRED",
+  "VOICE_DISABLED_BY_ADMIN",
+  "DAILY_VOICE_LIMIT",
+  "SERVICE_VOICE_LIMIT",
+  "AUDIO_RATE_LIMIT",
+  "INVALID_AUDIO_FRAME",
+  "AUDIO_FRAME_TOO_LARGE",
+  "STARTUP_AUDIO_OVERFLOW",
+  "TRANSCRIPTION_UNAVAILABLE",
+  "TRANSCRIPTION_NOT_READY",
+  "TRANSCRIPTION_ALREADY_ACTIVE",
+  "INVALID_READY",
+  "MICROPHONE_UNAVAILABLE",
+]);
+// A stream that stayed up this long was healthy, so its drop starts a fresh
+// run of attempts. A stream that keeps dropping at once gives up instead of
+// paying for a new provider stream every second.
+const HEALTHY_STREAM_MS = 30_000;
 
 export function supportsRealtimeSpeech(): boolean {
   if (typeof window === "undefined") {
@@ -343,8 +409,14 @@ export function createRealtimeSpeechSession(
     DEFAULT_REALTIME_TRANSCRIPTION_MAX_BUFFERED_BYTES,
   );
   const stopTimeoutMs = Math.max(100, options.stopTimeoutMs ?? 1_500);
+  const maxReconnectAttempts = positiveInteger(
+    options.maxReconnectAttempts,
+    DEFAULT_MAX_RECONNECT_ATTEMPTS,
+  );
   const setTimer = dependencies.setTimeout ?? setTimeout;
   const clearTimer = dependencies.clearTimeout ?? clearTimeout;
+  const now = dependencies.now ?? Date.now;
+  const random = dependencies.random ?? Math.random;
 
   let socket: RealtimeWebSocketLike | null = null;
   let stream: MediaStream | null = null;
@@ -355,12 +427,22 @@ export function createRealtimeSpeechSession(
   let workletNode: RealtimeAudioWorkletNodeLike | null = null;
   let metadata: RealtimeSpeechMetadata | null = null;
   let listening = false;
-  let state: "idle" | "starting" | "active" | "stopping" | "ended" = "idle";
+  // "reconnecting": the stream dropped, a replacement is opening, and the
+  // microphone stays open.
+  let state: "idle" | "starting" | "active" | "reconnecting" | "stopping" | "ended" = "idle";
   let stopTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let endReported = false;
   let pendingInput = new Float32Array(0);
   let inputSampleRate = targetSampleRate;
   let audioCaptureStarting = false;
+  let audioCaptureLive = false;
+  let everReady = false;
+  let streamReadyAt: number | null = null;
+  let lastSpeechAt = now();
+  let reconnectAttempts = 0;
+  let reconnectCause: RealtimeSpeechReconnectCause | null = null;
+  let endWakeable = false;
   let consecutiveDroppedFrames = 0;
   let dropWarningActive = false;
   let currentKeyterms = boundedKeyterms(options.keyterms ?? []);
@@ -381,8 +463,16 @@ export function createRealtimeSpeechSession(
     }
   };
 
+  const clearReconnectTimer = () => {
+    if (reconnectTimer !== null) {
+      clearTimer(reconnectTimer);
+      reconnectTimer = null;
+    }
+  };
+
   const releaseAudio = () => {
     setListening(false);
+    audioCaptureLive = false;
     pcmInputSession?.stop();
     pcmInputSession = null;
     if (processor) {
@@ -432,8 +522,9 @@ export function createRealtimeSpeechSession(
     endReported = true;
     state = "ended";
     clearStopTimer();
+    clearReconnectTimer();
     releaseAudio();
-    callbacks.onEnd?.(reason);
+    callbacks.onEnd?.(reason, { wakeable: reason === "paused" || endWakeable });
   };
 
   const closeSocket = (reason: string) => {
@@ -450,6 +541,104 @@ export function createRealtimeSpeechSession(
     releaseAudio();
     reportEnd("error");
     closeSocket("transcription error");
+  };
+
+  // Server refusals that a new stream can get past.
+  const recoverableCause = (code: string | undefined): RealtimeSpeechReconnectCause | null => {
+    switch (code) {
+      case "TRANSCRIPTION_SESSION_LIMIT":
+        return "rollover";
+      case "TRANSCRIPTION_CAPACITY_REACHED":
+      case "TRANSCRIPTION_PROVIDER_UNAVAILABLE":
+      case "RATE_LIMITED":
+        return "busy";
+      case "AUTHORIZATION_UNAVAILABLE":
+      case "POLICY_UNAVAILABLE":
+        return "dropped";
+      default:
+        // Once a stream has worked, anything not known to be final is a
+        // provider or network failure (a Deepgram reset arrives as
+        // PROVIDER_SOCKET_ERROR or Deepgram's own code). That covers a
+        // sign-in token that expired during a long sleep, which the next
+        // attempt reads afresh, and the old stream still holding this
+        // account's slot. On a first start these are real refusals.
+        return everReady && code && !FINAL_TRANSCRIPTION_CODES.has(code) ? "dropped" : null;
+    }
+  };
+
+  // Opens a replacement stream after a delay while the microphone stays
+  // open. Returns false when the session should end instead.
+  const scheduleReconnect = (cause: RealtimeSpeechReconnectCause): boolean => {
+    if (!options.reconnect || (state !== "starting" && state !== "active" && state !== "reconnecting")) {
+      return false;
+    }
+    if (streamReadyAt !== null && now() - streamReadyAt >= HEALTHY_STREAM_MS) {
+      reconnectAttempts = 0;
+    }
+    streamReadyAt = null;
+    if (reconnectAttempts >= maxReconnectAttempts) {
+      return false;
+    }
+    const longestDelayMs = RECONNECT_DELAYS_MS[Math.min(reconnectAttempts, RECONNECT_DELAYS_MS.length - 1)]!;
+    const delayMs = cause === "rollover" ? 0 : Math.round(longestDelayMs * (0.5 + random() / 2));
+    reconnectAttempts += 1;
+    reconnectCause = cause;
+    // Detach first, so the dropped socket's own close event is ignored.
+    const dropped = socket;
+    socket = null;
+    if (dropped && dropped.readyState < WEB_SOCKET_CLOSING) {
+      dropped.close(1000, "transcription reconnecting");
+    }
+    state = "reconnecting";
+    setListening(false);
+    pendingInput = new Float32Array(0);
+    clearReconnectTimer();
+    callbacks.onReconnecting?.(cause, reconnectAttempts);
+    reconnectTimer = setTimer(() => {
+      reconnectTimer = null;
+      openSocket();
+    }, delayMs);
+    return true;
+  };
+
+  // Ends the session, or opens a replacement stream when the failure is one
+  // a new stream can fix.
+  const handleFailure = (
+    message: string,
+    code: string | undefined,
+    cause: RealtimeSpeechReconnectCause | null,
+  ) => {
+    if (!cause || !options.reconnect) {
+      fail(message, code);
+      return;
+    }
+    if (
+      cause === "rollover" &&
+      options.quietPauseMs !== undefined &&
+      now() - lastSpeechAt >= options.quietPauseMs
+    ) {
+      releaseAudio();
+      reportEnd("paused");
+      closeSocket("transcription paused");
+      return;
+    }
+    if (scheduleReconnect(cause)) {
+      return;
+    }
+    giveUp(code);
+  };
+
+  const giveUp = (code?: string) => {
+    const lastCause = reconnectCause;
+    endWakeable = true;
+    fail(
+      lastCause === "busy"
+        ? "Airo's voice is busy right now. Try again in a minute; typed commands still work."
+        : everReady
+          ? "Airo's voice connection dropped and couldn't reconnect. Turn Airo on again; typed commands still work."
+          : "Could not connect to the realtime transcription service.",
+      code ?? "TRANSCRIPTION_RECONNECT_FAILED",
+    );
   };
 
   const sendStart = () => {
@@ -551,6 +740,16 @@ export function createRealtimeSpeechSession(
     sendPcmFrame(paddedFrame);
   };
 
+  // Listening starts now, or once a replacement stream is ready if the
+  // stream dropped while the microphone was connecting.
+  const markCaptureLive = () => {
+    audioCaptureLive = true;
+    if (state === "starting") {
+      state = "active";
+      setListening(true);
+    }
+  };
+
   const connectAudioCapture = async () => {
     if (state !== "starting" || audioCaptureStarting) {
       return;
@@ -562,8 +761,7 @@ export function createRealtimeSpeechSession(
           fail("Meet microphone capture was not prepared before transcription started.", "MICROPHONE_UNAVAILABLE");
           return;
         }
-        state = "active";
-        setListening(true);
+        markCaptureLive();
         return;
       }
       if (!audioContext || !stream) {
@@ -585,7 +783,8 @@ export function createRealtimeSpeechSession(
         try {
           moduleUrl = createAudioWorkletModuleUrl(AUDIO_WORKLET_PROCESSOR_SOURCE);
           await audioContext.audioWorklet.addModule(moduleUrl);
-          if (state !== "starting" || !audioContext || !source) {
+          // A stream that drops meanwhile keeps the microphone for its replacement.
+          if ((state !== "starting" && state !== "reconnecting") || !audioContext || !source) {
             releaseAudio();
             return;
           }
@@ -640,8 +839,7 @@ export function createRealtimeSpeechSession(
         source.connect(processor);
         processor.connect(audioContext.destination);
       }
-      state = "active";
-      setListening(true);
+      markCaptureLive();
     } catch (error) {
       fail(describeRealtimeSpeechError(error), "MICROPHONE_UNAVAILABLE");
     }
@@ -667,6 +865,27 @@ export function createRealtimeSpeechSession(
           model: message.model,
           sampleRate: message.sampleRate,
         };
+        streamReadyAt = now();
+        if (everReady) {
+          // A replacement stream: the microphone is still open, so listening
+          // resumes at once.
+          reconnectCause = null;
+          if (state === "reconnecting") {
+            state = audioCaptureLive ? "active" : "starting";
+          }
+          callbacks.onReconnected?.(metadata);
+          sendKeytermUpdate();
+          if (audioCaptureLive) {
+            setListening(true);
+          } else {
+            void connectAudioCapture();
+          }
+          return;
+        }
+        everReady = true;
+        if (state === "reconnecting") {
+          state = "starting";
+        }
         callbacks.onReady?.(metadata);
         // A label can be created or renamed while the provider connection is
         // opening. Apply the latest complete vocabulary before audio capture.
@@ -679,6 +898,7 @@ export function createRealtimeSpeechSession(
         if (!transcript) {
           return;
         }
+        lastSpeechAt = now();
         const transcriptEvent = toTranscriptEvent(message, transcript);
         callbacks.onInterim?.(transcript, transcriptEvent);
         return;
@@ -688,6 +908,7 @@ export function createRealtimeSpeechSession(
         if (!transcript) {
           return;
         }
+        lastSpeechAt = now();
         const transcriptEvent = toTranscriptEvent(message, transcript);
         callbacks.onFinal(transcript, transcriptEvent);
         return;
@@ -717,10 +938,17 @@ export function createRealtimeSpeechSession(
           callbacks.onError?.(errorMessage, errorCode);
           return;
         }
-        fail(errorMessage, errorCode);
+        handleFailure(errorMessage, errorCode, recoverableCause(errorCode));
         return;
       }
       case "transcription.stopped":
+        // Nobody asked this stream to stop: the provider closed it.
+        if (options.reconnect && (state === "starting" || state === "active")) {
+          if (!scheduleReconnect("dropped")) {
+            giveUp();
+          }
+          return;
+        }
         releaseAudio();
         reportEnd("stopped");
         closeSocket("transcription stopped");
@@ -730,26 +958,33 @@ export function createRealtimeSpeechSession(
     }
   };
 
+  const opening = () => state === "starting" || state === "reconnecting";
+
   const openSocket = () => {
-    if (state !== "starting") {
+    if (!opening()) {
       return;
     }
-    if (options.url || !options.accessToken) {
+    const accessToken = options.getAccessToken?.() ?? options.accessToken;
+    if (options.url || !accessToken) {
       connectSocket(url);
       return;
     }
     const apiBaseUrl = options.apiBaseUrl || (typeof window === "undefined" ? "http://localhost:4000" : window.location.origin);
-    void exchangeTicket(apiBaseUrl, options.accessToken).then(
+    void exchangeTicket(apiBaseUrl, accessToken).then(
       (ticket) => {
-        if (state === "starting") {
+        if (opening()) {
           connectSocket(buildRealtimeTranscriptionWebSocketUrl(options.apiBaseUrl, DEFAULT_REALTIME_TRANSCRIPTION_PATH, ticket));
         }
       },
       (error: unknown) => {
+        if (!opening()) {
+          return;
+        }
         const code = error instanceof TranscriptionTicketError ? error.code : "AUTHORIZATION_UNAVAILABLE";
-        fail(
+        handleFailure(
           describeTranscriptionCloseRefusal(code) ?? "Could not connect to the realtime transcription service.",
           code,
+          recoverableCause(code),
         );
       },
     );
@@ -757,24 +992,44 @@ export function createRealtimeSpeechSession(
 
   const connectSocket = (socketUrl: string) => {
     try {
-      socket = createWebSocket(socketUrl);
-      socket.binaryType = "arraybuffer";
-      socket.addEventListener("open", sendStart);
-      socket.addEventListener("message", handleServerMessage);
-      socket.addEventListener("error", () => {
+      const current = createWebSocket(socketUrl);
+      socket = current;
+      current.binaryType = "arraybuffer";
+      // A replaced socket's late events must not touch its successor.
+      current.addEventListener("open", () => {
+        if (socket === current) sendStart();
+      });
+      current.addEventListener("message", (event) => {
+        if (socket === current) handleServerMessage(event);
+      });
+      current.addEventListener("error", () => {
+        // With reconnect on, the close event that always follows decides.
+        if (socket !== current || options.reconnect) {
+          return;
+        }
         fail("Could not connect to the realtime transcription service.", "WEBSOCKET_ERROR");
       });
-      socket.addEventListener("close", (event) => {
-        if (state === "ended") {
+      current.addEventListener("close", (event) => {
+        if (socket !== current || state === "ended") {
           return;
         }
         const refusal = describeTranscriptionCloseRefusal(event?.reason ?? "");
         if (refusal) {
-          fail(refusal, event.reason);
+          handleFailure(refusal, event.reason, recoverableCause(event.reason));
           return;
         }
-        const reason: RealtimeSpeechEndReason = state === "stopping" ? "stopped" : "closed";
-        reportEnd(reason);
+        if (state === "stopping") {
+          reportEnd("stopped");
+          return;
+        }
+        // A server restart (1012), network drop (1006) or busy server (1013).
+        if (options.reconnect) {
+          if (!scheduleReconnect(event?.reason === "RATE_LIMITED" ? "busy" : "dropped")) {
+            giveUp();
+          }
+          return;
+        }
+        reportEnd("closed");
       });
     } catch (error) {
       fail(describeRealtimeSpeechError(error), "WEBSOCKET_UNAVAILABLE");
@@ -843,6 +1098,7 @@ export function createRealtimeSpeechSession(
         return;
       }
       state = "starting";
+      lastSpeechAt = now();
       void prepareSession();
     },
     updateKeyterms(keyterms) {

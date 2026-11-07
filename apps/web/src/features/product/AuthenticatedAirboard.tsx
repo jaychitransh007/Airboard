@@ -33,13 +33,13 @@ type SaveNotice =
  * A signed-in person's board. Viewer and Billing members get the view-only
  * board: no live session, no saving, no tools.
  */
-export function AuthenticatedAirboard({ boardId, templateId }: { boardId?: string; templateId?: string }) {
+export function AuthenticatedAirboard({ boardId }: { boardId?: string }) {
   const auth = useAirboardAuth();
   if (auth.account && !canEditBoards(auth.account.organization.role)) return <ViewOnlyBoard boardId={boardId} />;
-  return <EditableAirboard {...(boardId ? { boardId } : {})} {...(templateId ? { templateId } : {})} />;
+  return <EditableAirboard {...(boardId ? { boardId } : {})} />;
 }
 
-function EditableAirboard({ boardId, templateId }: { boardId?: string; templateId?: string }) {
+function EditableAirboard({ boardId }: { boardId?: string }) {
   const auth = useAirboardAuth();
   const router = useRouter();
   const [ready, setReady] = useState(false);
@@ -316,7 +316,7 @@ function EditableAirboard({ boardId, templateId }: { boardId?: string; templateI
   };
   return (
     <>
-      <AirboardPrototype surface="standalone" accessToken={auth.accessToken} accountUserId={auth.account.profile.id} persistentBoardId={board.id} persistentWorkspaceId={board.workspace_id} pendingSessionStart={pendingSessionStartRef.current} boardTitle={board.title} persistentSaveStatus={saveStatus} initialBoardState={normalizeBoardState(board.latest_state, board.id)} onPersistentBoardChange={persist} onRenameBoard={renameBoard} onDeleteBoard={deleteBoard} shareAccess={shareAccess} {...(auth.account.policy ? { organizationPolicy: auth.account.policy } : {})} {...(templateId ? { initialTemplateId: templateId } : {})} {...(auth.account.profile.preferences ? { initialPreferences: auth.account.profile.preferences } : {})} />
+      <AirboardPrototype surface="standalone" accessToken={auth.accessToken} accountUserId={auth.account.profile.id} persistentBoardId={board.id} persistentWorkspaceId={board.workspace_id} pendingSessionStart={pendingSessionStartRef.current} boardTitle={board.title} persistentSaveStatus={saveStatus} initialBoardState={normalizeBoardState(board.latest_state, board.id)} onPersistentBoardChange={persist} onRenameBoard={renameBoard} onDeleteBoard={deleteBoard} shareAccess={shareAccess} {...(auth.account.policy ? { organizationPolicy: auth.account.policy } : {})} {...(auth.account.profile.preferences ? { initialPreferences: auth.account.profile.preferences } : {})} />
       {saveNotice ? (
         <div className="board-save-warning" role={saveNotice.kind === "conflict" ? "alert" : "status"}>
           {saveNotice.kind === "conflict" ? (
