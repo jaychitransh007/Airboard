@@ -190,6 +190,7 @@ import {
   fetchRealtimeTranscriptionConfig,
   supportsRealtimeSpeech,
   type RealtimeSpeechMetadata,
+  type RealtimeSpeechReconnectCause,
   type RealtimeSpeechSession,
   type RealtimeTranscriptionConfig,
 } from "./realtimeSpeech";
@@ -572,6 +573,12 @@ const CATALOG_DRAG_MIME = "application/x-airboard-tool";
 const CAMERA_PROMPT_HINT_DELAY_MS = 1_500;
 const CAMERA_PROMPT_HINT =
   "Your browser is asking to use the camera. Choose Allow in its prompt near the address bar. No prompt? Another app or tab may be using the camera.";
+/**
+ * When a voice stream reaches the server's time limit and nobody has spoken
+ * for this long, voice pauses instead of reconnecting: the tab is probably
+ * forgotten, and streaming an empty room spends voice minutes.
+ */
+const VOICE_QUIET_PAUSE_MS = 20 * 60_000;
 const CATALOG_DROP_EXIT_PX = 12;
 const CATALOG_DROP_MIN_TRAVEL_PX = 24;
 const UNDO_TOAST_VISIBLE_MS = 6_000;
@@ -898,6 +905,22 @@ export function AirboardPrototype({
   const headlessCameraRequestedRef = useRef(false);
   const headlessVoiceRequestedCredentialRef = useRef<string | null>(null);
   const headlessVoiceCredentialRef = useRef<string | undefined>(effectiveAccessToken);
+  // The latest sign-in token, so a voice reconnect after a token refresh
+  // still gets a ticket.
+  const latestAccessTokenRef = useRef<string | undefined>(effectiveAccessToken);
+  // Voice ended on its own in a way trying again can fix (it paused after a
+  // quiet stretch, or gave up reconnecting), so an open palm or the Airo
+  // power button brings it back. The ref serves callbacks; the state, labels.
+  const voiceDroppedRef = useRef(false);
+  const [voiceDropped, setVoiceDropped] = useState(false);
+  const markVoiceDropped = useCallback((dropped: boolean) => {
+    voiceDroppedRef.current = dropped;
+    setVoiceDropped(dropped);
+  }, []);
+  const startVoiceCommandRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    latestAccessTokenRef.current = effectiveAccessToken;
+  }, [effectiveAccessToken]);
   const headlessVoiceRetryAttemptRef = useRef(0);
   const headlessVoiceRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const headlessSpeechConfigRetryAttemptRef = useRef(0);
@@ -7291,6 +7314,13 @@ export function AirboardPrototype({
       voiceRouter.openGate(gate);
       syncVoiceGateUi();
       const micArmed = Boolean(speechSessionRef.current);
+      if (!micArmed && voiceDroppedRef.current && startVoiceCommandRef.current) {
+        // Voice paused or dropped on its own; an open palm means the person
+        // wants to talk, so wake it. The gate stays open for the command.
+        startVoiceCommandRef.current();
+        setCommandFeedback("Waking Airo's voice… speak once it's listening.");
+        return;
+      }
       if (gate.mode === "ptt") {
         setCommandFeedback(
           micArmed
@@ -7739,6 +7769,7 @@ export function AirboardPrototype({
       // can report "stopped" synchronously. That intentional stop must never be
       // mistaken for an unexpected provider close by the headless retry path.
       activeSession.stop();
+      markVoiceDropped(false);
       voiceRouter.reset();
       setVoiceGate(null);
       setSpeechArmed(false);
@@ -7847,8 +7878,14 @@ export function AirboardPrototype({
           : "browser_media",
     });
 
+    markVoiceDropped(false);
     if (speechEngine === "realtime") {
       let realtimeSession: RealtimeSpeechSession | null = null;
+      // Why this session's stream is reconnecting, until it listens again,
+      // and whether it has listened yet: a retry before the first listen is
+      // still the first connection, with its first-run hint.
+      let reconnectCause: RealtimeSpeechReconnectCause | null = null;
+      let listenedOnce = false;
       realtimeSession = createRealtimeSpeechSession(
         {
           onReady: (metadata) => {
@@ -7879,6 +7916,16 @@ export function AirboardPrototype({
                 void refreshStandaloneMediaPermissions();
               }
               setSpeechRecognitionStatus("waiting");
+              const resumedFrom = listenedOnce ? reconnectCause : null;
+              reconnectCause = null;
+              listenedOnce = true;
+              if (resumedFrom) {
+                // A time-limit rollover is silent; after a drop, say voice is back.
+                if (resumedFrom !== "rollover") {
+                  setCommandFeedback("Airo is listening again.");
+                }
+                return;
+              }
               const metadata = realtimeSession?.getMetadata();
               setCommandFeedback(
                 `Airo is listening${metadata ? ` via ${metadata.provider} / ${metadata.model}` : ""}. Say “Airo, add a user.”`,
@@ -7924,6 +7971,20 @@ export function AirboardPrototype({
               finalizationReported: true,
             });
           },
+          onReconnecting: (cause) => {
+            reconnectCause = cause;
+            setSpeechRecognitionStatus("waiting");
+            if (cause === "busy") {
+              setCommandFeedback(
+                "Airo's voice is busy right now. Retrying in a moment; typed commands still work.",
+              );
+            } else if (cause === "dropped") {
+              setCommandFeedback("Reconnecting Airo's voice…");
+            }
+          },
+          onReconnected: (metadata) => {
+            setRealtimeSpeechMetadata(metadata);
+          },
           onProviderStatus: (event) => {
             if (event.provider && event.model) {
               setRealtimeSpeechMetadata((current) => ({
@@ -7951,7 +8012,7 @@ export function AirboardPrototype({
               "Your network is slow, so some microphone audio was dropped. A command may be cut off — pause briefly and say it again.",
             );
           },
-          onEnd: (reason) => {
+          onEnd: (reason, detail) => {
             // A rotated credential or model switch may already have installed
             // a replacement session. The stale callback must not attribute its
             // close to the new voice turn or reset the new session's router/UI.
@@ -7970,6 +8031,17 @@ export function AirboardPrototype({
             speechSessionRef.current = null;
             setSpeechListening(false);
             setSpeechArmed(false);
+            // Only an end that trying again can fix lets a palm or the power
+            // button bring voice back; a used-up allowance, an admin's switch
+            // or a blocked microphone must not restart it on every palm.
+            markVoiceDropped(detail?.wakeable === true);
+            if (reason === "paused") {
+              setSpeechRecognitionStatus("idle");
+              setCommandFeedback(
+                "Airo's voice paused after a long quiet stretch. Hold an open palm or press ⏻ to resume; typed commands still work.",
+              );
+              return;
+            }
             const shouldRetryHeadless =
               shouldRetryHeadlessMeetVoiceAfterEnd(
                 headlessMeetOverlay,
@@ -7997,6 +8069,12 @@ export function AirboardPrototype({
         {
           apiBaseUrl: AIRBOARD_API_URL,
           ...(effectiveAccessToken ? { accessToken: effectiveAccessToken } : {}),
+          getAccessToken: () => latestAccessTokenRef.current,
+          // Server restarts, network drops, a busy server and the per-stream
+          // time limit replace the stream instead of ending voice, and a
+          // forgotten, quiet tab stops streaming. The Meet overlay keeps its
+          // own retry loop (scheduleHeadlessVoiceRetry) instead.
+          ...(headlessMeetOverlay ? {} : { reconnect: true, quietPauseMs: VOICE_QUIET_PAUSE_MS }),
           language: typeof navigator === "undefined" ? "en-US" : navigator.language,
           model:
             selectedSpeechModelRef.current ||
@@ -8196,6 +8274,7 @@ export function AirboardPrototype({
     dispatchVoiceDecision,
     effectiveAccessToken,
     headlessMeetOverlay,
+    markVoiceDropped,
     realtimeTranscriptionConfig?.defaultModel,
     realtimeTranscriptionConfig?.dynamicKeyterms,
     refreshStandaloneMediaPermissions,
@@ -8212,6 +8291,10 @@ export function AirboardPrototype({
     voiceCaptureAvailable,
     voiceRouter,
   ]);
+
+  useEffect(() => {
+    startVoiceCommandRef.current = startVoiceCommand;
+  }, [startVoiceCommand]);
 
   const toggleVoiceInput = useCallback(() => {
     if (standaloneEditor && (speechSessionRef.current || speechArmed)) {
@@ -8546,6 +8629,7 @@ export function AirboardPrototype({
     // Turning Airo on starts from the strip; turning it off leaves the full panel.
     setCopilotExpanded(false);
     if (airoInputsActive) {
+      markVoiceDropped(false);
       if (airoVoiceAvailable && speechArmed) {
         toggleVoiceInput();
       }
@@ -8570,11 +8654,18 @@ export function AirboardPrototype({
     airoInputsActive,
     airoVoiceAvailable,
     cameraStatus,
+    markVoiceDropped,
     setCopilotVisibility,
     speechArmed,
     toggleCameraInput,
     toggleVoiceInput,
   ]);
+
+  // Hands stayed on while voice paused or gave up reconnecting: the power
+  // button resumes voice instead of turning everything off. The board menu
+  // still turns everything off.
+  const airoVoiceResumable =
+    airoInputsActive && voiceDropped && airoVoiceAvailable && !speechArmed;
 
   useEffect(() => {
     if (
@@ -11171,15 +11262,23 @@ export function AirboardPrototype({
                     <button
                       type="button"
                       className={`canvas-copilot-power${airoInputsActive ? " on" : ""}`}
-                      aria-pressed={airoInputsActive}
+                      aria-pressed={airoVoiceResumable ? undefined : airoInputsActive}
                       disabled={cameraStatus === "starting" || cameraStatus === "tracker_loading"}
                       aria-label={
-                        airoInputsActive
-                          ? "Turn off Airo voice and hand tracking"
-                          : "Enable Airo voice and hand tracking"
+                        airoVoiceResumable
+                          ? "Resume Airo voice"
+                          : airoInputsActive
+                            ? "Turn off Airo voice and hand tracking"
+                            : "Enable Airo voice and hand tracking"
                       }
-                      title={airoInputsActive ? "Turn off voice and hands" : "Turn on voice and hands"}
-                      onClick={toggleAiroInputs}
+                      title={
+                        airoVoiceResumable
+                          ? "Resume voice"
+                          : airoInputsActive
+                            ? "Turn off voice and hands"
+                            : "Turn on voice and hands"
+                      }
+                      onClick={airoVoiceResumable ? toggleVoiceInput : toggleAiroInputs}
                     >
                       ⏻
                     </button>

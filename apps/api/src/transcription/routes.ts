@@ -185,7 +185,7 @@ export function registerTranscriptionRoutes(
         sendError(
           clientSocket,
           "TRANSCRIPTION_SESSION_LIMIT",
-          "The realtime transcription session reached its maximum duration. Start Airo again to continue.",
+          "This voice stream reached its maximum length. Airboard opens a new one automatically.",
           true,
         );
         stopActive("aborted");

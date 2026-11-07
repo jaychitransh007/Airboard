@@ -333,3 +333,13 @@ test("caps each profile at two concurrent streams unless configured", () => {
     /AIRBOARD_TRANSCRIPTION_MAX_STREAMS_PER_PROFILE/,
   );
 });
+
+test("each instance carries 50 voice streams by default, so three instances stay inside Deepgram's 150", () => {
+  const defaults = loadTranscriptionConfig({});
+  assert.equal(defaults.maxConcurrentStreams, 50);
+  assert.equal(defaults.maxSessionMs, 30 * 60 * 1_000);
+  assert.equal(
+    loadTranscriptionConfig({ AIRBOARD_TRANSCRIPTION_MAX_CONCURRENT_STREAMS: "12" }).maxConcurrentStreams,
+    12,
+  );
+});

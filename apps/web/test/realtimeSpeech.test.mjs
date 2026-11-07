@@ -660,3 +660,345 @@ test("a refused ticket reports the same message as a refused socket", async () =
   assert.equal(errors[0].code, "ACTIVE_ENTITLEMENT_REQUIRED");
   assert.match(errors[0].message, /pilot access has ended/);
 });
+
+const { TranscriptionTicketError } = await import("../src/features/board/realtimeSpeech.ts");
+
+async function flushAsync() {
+  for (let i = 0; i < 6; i += 1) await new Promise((resolve) => setImmediate(resolve));
+}
+
+// The server or network ends the socket; nothing on the client closed it.
+function serverClose(socket, code, reason = "") {
+  socket.readyState = 3;
+  socket.emit("close", { code, reason });
+}
+
+function createReconnectHarness(options = {}, { random = () => 1 } = {}) {
+  const ends = [];
+  const sockets = [];
+  const tickets = [];
+  const timers = [];
+  const events = [];
+  const media = createMediaStreamHarness();
+  const audio = createWorkletAudioHarness();
+  let clock = 0;
+  let token = "first-jwt";
+  const ticketRefusals = [];
+  const session = createRealtimeSpeechSession(
+    {
+      onReady: () => events.push(["ready"]),
+      onReconnecting: (cause, attempt) => events.push(["reconnecting", cause, attempt]),
+      onReconnected: () => events.push(["reconnected"]),
+      onListening: (listening) => events.push(["listening", listening]),
+      onFinal() {},
+      onError: (message, code) => events.push(["error", message, code]),
+      onEnd: (reason, detail) => {
+        events.push(["end", reason]);
+        ends.push({ reason, ...detail });
+      },
+    },
+    {
+      apiBaseUrl: "https://api.example.com",
+      accessToken: "first-jwt",
+      getAccessToken: () => token,
+      reconnect: true,
+      ...options,
+    },
+    {
+      fetchTranscriptionTicket: async (_apiBaseUrl, accessToken) => {
+        tickets.push(accessToken);
+        const refusal = ticketRefusals.shift();
+        if (refusal) throw new TranscriptionTicketError(refusal);
+        return `ticket-${tickets.length}`;
+      },
+      createWebSocket: (url) => {
+        const socket = new FakeSocket();
+        socket.url = url;
+        sockets.push(socket);
+        return socket;
+      },
+      getUserMedia: async () => media.stream,
+      createAudioContext: () => audio.context,
+      createAudioWorkletNode: () => audio.worklet,
+      createAudioWorkletModuleUrl: () => "blob:test",
+      revokeAudioWorkletModuleUrl() {},
+      setTimeout: (callback, delayMs) => {
+        const timer = { callback, delayMs, done: false };
+        timers.push(timer);
+        return timer;
+      },
+      clearTimeout: (timer) => {
+        timer.done = true;
+      },
+      now: () => clock,
+      random,
+    },
+  );
+  return {
+    session,
+    ends,
+    refuseNextTicket: (code) => ticketRefusals.push(code),
+    sockets,
+    tickets,
+    events,
+    media,
+    audio,
+    latest: () => sockets.at(-1),
+    setToken: (next) => {
+      token = next;
+    },
+    advance: (ms) => {
+      clock += ms;
+    },
+    pendingTimers: () => timers.filter((timer) => !timer.done),
+    async runTimer() {
+      const timer = timers.find((candidate) => !candidate.done);
+      assert.ok(timer, "a reconnect is scheduled");
+      timer.done = true;
+      timer.callback();
+      await flushAsync();
+      return timer.delayMs;
+    },
+    async start() {
+      session.start();
+      await flushAsync();
+    },
+    async openAndReady(socket = sockets.at(-1)) {
+      socket.open();
+      socket.serverMessage({
+        type: "transcription.ready",
+        provider: "deepgram",
+        model: "flux-general-en",
+        sampleRate: 16_000,
+      });
+      await flushAsync();
+    },
+  };
+}
+
+const MINUTE = 60_000;
+
+test("a server restart or network drop reopens the stream with a fresh ticket while the microphone stays open", async () => {
+  const voice = createReconnectHarness();
+  await voice.start();
+  await voice.openAndReady();
+  assert.equal(voice.session.isListening(), true);
+
+  // The founder deploys: the API closes every socket with 1012.
+  serverClose(voice.sockets[0], 1012, "SERVICE_RESTART");
+  assert.deepEqual(voice.events.slice(-2), [["listening", false], ["reconnecting", "dropped", 1]]);
+  assert.equal(voice.media.track.stopCalls, 0, "the microphone stays open");
+  assert.equal(voice.audio.context.closeCalls, 0);
+
+  voice.setToken("refreshed-jwt");
+  assert.equal(await voice.runTimer(), 1_000);
+  assert.deepEqual(voice.tickets, ["first-jwt", "refreshed-jwt"], "the reconnect uses the latest sign-in");
+  assert.equal(voice.sockets.length, 2);
+  assert.equal(voice.sockets[1].url, "wss://api.example.com/transcription/ws?ticket=ticket-2");
+
+  await voice.openAndReady();
+  assert.equal(JSON.parse(voice.sockets[1].sent[0]).type, "transcription.start");
+  assert.deepEqual(voice.events.slice(-2), [["reconnected"], ["listening", true]]);
+  assert.equal(voice.events.filter(([name]) => name === "ready").length, 1, "only the first stream reports onReady");
+  assert.equal(voice.events.some(([name]) => name === "end" || name === "error"), false);
+
+  // Audio flows to the new stream, not the dropped one.
+  const sentBefore = voice.sockets[0].sent.length;
+  voice.audio.worklet.emit(new Float32Array(1_280));
+  assert.equal(voice.sockets[0].sent.length, sentBefore);
+  assert.ok(voice.sockets[1].sent.some((data) => data instanceof ArrayBuffer));
+  voice.session.abort();
+});
+
+test("the per-stream time limit rolls over at once while people talk, and pauses a quiet tab", async () => {
+  const talking = createReconnectHarness({ quietPauseMs: 20 * MINUTE });
+  await talking.start();
+  await talking.openAndReady();
+  talking.advance(25 * MINUTE);
+  talking.latest().serverMessage({ type: "transcription.partial", transcript: "so the API calls the queue" });
+  talking.advance(5 * MINUTE);
+  talking.latest().serverMessage({
+    type: "transcription.error",
+    code: "TRANSCRIPTION_SESSION_LIMIT",
+    message: "This voice stream reached its maximum length.",
+    fatal: true,
+  });
+  assert.deepEqual(talking.events.at(-1), ["reconnecting", "rollover", 1]);
+  assert.deepEqual(talking.sockets[0].closeCalls, [{ code: 1000, reason: "transcription reconnecting" }]);
+  assert.equal(await talking.runTimer(), 0, "a rollover reconnects without waiting");
+  await talking.openAndReady();
+  assert.equal(talking.session.isListening(), true);
+  assert.equal(talking.events.some(([name]) => name === "error" || name === "end"), false);
+  talking.session.abort();
+
+  const quiet = createReconnectHarness({ quietPauseMs: 20 * MINUTE });
+  await quiet.start();
+  await quiet.openAndReady();
+  quiet.advance(30 * MINUTE);
+  quiet.latest().serverMessage({
+    type: "transcription.error",
+    code: "TRANSCRIPTION_SESSION_LIMIT",
+    message: "This voice stream reached its maximum length.",
+    fatal: true,
+  });
+  assert.deepEqual(quiet.events.at(-1), ["end", "paused"]);
+  assert.deepEqual(quiet.ends, [{ reason: "paused", wakeable: true }]);
+  assert.equal(quiet.events.some(([name]) => name === "error"), false);
+  assert.equal(quiet.media.track.stopCalls, 1, "a paused session releases the microphone");
+  assert.equal(quiet.pendingTimers().length, 0);
+});
+
+test("a busy server is retried with growing waits, then voice ends with a plain message", async () => {
+  const voice = createReconnectHarness();
+  await voice.start();
+  const refuse = () => {
+    voice.latest().open();
+    voice.latest().serverMessage({
+      type: "transcription.error",
+      code: "TRANSCRIPTION_CAPACITY_REACHED",
+      message: "The realtime transcription service is at capacity. Try again shortly.",
+      fatal: true,
+    });
+  };
+  refuse();
+  const delays = [];
+  for (let attempt = 0; attempt < 7; attempt += 1) {
+    delays.push(await voice.runTimer());
+    refuse();
+  }
+  assert.deepEqual(delays, [1_000, 2_000, 4_000, 8_000, 15_000, 20_000, 30_000]);
+  assert.deepEqual(voice.ends, [{ reason: "error", wakeable: true }], "a later try may work, so voice can be woken");
+  const [, message, code] = voice.events.find(([name]) => name === "error");
+  assert.match(message, /busy right now/);
+  assert.equal(code, "TRANSCRIPTION_CAPACITY_REACHED");
+  assert.deepEqual(voice.events.at(-1), ["end", "error"]);
+  assert.equal(voice.media.track.stopCalls, 1);
+  assert.equal(voice.pendingTimers().length, 0);
+});
+
+test("a refusal a new stream can't fix still ends voice at once", async () => {
+  const voice = createReconnectHarness();
+  await voice.start();
+  await voice.openAndReady();
+  voice.latest().serverMessage({
+    type: "transcription.error",
+    code: "DAILY_VOICE_LIMIT",
+    message: "You've used today's Airo voice minutes.",
+    fatal: true,
+  });
+  assert.equal(voice.events.find(([name]) => name === "error")[2], "DAILY_VOICE_LIMIT");
+  assert.deepEqual(voice.events.at(-1), ["end", "error"]);
+  assert.deepEqual(voice.ends, [{ reason: "error", wakeable: false }], "a palm must not restart it");
+  assert.equal(voice.pendingTimers().length, 0);
+
+  // On a first start, the per-account limit means another tab has voice on.
+  const second = createReconnectHarness();
+  await second.start();
+  second.latest().open();
+  second.latest().serverMessage({
+    type: "transcription.error",
+    code: "TRANSCRIPTION_PROFILE_LIMIT",
+    message: "This account already has the maximum number of live transcription streams.",
+    fatal: true,
+  });
+  assert.equal(second.events.find(([name]) => name === "error")[2], "TRANSCRIPTION_PROFILE_LIMIT");
+  assert.equal(second.pendingTimers().length, 0);
+});
+
+test("turning voice off during a reconnect cancels it", async () => {
+  const voice = createReconnectHarness();
+  await voice.start();
+  await voice.openAndReady();
+  serverClose(voice.sockets[0], 1006);
+  assert.deepEqual(voice.events.at(-1), ["reconnecting", "dropped", 1]);
+  voice.session.stop();
+  assert.deepEqual(voice.events.at(-1), ["end", "stopped"]);
+  assert.equal(voice.pendingTimers().length, 0);
+  assert.equal(voice.sockets.length, 1);
+});
+
+test("a stream that drops right after opening gives up instead of looping, and a healthy stream starts afresh", async () => {
+  const voice = createReconnectHarness();
+  await voice.start();
+  await voice.openAndReady();
+  for (let attempt = 1; attempt <= 7; attempt += 1) {
+    serverClose(voice.latest(), 1006);
+    assert.deepEqual(voice.events.at(-1), ["reconnecting", "dropped", attempt]);
+    await voice.runTimer();
+    await voice.openAndReady();
+  }
+  serverClose(voice.latest(), 1006);
+  const [, message, code] = voice.events.find(([name]) => name === "error");
+  assert.match(message, /dropped and couldn't reconnect/);
+  assert.equal(code, "TRANSCRIPTION_RECONNECT_FAILED");
+  assert.deepEqual(voice.events.at(-1), ["end", "error"]);
+
+  const steady = createReconnectHarness();
+  await steady.start();
+  await steady.openAndReady();
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    serverClose(steady.latest(), 1006);
+    await steady.runTimer();
+    await steady.openAndReady();
+  }
+  steady.advance(31_000);
+  serverClose(steady.latest(), 1006);
+  assert.deepEqual(steady.events.at(-1), ["reconnecting", "dropped", 1]);
+  steady.session.abort();
+});
+
+test("without reconnect, a dropped stream still ends as closed", async () => {
+  const voice = createReconnectHarness({ reconnect: false });
+  await voice.start();
+  await voice.openAndReady();
+  serverClose(voice.sockets[0], 1012, "SERVICE_RESTART");
+  assert.deepEqual(voice.events.at(-1), ["end", "closed"]);
+  assert.equal(voice.pendingTimers().length, 0);
+});
+
+test("after a stream has worked, a provider failure or an expired sign-in reconnects; on a first start it doesn't", async () => {
+  const voice = createReconnectHarness();
+  await voice.start();
+  await voice.openAndReady();
+  // The API's socket to Deepgram resets mid-stream.
+  voice.latest().serverMessage({
+    type: "transcription.error",
+    code: "PROVIDER_SOCKET_ERROR",
+    message: "read ECONNRESET",
+    fatal: true,
+  });
+  assert.deepEqual(voice.events.at(-1), ["reconnecting", "dropped", 1]);
+  assert.equal(voice.media.track.stopCalls, 0);
+
+  // The laptop slept past the token's lifetime: the first ticket is refused,
+  // and the next attempt reads the refreshed token.
+  voice.refuseNextTicket("Airboard authentication required");
+  await voice.runTimer();
+  assert.deepEqual(voice.events.at(-1), ["reconnecting", "dropped", 2]);
+  voice.setToken("refreshed-jwt");
+  await voice.runTimer();
+  assert.equal(voice.tickets.at(-1), "refreshed-jwt");
+  await voice.openAndReady();
+  assert.equal(voice.session.isListening(), true);
+  assert.equal(voice.events.some(([name]) => name === "error" || name === "end"), false);
+  voice.session.abort();
+
+  const first = createReconnectHarness();
+  first.refuseNextTicket("Airboard authentication required");
+  await first.start();
+  assert.equal(first.events.find(([name]) => name === "error")[2], "Airboard authentication required");
+  assert.deepEqual(first.ends, [{ reason: "error", wakeable: false }]);
+  assert.equal(first.pendingTimers().length, 0);
+});
+
+test("reconnect waits are spread between half and all of each step, and a rate-limited close counts as busy", async () => {
+  const voice = createReconnectHarness({}, { random: () => 0 });
+  await voice.start();
+  await voice.openAndReady();
+  serverClose(voice.latest(), 1013, "RATE_LIMITED");
+  assert.deepEqual(voice.events.at(-1), ["reconnecting", "busy", 1]);
+  assert.equal(await voice.runTimer(), 500);
+  serverClose(voice.latest(), 1006);
+  assert.equal(await voice.runTimer(), 1_000);
+  voice.session.abort();
+});

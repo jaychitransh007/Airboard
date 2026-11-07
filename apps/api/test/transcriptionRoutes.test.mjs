@@ -202,6 +202,29 @@ test("the global stream cap still answers with the capacity code", { timeout: 5_
   blocked.socket.close();
 });
 
+test("a stream that reaches its time limit frees its slot, so the same person's replacement starts at once", { timeout: 5_000 }, async (t) => {
+  const url = await startServer(t, {
+    auth: fakeAuth({ entitledOrganizations: ["org-a"] }),
+    transcription: { maxConcurrentStreams: 1, maxStreamsPerProfile: 1, maxSessionMs: 50 },
+  });
+  const first = connect(url, "a");
+  first.start();
+  await first.nextMessage("transcription.ready");
+  const limit = await first.nextMessage("transcription.error");
+  assert.equal(limit.code, "TRANSCRIPTION_SESSION_LIMIT");
+  assert.equal(limit.fatal, true);
+  assert.match(limit.message, /opens a new one automatically/);
+  assert.equal((await first.nextMessage("transcription.stopped")).reason, "aborted");
+
+  // The browser closes the old socket and opens a replacement right away.
+  first.socket.close();
+  await first.closed;
+  const replacement = connect(url, "a");
+  replacement.start();
+  await replacement.nextMessage("transcription.ready");
+  replacement.socket.close();
+});
+
 test("a one-minute ticket opens the socket, so the sign-in token never goes in a URL", { timeout: 5_000 }, async (t) => {
   const url = await startServer(t, { auth: fakeAuth({ entitledOrganizations: ["org-paid"] }) });
   const api = url.replace("ws://", "http://").replace("/transcription/ws", "");

@@ -45,10 +45,13 @@ ID before retrying.
 | Code | Meaning | What to do |
 | --- | --- | --- |
 | `TRANSCRIPTION_UNAVAILABLE` | Realtime transcription is not configured. | Use typed commands and notify the operator if voice is expected. |
-| `TRANSCRIPTION_SESSION_LIMIT` | This account or environment has reached its active stream limit. | Close unused Airo sessions, wait briefly, and retry. |
+| `TRANSCRIPTION_SESSION_LIMIT` | A voice stream reached its maximum length (30 minutes). | Nothing: Airo opens a new stream on its own. If nobody spoke for 20 minutes, voice pauses instead; hold an open palm or press ⏻ (Resume voice) to wake it. |
+| `TRANSCRIPTION_CAPACITY_REACHED` | Airboard's voice service is at capacity. | Airo retries on its own for up to about a minute. If it still can't connect, use typed commands and try again in a minute. |
+| `TRANSCRIPTION_PROFILE_LIMIT` | Your account already has Airo voice on in other tabs. | Turn Airo off in the other tab, then turn it on here. |
+| `TRANSCRIPTION_RECONNECT_FAILED` | Airo's voice connection dropped and couldn't come back. | Check your network, then press ⏻ (Resume voice) on the Airo panel. Typed commands still work. |
 | `DAILY_VOICE_LIMIT` | You've used today's Airo voice minutes. Each person has a daily allowance. | Use typed commands; voice comes back at midnight UTC. |
 | `DAILY_AIRO_LIMIT` | You've reached today's limit for Airo commands that need its language model. | Built-in commands still work; the limit resets at midnight UTC. |
-| `TRANSCRIPTION_PROVIDER_UNAVAILABLE` | The transcription provider could not be reached. | Use typed commands and retry later. |
+| `TRANSCRIPTION_PROVIDER_UNAVAILABLE` | The transcription provider could not be reached. | Airo retries on its own for up to about a minute; meanwhile use typed commands. |
 | `SEMANTIC_INTENT_UNAVAILABLE` | Natural-language recovery is unavailable. | Use a canonical command; deterministic commands still work. |
 | `SEMANTIC_INTENT_RATE_LIMITED` | The semantic provider is temporarily rate limited. | Wait and retry, or use a shorter canonical command. |
 | `SEMANTIC_INTENT_TIMEOUT` | The provider did not answer within the bounded time. | Repeat against the current board state or use a canonical command. |

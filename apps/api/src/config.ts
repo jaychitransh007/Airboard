@@ -375,9 +375,14 @@ export function loadTranscriptionConfig(
       10_000,
       "AIRBOARD_TRANSCRIPTION_EOT_TIMEOUT_MS",
     ),
+    // Deepgram allows 150 live streams per project and the API runs at most
+    // 3 instances, so 50 each stays inside it. A load test of the relay put
+    // 100 streams at about 10% of one core and 150 MB. Cloud Run concurrency
+    // on the API is 250 (infra/cloud-run/release.sh), so 50 voice users and
+    // their board sockets leave room for everything else.
     maxConcurrentStreams: parseNumber(
       env.AIRBOARD_TRANSCRIPTION_MAX_CONCURRENT_STREAMS,
-      4,
+      50,
       1,
       100,
       "AIRBOARD_TRANSCRIPTION_MAX_CONCURRENT_STREAMS",
