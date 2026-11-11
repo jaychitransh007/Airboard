@@ -1,5 +1,7 @@
 # Chrome Web Store release — Airboard for Google Meet
 
+> **Removed 12 Nov 2026.** The Chrome Meet extension this describes was removed from the codebase (owner decision, [Cleanup Review](../Cleanup%20Review.md) section 3). Kept for history; nothing here is current, and the scripts and paths it names no longer exist.
+
 This is the production distribution runbook for the camera-overlay product.
 The legacy Google Workspace Marketplace add-on is not part of this journey and
 must not be advertised as the way to add Airboard to a meeting.
@@ -65,7 +67,7 @@ advertising, or store raw camera/microphone media.
 - Optional promotional tiles derived from the current Airboard visual system.
 
 Do not reuse the historical Marketplace main-stage screenshot. Run the
-two-client acceptance path in `Docs/Meet Camera Composite Verification.md` and
+two-client acceptance path in `Docs/archive/Meet Camera Composite Verification.md` and
 capture the actual 0.8.0 result.
 
 ## Release order

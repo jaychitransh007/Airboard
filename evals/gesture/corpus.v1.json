@@ -22,7 +22,6 @@
     "coreConditions": [
       "standalone-normal-light",
       "standalone-low-light",
-      "meet-bridge",
       "minimum-device-frame-budget"
     ],
     "criticalFalseTriggerGestures": [
@@ -66,9 +65,9 @@
       "contentType": "application/json",
       "hash": {
         "algorithm": "sha256",
-        "value": "4bbe10fa0325002415490befc21aec82db5c99930371111d460371d185e81a30"
+        "value": "9ddde7e73afa0e2bec4ab49d6785ebea58a5c244557f8e8bc592c7786966154d"
       },
-      "byteLength": 67413,
+      "byteLength": 67429,
       "privacy": {
         "classification": "synthetic_non_personal",
         "containsRawMedia": false,

@@ -45,7 +45,6 @@ export function LiveBoardJoin({ sessionId, joinToken }: { sessionId: string; joi
     <div className="canvas-route">
       <MaintenanceBanner />
       <AirboardPrototype
-        surface="standalone"
         initialBoardSessionId={sessionId}
         liveGuest
         boardTitle="Live board"

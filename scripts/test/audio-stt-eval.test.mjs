@@ -11,7 +11,6 @@ import {
   createDeepgramReplayAdapter,
   createFakeTranscriptionAdapter,
   createLiveGatewayWebSocketAdapter,
-  createMeetBridgeReplayAdapter,
 } from "../lib/audio-stt-eval/adapters.mjs";
 import {
   loadAudioAssetManifest,
@@ -70,12 +69,12 @@ test("canary selection is stable and covers diverse live-audio facets first", ()
       surface: "standalone",
     },
     {
-      id: "m-meet-narrative",
-      adapter: "meet-bridge-replay",
+      id: "m-narrative",
+      adapter: "live-websocket",
       channel: "scoped",
       evaluationClass: "narrative",
       processingPath: "semantic",
-      surface: "meet-main-stage",
+      surface: "standalone",
       accent: "indian-english",
     },
     {
@@ -97,7 +96,6 @@ test("canary selection is stable and covers diverse live-audio facets first", ()
     first.map(({ id }) => id),
     second.map(({ id }) => id),
   );
-  assert.ok(first.some(({ adapter }) => adapter === "meet-bridge-replay"));
   assert.equal(new Set(first.map(({ evaluationClass }) => evaluationClass)).size, 3);
 });
 
@@ -594,86 +592,7 @@ test("live WebSocket adapter streams verified WAV frames through the same oracle
   );
 });
 
-test("Meet replay traverses the production bridge protocol and realtime PCM path before STT", async () => {
-  let socket;
-  let requestedUrl;
-  let requestedSocketOptions;
-  const wav = parsePcm16Wav(syntheticWav({ sampleCount: 1_600 }));
-  const meetScenario = {
-    ...scenario({
-      id: "meet-live",
-      adapter: "meet-bridge-replay",
-      assetId: "synthetic-meet-wav",
-      source: { url: "ws://localhost/transcription/ws" },
-      criticalTokens: ["database"],
-      expectedActions: ["create_node"],
-    }),
-    surface: "meet-side-panel",
-    transport: "meet-bridge",
-  };
-  const report = await runAudioSttScenarios({
-    scenarios: [meetScenario],
-    adapters: [
-      createMeetBridgeReplayAdapter({
-        createWebSocket: (url, options) => {
-          requestedUrl = url;
-          requestedSocketOptions = options;
-          socket = new FakeGatewaySocket("add a database here");
-          return socket;
-        },
-        accessToken: "synthetic-eval-token",
-        apiToken: "synthetic-shared-token",
-        fetchImpl: ticketFetch,
-        frameDelayMs: 0,
-        origin: "http://localhost:3000",
-        timeoutMs: 1_000,
-      }),
-    ],
-    assetCatalog: {
-      async load() {
-        return {
-          id: "synthetic-meet-wav",
-          sha256: "0".repeat(64),
-          privacyClass: "synthetic",
-          wav,
-        };
-      },
-    },
-    requireAssets: true,
-  });
-
-  assert.equal(report.passed, true);
-  assert.equal(report.results[0].diagnostics.source, "meet-bridge-replay");
-  assert.equal(report.results[0].diagnostics.transportVerified, true);
-  assert.equal(report.results[0].diagnostics.bridgeProtocolVersion, 1);
-  assert.equal(report.results[0].diagnostics.bridgeChunksSent, 2);
-  assert.equal(report.results[0].diagnostics.bridgeSamplesSent, 1_600);
-  assert.equal(report.results[0].diagnostics.bridgeStopObserved, true);
-  assert.equal(new URL(requestedUrl).searchParams.get("ticket"), "synthetic-ticket");
-  assert.equal(new URL(requestedUrl).searchParams.get("access_token"), null, "the sign-in token never goes in a URL");
-  assert.equal(ticketRequests.at(-1).headers.authorization, "Bearer synthetic-eval-token");
-  assert.equal(
-    new URL(requestedUrl).searchParams.get("token"),
-    "synthetic-shared-token",
-  );
-  assert.deepEqual(requestedSocketOptions, {
-    origin: "http://localhost:3000",
-  });
-  const controls = socket.sent
-    .filter((value) => typeof value === "string")
-    .map((value) => JSON.parse(value));
-  assert.equal(controls[0].type, "transcription.start");
-  assert.equal(controls[0].sampleRate, 16_000);
-  assert.equal(controls.at(-1).type, "transcription.stop");
-  assert.deepEqual(
-    socket.sent
-      .filter((value) => value instanceof ArrayBuffer)
-      .map((value) => value.byteLength),
-    [2_560, 2_560],
-  );
-});
-
-test("Meet-tagged scenarios fail closed when they try to use direct WAV transport", async () => {
+test("Meet-tagged scenarios fail closed now that the Meet bridge replay is gone", async () => {
   await assert.rejects(
     () =>
       runAudioSttScenarios({
@@ -693,7 +612,7 @@ test("Meet-tagged scenarios fail closed when they try to use direct WAV transpor
         ],
         adapters: [createLiveGatewayWebSocketAdapter()],
       }),
-    /claims a Meet surface without the production Meet bridge replay transport/u,
+    /claims a Meet surface or Meet bridge transport, which can no longer be replayed/u,
   );
 });
 

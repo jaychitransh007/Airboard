@@ -6,7 +6,7 @@ categoryLabel: Troubleshooting and reference
 order: 16
 status: reference
 audiences: ["everyone", "admins", "support"]
-lastVerified: 2026-11-11
+lastVerified: 2026-11-12
 sources: ["apps/web/src/platform/api.ts", "apps/web/src/features/product/boardPreparation.ts", "apps/api/src/auth.ts", "apps/api/src/transcription/routes.ts", "apps/api/src/semanticIntent/providerError.ts", "apps/api/src/semanticIntent/routes.ts", "apps/api/src/dailyUsage.ts", "apps/api/src/organizationPolicy.ts", "apps/api/src/boardAccess.ts", "apps/api/src/boardContentRoutes.ts"]
 ---
 
@@ -56,7 +56,7 @@ ID before retrying.
 | `SEMANTIC_INTENT_RATE_LIMITED` | The semantic provider is temporarily rate limited. | Wait and retry, or use a shorter canonical command. |
 | `SEMANTIC_INTENT_COOLING_DOWN` | Airo's planner failed several times in a row and is pausing for a few seconds. | Airo retries on its own; say the command again in a moment. Short commands still work meanwhile. |
 | `SEMANTIC_INTENT_TIMEOUT` | The provider did not answer within the bounded time. | Repeat against the current board state or use a canonical command. |
-| `SEMANTIC_INTENT_MODEL_UNAVAILABLE` | The selected model is not currently available. | Choose an allowed model or use deterministic commands. |
+| `SEMANTIC_INTENT_MODEL_UNAVAILABLE` | Airo's configured language model is not currently available. | Use built-in commands, and tell support if it keeps happening. |
 
 ## What to send support
 

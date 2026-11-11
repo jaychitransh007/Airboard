@@ -19,12 +19,10 @@ presenting the Airboard tab:
    app: **Show a screen behind the board** in the board's **•••** menu.
 4. Microsoft Teams, Zoom, phones and tablets are not available.
 
-The Chrome Meet extension (`extensions/chrome-meet-bridge`), the unpublished
-Meet add-on surfaces and the native Electron overlay (`apps/desktop`) are still
-in the repository but are **not offered**: the extension is switched off in
-production and is not in the Chrome Web Store, the add-on was never published,
-and the Electron app is not advertised. Reviving any of them is an owner
-decision.
+The Chrome Meet extension, the unpublished Meet add-on and the native Electron
+desktop overlay were **removed from the codebase on 12 November 2026** (owner
+decision). Bringing any of them back would be new work, with its own launch
+gates.
 
 ## Browser support
 
@@ -42,8 +40,8 @@ decision.
 | --- | --- | --- | --- | --- |
 | Standalone web | Controlled pilot | Desktop Chrome and Edge on the browser table above | Full-page Airboard with voice, hands, typing, pointer and a screen behind the board, subject to device permission and provider configuration | General availability needs the standalone launch gate and its browser and device evidence |
 | Google Meet (present the tab) | Controlled pilot | Chrome or Edge desktop, with Meet in the same browser | The presented Airboard tab | Same as standalone web; no Meet-specific install or review |
-| Chrome Meet extension | Not offered | — | In the repo, switched off | Owner decision, Web Store review and receiver-side Meet evidence |
-| Native desktop overlay (Electron) | Not offered | — | In the repo, not advertised | Owner decision, signed installers, updates and OS validation |
+| Chrome Meet extension | Removed (12 Nov 2026) | — | None | New work: Web Store review and receiver-side Meet evidence |
+| Native desktop overlay (Electron) | Removed (12 Nov 2026) | — | None | New work: signed installers, updates and OS validation |
 | Microsoft Teams and Zoom | Not supported | None | None | Each provider needs its own implementation, identity, store, privacy and operations gate |
 
 The add-on-era provider research (through 16 July 2026) is kept in

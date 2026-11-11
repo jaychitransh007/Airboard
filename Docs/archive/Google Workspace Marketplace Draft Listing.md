@@ -8,7 +8,7 @@
 > Meet side panel or main-stage activity. The required product is the ordinary
 > outgoing camera tile with a private extension-owned renderer. This document
 > is retained only as historical evidence for the retired shared-stage pilot.
-> The active release runbook is `Docs/Chrome Web Store Release.md`.
+> The extension release runbook that replaced it is `Docs/archive/Chrome Web Store Release.md`; the extension was also removed on 12 Nov 2026.
 
 ## Distribution decision
 

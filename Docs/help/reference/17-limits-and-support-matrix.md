@@ -6,8 +6,8 @@ categoryLabel: Troubleshooting and reference
 order: 17
 status: reference
 audiences: ["everyone", "admins", "security"]
-lastVerified: 2026-11-11
-sources: ["Docs/Platform Support Matrix.md", "apps/api/src/config.ts", "apps/api/src/boardAssetLifecycle.ts", "apps/web/src/platform/distribution.ts", "Docs/Commercial Platform Runbook.md"]
+lastVerified: 2026-11-12
+sources: ["Docs/Platform Support Matrix.md", "apps/api/src/config.ts", "apps/api/src/boardAssetLifecycle.ts", "Docs/Commercial Platform Runbook.md"]
 ---
 
 This matrix describes the controlled-pilot implementation. It is not an uptime,
@@ -19,7 +19,7 @@ SLA, certification, or accessibility-conformance claim.
 | --- | --- | --- |
 | Standalone web workspace | Shipped pilot surface | Persistent boards, typed/pointer/keyboard input, supported voice and gestures, composition, and export |
 | Google Meet | Shipped | Present your Airboard tab from Chrome, or Edge on Windows; nothing to install. The diagram appears as a presented tab, not in your Meet camera tile |
-| Desktop overlay | Shipped | In the web app: show a screen or window behind the board and draw on top |
+| Desktop overlay | Shipped | In the web app: show a screen or window behind the board and draw on top. There is no separate desktop app |
 | Paid checkout | Gated | Available only when the billing page explicitly enables it |
 
 ## Provider-dependent capabilities

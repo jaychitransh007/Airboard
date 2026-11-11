@@ -80,7 +80,7 @@ export async function scoreAudioSttEventsWithSemantic(
     } else {
       const adapterId =
         scenario.semanticAdapter ??
-        (["live-websocket", "meet-bridge-replay"].includes(scenario.adapter)
+        (scenario.adapter === "live-websocket"
           ? "live-api"
           : scenario.source?.fakeSemanticPlan
             ? "fake"

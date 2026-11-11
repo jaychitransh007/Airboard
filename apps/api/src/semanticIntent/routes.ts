@@ -93,7 +93,7 @@ export function registerSemanticIntentRoutes(
     }
     const operator = configuredApiTokenAllowed(request, config.apiToken);
     const context =
-      !operator && auth ? await auth.authenticate(request, { allowInstallation: true }) : null;
+      !operator && auth ? await auth.authenticate(request) : null;
     if (!operator && !context && !config.localEntitlements) {
       return reply.code(401).send({ error: "AUTH_REQUIRED" });
     }

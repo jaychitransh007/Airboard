@@ -90,6 +90,8 @@ Nothing has been changed. The appendix lists every finding with file paths, evid
 
 ## 3. Your decisions (the biggest payoff)
 
+> **Done 12 Nov 2026 (owner decision, on `codex/production-readiness`, not yet deployed):** removed the Chrome Meet extension, the Meet add-on, the Electron desktop app, the live and real-device eval workflows and tiers, SSO and SCIM (routes and the Settings page; old links go to Workspace), the `board_versions` write on every save, and the developer controls in Board settings (model pickers, landmark trace, Debug). **Kept:** Touchpad Writing, which is still reachable from Board settings → Input Mode. No tables were dropped. The other rows below (old Trash leftovers, cookie banner, enterprise and legal-draft pages, redirect stubs, Zoom/Teams/`chrome_overlay` providers) are still open, as are the `/pilot/*` extension preview pages.
+
 | Decision | What goes if you remove it | Note |
 | --- | --- | --- |
 | **Chrome Meet extension**, off in production and not in the Web Store | About 10,000 lines: the extension (3,100), its release scripts (1,400), the API installation control plane (about 1,600 plus tests), the headless overlay engine and media bridge in the web app (about 1,700), and 2,500 lines of web tests. Every pull request also stops building a Web Store zip. | You asked to keep it for now. Even if it stays, item 1.4 should be fixed. |

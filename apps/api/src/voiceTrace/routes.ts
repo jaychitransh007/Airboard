@@ -26,7 +26,7 @@ export function registerVoiceTraceRoutes(
       return reply.code(403).send({ error: "ORIGIN_NOT_ALLOWED" });
     }
     const context = auth
-      ? await auth.authenticate(request, { allowInstallation: true })
+      ? await auth.authenticate(request)
       : null;
     if (!(await diagnosticAccessAllowed(request, config, auth, context))) {
       return reply.code(401).send({ error: "AUTH_REQUIRED" });

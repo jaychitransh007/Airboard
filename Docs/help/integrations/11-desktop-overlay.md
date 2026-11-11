@@ -6,14 +6,15 @@ categoryLabel: Integrations
 order: 11
 status: shipped
 audiences: ["everyone", "creators"]
-lastVerified: 2026-11-11
+lastVerified: 2026-11-12
 sources: ["apps/web/src/features/board/AirboardPrototype.tsx", "apps/web/src/features/board/screenUnderlay.ts", "apps/web/src/features/board/lightboardComposition.ts", "apps/web/src/features/board/lightboardRecorder.ts"]
 ---
 
 The desktop overlay lets you draw over anything on your screen, such as slides,
 a prototype, a dashboard or any other app, from the Airboard web app. Airboard
 shows the screen or window you choose behind your board, and your diagram sits
-on top. There's nothing to download.
+on top. There's nothing to download: this happens in your browser tab, and
+there is no separate desktop app.
 
 ## Draw over an app or slides
 

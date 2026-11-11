@@ -560,11 +560,6 @@
   cursor: grabbing;
 }
 
-.airboard-shell.meet-overlay-engine .creation-shape-sidebar,
-.airboard-shell.desktop-overlay .creation-shape-sidebar {
-  display: none;
-}
-
 @media (max-width: 900px) {
   .creation-surface {
     inset: 6px;
@@ -834,10 +829,6 @@ body {
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-body.airboard-desktop-overlay {
-  background: transparent;
-}
-
 button,
 input,
 select {
@@ -1015,30 +1006,6 @@ button:disabled {
   }
 }
 
-.meet-status-page {
-  display: grid;
-  place-content: center;
-  min-height: 100vh;
-  min-height: 100dvh;
-  padding: 24px;
-  text-align: center;
-}
-
-.meet-status-page h1 {
-  margin: 0 0 8px;
-  font-size: 20px;
-}
-
-.meet-status-page p {
-  max-width: 680px;
-  margin: 0 auto 8px;
-  color: var(--danger);
-}
-
-.meet-status-page small {
-  color: var(--muted);
-}
-
 .airboard-shell {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -1055,25 +1022,6 @@ button:disabled {
   padding: 10px 14px;
   border-bottom: 1px solid var(--panel-border);
   background: var(--panel);
-}
-
-.brand {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  min-width: 0;
-}
-
-.brand h1 {
-  margin: 0;
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: 0;
-}
-
-.surface-label {
-  color: var(--muted);
-  font-size: 12px;
 }
 
 .toolbar {
@@ -1440,76 +1388,12 @@ button:disabled {
   }
 }
 
-.intent-command-form {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
-  gap: 6px;
-}
-
-.intent-command-form input {
-  min-width: 0;
-  min-height: 38px;
-  border: 1px solid var(--panel-border);
-  border-radius: 7px;
-  padding: 0 10px;
-  color: var(--ink);
-  background: #ffffff;
-}
-
-.intent-command-form input:focus {
-  border-color: var(--accent);
-  outline: 2px solid var(--accent);
-}
-
-.voice-button.listening {
-  border-color: #be123c;
-  background: #fff1f2;
-  color: #be123c;
-}
-
 .intent-feedback {
   min-height: 17px;
   margin: 0;
   color: #334155;
   font-size: 11px;
   line-height: 1.45;
-}
-
-.voice-heard {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 24px;
-  margin: -2px 0 0;
-  padding: 4px 7px;
-  border: 1px solid #dbe7e4;
-  border-radius: 7px;
-  background: #f7faf9;
-  color: #334155;
-  font-size: 10px;
-  line-height: 1.35;
-}
-
-.voice-heard > span {
-  margin-left: auto;
-  color: #64748b;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.voice-heard.wake-detected,
-.voice-heard.command-recognized {
-  border-color: #99d4ca;
-  background: #edf9f6;
-  color: #145e52;
-}
-
-.voice-heard.wake-missing,
-.voice-heard.command-rejected,
-.voice-heard.error {
-  border-color: #fecaca;
-  background: #fff7f7;
-  color: #991b1b;
 }
 
 .object-dock button {
@@ -1580,187 +1464,10 @@ button:disabled {
   transition: opacity 120ms ease;
 }
 
-.airboard-shell.meet-overlay-engine .lightboard-underlay,
-.airboard-shell.meet-overlay-engine .lightboard-scrim,
-.airboard-shell.desktop-overlay .lightboard-underlay,
-.airboard-shell.desktop-overlay .lightboard-scrim {
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  border-radius: 0;
-}
-
 .board-area.lightboard .board-canvas {
   position: relative;
   z-index: 3;
   background: transparent;
-}
-
-.airboard-shell.meet-overlay-engine .topbar,
-.airboard-shell.meet-overlay-engine .sidebar,
-.airboard-shell.meet-overlay-engine .catalog-dock,
-.airboard-shell.desktop-overlay .topbar,
-.airboard-shell.desktop-overlay .sidebar,
-.airboard-shell.desktop-overlay .catalog-dock {
-  display: none;
-}
-
-.airboard-shell.meet-overlay-engine,
-.airboard-shell.desktop-overlay {
-  grid-template-rows: minmax(0, 1fr);
-}
-
-.airboard-shell.meet-overlay-engine .content,
-.airboard-shell.desktop-overlay .content {
-  grid-template-columns: 1fr;
-}
-
-.airboard-shell.meet-overlay-engine .board-area,
-.airboard-shell.desktop-overlay .board-area {
-  padding: 0;
-}
-
-.airboard-shell.meet-overlay-engine .board-canvas,
-.airboard-shell.desktop-overlay .board-canvas {
-  border: none;
-  border-radius: 0;
-}
-
-.airboard-shell.broadcast-safe,
-.airboard-shell.broadcast-safe .board-canvas {
-  cursor: none;
-}
-
-.airboard-shell.broadcast-safe .board-canvas {
-  pointer-events: none;
-  outline: none;
-}
-
-/* Defense in depth: strict output mode must never leak presenter feedback. */
-.airboard-shell.broadcast-safe .recording-badge,
-.airboard-shell.broadcast-safe .voice-gate-pill,
-.airboard-shell.broadcast-safe .object-gesture-pill,
-.airboard-shell.broadcast-safe .hand-cue,
-.airboard-shell.broadcast-safe .onboarding-overlay,
-.airboard-shell.broadcast-safe .debug-point,
-.airboard-shell.broadcast-safe .debug-spring,
-.airboard-shell.broadcast-safe .camera-preview,
-.airboard-shell.broadcast-safe .floating-label-editor {
-  display: none !important;
-}
-
-/* The Meet extension hosts this renderer offscreen at a fixed 1280×720. It is
-   an engine, not a second UI: only the transparent board plane is captured. */
-.airboard-shell.meet-overlay-engine,
-.airboard-shell.meet-overlay-engine .content,
-.airboard-shell.meet-overlay-engine .board-area.lightboard {
-  width: 1280px;
-  height: 720px;
-  min-height: 0;
-  overflow: hidden;
-  background: transparent;
-}
-
-.airboard-shell.meet-overlay-engine .content {
-  min-height: 0;
-}
-
-.airboard-shell.meet-overlay-engine .board-canvas {
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-}
-
-.airboard-shell.desktop-overlay,
-.airboard-shell.desktop-overlay .content,
-.airboard-shell.desktop-overlay .board-area.lightboard {
-  background: transparent;
-}
-
-.airboard-shell.desktop-overlay {
-  height: 100vh;
-  height: 100dvh;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.airboard-shell.desktop-overlay .content {
-  min-height: 0;
-  overflow: hidden;
-}
-
-.airboard-shell.desktop-overlay .board-canvas {
-  height: 100%;
-  min-height: 0;
-}
-
-.desktop-overlay-controls {
-  position: absolute;
-  z-index: 8;
-  top: 18px;
-  left: 50%;
-  display: grid;
-  gap: 10px;
-  width: min(720px, calc(100% - 36px));
-  padding: 14px;
-  transform: translateX(-50%);
-  border: 1px solid rgba(103, 232, 249, 0.42);
-  border-radius: 14px;
-  background: rgba(5, 10, 16, 0.92);
-  box-shadow: 0 18px 56px rgba(0, 0, 0, 0.42);
-  color: #e2e8f0;
-  backdrop-filter: blur(12px);
-}
-
-.desktop-overlay-controls-header,
-.desktop-overlay-actions,
-.desktop-overlay-scrim-control {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.desktop-overlay-controls-header {
-  justify-content: space-between;
-}
-
-.desktop-overlay-controls-header > div {
-  display: grid;
-  gap: 2px;
-}
-
-.desktop-overlay-controls-header span,
-.desktop-overlay-controls small {
-  color: #94a3b8;
-  font-size: 11px;
-}
-
-.desktop-overlay-actions {
-  flex-wrap: wrap;
-}
-
-.desktop-overlay-scrim-control {
-  flex: 1 1 260px;
-  min-height: 36px;
-  padding: 0 10px;
-  border: 1px solid rgba(148, 163, 184, 0.32);
-  border-radius: 6px;
-}
-
-.desktop-overlay-scrim-control input {
-  flex: 1;
-}
-
-.desktop-overlay-scrim-control output {
-  min-width: 3ch;
-  color: #67e8f9;
-  font-variant-numeric: tabular-nums;
-}
-
-.desktop-overlay-command {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
 }
 
 .recording-badge {
@@ -1855,56 +1562,6 @@ button:disabled {
   border: 1px solid var(--panel-border);
   border-radius: 6px;
   padding: 0 8px;
-}
-
-.debug-point {
-  position: absolute;
-  z-index: 2;
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  pointer-events: none;
-  transform: translate(-50%, -50%);
-}
-
-.debug-point.raw {
-  background: rgba(180, 83, 9, 0.35);
-  border: 1px solid rgba(180, 83, 9, 0.7);
-}
-
-.debug-point.tip {
-  width: 12px;
-  height: 12px;
-  background: rgba(37, 99, 235, 0.24);
-  border: 2px solid rgba(37, 99, 235, 0.9);
-}
-
-.debug-point.grip {
-  width: 8px;
-  height: 8px;
-  background: rgba(147, 51, 234, 0.22);
-  border: 1px solid rgba(147, 51, 234, 0.8);
-}
-
-.debug-point.virtual {
-  background: #0f766e;
-  border: 2px solid #ffffff;
-  box-shadow: 0 0 0 1px rgba(15, 118, 110, 0.45);
-}
-
-.debug-spring {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-
-.debug-spring line {
-  stroke: rgba(15, 118, 110, 0.32);
-  stroke-width: 1.5;
-  stroke-dasharray: 4 4;
 }
 
 .sidebar {
@@ -2125,14 +1782,6 @@ button:disabled {
     flex-wrap: wrap;
     justify-content: center;
     transform: translateX(-50%);
-  }
-
-  .intent-command-form {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-  }
-
-  .intent-command-form > button:last-child:not(.primary) {
-    grid-column: 1 / -1;
   }
 
   .object-dock button {

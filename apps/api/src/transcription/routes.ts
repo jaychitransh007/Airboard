@@ -171,14 +171,14 @@ export function registerTranscriptionRoutes(
   server.get("/transcription/config", async () => publicTranscriptionConfig(config.transcription));
 
   // Who may stream audio: the shared API token or local development, else a
-  // signed-in (or installation) identity whose organization is entitled. Any
+  // signed-in identity whose organization is entitled. Any
   // email can sign in, so Deepgram spend also requires an entitlement; the
   // reason string is the client-facing error code.
   const authorizeRequest = async (request: Parameters<AuthService["authenticate"]>[0]): Promise<TranscriptionAuthorization> => {
     if (configuredApiTokenAllowed(request, config.apiToken) || config.localEntitlements) {
       return { allowed: true, profileId: null };
     }
-    const context = auth ? await auth.authenticate(request, { allowInstallation: true }) : null;
+    const context = auth ? await auth.authenticate(request) : null;
     if (!auth || !context) {
       return { allowed: false, reason: "Airboard authentication required" };
     }

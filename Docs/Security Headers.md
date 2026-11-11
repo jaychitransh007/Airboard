@@ -14,28 +14,19 @@ request.
 
 ## Headers by page type
 
-| Header | Normal pages | Share page `/s/<token>` | Overlay engine `/meet/overlay-engine` |
-| --- | --- | --- | --- |
-| `Content-Security-Policy` | The policy below, `frame-ancestors 'none'` | Same | Same, but `frame-ancestors https://meet.google.com chrome-extension://<extension ID>` |
-| `X-Frame-Options` | `DENY` | `DENY` | Not sent |
-| `X-Content-Type-Options` | `nosniff` | `nosniff` | `nosniff` |
-| `Referrer-Policy` | `strict-origin-when-cross-origin` | `no-referrer`, so the token never leaves in a Referer | `strict-origin-when-cross-origin` |
-| `Permissions-Policy` | `camera`, `microphone` and `display-capture` for the app's own origin; other powerful features off | Same | `camera`, `microphone` and `display-capture` off as well |
-| `Strict-Transport-Security` | `max-age=63072000; includeSubDomains`, production only | Same | Same |
+| Header | Normal pages | Share page `/s/<token>` |
+| --- | --- | --- |
+| `Content-Security-Policy` | The policy below, `frame-ancestors 'none'` | Same |
+| `X-Frame-Options` | `DENY` | `DENY` |
+| `X-Content-Type-Options` | `nosniff` | `nosniff` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | `no-referrer`, so the token never leaves in a Referer |
+| `Permissions-Policy` | `camera`, `microphone` and `display-capture` for the app's own origin; other powerful features off | Same |
+| `Strict-Transport-Security` | `max-age=63072000; includeSubDomains`, production only | Same |
 
-The overlay engine is nested two deep. Meet's page frames the extension's
-`engine.html`, and that page frames the engine. `frame-ancestors` checks every
-ancestor, so it lists both. The extension ID comes from
-`NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_ID`, which is the same ID the renderer
-already requires of relay messages (`extensionRelayTrust.ts`). A production
-build without a valid ID lets nothing frame the engine. In development, any
-`chrome-extension:` ancestor is allowed, because an unpacked build's ID depends
-on its folder. The engine needs no capture permission because Meet's page
-captures the camera and microphone and relays the media to it.
-
-The legacy Meet add-on pages (`/meet/side-panel`, `/meet/main-stage`) refuse
-framing like every other page. The add-on is no longer distributed. If it must
-work again, add `https://meet.google.com` as their ancestor.
+No page may be framed. The Chrome extension's overlay engine
+(`/meet/overlay-engine`), the only page Meet was once allowed to frame, and the
+Meet add-on pages (`/meet/side-panel`, `/meet/main-stage`) were removed on
+12 November 2026; their old paths now get the same headers as every other page.
 
 The Permissions-Policy leaves `autoplay`, `fullscreen`, `encrypted-media` and
 `picture-in-picture` at the browser defaults. If the header listed them as
@@ -96,5 +87,4 @@ the table above. `apps/web/test/securityHeaders.test.mjs` pins the policy for
 each page type. `apps/web/e2e/securityHeaders.spec.ts` checks the headers that
 are sent. It also loads pages, MediaPipe and the microphone worklet under the
 policy with no violations, and confirms an injected inline script is refused.
-It checks framing too: Meet may frame the overlay engine, other sites may not,
-and nothing may frame other pages.
+It checks framing too: nothing may frame any page.

@@ -300,58 +300,6 @@ test("local contrast plates darken only diagram clusters over a shared screen", 
   expect(pixels.darkPlatePixels).toBeGreaterThan(500);
 });
 
-test("desktop mode is a full-display transparent canvas with explicit click-through controls", async ({
-  page,
-}) => {
-  // Exercise the general <=900px responsive breakpoint as well as desktop
-  // mode; the native layer must never inherit the ordinary mobile canvas cap.
-  await page.setViewportSize({ width: 800, height: 600 });
-  await page.goto("/?desktopOverlay=1");
-
-  const shell = page.locator("main.airboard-shell.desktop-overlay");
-  await expect(shell).toBeVisible();
-  await expect(page.locator("header.topbar")).not.toBeVisible();
-  await expect(page.locator("aside.sidebar")).not.toBeVisible();
-  await expect(page.locator(".catalog-dock")).not.toBeVisible();
-  await expect(page.getByTestId("screen-underlay")).toHaveCount(0);
-  await expect(page.getByTestId("lightboard-underlay")).toHaveCount(0);
-  await expect(page.getByTestId("desktop-overlay-controls")).toBeVisible();
-  await expect(page.getByTestId("lightboard-scrim")).toHaveCSS("opacity", "0.6");
-
-  const layout = await page.evaluate(() => {
-    const selectors = [
-      ".airboard-shell",
-      ".content",
-      ".board-area",
-      ".board-canvas",
-      ".lightboard-scrim",
-    ];
-    return {
-      viewportHeight: window.innerHeight,
-      bodyBackground: getComputedStyle(document.body).backgroundColor,
-      layers: selectors.map((selector) => {
-        const rect = document.querySelector(selector)!.getBoundingClientRect();
-        return { selector, top: rect.top, bottom: rect.bottom, height: rect.height };
-      }),
-    };
-  });
-  expect(layout.bodyBackground).toBe("rgba(0, 0, 0, 0)");
-  for (const layer of layout.layers) {
-    expect(layer.top, layer.selector).toBe(0);
-    expect(layer.bottom, layer.selector).toBe(layout.viewportHeight);
-    expect(layer.height, layer.selector).toBe(layout.viewportHeight);
-  }
-
-  const [, , , alpha] = await cornerPixel(page);
-  expect(alpha).toBe(0);
-
-  // In a browser preview there is no native bridge, but this exercises the
-  // same renderer transition the Electron shortcut invokes.
-  await page.getByRole("button", { name: "Return to click-through" }).click();
-  await expect(page.getByTestId("desktop-overlay-controls")).toHaveCount(0);
-  await expect(shell).toHaveClass(/broadcast-safe/);
-});
-
 test("theme choice survives a reload", async ({ page }) => {
   await openStandalone(page);
   await page.getByLabel("Lightboard (neon) theme").check();

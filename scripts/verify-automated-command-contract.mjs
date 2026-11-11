@@ -34,13 +34,10 @@ const runtimeSourceRoots = [
   "apps/web/app/",
   "apps/web/src/",
   "apps/api/src/",
-  "apps/desktop/src/",
   "packages/core/src/",
   "packages/drawing-engine/src/",
   "packages/gesture-engine/src/",
-  "packages/integrations/src/",
   "packages/realtime-client/src/",
-  "extensions/chrome-meet-bridge/",
 ];
 const runtimeSources = await Promise.all([
   ...runtimeSourceRoots.map((directory) =>

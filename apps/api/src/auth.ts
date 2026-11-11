@@ -1,7 +1,5 @@
 import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
-import { createHash } from "node:crypto";
 import type { ApiConfig } from "./config";
-import { installationTokenMatches } from "./installationCredential";
 import { DEFAULT_ORGANIZATION_POLICY, policyFromRow } from "./organizationPolicy";
 import { bearerToken, verifySignedToken } from "./signedTokens";
 
@@ -14,7 +12,7 @@ export type AuthContext = {
   role: AccountRole;
   email: string | null;
   displayName: string;
-  tokenKind: "supabase" | "development" | "installation";
+  tokenKind: "supabase" | "development";
 };
 
 type RequestLike = {
@@ -133,10 +131,7 @@ export class AuthService {
     }
   }
 
-  async authenticate(
-    request: RequestLike,
-    options: { allowInstallation?: boolean } = {},
-  ): Promise<AuthContext | null> {
+  async authenticate(request: RequestLike): Promise<AuthContext | null> {
     // Only the Authorization header: a sign-in token in a URL would land in
     // browser history and request logs (RGB-016). Sockets use short tickets.
     const token = bearerToken(request.headers);
@@ -166,47 +161,6 @@ export class AuthService {
         return null;
       }
       return this.contextForProfile(profile, "development");
-    }
-
-    const installation = verifySignedToken(
-      this.config.sessionSigningSecret,
-      token,
-      "installation",
-    );
-    if (installation) {
-      // Installation credentials are intentionally capability-scoped. They
-      // can reach only the media/session endpoints that explicitly opt in,
-      // never the general account or control-plane API surface.
-      if (!options.allowInstallation) return null;
-      if (!installation.installationId || !installation.organizationId || !this.client) {
-        return null;
-      }
-      const { data: installRow } = await this.client
-        .from("platform_installations")
-        .select("id,installed_by,organization_id,status,token_hash,previous_token_hash,previous_token_expires_at")
-        .eq("id", installation.installationId)
-        .eq("organization_id", installation.organizationId)
-        .maybeSingle();
-      const presentedTokenHash = sha256(token);
-      if (
-        installRow?.installed_by &&
-        installationTokenMatches(installRow, presentedTokenHash)
-      ) {
-        const { data: profile } = await this.client
-          .from("profiles")
-          .select(PROFILE_COLUMNS)
-          .eq("id", installRow.installed_by)
-          .maybeSingle();
-        if (profile) {
-          const context = await this.contextForProfile(
-            profile as ProfileRow,
-            "installation",
-            installation.organizationId,
-          );
-          if (context && context.organizationId === installation.organizationId) return context;
-        }
-      }
-      return null;
     }
 
     if (!this.client) {
@@ -567,7 +521,6 @@ export class AuthService {
   private async contextForProfile(
     profile: ProfileRow,
     tokenKind: AuthContext["tokenKind"],
-    organizationId?: string,
   ): Promise<AuthContext | null> {
     if (!this.client) {
       return null;
@@ -577,7 +530,7 @@ export class AuthService {
       .select("organization_id,role,status")
       .eq("profile_id", profile.id)
       .eq("status", "active");
-    const targetOrganizationId = organizationId ?? profile.default_organization_id;
+    const targetOrganizationId = profile.default_organization_id;
     if (targetOrganizationId) {
       membershipQuery = membershipQuery.eq("organization_id", targetOrganizationId);
     }
@@ -614,10 +567,4 @@ function toAuthContext(
 
 function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim().slice(0, 500) : null;
-}
-
-function sha256(value: string): string {
-  // WebCrypto is not used here because authentication is on the synchronous
-  // request path and Node's implementation is already available to the API.
-  return createHash("sha256").update(value).digest("hex");
 }

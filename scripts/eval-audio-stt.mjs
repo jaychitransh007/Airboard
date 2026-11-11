@@ -18,7 +18,6 @@ import {
   createDeepgramReplayAdapter,
   createFakeTranscriptionAdapter,
   createLiveGatewayWebSocketAdapter,
-  createMeetBridgeReplayAdapter,
 } from "./lib/audio-stt-eval/adapters.mjs";
 import {
   loadAudioAssetManifest,
@@ -90,14 +89,12 @@ export async function main(args = process.argv.slice(2), env = process.env) {
     options.requireAssets &&
     !scenarios.some(
       (scenario) =>
-        ["live-websocket", "meet-bridge-replay"].includes(
-          scenario.adapter,
-        ) &&
+        scenario.adapter === "live-websocket" &&
         typeof scenario.assetId === "string",
     )
   ) {
     throw new Error(
-      "External audio assets are required, but no live direct or Meet bridge scenario references one.",
+      "External audio assets are required, but no live direct scenario references one.",
     );
   }
 
@@ -125,7 +122,6 @@ export async function main(args = process.argv.slice(2), env = process.env) {
     createFakeTranscriptionAdapter(),
     createDeepgramReplayAdapter(),
     createLiveGatewayWebSocketAdapter(liveTranscriptionDefaults),
-    createMeetBridgeReplayAdapter(liveTranscriptionDefaults),
   ];
   const semanticModel =
     options.model ??
@@ -792,7 +788,7 @@ Options:
   --fixture PATH          Scenario corpus (evals/audio/stt-scenarios.v1.json)
   --manifest PATH         Privacy/hash manifest (evals/audio/corpus.v1.json)
   --media-root PATH       Restricted asset mount (AIRBOARD_EVAL_MEDIA_ROOT)
-  --adapter NAME          Run one adapter; may be repeated (Meet assets require meet-bridge-replay)
+  --adapter NAME          Run one adapter (fake, deepgram-replay, live-websocket); may be repeated
   --dataset-split NAME    Restrict external assets to development/regression/holdout
   --ws-url URL            Live Airboard transcription WebSocket URL
   --api-url URL           Airboard API base URL used to derive /transcription/ws

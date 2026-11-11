@@ -4,23 +4,15 @@ import { useEffect, useState } from "react";
 import { AIRBOARD_API_URL } from "../../platform/config";
 import { AirboardPrototype } from "./AirboardPrototype";
 
-type TestAirboardHarnessProps = {
-  surface: "standalone" | "meet-main-stage";
-  meetingProvider?: "google_meet";
-  providerMeetingId?: string;
-  headlessMeetOverlay?: boolean;
-  desktopOverlay?: boolean;
-};
-
 /**
  * Browser-test-only authenticated mount.
  *
- * Production board sessions require a verified Supabase, installation, or
- * signed development identity. The E2E API deliberately runs in loopback
+ * Production board sessions require a verified Supabase or signed
+ * development identity. The E2E API deliberately runs in loopback
  * development mode, so this harness obtains the same short-lived signed
  * credential a local developer uses instead of weakening the session route.
  */
-export function TestAirboardHarness(props: TestAirboardHarnessProps) {
+export function TestAirboardHarness() {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,5 +47,5 @@ export function TestAirboardHarness(props: TestAirboardHarnessProps) {
   if (!accessToken) {
     return <main data-testid="test-harness-loading">Preparing signed test identity…</main>;
   }
-  return <AirboardPrototype {...props} accessToken={accessToken} accountUserId="local-owner" />;
+  return <AirboardPrototype accessToken={accessToken} accountUserId="local-owner" />;
 }

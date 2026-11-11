@@ -57,10 +57,8 @@ Meeting talk not addressed to Airo never changes the board. Details:
 | `infra/cloud-run` | Docker images and `release.sh` (build, migrate, stage, promote) |
 | `scripts`, `evals` | Evaluation runners, datasets, launch checks and smoke tests |
 
-Also in the repo but **not part of the launch scope**: the Chrome Meet
-extension (`extensions/chrome-meet-bridge`, switched off in production), the
-unpublished Meet add-on surfaces (`apps/web/app/meet`, `packages/integrations`)
-and the native Electron overlay (`apps/desktop`).
+The Chrome Meet extension, the unpublished Meet add-on and the Electron
+desktop app were removed from the codebase on 12 Nov 2026.
 
 ## Local development
 

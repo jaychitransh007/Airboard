@@ -7,7 +7,7 @@
  * re-prompt or fail the same way.
  */
 
-export type CameraRecoveryReason = "tracker_error" | "track_ended" | "start_failed" | "bridge_ended";
+export type CameraRecoveryReason = "tracker_error" | "track_ended" | "start_failed";
 
 export const CAMERA_RECOVERY_MAX_ATTEMPTS = 8;
 /** How long a restarted camera must run before the backoff starts over. */
@@ -30,17 +30,4 @@ export function shouldRetryCameraStart(error: unknown): boolean {
       : "";
   // NotAllowed/Security: the person or the browser refused; never re-prompt.
   return name !== "NotAllowedError" && name !== "SecurityError";
-}
-
-export function cameraRecoveryMessage(reason: CameraRecoveryReason, delayMs: number): string {
-  const seconds = Math.max(1, Math.round(delayMs / 1_000));
-  const what =
-    reason === "track_ended"
-      ? "The camera stopped"
-      : reason === "bridge_ended"
-        ? "The Meet camera bridge stopped"
-        : reason === "start_failed"
-          ? "The camera didn't start"
-          : "Hand tracking stopped";
-  return `${what}. Restarting hands in ${seconds} s…`;
 }

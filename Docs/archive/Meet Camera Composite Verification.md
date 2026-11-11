@@ -1,5 +1,7 @@
 # Meet Camera Composite Verification
 
+> **Removed 12 Nov 2026.** The Chrome Meet extension this describes was removed from the codebase (owner decision, [Cleanup Review](../Cleanup%20Review.md) section 3). Kept for history; nothing here is current, and the scripts and paths it names no longer exist.
+
 This is the acceptance record for the audience-facing camera path. Airboard
 can now prove from inside a real Meet client that Meet attached the composited
 track and is encoding outbound RTP. A second participant is still required to

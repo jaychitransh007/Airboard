@@ -311,7 +311,7 @@ function EditableAirboard({ boardId }: { boardId?: string }) {
   };
   return (
     <>
-      <AirboardPrototype surface="standalone" accessToken={auth.accessToken} accountUserId={auth.account.profile.id} persistentBoardId={board.id} persistentWorkspaceId={board.workspace_id} pendingSessionStart={pendingSessionStartRef.current} boardTitle={board.title} persistentSaveStatus={saveStatus} initialBoardState={normalizeBoardState(board.latest_state, board.id)} onPersistentBoardChange={persist} onRenameBoard={renameBoard} onDeleteBoard={deleteBoard} shareAccess={shareAccess} {...(auth.account.policy ? { organizationPolicy: auth.account.policy } : {})} {...(auth.account.profile.preferences ? { initialPreferences: auth.account.profile.preferences } : {})} />
+      <AirboardPrototype accessToken={auth.accessToken} accountUserId={auth.account.profile.id} persistentBoardId={board.id} persistentWorkspaceId={board.workspace_id} pendingSessionStart={pendingSessionStartRef.current} boardTitle={board.title} persistentSaveStatus={saveStatus} initialBoardState={normalizeBoardState(board.latest_state, board.id)} onPersistentBoardChange={persist} onRenameBoard={renameBoard} onDeleteBoard={deleteBoard} shareAccess={shareAccess} {...(auth.account.policy ? { organizationPolicy: auth.account.policy } : {})} {...(auth.account.profile.preferences ? { initialPreferences: auth.account.profile.preferences } : {})} />
       {saveNotice ? (
         <div className="board-save-warning" role={saveNotice.kind === "conflict" ? "alert" : "status"}>
           {saveNotice.kind === "conflict" ? (

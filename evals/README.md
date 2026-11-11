@@ -19,7 +19,7 @@ flowchart LR
   P --> G["Grounding and validation"]
   S --> G
 
-  C["Camera / Meet frames"] --> H["HandLandmarker"]
+  C["Camera frames"] --> H["HandLandmarker"]
   H --> A["Gesture trackers and arbitration"]
   A --> D["DiagramCommand or view/voice action"]
 
@@ -138,10 +138,12 @@ an outcome: `quiet`, `changes_board`, `acts`, `asks_clarification`,
 | Command | Intended use | Provider/media policy |
 | --- | --- | --- |
 | `pnpm eval:pr` | Every PR: schemas, policy, coverage, deterministic text, grounded negatives, recorded semantic negatives, mocked pipelines, provider replay, landmark replay, properties, seeded faults, and core Chromium journeys | Fully offline; blocking |
-| `pnpm eval:canary` | Prompt, model, STT, routing, or threshold changes | Full 33-case semantic seed corpus plus a diversity-first maximum of 30 regression audio/Meet cases; protected providers/media; safety failures block |
-| `pnpm eval:nightly` | Full semantic corpus at three repetitions for baseline and candidate models, their blocking comparison, ambient negatives, regression-split live audio/gesture replay, and recorded-video browser/Meet journeys | Protected keys and encrypted media mount |
-| `pnpm eval:device` | Weekly and pre-release physical camera/microphone smoke, HandLandmarker health, OS journeys, and independently attested Meet bridge matrix | Approved real-device runner |
-| `pnpm eval:release` | The complete offline deterministic/negative/provider/fault gates plus five semantic repetitions, sealed holdout audio/ambient and gesture assets, holdout recorded-video journeys, races, and advertised surfaces | Strict protected evidence; blocking |
+
+The live-provider tiers (`eval:canary`, `eval:nightly`, `eval:release`) and the
+real-device tier (`eval:device`), with their `evals.yml` and `device-evals.yml`
+workflows, were removed on 12 Nov 2026: they waited for self-hosted runners
+that never existed and never ran. The live adapters and media CLIs below still
+work when run by hand with your own keys and mounted media.
 
 Useful focused commands include:
 
@@ -161,89 +163,23 @@ pnpm eval:quality
 
 `pnpm eval:pr -- --skip-browser` is the fast offline diagnostic variant; it is
 not the merge gate. Set `AIRBOARD_EVAL_RUN_ID` to obtain a stable artifact
-directory. Nightly comparison requires distinct
-`AIRBOARD_EVAL_BASELINE_MODEL` and `AIRBOARD_EVAL_CANDIDATE_MODEL` values.
-
-The `live-provider-evals` GitHub environment must restrict access to its
-`eval-media` self-hosted runner and provide:
-
-- secrets `AIRBOARD_EVAL_OPENAI_API_KEY`,
-  `AIRBOARD_EVAL_DEEPGRAM_API_KEY`, and optionally
-  `AIRBOARD_EVAL_API_TOKEN`;
-- variables `AIRBOARD_EVAL_MEDIA_ROOT`,
-  `AIRBOARD_EVAL_INTENT_ALLOWED_MODELS`,
-  `AIRBOARD_EVAL_BASELINE_MODEL`, `AIRBOARD_EVAL_CANDIDATE_MODEL`,
-  `AIRBOARD_EVAL_INPUT_USD_PER_MILLION`, and
-  `AIRBOARD_EVAL_OUTPUT_USD_PER_MILLION`.
-
-Provider keys are inherited by the localhost API and unset before evaluator and
-browser children start. API logs live in the runner temporary directory, are
-deleted at step exit, and are never part of artifact upload.
-Internal pull requests that touch the semantic prompt/schema, transcription,
-routing, gesture perception, or their corpora automatically request the
-protected canary job. Fork pull requests do not receive protected-provider
-access.
-
-## Protected real-device station
-
-`eval:device` fails before opening media unless it runs on macOS or Windows
-with both physical-device opt-ins, a stable station ID, and station-specific
-expected camera and microphone label patterns. Its dedicated Playwright smoke
-test grants the local Airboard origin permission, acquires camera and
-microphone tracks without fake-device launch flags, rejects known
-fake/virtual/logical-default identities, verifies live settings and advancing
-camera frames, then starts the camera from Airboard's production settings UI.
-It requires multiple successful `HandLandmarker` inference frames in the
-production gesture journal. It records no audio/video, screenshots, traces, or
-media-derived content.
-
-The protected `device-evals` environment provides:
-
-- macOS secrets `AIRBOARD_EVAL_MACOS_DEVICE_ID`,
-  `AIRBOARD_EVAL_MACOS_CAMERA_LABEL_PATTERN`,
-  `AIRBOARD_EVAL_MACOS_MICROPHONE_LABEL_PATTERN`, and
-  `AIRBOARD_EVAL_MACOS_MEET_ATTESTATION_PATH`;
-- corresponding Windows secrets with the `AIRBOARD_EVAL_WINDOWS_` prefix.
-
-Each attestation path is absolute and lives outside its station checkout.
-
-`AIRBOARD_EVAL_MEET_BRIDGE=1` is only an opt-in and is never treated as proof.
-The station-owned JSON at the attestation path must use
-`airboard-meet-station-attestation.v1`, bind to the configured device, be less
-than two hours old and unexpired, include positive compositor/sender/frame/byte
-deltas, and include an independent second-participant or receiver-station
-observation of the expected overlay. It must declare that no content or raw
-media was retained and identify the meeting only by a SHA-256 hash. The
-attestation itself is not copied into CI artifacts. Its exact field contract is
-versioned in `evals/schema/meet-station-attestation.v1.schema.json`.
-
-The weekly and GitHub-prerelease triggers run a fail-independent macOS/Windows
-matrix. Station automation must refresh each receiver attestation before the
-window or that matrix leg fails closed. Manually dispatched runs additionally
-require the workflow confirmation input. This gate proves the enumerated
-hardware and current browser pipeline on each station, but cannot establish
-that every driver presenting a physical-looking label is genuine; protection
-of the runner plus station-specific label binding remains part of the trust
-boundary.
+directory.
 
 ## Provider adapters
 
-Audio scenarios run unchanged through four adapters:
+Audio scenarios run unchanged through three adapters:
 
 - `fake`: deterministic final/partial events for fast contract tests.
 - `deepgram-replay`: privacy-reviewed provider messages, including duplicate
   finals and transport edge cases.
 - `live-websocket`: the production Airboard gateway with mounted WAV assets
-  recorded for non-Meet surfaces.
-- `meet-bridge-replay`: mounted Meet WAV assets replayed as Float32
-  `audio-chunk` messages through the production Meet bridge parser and the
-  production realtime speech session before reaching the live gateway.
+  recorded on the standalone surface.
 
-Meet transport is fail closed: assets tagged `meet-main-stage`,
-`meet-side-panel`, `meet`, or `meet-bridge` must declare
-`sttEvaluation.transport: "meet-bridge"` and are assigned only to
-`meet-bridge-replay`. A direct WebSocket upload may not claim a Meet surface.
-Non-Meet external assets declare `sttEvaluation.transport: "direct"`.
+External assets declare `sttEvaluation.transport: "direct"`. The Meet surfaces
+and the `meet-bridge-replay` adapter went with the Chrome extension on
+12 Nov 2026: dataset validation rejects an asset tagged with a Meet surface,
+and the runner refuses any Meet scenario. Record Meet use on the standalone
+surface, since Meet is joined by presenting the board's tab.
 
 Semantic scenarios use the production API with either its configured model or
 an explicitly allowlisted model. A transient provider request is retried once
@@ -257,7 +193,6 @@ Examples:
 node scripts/eval-audio-stt.mjs --adapter deepgram-replay
 node scripts/eval-audio-stt.mjs \
   --adapter live-websocket \
-  --adapter meet-bridge-replay \
   --require-assets \
   --dataset-split regression \
   --media-root /approved/read-only/eval-media
@@ -269,32 +204,10 @@ node scripts/eval-voice-intent.mjs --attempts 5 --model MODEL_ID
 
 Both media CLIs accept
 `--dataset-split development|regression|holdout`. Recorded-video browser replay
-uses `AIRBOARD_EVAL_DATASET_SPLIT` for the same selection. Nightly pins all
-participant-linked media to `regression`; release pins it to the sealed
-`holdout`. A requested split with no matching audio or landmark assets fails
+uses `AIRBOARD_EVAL_DATASET_SPLIT` for the same selection. Use `regression`
+for routine checks and keep the sealed `holdout` for release decisions. A
+requested split with no matching audio or landmark assets fails
 instead of falling back to another split.
-
-## Semantic baseline/candidate comparison
-
-Nightly runs the same materialized metamorphic corpus three times per case
-against the configured baseline and candidate models. It stores the inputs at:
-
-```text
-model-comparison/baseline/semantic/semantic-metamorphic.json
-model-comparison/candidate/semantic/semantic-metamorphic.json
-```
-
-`eval-semantic-comparison.mjs` verifies that dataset hashes, case counts,
-attempt counts, and critical-slice inventories match before comparing quality.
-It blocks when candidate core accuracy is below 95%, overall accuracy is below
-90%, any candidate case misses its repetition policy, a critical slice drops
-more than three percentage points, or observed cost per successful turn
-regresses more than 10%. Provider-infrastructure failure rates above 5% make
-the comparison inconclusive rather than an understanding failure.
-
-The comparison emits
-`model-comparison/semantic-comparison.[json|xml|md|html]`, including metric
-deltas, per-critical-slice results, provider diagnostics, and a replay command.
 
 ## Datasets, annotations, and privacy
 
@@ -315,8 +228,8 @@ and sealed holdout sets. Every participant-linked asset must declare
 `datasetSplit` matching its participant record and a `meetingSessionId` listed
 for that participant. No participant or meeting session may cross splits.
 Deletion by participant ID must remove every asset and annotation from every
-dataset version. Development is for corpus construction, nightly uses
-regression, and release consumes only the sealed holdout.
+dataset version. Development is for corpus construction, regression for
+routine runs, and the sealed holdout only for release decisions.
 
 ### Audio asset contract
 
@@ -333,8 +246,7 @@ declare:
   disagreed;
 - `sttEvaluation.channel`, its transcript/action oracle, a grounded board
   `context`, and a `finalState` constraint;
-- `sttEvaluation.transport: "direct"` for standalone captures or
-  `"meet-bridge"` for Meet-tagged captures;
+- `sttEvaluation.transport: "direct"` (standalone is the only surface);
 - `purpose` and a positive `durationSeconds` for ambient-safety recordings.
 
 Fake, provider-event replay, and mounted WAV cases use the same downstream
@@ -495,8 +407,8 @@ evaluator defect.
 3. Add capability evidence and required positive, negative, grounding, and
    final-state coverage where applicable.
 4. Confirm the case fails before the product fix and passes afterward.
-5. Run `pnpm eval:pr`; use the matching protected tier for provider or media
-   evidence.
+5. Run `pnpm eval:pr`; for provider or media evidence, run the live adapters
+   or media CLIs by hand against mounted assets.
 
 Every confirmed consented production failure should become a regression case
 within two working days.

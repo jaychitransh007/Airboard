@@ -46,18 +46,12 @@
       }
     },
     "surfaces": {
-      "reason": "The production Surface union is type-only. Values here cover every routable board surface; the Meet value (the extension's headless overlay engine) remains a private-preview surface rather than a public availability claim.",
-      "productionTypeUnion": {
-        "path": "apps/web/src/features/board/AirboardPrototype.tsx",
-        "typeName": "Surface"
-      },
+      "reason": "The standalone web board is the only board surface. The Meet add-on, the Chrome extension's headless overlay engine and the Electron desktop app were removed on 12 Nov 2026; Google Meet is supported by presenting the browser tab, which runs this same surface. With a single surface there is no production Surface type union to read.",
       "values": [
-        "standalone",
-        "meet-main-stage"
+        "standalone"
       ],
       "availability": {
-        "standalone": "controlled_pilot",
-        "meet-main-stage": "private_preview"
+        "standalone": "controlled_pilot"
       }
     }
   },
@@ -694,28 +688,6 @@
         "negative"
       ],
       "rationale": "The standalone surface fails closed without a browser grant."
-    },
-    {
-      "evidenceId": "browser:apps/web/e2e/meetMediaBridge.spec.ts#the extension engine is control-free and starts the camera overlay automatically",
-      "capabilities": [
-        "surface:meet-main-stage"
-      ],
-      "facets": [
-        "positive",
-        "grounding",
-        "negative"
-      ],
-      "rationale": "The mounted headless main-stage engine starts the camera overlay and pumps board frames on its own, and renders no presenter controls (top bar, sidebar, dock or buttons) into the outgoing composite."
-    },
-    {
-      "evidenceId": "browser:apps/web/e2e/meetMediaBridge.spec.ts#hidden diagram restores raw Meet camera and resumes the compositor without recapturing",
-      "capabilities": [
-        "surface:meet-main-stage"
-      ],
-      "facets": [
-        "final_state"
-      ],
-      "rationale": "The mounted bridge reaches and recovers the final main-stage compositor state."
     },
     {
       "evidenceId": "test:packages/core/test/semanticPlan.test.mjs#plans hold a two-minute narration and the new edit actions",

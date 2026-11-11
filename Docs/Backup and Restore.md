@@ -18,9 +18,9 @@ proves the stated recovery point and recovery time."
 | Code and releases | GitHub and Artifact Registry | Every release image tagged `live` is kept | None |
 
 Point-in-time recovery (restoring to any second) is a paid Supabase add-on, and
-it is not enabled. Board version history (`board_versions`) lets a person go
-back to an earlier version of one board. It doesn't protect against losing the
-database.
+it is not enabled. Airboard keeps only each board's latest state: since
+12 November 2026 saves no longer write copies to `board_versions`, and nothing
+ever read them, so there is no per-board history to go back to either.
 
 ## The promise to make
 

@@ -291,8 +291,6 @@ async function buildApp(t, client, overrides = {}) {
       cronSecret: CRON_SECRET,
       email: { from: "Airboard <test@airboard.test>" },
       stripe: { enabled: false },
-      chromeExtensionCompatibleVersions: [],
-      chromeExtensionEnabled: false,
       ...overrides,
     },
     fakeAuth(client),
@@ -333,10 +331,6 @@ test("board state saves are compare-and-swap on latest_version", async (t) => {
   assert.equal(saved.statusCode, 200, saved.body);
   assert.equal(saved.json().board.latest_version, 4);
   assert.deepEqual(client.tables.boards[0].latest_state, { nodes: ["tab-a"] });
-  assert.deepEqual(
-    client.tables.board_versions.map((row) => [row.version, row.state]),
-    [[4, { nodes: ["tab-a"] }]],
-  );
 
   // A second tab still on version 3 also proposes 4 and must not overwrite.
   const stale = await patchBoard(server, { version: 4, state: { nodes: ["tab-b"] } });
@@ -347,12 +341,11 @@ test("board state saves are compare-and-swap on latest_version", async (t) => {
   assert.equal(ahead.statusCode, 409);
   assert.equal(ahead.json().latestVersion, 4);
   assert.deepEqual(client.tables.boards[0].latest_state, { nodes: ["tab-a"] });
-  assert.equal(client.tables.board_versions.length, 1, "rejected writes create no history");
 
   const next = await patchBoard(server, { version: 5, state: { nodes: ["tab-b rebased"] } });
   assert.equal(next.statusCode, 200, next.body);
   assert.equal(next.json().board.latest_version, 5);
-  assert.deepEqual(client.tables.board_versions.map((row) => row.version), [4, 5]);
+  assert.deepEqual(client.tables.board_versions, [], "a save keeps no copy of the board");
 });
 
 test("another member's private board is invisible; organization boards stay shared", async (t) => {
@@ -363,7 +356,6 @@ test("another member's private board is invisible; organization boards stay shar
       boardRow({ owner_profile_id: OTHER }),
       boardRow({ id: SHARED, owner_profile_id: OTHER, visibility: "organization", title: "Team map" }),
     ],
-    board_versions: [],
     audit_events: [],
   });
   const server = await buildApp(t, client);
@@ -395,7 +387,6 @@ test("only a board's owner changes who can open it", async (t) => {
       boardRow(),
       boardRow({ id: SHARED, owner_profile_id: OTHER, visibility: "organization" }),
     ],
-    board_versions: [],
     audit_events: [],
   });
   const server = await buildApp(t, client);
@@ -413,7 +404,7 @@ test("only a board's owner changes who can open it", async (t) => {
 });
 
 test("metadata-only board patches need no version and missing boards stay 404", async (t) => {
-  const client = createFakeSupabase({ boards: [boardRow()], board_versions: [], audit_events: [] });
+  const client = createFakeSupabase({ boards: [boardRow()], audit_events: [] });
   const server = await buildApp(t, client);
 
   const renamed = await patchBoard(server, { title: "Renamed" });
@@ -427,17 +418,6 @@ test("metadata-only board patches need no version and missing boards stay 404", 
   const missing = await patchBoard(server, { version: 4, state: { nodes: [] } });
   assert.equal(missing.statusCode, 404);
   assert.equal(missing.json().error, "BOARD_NOT_FOUND");
-});
-
-test("a failed history write is a distinct 500 that reports the saved version", async (t) => {
-  const client = createFakeSupabase(
-    { boards: [boardRow()], board_versions: [] },
-    { fail: (table) => (table === "board_versions" ? { code: "XX000", message: "boom" } : null) },
-  );
-  const server = await buildApp(t, client);
-  const response = await patchBoard(server, { version: 4, state: { nodes: ["saved"] } });
-  assert.equal(response.statusCode, 500);
-  assert.deepEqual(response.json(), { error: "BOARD_VERSION_HISTORY_FAILED", latestVersion: 4 });
 });
 
 const DAY = 86_400_000;
@@ -905,7 +885,6 @@ test("team members save and permanently delete a shared board", async (t) => {
   const OTHER = "99999999-9999-4999-8999-999999999999";
   const client = createFakeSupabase({
     boards: [boardRow({ owner_profile_id: OTHER, visibility: "organization" })],
-    board_versions: [],
     audit_events: [],
     board_assets: [{ id: "asset-1", organization_id: ORG, board_id: BOARD, storage_path: `${ORG}/${BOARD}/photo.png` }],
   });
@@ -1051,7 +1030,6 @@ test("the development sign-in trusts only the connection's real loopback address
 test("Viewer and Billing members open boards but cannot change or share them", async (t) => {
   const tables = shareTables();
   tables.boards[0].visibility = "organization";
-  tables.board_versions = [];
   const client = createFakeSupabase(tables);
   const server = await buildApp(t, client, { appUrl: "https://app.airboard.test", trustedProxyHops: 0 });
   const before = JSON.stringify(client.tables.boards);

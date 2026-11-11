@@ -10,7 +10,6 @@ import {
 import {
   CAMERA_RECOVERY_MAX_ATTEMPTS,
   cameraRecoveryDelayMs,
-  cameraRecoveryMessage,
   shouldRetryCameraStart,
 } from "../src/features/board/cameraRecovery.ts";
 
@@ -115,14 +114,6 @@ test("camera recovery never retries a permission refusal", () => {
   assert.equal(shouldRetryCameraStart({ name: "NotReadableError" }), true, "camera busy in another app");
   assert.equal(shouldRetryCameraStart({ name: "NotFoundError" }), true, "camera unplugged");
   assert.equal(shouldRetryCameraStart(new Error("tracker")), true);
-});
-
-test("camera recovery says what stopped and when hands come back", () => {
-  assert.equal(
-    cameraRecoveryMessage("track_ended", 2_000),
-    "The camera stopped. Restarting hands in 2 s…",
-  );
-  assert.match(cameraRecoveryMessage("tracker_error", 1_000), /^Hand tracking stopped/);
 });
 
 test("frames without a tracked hand let the last point go stale", () => {

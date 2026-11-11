@@ -26,12 +26,6 @@ REGISTRY=$REGION-docker.pkg.dev/$PROJECT/airboard-pilot
 BUILD_ACCOUNT=projects/$PROJECT/serviceAccounts/634900453473-compute@developer.gserviceaccount.com
 API_URL=https://airboard-pilot-api-634900453473.asia-south1.run.app
 SUPABASE_REF=ujotgzjpkocuhtfrvbzu
-MEET_PROJECT_NUMBER=634900453473
-# The Chrome Meet extension is switched off (launch scope, 11 Nov 2026), so no
-# extension ID is built in and nothing may frame the overlay engine. Set
-# CHROME_EXTENSION_ID to the reviewed Web Store ID only if the extension returns.
-CHROME_EXTENSION_ID=${CHROME_EXTENSION_ID:-}
-CHROME_EXTENSION_VERSION=0.8.0
 
 RELEASE=${AIRBOARD_RELEASE:-launch-$(git rev-parse --short=7 HEAD)}
 
@@ -107,7 +101,7 @@ build() {
   local api=$!
   run gcloud builds submit . --project="$PROJECT" --service-account="$BUILD_ACCOUNT" \
     --config=infra/cloud-run/cloudbuild-web.yaml \
-    --substitutions="_IMAGE=$REGISTRY/web:$RELEASE,_AIRBOARD_API_URL=$API_URL,_GOOGLE_MEET_CLOUD_PROJECT_NUMBER=$MEET_PROJECT_NUMBER,_SUPABASE_URL=https://$SUPABASE_REF.supabase.co,_SUPABASE_ANON_KEY=$key,_AIRBOARD_CHROME_EXTENSION_ID=$CHROME_EXTENSION_ID,_CHROME_EXTENSION_VERSION=$CHROME_EXTENSION_VERSION,_CHROME_EXTENSION_COMPATIBLE_VERSIONS=$CHROME_EXTENSION_VERSION" \
+    --substitutions="_IMAGE=$REGISTRY/web:$RELEASE,_AIRBOARD_API_URL=$API_URL,_SUPABASE_URL=https://$SUPABASE_REF.supabase.co,_SUPABASE_ANON_KEY=$key" \
     >"$logs/airboard-$RELEASE-web.log" 2>&1 &
   local web=$!
   local failed=0

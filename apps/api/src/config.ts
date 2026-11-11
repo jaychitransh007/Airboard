@@ -1,8 +1,6 @@
 import type { TranscriptionRuntimeConfig } from "./transcription/types";
 import type { SemanticIntentRuntimeConfig } from "./semanticIntent/types";
 import type { DailyUsageLimits } from "./dailyUsage";
-import { normalizeChromeExtensionPackageId } from "./chromeInstallationIdentity.ts";
-import { parseChromeExtensionCompatibleVersions } from "./chromeExtensionCompatibility.ts";
 
 const DEEPGRAM_FLUX_MODELS = new Set(["flux-general-en", "flux-general-multi"]);
 
@@ -22,11 +20,6 @@ export type ApiConfig = {
    * the project's own team, and the pilot signs people in with Google.
    */
   emailSignInEnabled: boolean;
-  chromeExtensionEnabled: boolean;
-  /** Exact reviewed Chrome Web Store package ID; required when enabled in production. */
-  chromeExtensionId?: string;
-  /** Finite overlap window accepted while Chrome rolls a reviewed update out. */
-  chromeExtensionCompatibleVersions: string[];
   allowedOrigins: string[];
   sessionSigningSecret: string;
   /** Optional shared token guarding provider-spending endpoints. */
@@ -81,37 +74,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
-  const chromeExtensionEnabled = isProduction
-    ? env.AIRBOARD_CHROME_EXTENSION_ENABLED === "true"
-    : env.AIRBOARD_CHROME_EXTENSION_ENABLED !== "false";
-  const configuredChromeExtensionId = env.AIRBOARD_CHROME_EXTENSION_ID?.trim();
-  const chromeExtensionId = normalizeChromeExtensionPackageId(configuredChromeExtensionId);
-  const chromeExtensionCompatibleVersions = parseChromeExtensionCompatibleVersions(
-    env.AIRBOARD_CHROME_EXTENSION_COMPATIBLE_VERSIONS,
-  );
-  if (configuredChromeExtensionId && !chromeExtensionId) {
-    throw new Error("AIRBOARD_CHROME_EXTENSION_ID must be a 32-character Chrome extension ID.");
-  }
-  if (isProduction && chromeExtensionEnabled && !chromeExtensionId) {
-    throw new Error(
-      "AIRBOARD_CHROME_EXTENSION_ID is required when the Chrome extension is enabled in production.",
-    );
-  }
-  if (isProduction && chromeExtensionEnabled) {
-    let appOrigin: string;
-    try {
-      appOrigin = new URL(appUrl).origin;
-    } catch {
-      throw new Error(
-        "AIRBOARD_APP_URL must be a valid origin when the Chrome extension is enabled in production.",
-      );
-    }
-    if (allowedOrigins.includes("*") || !allowedOrigins.includes(appOrigin)) {
-      throw new Error(
-        "AIRBOARD_ALLOWED_ORIGINS must explicitly include the AIRBOARD_APP_URL origin without a wildcard when the Chrome extension is enabled in production.",
-      );
-    }
-  }
   // Without Supabase the API would quietly keep boards in memory and lose
   // them on every restart, so production refuses to start instead.
   if (isProduction && (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY)) {
@@ -136,9 +98,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     emailSignInEnabled: isProduction
       ? env.AIRBOARD_EMAIL_SIGN_IN_ENABLED === "true"
       : env.AIRBOARD_EMAIL_SIGN_IN_ENABLED !== "false",
-    chromeExtensionEnabled,
-    ...(chromeExtensionId ? { chromeExtensionId } : {}),
-    chromeExtensionCompatibleVersions,
     sessionSigningSecret,
     allowedOrigins,
     ...(env.AIRBOARD_API_TOKEN?.trim() ? { apiToken: env.AIRBOARD_API_TOKEN.trim() } : {}),

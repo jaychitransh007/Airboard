@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 // Signed-in acceptance journey for the standalone web app's control plane:
 // account, preferences, the board-opening preflight and pilot, a saved board
 // (compare-and-swap saves, reload, rename), a live session (start, a guest on
-// the live link, ticket renewal, ending it), invitations, SCIM, a privacy
+// the live link, ticket renewal, ending it), invitations, a privacy
 // request, usage and audit, and a permanent board delete. Temporary
 // credentials are revoked as it goes. Run it as a disposable account
 // (AIRBOARD_ACCESS_TOKEN) against an API backed by Supabase: an in-memory API
@@ -155,34 +155,6 @@ async function main() {
   assert.ok((await call("/organization/invitations")).body.invitations.length >= 1);
   await call(`/organization/invitations/${invitation.invitationId}`, { method: "DELETE" });
 
-  const scim = (await call("/organization/scim-tokens", {
-    method: "POST",
-    body: { name: "Commercial journey smoke" },
-  })).body;
-  const scimHeaders = { authorization: `Bearer ${scim.token}` };
-  assert.equal(
-    (await call("/scim/v2/ServiceProviderConfig", { auth: false, headers: scimHeaders })).body.patch.supported,
-    true,
-  );
-  const directoryUser = (await call("/scim/v2/Users", {
-    method: "POST",
-    auth: false,
-    headers: scimHeaders,
-    body: {
-      schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
-      userName: "airboard-directory-smoke@example.com",
-      displayName: "Directory Smoke",
-      active: true,
-    },
-  })).body;
-  assert.ok(directoryUser.id);
-  assert.ok((await call("/scim/v2/Users?filter=userName%20eq%20%22airboard-directory-smoke%40example.com%22", {
-    auth: false,
-    headers: scimHeaders,
-  })).body.totalResults >= 1);
-  await call(`/scim/v2/Users/${directoryUser.id}`, { method: "DELETE", auth: false, headers: scimHeaders });
-  await call(`/organization/scim-tokens/${scim.record.id}`, { method: "DELETE" });
-
   const exportRequest = (await call("/privacy/data-requests", {
     method: "POST",
     body: { requestType: "export" },
@@ -208,7 +180,6 @@ async function main() {
     versionConflict: "verified",
     liveSession: "started, joined, renewed and ended",
     invitation: "verified-and-revoked",
-    scim: "verified-and-revoked",
     privacyRequest: "verified-and-canceled",
     usageAndAudit: "verified",
     boardDelete: "permanent, verified gone",

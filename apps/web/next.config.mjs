@@ -11,7 +11,6 @@ const nextConfig = {
     "@airboard/core",
     "@airboard/drawing-engine",
     "@airboard/gesture-engine",
-    "@airboard/integrations",
     "@airboard/realtime-client"
   ],
   webpack(config) {

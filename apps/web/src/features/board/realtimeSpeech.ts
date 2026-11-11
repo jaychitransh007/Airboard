@@ -127,7 +127,7 @@ export type RealtimeSpeechOptions = {
   /** Explicit WebSocket URL. Takes precedence over apiBaseUrl. */
   url?: string;
   /**
-   * Verified user or installation token. It is exchanged for a one-minute
+   * Verified user access token. It is exchanged for a one-minute
    * transcription ticket, and only the ticket goes in the socket URL.
    */
   accessToken?: string;
@@ -250,10 +250,9 @@ export type RealtimeSpeechDependencies = {
   /** Exchanges the access token for a transcription ticket (POST /transcription/ticket). */
   fetchTranscriptionTicket?: (apiBaseUrl: string, accessToken: string) => Promise<string>;
   /**
-   * Direct mono PCM source for hosts that already expose decoded microphone
-   * samples (for example the Meet extension bridge). This bypasses
-   * AudioContext entirely, so default-on capture is not blocked by iframe
-   * autoplay/user-activation policy.
+   * Direct mono PCM source that already exposes decoded microphone samples
+   * (the voice tests and evals inject one). This bypasses AudioContext
+   * entirely.
    */
   startPcmInput?: (handlers: {
     onChunk: (samples: Float32Array, sampleRate: number) => void;
@@ -811,7 +810,7 @@ export function createRealtimeSpeechSession(
     try {
       if (startPcmInput) {
         if (!pcmInputSession) {
-          fail("Meet microphone capture was not prepared before transcription started.", "MICROPHONE_UNAVAILABLE");
+          fail("PCM microphone capture was not prepared before transcription started.", "MICROPHONE_UNAVAILABLE");
           return;
         }
         markCaptureLive();
@@ -1134,7 +1133,7 @@ export function createRealtimeSpeechSession(
             if (state === "ended" || state === "stopping") {
               return;
             }
-            fail(`The Meet microphone bridge stopped: ${reason}.`, "MICROPHONE_UNAVAILABLE");
+            fail(`The PCM microphone source stopped: ${reason}.`, "MICROPHONE_UNAVAILABLE");
           },
         });
         if (state !== "starting") {

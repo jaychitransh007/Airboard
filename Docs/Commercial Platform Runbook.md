@@ -4,14 +4,14 @@ This document describes the implemented customer journey, its operating data, an
 
 ## Customer journey now implemented
 
-1. **Discover** — public pages identify the standalone web product as a controlled pilot, Google Meet as a private preview, desktop as a development preview, and Zoom/Teams as unavailable. Contact-sales submissions are stored as deduplicated leads with a spam honeypot.
+1. **Discover** — public pages identify the standalone web product as a controlled pilot, Google Meet (by presenting the Airboard tab) as part of it, and Zoom/Teams as unavailable. Contact-sales submissions are stored as deduplicated leads with a spam honeypot.
 2. **Create an account** — email magic-link, Google and Microsoft authentication use Supabase Auth. The database bootstrap creates a profile, personal organization, owner membership, default workspace, policy, trial eligibility and pending entitlement. An invitation can add the same identity to another organization without duplicating the user.
 3. **Onboard** — the product records role, company-size band, primary use case and target platform. It stores no board content, transcript or meeting title in analytics. Organization switching is explicit and remembered as the user's default tenant.
-4. **Reach first value** — the one-month (30-day) pilot is not consumed at signup. It activates after a successful standalone canvas preflight or a Meet extension preflight that proves consent, sender attachment, encoded composite frames and outbound bytes.
-5. **Use Airboard** — users create persistent, versioned boards; open recent and shared views; start live sessions; use typed, pointer, gesture or Airo input; present over a selected screen; or run the native click-through desktop overlay. A failed background save reports a non-blocking warning and preserves the working canvas.
-6. **Integrate with Meet** — the Chrome extension is linked to the signed-in organization with a one-time link token. It keeps its drawing engine private and replaces the outgoing camera track with the camera-plus-neon composite. There is no dedicated Airboard activity or shared canvas inside Meet.
+4. **Reach first value** — the one-month (30-day) pilot is not consumed at signup. It activates after a successful standalone canvas preflight.
+5. **Use Airboard** — users create persistent boards (each save is compare-and-swap on a version number; no history copies are kept); open recent and shared views; start live sessions; use typed, pointer, gesture or Airo input; and show a selected screen behind the board. A failed background save reports a non-blocking warning and preserves the working canvas.
+6. **Use it in Meet** — the presenter shares the Airboard tab (**Present now → A tab**); nothing is installed. The Chrome extension, the Meet add-on and the Electron desktop app were removed on 12 Nov 2026.
 7. **Buy and manage** — the billing page checks a secret-free commercial capability response. Unless Stripe checkout, prices and signed webhook processing are all configured, prices are labeled proposals, checkout stays unavailable and users enter a managed evaluation path. When enabled, signed idempotent webhooks update customers, subscriptions and entitlements and Stripe remains the payment system of record.
-8. **Administer** — owners/admins manage members, invitations, organization policy, installation settings/revocation, usage, audit events, SAML/OIDC metadata and SCIM tokens. SSO enforcement remains off until an operator activates and verifies the matching identity provider, preventing tenant lockout.
+8. **Administer** — owners/admins manage members, invitations, organization policy, usage and audit events. SSO and SCIM were removed on 12 Nov 2026; their tables stay in the database, unused.
 9. **Get help or leave** — authenticated support requests and user-created, content-free seven-day diagnostic bundles are available. Users can request a data export, schedule account/workspace deletion with a seven-day cancellation window, cancel a queued request, end sessions and control notification/analytics consent.
 
 ## Product pages
@@ -30,8 +30,8 @@ This document describes the implemented customer journey, its operating data, an
 - `/onboarding`; `/app`, the home page: every Airboard you can open, with Create Airboard
 - `/app/boards/:id`, `/app/boards/new`, `/app/billing`
 - `/app/settings/profile|preferences|connected-accounts|notifications|privacy-data|sessions`
-- `/app/settings/workspace`, and for team owners and admins `/app/settings/members|policies|identity-directory|audit-logs`
-- Signed-in pages have no sidebar: a top header with the profile menu (Profile, Help Center, Plan & Billing, Settings, Sign out). Old addresses redirect: `/app/boards`, `/app/shared`, `/app/activity` and `/app/trash` to `/app`; `/app/integrations` to the Google Meet help article; `/app/admin/*` to the same page in Settings.
+- `/app/settings/workspace`, and for team owners and admins `/app/settings/members|policies|audit-logs`
+- Signed-in pages have no sidebar: a top header with the profile menu (Profile, Help Center, Plan & Billing, Settings, Sign out). Old addresses redirect: `/app/boards`, `/app/shared`, `/app/activity` and `/app/trash` to `/app`; `/app/integrations` to the Google Meet help article; `/app/admin/*` to the same page in Settings; the removed SSO & SCIM page (`identity-directory`, under either path) to `/app/settings/workspace`.
 
 ## Data collected and why
 
@@ -39,8 +39,8 @@ This document describes the implemented customer journey, its operating data, an
 | --- | --- | --- | --- |
 | Identity | email, display name, auth provider, locale, timezone | authentication, account recovery and display | user export/deletion; provider session revocation |
 | Organization | name, size band, country, role, membership | tenancy, onboarding, access and growth segmentation | organization lifecycle policy |
-| Product content | board title, description, versioned state, visibility | core standalone and live-board service | active until deletion; deletion is immediate and permanent (boards soft-deleted before 2026-11-11 are purged after the organization retention window) |
-| Installation | platform, version, settings, consent time, last seen/success/error | setup health and support | revocable per installation |
+| Product content | board title, description, latest state, visibility | core standalone and live-board service | active until deletion; deletion is immediate and permanent (boards soft-deleted before 2026-11-11 are purged after the organization retention window) |
+| Installation (extension era) | platform, version, settings, consent time, last seen/success/error | none since the extension was removed (12 Nov 2026); old rows stay in the table | included in export; account deletion clears the installer link |
 | Billing | Stripe customer/subscription IDs, plan, seats, periods, status | entitlement and revenue operations | Stripe remains payment system of record |
 | Consent | document version, consent type, granted state and source | prove media/privacy choice | append-only record; included in export |
 | Product events | allowlisted event name, timestamps and bounded content-free properties | activation, reliability, conversion and cohort analysis | 90 days; no labels, transcripts, meeting URLs, raw media or credentials |
@@ -59,9 +59,9 @@ IP addresses are not stored in product analytics. The lead form stores only a sh
 - Every API response carries `x-request-id`; an incoming W3C `traceparent` is echoed and structured request logs correlate the route and duration.
 - `/internal/lifecycle/run` requires the cron secret. It expires trials and entitlements, executes queued exports/deletions, delivers lifecycle notifications, purges expired deleted boards and enforces operational retention.
 - Stripe webhook payloads are signature-verified and first persisted to an idempotent inbox. Unknown configured price IDs fail closed rather than granting an arbitrary plan.
-- Two smoke tests run against a live or local API (`AIRBOARD_API_URL`). Neither touches the Chrome extension, which is off in production.
+- Two smoke tests run against a live or local API (`AIRBOARD_API_URL`).
   - `pnpm smoke:deploy` (also needs `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`) creates a throwaway account with the Supabase admin key. It checks the entitlement gate (402 until the pilot starts), a board save, the stale-version 409, the reload, a data-export request and permanent delete: afterwards the board returns 404 and is gone from the list. It removes the account whether or not the run passed.
-  - `pnpm smoke:commercial` is the wider acceptance test. Give it a disposable account's `AIRBOARD_ACCESS_TOKEN` and an API backed by Supabase; the in-memory API keeps no boards. It covers account bootstrap, preferences, the board-opening preflight and pilot activation, compare-and-swap saves, reload and rename, and a live session: start, a guest joining on the live link, ticket renewal, and ending it from Settings. It also covers invitations, SCIM, a privacy request, usage and audit, and permanent delete, which also removes the board's live session. Temporary credentials are revoked as it goes.
+  - `pnpm smoke:commercial` is the wider acceptance test. Give it a disposable account's `AIRBOARD_ACCESS_TOKEN` and an API backed by Supabase; the in-memory API keeps no boards. It covers account bootstrap, preferences, the board-opening preflight and pilot activation, compare-and-swap saves, reload and rename, and a live session: start, a guest joining on the live link, ticket renewal, and ending it from Settings. It also covers invitations, a privacy request, usage and audit, and permanent delete, which also removes the board's live session. Temporary credentials are revoked as it goes.
 
 ## Required production configuration
 
@@ -71,17 +71,6 @@ Core service:
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `AIRBOARD_SESSION_SIGNING_SECRET`, `AIRBOARD_ALLOWED_ORIGINS`, `AIRBOARD_APP_URL`
 - `NEXT_PUBLIC_AIRBOARD_API_URL`, `AIRBOARD_API_TOKEN`, `AIRBOARD_CRON_SECRET`
-- `NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_ID` and
-  `AIRBOARD_CHROME_EXTENSION_ID` must be identical so both the renderer and API
-  trust only the reviewed package; the configured
-  `NEXT_PUBLIC_CHROME_EXTENSION_VERSION` must match the reviewed Meet package;
-  validate the deployed API/web pair with `pnpm verify:extension-deployment`
-  before producing an artifact with `pnpm release:extension`
-- after Web Store approval, `NEXT_PUBLIC_CHROME_WEB_STORE_URL` must be the
-  listing whose final path segment is that exact extension ID; mismatched or
-  malformed listing URLs fail closed and keep the public install action hidden
-- `AIRBOARD_CHROME_EXTENSION_ENABLED=true` for an active Meet release; set it
-  to `false` for the documented emergency disable path
 
 Commercial providers:
 
@@ -139,9 +128,7 @@ The repository cannot complete these without the relevant account owner, credent
 - create/approve production Stripe products, tax policy, refund policy and webhook endpoint;
 - verify the sending domain and lifecycle templates in Resend;
 - configure Supabase production OAuth redirect URIs and Google/Microsoft provider credentials;
-- activate and test each enterprise SAML/OIDC provider after metadata/domain verification;
-- publish the Chrome extension through Chrome Web Store review and distribute signed desktop installers;
-- complete receiver-side Google Meet evidence with two real accounts/devices; repeat the marketplace approval process before describing Zoom or Teams as generally available;
+- confirm presenting the Airboard tab in Google Meet with two real accounts/devices; complete a marketplace approval process before describing Zoom or Teams as generally available;
 - counsel approval for terms, privacy notice, DPA, subprocessors, trial/renewal language and deletion obligations;
 - independent penetration test, dependency/container scanning, backup-restore exercise, incident response exercise and accessibility audit;
 - production alert routing, on-call ownership, status-provider integration, support SLA and CRM routing.

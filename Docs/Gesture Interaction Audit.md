@@ -83,5 +83,6 @@ commitments.
 - Empty landmark recordings are rejected locally with an actionable message;
   valid downloads now include capture-quality counts.
 
-Landmark traces remain explicit, local diagnostic downloads. Airboard does not
-record or upload hand landmarks automatically.
+The landmark-trace download was removed with the developer controls in Board
+settings on 12 November 2026. Airboard does not record or upload hand
+landmarks.

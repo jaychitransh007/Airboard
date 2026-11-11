@@ -3,7 +3,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import test from "node:test";
 
-import { movedAdminSection, SETTINGS_SECTIONS, settingsSectionTitle, WORKSPACE_ADMIN_SECTIONS, WORKSPACE_SECTIONS } from "../src/features/product/pageTitles.ts";
+import { movedAdminSection, removedSettingsSection, SETTINGS_SECTIONS, settingsSectionTitle, WORKSPACE_ADMIN_SECTIONS, WORKSPACE_SECTIONS } from "../src/features/product/pageTitles.ts";
 
 const webRoot = resolve(import.meta.dirname, "..");
 const css = readFileSync(join(webRoot, "app/globals.css"), "utf8");
@@ -47,8 +47,7 @@ function pageFiles(directory) {
 }
 
 test("every page names itself in the browser title", () => {
-  // The landing page keeps the site title; Meet's add-on frames are never a
-  // browser tab; onboarding and the pages folded into the home page,
+  // The landing page keeps the site title; onboarding and the pages folded into the home page,
   // Settings or the Help Center only redirect.
   const exempt = new Set([
     "app/page.tsx",
@@ -61,7 +60,7 @@ test("every page names itself in the browser title", () => {
   ]);
   const missing = pageFiles(join(webRoot, "app"))
     .map((path) => relative(webRoot, path))
-    .filter((path) => !exempt.has(path) && !path.startsWith("app/meet/"))
+    .filter((path) => !exempt.has(path))
     .filter((path) => !/export (const metadata|(async )?function generateMetadata)/.test(readFileSync(join(webRoot, path), "utf8")));
   assert.deepEqual(missing, []);
 });
@@ -81,4 +80,11 @@ test("old Administration links land on the same page in Settings", () => {
   assert.equal(movedAdminSection("overview"), "workspace");
   assert.equal(movedAdminSection("installations"), "workspace");
   assert.equal(movedAdminSection("anything-else"), "workspace");
+});
+
+test("the removed SSO & SCIM page sends its old links to Workspace", () => {
+  assert.equal(movedAdminSection("identity-directory"), "workspace");
+  assert.equal(removedSettingsSection("identity-directory"), "workspace");
+  assert.equal(removedSettingsSection("members"), null);
+  assert.ok(!WORKSPACE_ADMIN_SECTIONS.some(([id]) => id === "identity-directory"));
 });

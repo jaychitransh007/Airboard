@@ -1,19 +1,18 @@
 ---
 title: Workspace administration
-description: Manage a team workspace's members, policies, sign-in setup, and audit log from Settings.
+description: Manage a team workspace's members, policies, and audit log from Settings.
 category: account
 categoryLabel: Account and administration
 order: 13
 status: shipped
 audiences: ["admins", "owners"]
-lastVerified: 2026-11-11
+lastVerified: 2026-11-12
 sources: ["apps/web/src/features/product/AdminPage.tsx", "apps/web/src/features/product/pageTitles.ts", "apps/api/src/controlPlaneRoutes.ts", "apps/api/src/boardShareRoutes.ts", "apps/api/src/organizationPolicy.ts", "Docs/Commercial Platform Runbook.md"]
 ---
 
 Owners and admins of a team workspace manage it in **Settings**. Open the
 profile icon at the top right, choose **Settings**, and use the **Workspace**
-group: **Workspace**, **Members**, **Policies**, **SSO & SCIM**, and **Audit
-log**. Personal workspaces have no members or policies to manage. Changes apply
+group: **Workspace**, **Members**, **Policies**, and **Audit log**. Personal workspaces have no members or policies to manage. Changes apply
 to the workspace you are in.
 
 ## Workspace
@@ -56,14 +55,6 @@ session keep their access until it ends.
 **View-only links** lists every working link anyone in the workspace has made,
 with its board and who made it. **Turn off** stops a link at once and records
 it in the audit log.
-
-## SSO and SCIM
-
-Enter your SAML metadata URL and verified email domains, and manage SCIM tokens,
-from **SSO & SCIM**. Production
-identity-provider enforcement remains off until an Airboard operator verifies
-and activates the matching configuration. Record a newly created SCIM token
-when it is displayed; revoke tokens that are no longer in use.
 
 ## Audit log
 

@@ -360,7 +360,7 @@ export async function buildServer(
       allowParticipantDrawing?: boolean;
     };
   }>("/sessions/start", async (request, reply) => {
-    const account = await auth.authenticate(request, { allowInstallation: true });
+    const account = await auth.authenticate(request);
     if (!account) {
       return reply.code(401).send({ error: "OWNER_AUTH_REQUIRED" });
     }
@@ -545,7 +545,7 @@ export async function buildServer(
       return reply.code(404).send({ error: "PARTICIPANT_NOT_IN_SESSION" });
     }
     if (participant.role === "owner") {
-      const account = await auth.authenticate(request, { allowInstallation: true });
+      const account = await auth.authenticate(request);
       if (!account || account.profileId !== session.ownerUserId) {
         return reply.code(401).send({ error: "OWNER_AUTH_REQUIRED" });
       }

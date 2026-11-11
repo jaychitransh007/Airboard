@@ -14,7 +14,6 @@
     "@airboard/core": "workspace:*",
     "@airboard/drawing-engine": "workspace:*",
     "@airboard/gesture-engine": "workspace:*",
-    "@airboard/integrations": "workspace:*",
     "@airboard/realtime-client": "workspace:*",
     "@supabase/supabase-js": "^2.118.0",
     "next": "^15.5.29",

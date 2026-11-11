@@ -19,7 +19,7 @@
     "distances": ["near", "normal", "far"],
     "conditions": ["quiet", "meeting-noise", "overlap", "clipped", "cutoff"],
     "lengths": ["1-3-words", "short", "medium", "near-500-character-limit"],
-    "surfaces": ["standalone", "meet-main-stage"],
+    "surfaces": ["standalone"],
     "channels": ["wake", "ptt", "scoped"],
     "evaluationClasses": ["core", "narrative", "safety"],
     "processingPaths": ["deterministic", "semantic", "no_route"],

@@ -2,7 +2,7 @@
 
 Historical plans, spikes and checklists, kept for context. They describe the
 project as it was when they were written: the July MVP plan, the retired Google
-Meet add-on, removed input modes and earlier readiness reviews. Nothing here is
+Meet add-on and Chrome extension, removed input modes and earlier readiness reviews. Nothing here is
 current. For the current state see [Project Status](../Project%20Status.md);
 for decisions and fixes over time see the change log in
 [Release Readiness Backlog](../Release%20Readiness%20Backlog.md).
@@ -13,7 +13,8 @@ for decisions and fixes over time see the change log in
 | Board Sync and Meet Session Wiring Design | Design for board sync around the retired Meet add-on |
 | Physical Marker Prop Mode Implementation Notes | A marker input mode removed on 2026-07-13 |
 | Gesture Annotation Mode Implementation Notes | An earlier gesture drawing mode |
-| Google Meet Real-Client Feasibility Spike, Google Workspace Marketplace Draft Listing | The retired Meet add-on, replaced by the Chrome extension |
+| Google Meet Real-Client Feasibility Spike, Google Workspace Marketplace Draft Listing | The retired Meet add-on, replaced by the Chrome extension; the add-on code was removed on 2026-11-12 |
+| Chrome Web Store Release, Meet Camera Composite Verification | The Chrome Meet extension's release runbook and camera-composite acceptance record; the extension was removed on 2026-11-12 |
 | System Architecture Review and Gap Analysis, Public Beta Readiness and Platform Onboarding Checklist | Earlier readiness reviews, superseded by the Release Readiness Backlog |
 | Intent Canvas Implementation Notes | Notes for the Intent Canvas input mode as built in July; its Start Airo button, sidebar and one-to-twelve command plan have since changed |
 | Object First Gesture Mode Implementation Notes | Notes for object-first gestures; the sidebar row, Enable hands button and floating label editor they mention were removed in RGB-048 and RGB-049 |
