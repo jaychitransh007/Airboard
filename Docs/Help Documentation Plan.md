@@ -37,9 +37,9 @@ within a release.
 | Surface | Entry point | State |
 | --- | --- | --- |
 | Standalone web workspace | `/app/boards/<id>` — Intent Canvas and Touchpad Writing input modes (`AirboardPrototype.tsx:8237`) | Shipped |
-| Google Meet camera overlay | Chrome extension v0.8.0, `extensions/chrome-meet-bridge` | Private preview; Web Store URL not configured |
-| Native desktop overlay | Electron shell, `apps/desktop` | Preview; unsigned, no auto-update |
-| Commercial control plane | `/app`, `/app/admin/*`, `/app/settings/*`, `/app/billing` | Shipped; paid checkout gated behind `AIRBOARD_BILLING_ENABLED` |
+| Google Meet | Present the Airboard tab from Meet (**Present now → A tab**); nothing to install | Shipped. The Chrome extension is switched off in production and the Meet add-on was never published, so neither is documented for users |
+| Desktop overlay | Web app: board menu **•••** → **Show a screen behind the board** | Shipped. The native Electron shell (`apps/desktop`) is not distributed and is not advertised in user help |
+| Commercial control plane | `/app` (**Airboards** home), `/app/settings/*` (team admin pages in the **Workspace** group: Workspace, Members, Policies, SSO & SCIM, Audit log), `/app/billing` | Shipped; paid checkout gated behind `AIRBOARD_BILLING_ENABLED`. No sidebar, Boards, Shared, Activity, Integrations or Overview pages, and no installation health |
 
 Input paths that all need parity coverage: typed commands, Airo voice, camera
 hand gestures, pointer/mouse, touchpad writing, keyboard.
@@ -68,8 +68,8 @@ excellent *sources* (§4).
 - The command grammar. Users cannot discover what they are allowed to say.
 - Keyboard shortcuts. At least eight exist and none is listed in the UI.
 - Error codes. 70+ stable codes across the API, web app, and extension.
-- The admin console — members, policies, SSO/SCIM, installation health, audit
-  log.
+- Workspace administration — members, policies, SSO/SCIM, audit log (now in
+  Settings → Workspace group).
 - Trial mechanics, board versioning, permanent delete, export.
 - What to do when voice or hands do not work.
 
@@ -119,7 +119,7 @@ preview or gated.
 | Content creator | Camera/screen composition, recording, hiding the diagram, hands-free operation | 01 → 06 → 08 → 09 |
 | Online tutor | Long hands-on sessions, legibility over slides, low-ceremony editing | 01 → 03 → 06 → 08 |
 | Camera-off / keyboard-only user | Full parity path with no camera and no microphone | 01 → 03 → 07 |
-| Design-partner admin | Invite members, set policy, verify installations, audit, answer a security questionnaire | 12 → 13 → 14 → 17 |
+| Design-partner admin | Invite members, set policy, audit, answer a security questionnaire | 12 → 13 → 14 → 17 |
 
 ---
 
@@ -158,19 +158,19 @@ Docs/help/
 | --- | --- | --- | --- | --- |
 | 01 | What Airboard is | What the product does, the four surfaces, what "no confirmation, undo is the safety net" means and why | `README.md`; [Augmented Experience Vision](./Augmented%20Experience%20Vision%20and%20Interaction%20Spec.md) §1–2 | Product read-through |
 | 02 | System requirements | Browsers, camera, microphone, lighting, network, which capabilities need which provider keys | `Intent Canvas Implementation Notes.md` "Browser and Hardware Limits"; `Platform Support Matrix.md` (after RGB-034) | Manual matrix test |
-| 03 | Your first board | Sign up → create a board → place two objects → connect them → rename → undo, with a typed-only path and a voice path | `Dashboard.tsx`; `BoardsPage.tsx`; manual walkthrough | Perform end to end |
+| 03 | Your first board | Sign up → **Create Airboard** on **Airboards** → place two objects → connect them → rename → undo, with a typed-only path and a voice path | `AirboardsHome.tsx`; manual walkthrough | Perform end to end |
 | 04 | Commands | The full grammar; node types; placement words; what happens when a command is not understood; the deterministic vs. semantic distinction in plain language | **Generated** from `packages/core/src/semanticCapabilities.ts:40,205,259,277` and `OBJECT_CATALOG` (`AirboardPrototype.tsx:417`) | Generator + `pnpm eval:grammar` corpus |
 | 05 | Airo voice | Start Airo once; open-palm push-to-talk; the "Airo" wake fallback; hold-to-edit; what to do with a misheard command; why ordinary meeting talk is safe | `README.md` "Realtime Voice"; `voiceCommandRouter.ts`; Vision spec §2, §5 | Live session with a microphone |
 | 06 | Gestures | Every shipped pose with exact performance; confusable pairs and how to avoid them; what is deliberately *not* a gesture and why | [Gesture Interaction Audit](./Gesture%20Interaction%20Audit.md) — the single best existing source; use its tables near-verbatim | Live session with a camera; feeds the trainer (§6) |
 | 07 | Keyboard, pointer, touchpad | Every shortcut; the complete camera-off, microphone-off parity path | **Generated** from the keydown handler (`AirboardPrototype.tsx:5924`–`6090`): `Cmd/Ctrl+Z`, `Shift+H`, `Space`, `Tab`/`Shift+Tab`, `Enter`/`F2`, `Escape`, hold `V`, `E`, `Shift`, `Alt`, `Ctrl/⌘+wheel` | Keyboard-only run of doc 03 |
 | 08 | Screen and camera composition | Use screen, camera underlay, dark overlay dial, snap-to-hide, studio recording, what the audience sees | `README.md` "Screen and camera composition"; `lightboardComposition.ts` | Manual, with a second viewer |
-| 09 | Boards, versions, export | Save, rename, versions, share/visibility, delete, PNG export | `BoardsPage.tsx`; `ProductSection.tsx`; `boardLifecycle.ts` | Manual |
-| 10 | Google Meet | Install, connect, media confirmation, the six readiness checks by name, receiver verification, what the audience sees, uninstall/revoke | `extensions/chrome-meet-bridge/README.md`; `popup.html` readiness list; [Meet Camera Composite Verification](./Meet%20Camera%20Composite%20Verification.md) | Two-account real call |
-| 11 | Desktop overlay | Launch, click-through model, `Cmd/Ctrl+Shift+O`, `Cmd/Ctrl+Shift+H`, tray controls, and the unsigned-preview caveat | `README.md` "Native desktop overlay"; `apps/desktop/src/overlayWindow.mjs` | Manual on macOS |
+| 09 | Boards, versions, export | Save, rename, versions, share/visibility, delete, PNG export | `AirboardsHome.tsx`; `ShareDialog.tsx`; `boardLifecycle.ts` | Manual |
+| 10 | Use Airboard in Google Meet | Before you start (Chrome or Edge, signed in, nothing to install); present the Airboard tab (**Present now → A tab**); camera behind the board; what the audience sees; voice, gestures, typing and mouse while presenting; optional live link for co-editing; stopping; troubleshooting and honest limits (presented tab, not the Meet camera tile) | `AirboardPrototype.tsx` board menu; `ShareDialog.tsx`; `screenUnderlay.ts` | Two-account real call |
+| 11 | Desktop overlay | Draw over slides or any app from the web app via **••• → Show a screen behind the board**; dark overlay and local contrast; showing it in Meet or recording it; stopping | `AirboardPrototype.tsx`; `screenUnderlay.ts`; `lightboardComposition.ts` | Manual in Chrome and Edge |
 | 12 | Account, trial, billing | Sign-up, invitations, the one-month value-triggered pilot, what happens at expiry, why checkout may be unavailable | [Commercial Platform Runbook](./Commercial%20Platform%20Runbook.md); `BillingPage.tsx` | `pnpm smoke:commercial` |
-| 13 | Admin console | Members and roles, policies, SSO/SCIM configuration, installation health, audit log export | `AdminPage.tsx`; `controlPlaneRoutes.ts`; Commercial Platform Runbook | Manual as an owner account |
+| 13 | Workspace administration | Settings → Workspace group: Workspace (name, switching, usage), Members and roles, Policies, SSO & SCIM, Audit log | `AdminPage.tsx`; `pageTitles.ts`; `controlPlaneRoutes.ts`; Commercial Platform Runbook | Manual as an owner account |
 | 14 | Privacy and your data | What is processed vs. stored, per provider; voice-trace retention (14 days); analytics; export and deletion, including the 7-day cancellation window | `Official Launch Readiness.md` "Data inventory and enforced retention"; **after RGB-036 is fixed** | Cross-check against `/privacy` and the retention jobs |
-| 15 | Troubleshooting | Symptom-first: hands not detected, voice unavailable, command rejected, Meet shows no overlay, board will not save, sign-in loop | Error-code map; `chromeMeetReadiness.ts`; support intake patterns | Each entry reproduced once |
+| 15 | Troubleshooting | Symptom-first: hands not detected, voice unavailable, command rejected, people in Meet can't see the board, board will not save, sign-in loop | Error-code map; support intake patterns | Each entry reproduced once |
 | 16 | Error codes | Every stable code, plain-language meaning, user action, whether to contact support | **Generated** by scanning `apps/api/src`, `apps/web/src`, `extensions/chrome-meet-bridge` | Generator + CI diff gate |
 | 17 | Limits and support matrix | What is preview vs. shipped; concurrency, session, size and rate limits; explicitly unsupported things | `Platform Support Matrix.md` (after RGB-034); `apps/api/src/config.ts` | Config read-through |
 
@@ -305,9 +305,8 @@ check for Phases 1–3:
 1. Give docs 01–03 to someone who has never used Airboard, camera off. They
    should reach a connected two-node diagram without asking a question.
 2. Repeat with camera and microphone on, using docs 05 and 06.
-3. Give doc 10 to a tester with a second Google account and require the
-   receiver-side confirmation from
-   [Meet Camera Composite Verification](./Meet%20Camera%20Composite%20Verification.md).
+3. Give doc 10 to a tester in a real Meet call with a second Google account,
+   and confirm the second participant sees the presented Airboard tab.
 4. Give doc 13 to a design-partner admin on a fresh organization.
 5. Run `pnpm docs:check`, `CI=true pnpm test`, `CI=true pnpm typecheck`.
 
@@ -338,3 +337,8 @@ check for Phases 1–3:
 
 - **2026-07-30** — Plan created from a review of the repository, all 23 `Docs/`
   files, and every user-facing surface. No content written.
+- **2026-11-11** — Google Meet is now "present your Airboard tab, nothing to
+  install" (extension off in production, add-on never published); the desktop
+  overlay is the web app's screen-behind-the-board option; team administration
+  moved into Settings with the new navigation (Airboards home, profile menu).
+  Docs 01–03, 08–17 updated to match.

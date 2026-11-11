@@ -112,7 +112,7 @@ export function AuthPage({ mode }: { mode: "login" | "signup" }) {
           </p>
           <ul>
             <li>Standalone visual workspace</li>
-            <li>Google Meet camera overlay (private preview)</li>
+            <li>Present your board in Google Meet</li>
             <li>Pointer, voice and gesture controls</li>
           </ul>
         </section>

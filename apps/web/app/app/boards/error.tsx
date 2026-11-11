@@ -25,7 +25,7 @@ export default function BoardError({ error }: { error: Error & { digest?: string
         <button className="button button-primary" type="button" onClick={() => window.location.reload()}>
           Reopen board
         </button>
-        <Link className="button button-quiet" href="/app/boards">
+        <Link className="button button-quiet" href="/app">
           Go to my boards
         </Link>
       </span>

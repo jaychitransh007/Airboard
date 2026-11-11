@@ -85,8 +85,9 @@ What you can rely on outside the canvas:
   returns focus to the button that opened a menu or dialog when it closes.
 - Pages have landmarks, one main heading, labelled fields, and status messages
   that screen readers announce.
-- Pages reflow to 320 pixels wide, so you can zoom to 400%. On narrow screens
-  the **More** button in the bottom bar holds the rest of the navigation.
+- Pages reflow to 320 pixels wide, so you can zoom to 400%. On every screen
+  size, the profile icon at the top right opens Profile, Help Center, Plan &
+  Billing, Settings and Sign out.
 - Animations switch off when your system asks for reduced motion.
 - On the board, a screen reader hears which object `Tab` selects, and can read
   the board's words as a list.

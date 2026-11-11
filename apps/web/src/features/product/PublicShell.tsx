@@ -39,7 +39,7 @@ export function PublicShell({ children }: { children: ReactNode }) {
           <Link href="/subprocessors">Subprocessors</Link>
           <Link href="/accessibility">Accessibility</Link>
         </div>
-        <small>© {new Date().getFullYear()} Airboard. Controlled pilot: standalone web is available; meeting and desktop integrations are previews. Raw media is processed live and is not stored by Airboard.</small>
+        <small>© {new Date().getFullYear()} Airboard. Controlled pilot: the web app is available, and you can present it in Google Meet or draw over your screen with it. Raw media is processed live and is not stored by Airboard.</small>
       </footer>
     </div>
   );

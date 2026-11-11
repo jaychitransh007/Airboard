@@ -290,7 +290,7 @@ export function ShareDialog({
                     />
                     <span>
                       <strong>Everyone in {access.workspaceName}</strong>
-                      <small>Members find it under Shared and can edit it.</small>
+                      <small>Members see it on their Airboards page and can edit it.</small>
                     </span>
                   </label>
                 </div>

@@ -6,13 +6,13 @@ categoryLabel: Getting started
 order: 2
 status: reference
 audiences: ["everyone", "admins"]
-lastVerified: 2026-11-06
-sources: ["Docs/Platform Support Matrix.md", "Docs/Browser Matrix.md", "apps/api/src/config.ts", "apps/web/src/features/board/mediaPermissionPreference.ts", "extensions/chrome-meet-bridge/manifest.json"]
+lastVerified: 2026-11-11
+sources: ["Docs/Platform Support Matrix.md", "Docs/Browser Matrix.md", "apps/api/src/config.ts", "apps/web/src/features/board/mediaPermissionPreference.ts", "apps/web/src/features/board/screenUnderlay.ts"]
 ---
 
 Use Google Chrome on a desktop or laptop for the standalone Airboard workspace.
-Camera, microphone, screen capture, and meeting integration support depend on
-browser permissions and your organization's Airboard policy.
+Camera, microphone, and screen capture depend on browser permissions and your
+organization's Airboard policy. There is nothing to install.
 
 ## Supported browsers
 
@@ -55,14 +55,15 @@ and the Airo panel says why voice is off. Typed commands keep working.
 Natural-language recovery additionally depends on the semantic intent provider.
 Canonical commands continue to work when that provider is unavailable.
 
-## Google Meet private preview
+## Google Meet
 
-The Meet overlay requires the approved Chrome extension build, a supported
-Chrome profile, an Airboard account, affirmative live-media confirmation, and
-a standard Google Meet meeting-code URL. The public Chrome Web Store install
-link appears only after the reviewed listing URL is configured.
+To use Airboard in a Meet call, you need a supported browser, an Airboard
+account, and the Meet call open in the same browser as your Airboard tab. You
+present the Airboard tab from Meet; there is nothing to install. See
+[Use Airboard in Google Meet](/help/integrations/google-meet).
 
-## Desktop development preview
+## Desktop overlay
 
-The native overlay currently runs as an Electron development build. General
-distribution still requires signed installers and an automatic-update path.
+The desktop overlay runs in the web app. Your browser must be allowed to share
+a screen or window, and it asks you to choose one each time you start. See
+[Desktop overlay](/help/integrations/desktop-overlay).

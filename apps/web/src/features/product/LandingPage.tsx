@@ -22,7 +22,7 @@ const ideaJourney = [
     number: "03",
     verb: "Share the thought",
     title: "Keep the explanation inside the conversation.",
-    body: "Place the visual over your camera or screen, or keep building on Airboard. Your controls stay private; the idea is what travels.",
+    body: "Place the visual over your camera or screen, present it in Google Meet, or keep building on Airboard.",
     note: "Meet · Overlay · Canvas",
   },
 ];
@@ -30,21 +30,21 @@ const ideaJourney = [
 const surfaces = [
   {
     className: "meeting",
-    eyebrow: "In the meeting · private preview",
-    title: "Your explanation lives on your video.",
-    body: "Airboard composites neon diagrams with your camera, so people see you and the idea together—not a second canvas and not your controls.",
-    link: "/integrations/google-meet",
-    linkLabel: "See the Google Meet integration",
-    tags: ["Audience-safe", "Private controls"],
+    eyebrow: "In Google Meet",
+    title: "Present you and the idea together.",
+    body: "Open your Airboard in Chrome or Edge and present its tab in Google Meet. With your camera behind the board, people see you and the diagram together, and voice, hands, typing and mouse keep working. Nothing to install.",
+    link: "/help/integrations/google-meet",
+    linkLabel: "How to present in Google Meet",
+    tags: ["Nothing to install", "Voice and hands"],
   },
   {
     className: "overlay",
-    eyebrow: "Over your screen · development preview",
+    eyebrow: "Over your screen",
     title: "Draw on the thing you are already showing.",
-    body: "Use the native click-through overlay to annotate slides, prototypes, dashboards, or any desktop app without moving the audience elsewhere.",
-    link: "/download",
-    linkLabel: "Explore the desktop overlay",
-    tags: ["Click-through", "Screen-aware"],
+    body: "Show slides, prototypes, dashboards, or any app behind your board and draw on top, right from the web app.",
+    link: "/help/integrations/desktop-overlay",
+    linkLabel: "See how the desktop overlay works",
+    tags: ["Any app or slides", "In your browser"],
   },
   {
     className: "canvas",
@@ -79,8 +79,8 @@ export function LandingPage() {
           </h1>
           <p>
             Speak it, sketch it, point at it, or move it with your hands. Airboard turns live
-            thinking into a shared visual layer—on its own canvas, over your screen, or directly
-            in your meeting video.
+            thinking into a shared visual layer—on its own canvas, over your screen, or presented
+            in your Google Meet call.
           </p>
           <div className="hero-actions">
             <Link className="button button-primary button-large" href="/signup">
@@ -90,7 +90,7 @@ export function LandingPage() {
               See an idea move
             </Link>
           </div>
-          <small>Free one-month pilot · No card required · Google Meet and desktop in preview</small>
+          <small>Free one-month pilot · No card required · Works in Google Meet</small>
         </div>
         <p className="hero-idea-caption">
           <span aria-hidden="true">✦</span>
@@ -182,7 +182,8 @@ export function LandingPage() {
         <div>
           <p>
             Start with a blank Airboard. Voice and gesture inputs are available in supported
-            desktop browsers; meeting and native desktop surfaces require preview access.
+            desktop browsers, and you can present any board in Google Meet with nothing to
+            install.
           </p>
           <Link className="button button-primary button-large" href="/signup">
             Join the pilot

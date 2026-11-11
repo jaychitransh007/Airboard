@@ -30,7 +30,7 @@ export function HelpCenterPage() {
         <p className="eyebrow">Airboard Help Center</p>
         <h1>Find the answer before the meeting starts.</h1>
         <p>
-          Learn the board, choose an input method, verify preview integrations, and
+          Learn the board, choose an input method, present in Google Meet, and
           recover from visible errors without sharing conversation content.
         </p>
         <HelpSearch

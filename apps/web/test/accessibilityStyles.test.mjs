@@ -3,7 +3,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import test from "node:test";
 
-import { adminSectionTitle, appSectionTitle, SETTINGS_SECTIONS, settingsSectionTitle } from "../src/features/product/pageTitles.ts";
+import { movedAdminSection, SETTINGS_SECTIONS, settingsSectionTitle, WORKSPACE_ADMIN_SECTIONS, WORKSPACE_SECTIONS } from "../src/features/product/pageTitles.ts";
 
 const webRoot = resolve(import.meta.dirname, "..");
 const css = readFileSync(join(webRoot, "app/globals.css"), "utf8");
@@ -48,8 +48,16 @@ function pageFiles(directory) {
 
 test("every page names itself in the browser title", () => {
   // The landing page keeps the site title; Meet's add-on frames are never a
-  // browser tab; onboarding only redirects.
-  const exempt = new Set(["app/page.tsx", "app/onboarding/page.tsx"]);
+  // browser tab; onboarding and the pages folded into the home page or
+  // Settings only redirect.
+  const exempt = new Set([
+    "app/page.tsx",
+    "app/onboarding/page.tsx",
+    "app/app/boards/page.tsx",
+    "app/app/[section]/page.tsx",
+    "app/app/integrations/page.tsx",
+    "app/app/admin/[section]/page.tsx",
+  ]);
   const missing = pageFiles(join(webRoot, "app"))
     .map((path) => relative(webRoot, path))
     .filter((path) => !exempt.has(path) && !path.startsWith("app/meet/"))
@@ -58,13 +66,18 @@ test("every page names itself in the browser title", () => {
 });
 
 test("section pages have distinct titles, so route changes are announced", () => {
-  const titles = [
-    ...["activity", "shared"].map(appSectionTitle),
-    ...["overview", "members", "policies", "audit-logs", "installations", "identity-directory"].map(adminSectionTitle),
-    ...SETTINGS_SECTIONS.map(([id]) => settingsSectionTitle(id)),
-  ];
+  const titles = [...SETTINGS_SECTIONS, ...WORKSPACE_SECTIONS, ...WORKSPACE_ADMIN_SECTIONS]
+    .map(([id]) => settingsSectionTitle(id));
   assert.equal(new Set(titles).size, titles.length);
   assert.equal(settingsSectionTitle("privacy-data"), "Privacy & data · Settings");
-  assert.equal(appSectionTitle("nothing-here"), "Page not found");
-  assert.equal(adminSectionTitle("unknown"), "Admin overview");
+  assert.equal(settingsSectionTitle("members"), "Members · Settings");
+  assert.equal(settingsSectionTitle("nothing-here"), "Settings");
+});
+
+test("old Administration links land on the same page in Settings", () => {
+  assert.equal(movedAdminSection("members"), "members");
+  assert.equal(movedAdminSection("audit-logs"), "audit-logs");
+  assert.equal(movedAdminSection("overview"), "workspace");
+  assert.equal(movedAdminSection("installations"), "workspace");
+  assert.equal(movedAdminSection("anything-else"), "workspace");
 });

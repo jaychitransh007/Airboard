@@ -15,29 +15,38 @@ export const SETTINGS_SECTIONS = [
   ["sessions", "Sessions"],
 ] as const;
 
-const APP_SECTION_TITLES: Record<string, string> = {
-  activity: "Activity",
-  shared: "Shared boards",
+/** Workspace pages in Settings. Every member sees Workspace; the rest are for team owners and admins. */
+export const WORKSPACE_SECTIONS = [
+  ["workspace", "Workspace"],
+] as const;
+
+export const WORKSPACE_ADMIN_SECTIONS = [
+  ["members", "Members"],
+  ["policies", "Policies"],
+  ["identity-directory", "SSO & SCIM"],
+  ["audit-logs", "Audit log"],
+] as const;
+
+// Old Administration links, from before admin moved into Settings.
+const ADMIN_SECTION_MOVES: Record<string, string> = {
+  overview: "workspace",
+  installations: "workspace",
+  members: "members",
+  policies: "policies",
+  "identity-directory": "identity-directory",
+  "audit-logs": "audit-logs",
 };
 
-const ADMIN_SECTION_TITLES: Record<string, string> = {
-  overview: "Admin overview",
-  members: "Members",
-  policies: "Organization policy",
-  "audit-logs": "Audit log",
-  installations: "Installation health",
-  "identity-directory": "SSO and SCIM",
-};
-
-export function appSectionTitle(section: string): string {
-  return APP_SECTION_TITLES[section] ?? "Page not found";
+export function movedAdminSection(section: string): string {
+  return ADMIN_SECTION_MOVES[section] ?? "workspace";
 }
 
-export function adminSectionTitle(section: string): string {
-  return ADMIN_SECTION_TITLES[section] ?? ADMIN_SECTION_TITLES.overview!;
+export function isWorkspaceAdminSection(section: string): boolean {
+  return WORKSPACE_ADMIN_SECTIONS.some(([id]) => id === section);
 }
 
 export function settingsSectionTitle(section: string): string {
-  const label = SETTINGS_SECTIONS.find(([id]) => id === section)?.[1];
+  const label = [...SETTINGS_SECTIONS, ...WORKSPACE_SECTIONS, ...WORKSPACE_ADMIN_SECTIONS]
+    .find(([id]) => id === section)?.[1];
   return label ? `${label} · Settings` : "Settings";
 }

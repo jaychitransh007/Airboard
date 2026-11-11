@@ -1,12 +1,12 @@
 ---
 title: Limits and support matrix
-description: Check which Airboard surfaces are shipped, preview-only, gated, or unsupported.
+description: Check which Airboard surfaces are shipped or gated, and the limits that apply.
 category: reference
 categoryLabel: Troubleshooting and reference
 order: 17
 status: reference
 audiences: ["everyone", "admins", "security"]
-lastVerified: 2026-11-07
+lastVerified: 2026-11-11
 sources: ["Docs/Platform Support Matrix.md", "apps/api/src/config.ts", "apps/api/src/boardAssetLifecycle.ts", "apps/web/src/platform/distribution.ts", "Docs/Commercial Platform Runbook.md"]
 ---
 
@@ -18,11 +18,9 @@ SLA, certification, or accessibility-conformance claim.
 | Surface | Current status | Notes |
 | --- | --- | --- |
 | Standalone web workspace | Shipped pilot surface | Persistent boards, typed/pointer/keyboard input, supported voice and gestures, composition, and export |
-| Google Meet camera overlay | Private preview | Requires approved Chrome build, media confirmation, preflight, and receiver verification |
-| Native desktop overlay | Development preview | No generally distributed signed installer or automatic updater |
+| Google Meet | Shipped | Present your Airboard tab from Chrome, or Edge on Windows; nothing to install. The diagram appears as a presented tab, not in your Meet camera tile |
+| Desktop overlay | Shipped | In the web app: show a screen or window behind the board and draw on top |
 | Paid checkout | Gated | Available only when the billing page explicitly enables it |
-| Zoom | Unsupported product channel | Marketplace and real-client verification remain future work |
-| Microsoft Teams | Unsupported product channel | Shared-stage and outgoing-camera feasibility remain future work |
 
 ## Provider-dependent capabilities
 

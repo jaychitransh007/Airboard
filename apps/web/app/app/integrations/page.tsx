@@ -1,6 +1,4 @@
-import type { Metadata } from "next";
-import { Suspense } from "react";
-import { IntegrationsPage } from "../../../src/features/product/IntegrationsPage";
+import { redirect } from "next/navigation";
 
-export const metadata: Metadata = { title: "Integrations" };
-export default function Integrations() { return <Suspense fallback={<div className="empty-panel">Loading integrations…</div>}><IntegrationsPage /></Suspense>; }
+// Google Meet is explained in the Help Center; there is no integrations page.
+export default function Integrations() { redirect("/help/integrations/google-meet"); }

@@ -1,25 +1,33 @@
 ---
-title: Admin console
-description: Manage members, policy, identity setup, installation health, and audit events.
+title: Workspace administration
+description: Manage a team workspace's members, policies, sign-in setup, and audit log from Settings.
 category: account
 categoryLabel: Account and administration
 order: 13
 status: shipped
 audiences: ["admins", "owners"]
-lastVerified: 2026-11-06
-sources: ["apps/web/src/features/product/AdminPage.tsx", "apps/api/src/controlPlaneRoutes.ts", "apps/api/src/boardShareRoutes.ts", "apps/api/src/organizationPolicy.ts", "Docs/Commercial Platform Runbook.md"]
+lastVerified: 2026-11-11
+sources: ["apps/web/src/features/product/AdminPage.tsx", "apps/web/src/features/product/pageTitles.ts", "apps/api/src/controlPlaneRoutes.ts", "apps/api/src/boardShareRoutes.ts", "apps/api/src/organizationPolicy.ts", "Docs/Commercial Platform Runbook.md"]
 ---
 
-Organization owners and administrators see the Administration section in the
-Airboard portal when a team workspace is selected; personal workspaces have no
-administration. Changes apply to the currently selected organization.
+Owners and admins of a team workspace manage it in **Settings**. Open the
+profile icon at the top right, choose **Settings**, and use the **Workspace**
+group: **Workspace**, **Members**, **Policies**, **SSO & SCIM**, and **Audit
+log**. Personal workspaces have no members or policies to manage. Changes apply
+to the workspace you are in.
+
+## Workspace
+
+**Workspace** shows the workspace's name and, for owners and admins, how many
+members, boards, and sessions in the last 30 days it has. When you belong to
+more than one workspace, choose another in **Switch workspace**.
 
 ## Members and invitations
 
-Invite members with the intended organization role. Revoke unused invitations,
-change a member's role, and suspend access when a person no longer needs the
-workspace. Ask invitees to
-sign in with the address that received the invitation.
+In **Members**, invite people with the intended role. Revoke unused
+invitations, change a member's role, and suspend access when a person no longer
+needs the workspace. Ask invitees to sign in with the address that received the
+invitation.
 
 - **Owner** and **Admin** manage the workspace and edit boards.
 - **Member** creates, edits and shares boards.
@@ -27,10 +35,10 @@ sign in with the address that received the invitation.
   can't create, edit, share or delete boards, or start live
   sessions. Billing also manages the plan.
 
-## Organization policy
+## Policies
 
-Policy applies to everyone in the workspace, in Airboard and the Meet
-extension. Review it before troubleshooting an apparently missing feature.
+**Policies** apply to everyone in the workspace. Review them before
+troubleshooting an apparently missing feature.
 
 - **External guests.** When off, only signed-in members can join live boards,
   new view-only links can't be made, and every existing view-only link stops
@@ -57,15 +65,8 @@ identity-provider enforcement remains off until an Airboard operator verifies
 and activates the matching configuration. Record a newly created SCIM token
 when it is displayed; revoke tokens that are no longer in use.
 
-## Installation health
-
-Review each installation's connection, version, policy, consent and
-last-success state.
-Revoke installations that are outdated, lost, or no longer authorized. A
-connected status does not replace a fresh preflight before a real meeting.
-
 ## Audit log
 
-Use audit events to review accountable organization actions. The page lists the
+Use **Audit log** to review accountable workspace actions. The page lists the
 latest events, and audit events are kept for 365 days. Audit metadata is
 bounded and does not include raw media, meeting transcripts, or board labels.

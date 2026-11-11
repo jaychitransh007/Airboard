@@ -37,11 +37,14 @@ async function openShare(page: Page) {
   return dialog;
 }
 
-test("the library lists saved boards and opens one with its content", async ({ page }) => {
+test("the home page lists saved boards and opens one with its content", async ({ page }) => {
   const api = await signIn(page, { boards: [{ title: checkoutFlow.title, state: checkoutFlow.state }] });
-  await page.goto("/app/boards");
+  await page.goto("/app");
   const card = page.getByRole("link", { name: new RegExp(checkoutFlow.title) });
   await expect(card).toBeVisible({ timeout: 30_000 });
+  // With boards saved, Create Airboard sits beside the title.
+  await expect(page.getByRole("heading", { level: 1, name: "Airboards" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Create Airboard" })).toBeVisible();
   await card.click();
   await expect(page).toHaveURL(new RegExp(`/app/boards/${api.boardId(checkoutFlow.title)}`));
   await expect.poll(() => boardLabels(page), { timeout: 30_000 }).toEqual(
@@ -209,7 +212,7 @@ test("on a teammate's board only its creator can make view-only links", async ({
 
 test("an admin invites a teammate and copies the invite link", async ({ page }) => {
   const api = await signIn(page, { workspace: "team" });
-  await page.goto("/app/admin/members");
+  await page.goto("/app/settings/members");
   await expect(page.getByRole("heading", { level: 1, name: "Members" })).toBeVisible({ timeout: 30_000 });
 
   await page.getByLabel("Email to invite").fill("priya@acme.test");
@@ -229,10 +232,10 @@ test("an admin invites a teammate and copies the invite link", async ({ page }) 
 
 test("a Viewer opens boards view-only and can't create, change or share them", async ({ page }) => {
   const api = await signIn(page, { workspace: "team", role: "viewer", boards: [{ title: checkoutFlow.title, state: checkoutFlow.state }] });
-  await page.goto("/app/boards");
+  await page.goto("/app");
   const card = page.getByRole("link", { name: new RegExp(checkoutFlow.title) });
   await expect(card).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByRole("link", { name: "New Airboard" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Create Airboard" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: `Actions for ${checkoutFlow.title}` })).toHaveCount(0);
 
   await card.click();
@@ -252,7 +255,7 @@ test("an admin sees every view-only link in the workspace and turns one off", as
   const api = await signIn(page, { workspace: "team", boards: [{ title: checkoutFlow.title, state: checkoutFlow.state }] });
   const boardId = api.boardId(checkoutFlow.title);
   api.addLinks(boardId, 1);
-  await page.goto("/app/admin/policies");
+  await page.goto("/app/settings/policies");
   await expect(page.getByRole("heading", { level: 2, name: "View-only links" })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("Downloading or copying boards as PNG or PDF.", { exact: false })).toBeVisible();
 
@@ -262,7 +265,7 @@ test("an admin sees every view-only link in the workspace and turns one off", as
   expect(api.activeLinks(boardId)).toEqual([]);
 });
 
-test("the library, the Share dialog and Admin members meet WCAG 2.2 AA", async ({ page }) => {
+test("the home page, the Share dialog and Settings members meet WCAG 2.2 AA", async ({ page }) => {
   const api = await signIn(page, { workspace: "team", boards: [{ title: checkoutFlow.title, state: checkoutFlow.state }] });
   const audit = async (scope?: string) => {
     const builder = new AxeBuilder({ page }).withTags(WCAG);
@@ -270,7 +273,7 @@ test("the library, the Share dialog and Admin members meet WCAG 2.2 AA", async (
     return violations.map((violation) => `${violation.impact} ${violation.id}: ${violation.nodes.map((node) => node.target.join(" ")).join(", ")}`);
   };
 
-  await page.goto("/app/boards");
+  await page.goto("/app");
   await expect(page.getByRole("link", { name: new RegExp(checkoutFlow.title) })).toBeVisible({ timeout: 30_000 });
   expect(await audit()).toEqual([]);
 
@@ -278,12 +281,12 @@ test("the library, the Share dialog and Admin members meet WCAG 2.2 AA", async (
   await openShare(page);
   expect(await audit(".share-dialog")).toEqual([]);
 
-  await page.goto("/app/admin/members");
+  await page.goto("/app/settings/members");
   await expect(page.getByRole("heading", { level: 1, name: "Members" })).toBeVisible({ timeout: 30_000 });
   expect(await audit()).toEqual([]);
 
   api.addLinks(api.boardId(checkoutFlow.title), 1);
-  await page.goto("/app/admin/policies");
+  await page.goto("/app/settings/policies");
   await expect(page.getByRole("button", { name: `Turn off view-only link to ${checkoutFlow.title}` })).toBeVisible({ timeout: 30_000 });
   expect(await audit()).toEqual([]);
 });

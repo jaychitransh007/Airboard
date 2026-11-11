@@ -62,7 +62,7 @@ export function ViewOnlyBoard({ boardId }: { boardId?: string | undefined }) {
               : "Something went wrong while opening the board. Please try again."}
         </span>
         <span className="product-loading-actions">
-          <Link className="button button-primary" href="/app/boards">Go to my boards</Link>
+          <Link className="button button-primary" href="/app">Go to my boards</Link>
         </span>
       </main>
     );
@@ -75,7 +75,7 @@ export function ViewOnlyBoard({ boardId }: { boardId?: string | undefined }) {
       images={images}
       loadImage={loadImage}
       notice={READ_ONLY_NOTICE}
-      actions={<Link className="button" href="/app/boards">Back to boards</Link>}
+      actions={<Link className="button" href="/app">Back to boards</Link>}
     />
   );
 }

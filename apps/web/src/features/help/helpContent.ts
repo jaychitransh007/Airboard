@@ -15,7 +15,7 @@ export const HELP_CATEGORY_ORDER = [
 export const HELP_CATEGORY_DESCRIPTIONS: Record<string, string> = {
   "getting-started": "Learn the product, check requirements, and make your first diagram.",
   "using-the-board": "Create and present with commands, voice, gestures, pointer, and keyboard.",
-  integrations: "Set up preview surfaces and verify what your audience receives.",
+  integrations: "Present your board in Google Meet, draw over any app on your screen, and check what your audience sees.",
   account: "Manage your workspace, trial, administration, privacy, and data.",
   reference: "Troubleshoot symptoms, interpret errors, and check current limits.",
 };

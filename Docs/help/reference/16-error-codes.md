@@ -6,8 +6,8 @@ categoryLabel: Troubleshooting and reference
 order: 16
 status: reference
 audiences: ["everyone", "admins", "support"]
-lastVerified: 2026-11-06
-sources: ["apps/web/src/platform/api.ts", "apps/web/src/features/product/IntegrationsPage.tsx", "apps/api/src/auth.ts", "apps/api/src/transcription/routes.ts", "apps/api/src/semanticIntent/providerError.ts", "apps/api/src/semanticIntent/routes.ts", "apps/api/src/dailyUsage.ts", "apps/api/src/organizationPolicy.ts", "apps/api/src/boardAccess.ts", "apps/api/src/boardContentRoutes.ts"]
+lastVerified: 2026-11-11
+sources: ["apps/web/src/platform/api.ts", "apps/web/src/features/product/boardPreparation.ts", "apps/api/src/auth.ts", "apps/api/src/transcription/routes.ts", "apps/api/src/semanticIntent/providerError.ts", "apps/api/src/semanticIntent/routes.ts", "apps/api/src/dailyUsage.ts", "apps/api/src/organizationPolicy.ts", "apps/api/src/boardAccess.ts", "apps/api/src/boardContentRoutes.ts"]
 ---
 
 Error codes identify the failed capability without requiring conversation or
@@ -30,15 +30,13 @@ ID before retrying.
 | `VOICE_DISABLED_BY_ADMIN` | A workspace admin turned off voice commands. | Use typed commands, or ask your admin. |
 | `ASSET_QUOTA_EXCEEDED` | The workspace has used its 2 GB of board images and videos. | Delete boards you no longer need, or contact support. |
 | `POLICY_UNAVAILABLE` | Airboard couldn't check your workspace's policy just now, so it refused rather than guess. | Try again in a moment. |
-| `ACTIVE_ENTITLEMENT_REQUIRED`, `OWNER_ENTITLEMENT_REQUIRED` | The workspace's pilot or plan has ended, so new boards, live sessions and Airo voice are off. Saved boards still open and save. | Choose **Ask for more pilot time** on **Plan & billing**. |
+| `ACTIVE_ENTITLEMENT_REQUIRED`, `OWNER_ENTITLEMENT_REQUIRED` | The workspace's pilot or plan has ended, so new boards, live sessions and Airo voice are off. Saved boards still open and save. | Choose **Ask for more pilot time** on **Plan & Billing**. |
 
-## Extension and integration
+## Opening a board
 
 | Code | Meaning | What to do |
 | --- | --- | --- |
-| `CHROME_EXTENSION_NOT_REACHABLE` | Chrome could not reach the expected extension. | Reload the extension and reopen setup from its popup. |
-| `EXTENSION_LINK_FAILED` | The installation did not complete account linking. | Start Connect Airboard again and complete the one-time exchange. |
-| `STANDALONE_PREFLIGHT_FAILED` | The standalone readiness check did not pass. | Review the failed capability before activating a real session. |
+| `STANDALONE_PREFLIGHT_FAILED` | Airboard couldn't finish its first check before starting your pilot, so the board didn't open. | Choose **Try again**. If it keeps happening, contact support with the reference code. |
 
 ## Voice and intent
 

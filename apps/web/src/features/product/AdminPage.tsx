@@ -1,34 +1,63 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { airboardApi } from "../../platform/api";
 import { AIRBOARD_API_URL } from "../../platform/config";
 import { useAirboardAuth } from "../../platform/auth";
 import { FormStatus } from "./FormStatus";
 
-export function AdminPage({ section }: { section: string }) {
-  const auth = useAirboardAuth();
-  // A personal workspace has one member and nothing to administer; the
-  // sidebar hides these pages there, and an old link lands somewhere useful.
-  if (auth.account?.organization.kind === "personal") return <PersonalWorkspaceAdmin />;
+/** A team workspace's admin pages, shown inside Settings to owners and admins. */
+export function WorkspaceAdminSection({ section }: { section: string }) {
   if (section === "members") return <MembersAdmin />;
   if (section === "policies") return <PoliciesAdmin />;
   if (section === "audit-logs") return <AuditAdmin />;
-  if (section === "installations") return <InstallationsAdmin />;
-  if (section === "identity-directory") return <IdentityDirectoryAdmin />;
-  return <AdminOverview />;
+  return <IdentityDirectoryAdmin />;
 }
 
-function PersonalWorkspaceAdmin() {
-  return <div className="empty-panel"><h1>Your personal workspace is just for you</h1><p>Members, policies and audit tools are for team workspaces. To work with someone now, open a board and choose Share.</p><Link className="button button-primary" href="/app/boards">Go to my boards</Link></div>;
-}
+type Organization = { organization_id: string; organizations: { name?: string } | null };
+const WORKSPACE_KIND_LABEL = { personal: "Personal workspace", team: "Team workspace", enterprise: "Enterprise workspace" } as const;
 
-function AdminOverview() {
+/** Which workspace you're in, switching between yours, and a team's numbers for its admins. */
+export function WorkspaceSettings({ isAdmin }: { isAdmin: boolean }) {
   const auth = useAirboardAuth();
-  const [usage, setUsage] = useState({ members: 0, boards: 0, sessions30d: 0, installations: 0 });
-  useEffect(() => { if (auth.accessToken) void airboardApi<{ usage: typeof usage }>("/organization/usage", { accessToken: auth.accessToken }).then((result) => setUsage(result.usage)); }, [auth.accessToken]);
-  return <div><section className="app-page-heading"><p className="eyebrow">Organization administration</p><h1>{auth.account?.organization.name}</h1><p>Control access, integrations, retention and directory provisioning.</p></section><div className="metric-grid"><Metric label="Members" value={String(usage.members)} detail="Active access" /><Metric label="Boards" value={String(usage.boards)} detail="Saved workspace content" /><Metric label="Sessions" value={String(usage.sessions30d)} detail="Last 30 days" /><Metric label="Installations" value={String(usage.installations)} detail="Not revoked" /></div><div className="admin-readiness"><h2>Enterprise controls</h2>{[["Identity and tenant isolation","Implemented"],["Organization policy","Implemented"],["Audit records","Implemented"],["SAML/OIDC configuration","Operator activation required"],["SCIM 2.0 provisioning","Implemented"],["Independent penetration test","External validation required"]].map(([label,status]) => <div key={label}><span className={`status-dot ${status === "Implemented" ? "ready" : "preview"}`} /><strong>{label}</strong><em>{status}</em></div>)}</div></div>;
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [usage, setUsage] = useState<{ members: number; boards: number; sessions30d: number } | null>(null);
+  const [switching, setSwitching] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  useEffect(() => {
+    if (!auth.accessToken) return;
+    void airboardApi<{ organizations: Organization[] }>("/me/organizations", { accessToken: auth.accessToken })
+      .then((result) => setOrganizations(result.organizations))
+      .catch(() => undefined);
+  }, [auth.accessToken]);
+  useEffect(() => {
+    if (!auth.accessToken || !isAdmin) return;
+    void airboardApi<{ usage: { members: number; boards: number; sessions30d: number } }>("/organization/usage", { accessToken: auth.accessToken })
+      .then((result) => setUsage(result.usage))
+      .catch(() => undefined);
+  }, [auth.accessToken, isAdmin]);
+  const selectOrganization = async (organizationId: string) => {
+    if (!auth.accessToken || organizationId === auth.account?.organization.id) return;
+    setSwitching(true);
+    setMessage(null);
+    try {
+      await airboardApi(`/me/organizations/${organizationId}/select`, { method: "POST", accessToken: auth.accessToken });
+      await auth.refreshAccount();
+      window.location.assign("/app");
+    } catch {
+      setSwitching(false);
+      setMessage("Could not switch workspace. Try again.");
+    }
+  };
+  const organization = auth.account?.organization;
+  return <>
+    <p className="eyebrow">{organization ? WORKSPACE_KIND_LABEL[organization.kind] : "Workspace"}</p>
+    <h1>{organization?.name ?? "Your workspace"}</h1>
+    <p>Your Airboards, members and plan belong to this workspace.</p>
+    {organizations.length > 1 ? <label>Switch workspace<select disabled={switching} value={organization?.id ?? ""} onChange={(event) => void selectOrganization(event.target.value)}>{organizations.map((membership) => <option value={membership.organization_id} key={membership.organization_id}>{membership.organizations?.name ?? "Airboard workspace"}</option>)}</select></label> : null}
+    {isAdmin && usage ? <div className="metric-grid"><Metric label="Members" value={String(usage.members)} detail="Active access" /><Metric label="Boards" value={String(usage.boards)} detail="Saved workspace content" /><Metric label="Sessions" value={String(usage.sessions30d)} detail="Last 30 days" /></div> : null}
+    <FormStatus tone="warning" message={message} />
+  </>;
 }
 
 type Member = { id: string; role: string; status: string; profiles?: { display_name?: string; email?: string } };
@@ -60,11 +89,11 @@ function PoliciesAdmin() {
   const toggles: Array<[string, keyof Omit<typeof policy, "contentRetentionDays">, string]> = [
     ["External guests", "externalGuestsAllowed", "People outside the workspace can join live boards and open view-only links. When off, only signed-in members can join, and every view-only link stops working until it's turned back on."],
     ["Voice commands", "voiceEnabled", "Airo listens for spoken commands. When off, voice is refused for everyone in the workspace; typed commands still work."],
-    ["Camera and gesture input", "cameraEnabled", "The camera, used for hand gestures, in Airboard and the Meet extension."],
-    ["Gesture control", "gestureEnabled", "Hand gestures in Airboard and the Meet extension."],
+    ["Camera and gesture input", "cameraEnabled", "The camera, used for hand gestures."],
+    ["Gesture control", "gestureEnabled", "Hand gestures on the board."],
     ["Exports", "exportsEnabled", "Downloading or copying boards as PNG or PDF. When off, those buttons stop working. People can still take screenshots."],
   ];
-  return <div><section className="app-page-heading"><p className="eyebrow">Guardrails</p><h1>Organization policy</h1><p>These apply to everyone in the workspace, in Airboard and the Meet extension.</p></section><div className="policy-panel">{toggles.map(([label,key,detail]) => <label className="setting-toggle" key={key}><div><strong>{label}</strong><span>{detail}</span></div><input type="checkbox" checked={policy[key]} onChange={(event) => setPolicy({ ...policy, [key]: event.target.checked })} /></label>)}<button className="button button-primary" onClick={() => void save()}>Save policy</button><FormStatus message={message} /></div><ShareLinksAdmin /></div>;
+  return <div><section className="app-page-heading"><p className="eyebrow">Guardrails</p><h1>Organization policy</h1><p>These apply to everyone in the workspace.</p></section><div className="policy-panel">{toggles.map(([label,key,detail]) => <label className="setting-toggle" key={key}><div><strong>{label}</strong><span>{detail}</span></div><input type="checkbox" checked={policy[key]} onChange={(event) => setPolicy({ ...policy, [key]: event.target.checked })} /></label>)}<button className="button button-primary" onClick={() => void save()}>Save policy</button><FormStatus message={message} /></div><ShareLinksAdmin /></div>;
 }
 
 type AdminShareLink = { id: string; boardId: string; boardTitle: string; createdBy: string; createdAt: string; expiresAt: string | null };
@@ -126,8 +155,5 @@ function IdentityDirectoryAdmin() {
 
 function AuditAdmin() { const auth = useAirboardAuth(); const [events, setEvents] = useState<Record<string, unknown>[]>([]); useEffect(() => { if (auth.accessToken) void airboardApi<{ events: Record<string, unknown>[] }>("/organization/audit", { accessToken: auth.accessToken }).then((result) => setEvents(result.events)); }, [auth.accessToken]); return <div><section className="app-page-heading"><p className="eyebrow">Recorded activity</p><h1>Audit log</h1><p>Administrative, security, consent, installation, billing and data-control actions retained for 365 days. Personal fields are anonymized when an account is deleted.</p></section><div className="data-table audit" role="table" aria-label="Audit events"><div className="table-head" role="row"><span role="columnheader">Action</span><span role="columnheader">Target</span><span role="columnheader">Time</span></div>{events.length ? events.map((event) => <div key={String(event.id)} role="row"><span role="cell"><strong>{String(event.action)}</strong><small>Request {String(event.request_id ?? "—")}</small></span><span role="cell">{String(event.target_type ?? "—")}</span><span role="cell">{new Date(String(event.occurred_at)).toLocaleString()}</span></div>) : <div role="row"><span role="cell">No audit events yet.</span></div>}</div></div>; }
 
-// reload only reads the current token, so the token is the trigger.
-// eslint-disable-next-line react-hooks/exhaustive-deps
-function InstallationsAdmin() { const auth = useAirboardAuth(); const [items, setItems] = useState<Array<Record<string, unknown>>>([]); const reload = async () => { if (!auth.accessToken) return; const result = await airboardApi<{ installations: Array<Record<string, unknown>> }>("/integrations", { accessToken: auth.accessToken }); setItems(result.installations); }; useEffect(() => { void reload(); }, [auth.accessToken]); const revoke = async (id: string) => { if (!auth.accessToken) return; await airboardApi(`/integrations/${id}`, { method: "PATCH", accessToken: auth.accessToken, body: JSON.stringify({ revoked: true }) }); await reload(); }; return <div><section className="app-page-heading"><p className="eyebrow">Deployment health</p><h1>Installations</h1><p>Connection, version, policy, consent and last-success state for every deployment.</p></section><div className="data-table" role="table" aria-label="Installations"><div className="table-head" role="row"><span role="columnheader">Installation</span><span role="columnheader">Health</span><span role="columnheader">Action</span></div>{items.length ? items.map((item) => <div key={String(item.id)} role="row"><span role="cell"><strong>{String(item.platform)}</strong><small>Version {String(item.version ?? "unknown")}</small></span><span role="cell">{String(item.status)} · {item.last_success_at ? `verified ${new Date(String(item.last_success_at)).toLocaleString()}` : "not verified"}</span><span role="cell">{item.status !== "revoked" ? <button onClick={() => void revoke(String(item.id))}>Revoke</button> : "Revoked"}</span></div>) : <div role="row"><span role="cell">No installations connected.</span></div>}</div></div>; }
 
 function Metric({ label, value, detail }: { label: string; value: string; detail: string }) { return <article><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>; }

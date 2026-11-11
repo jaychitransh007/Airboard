@@ -63,7 +63,6 @@ export function StatusPage() {
         ) : null}
       </section>
       <p>If this page doesn&apos;t load, incident updates are also on <a href={INCIDENTS_ON_GITHUB}>GitHub</a>. Need help? Email <a href={`mailto:${PILOT_SUPPORT_EMAIL}`}>{PILOT_SUPPORT_EMAIL}</a>.</p>
-      <p>The Google Meet preview also depends on your Meet and Chrome extension versions.</p>
     </MarketingPage>
   );
 }

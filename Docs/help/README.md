@@ -7,11 +7,11 @@ it does not read repository files at runtime.
 ## Reading paths
 
 - **New presenter:** What Airboard is → System requirements → Your first board
-  → Commands → Google Meet.
+  → Commands → Use Airboard in Google Meet.
 - **Content creator or tutor:** Your first board → Gestures → Screen and camera
   composition → Boards, versions, and export.
 - **Keyboard-only user:** Your first board → Keyboard, pointer, and touchpad.
-- **Workspace administrator:** Account, trial, and billing → Admin console →
+- **Workspace administrator:** Account, trial, and billing → Workspace administration →
   Privacy and your data → Limits and support matrix.
 - **Something went wrong:** Troubleshooting → Error codes → Contact support.
 

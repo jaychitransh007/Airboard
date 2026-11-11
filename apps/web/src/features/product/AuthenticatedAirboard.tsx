@@ -281,7 +281,7 @@ function EditableAirboard({ boardId }: { boardId?: string }) {
     });
     // Only once it is gone: a failed delete keeps the leave-page guard.
     allowUnloadRef.current = true;
-    router.replace("/app/boards?deleted=1");
+    router.replace("/app?deleted=1");
   }, [auth.accessToken, board, router]);
   const accessToken = auth.accessToken;
   const durableBoardId = board?.id;
@@ -337,7 +337,7 @@ function BoardUnavailable({ code }: { code: string }) {
         <span>Your saved boards are still in your library. Starting a new board needs an active pilot. Ask us and we&apos;ll extend it.</span>
         <span className="product-loading-actions">
           <PilotExtensionButton primary />
-          <Link className="button button-quiet" href="/app/boards">Go to my boards</Link>
+          <Link className="button button-quiet" href="/app">Go to my boards</Link>
         </span>
       </main>
     );
@@ -356,7 +356,7 @@ function BoardUnavailable({ code }: { code: string }) {
       </span>
       <span className="product-loading-actions">
         <button className="button button-primary" type="button" onClick={() => window.location.reload()}>Try again</button>
-        <Link className="button button-quiet" href="/app/boards">Go to my boards</Link>
+        <Link className="button button-quiet" href="/app">Go to my boards</Link>
       </span>
       <small>Reference: {code}</small>
     </main>

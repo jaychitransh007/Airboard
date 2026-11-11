@@ -1,18 +1,18 @@
 ---
 title: What Airboard is
-description: Understand Airboard's workspace, input methods, and preview integrations.
+description: Understand Airboard's workspace, input methods, and where you can use it.
 category: getting-started
 categoryLabel: Getting started
 order: 1
 status: shipped
 audiences: ["everyone"]
-lastVerified: 2026-11-05
-sources: ["README.md", "apps/web/src/features/board/AirboardPrototype.tsx", "apps/web/src/features/product/Dashboard.tsx"]
+lastVerified: 2026-11-11
+sources: ["README.md", "apps/web/src/features/board/AirboardPrototype.tsx", "apps/web/src/features/product/AirboardsHome.tsx"]
 ---
 
 Airboard is a visual workspace for creating and presenting diagrams. You can
-work in a standalone board, place that board over a selected screen, or use a
-preview integration that composites the diagram into your meeting camera.
+work on a board on its own, draw over a screen you choose, or present your
+board in Google Meet.
 
 ## What you can do
 
@@ -33,11 +33,14 @@ command or asks a focused question instead of guessing.
 
 ## Product surfaces
 
-The standalone web workspace is the primary shipped surface. The Google Meet
-camera overlay is a private preview. The native desktop overlay is a development
-preview without generally distributed signed installers or automatic updates.
+Airboard runs in your browser; there is nothing to install. Your boards live
+on **Airboards**, the page you see after you sign in.
 
-Zoom and Microsoft Teams are not current Airboard product channels.
+- **Google Meet:** present your Airboard tab in the call. Everyone sees you and
+  the diagram, and voice, gestures, typing and the mouse keep working. See
+  [Use Airboard in Google Meet](/help/integrations/google-meet).
+- **Desktop overlay:** show slides or any app behind your board and draw on
+  top. See [Desktop overlay](/help/integrations/desktop-overlay).
 
 ## You do not need a camera or microphone
 
