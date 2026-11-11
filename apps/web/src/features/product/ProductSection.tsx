@@ -3,15 +3,14 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { airboardApi } from "../../platform/api";
-import { canEditBoards, useAirboardAuth } from "../../platform/auth";
+import { useAirboardAuth } from "../../platform/auth";
 
 type Board = { id: string; title: string; updated_at: string; latest_version: number; visibility: string };
 type Activity = { event_id: string; event_name: string; properties: Record<string, unknown>; occurred_at: string };
 
 export function ProductSection({ section }: { section: string }) {
   if (section === "activity") return <ActivityView />;
-  if (section === "shared") return <BoardCollection title="Shared" description="Boards anyone in this workspace can open and edit." scope="shared" />;
-  if (section === "trash") return <BoardCollection title="Trash" description="Deleted boards remain recoverable until your retention workflow removes them." scope="trash" />;
+  if (section === "shared") return <SharedBoards />;
   return <div className="empty-panel"><h1>Page not found</h1><p>This part of Airboard doesn&apos;t exist.</p><Link href="/app">Return to Airboard</Link></div>;
 }
 
@@ -21,53 +20,27 @@ function ActivityView() {
   return <div><section className="app-page-heading"><p className="eyebrow">Content-safe telemetry</p><h1>Activity</h1><p>Successful setups, sessions and commercial lifecycle events. Board text, raw media, transcripts and meeting URLs are excluded.</p></section><div className="data-table audit" role="table" aria-label="Activity"><div className="table-head" role="row"><span role="columnheader">Event</span><span role="columnheader">Context</span><span role="columnheader">Time</span></div>{events.length ? events.map((event) => <div key={event.event_id} role="row"><span role="cell"><strong>{event.event_name.replaceAll(".", " ")}</strong></span><span role="cell">{Object.entries(event.properties).map(([key,value]) => `${key}: ${String(value)}`).join(" · ") || "—"}</span><span role="cell">{new Date(event.occurred_at).toLocaleString()}</span></div>) : <div role="row"><span role="cell">No activity yet.</span></div>}</div></div>;
 }
 
-function BoardCollection({ title, description, scope }: { title: string; description: string; scope: "shared" | "trash" }) {
+/** Boards others in the workspace opened up to everyone. */
+function SharedBoards() {
   const auth = useAirboardAuth();
   const [boards, setBoards] = useState<Board[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const reload = async () => {
-    if (!auth.accessToken) return;
-    try {
-      const result = await airboardApi<{ boards: Board[] }>(`/boards?scope=${scope}`, {
-        accessToken: auth.accessToken,
-      });
-      setBoards(result.boards);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    void reload();
-    // reload reads only the token and scope, which are the triggers.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auth.accessToken, scope]);
-
-  const restore = async (id: string) => {
     if (!auth.accessToken) return;
-    await airboardApi(`/boards/${id}/restore`, {
-      method: "POST",
-      accessToken: auth.accessToken,
-    });
-    await reload();
-  };
-
-  const isTrash = scope === "trash";
+    void airboardApi<{ boards: Board[] }>("/boards?scope=shared", { accessToken: auth.accessToken })
+      .then((result) => setBoards(result.boards))
+      .finally(() => setLoading(false));
+  }, [auth.accessToken]);
 
   return (
     <div>
-      <section className={`app-page-heading${isTrash ? " inline" : ""}`}>
+      <section className="app-page-heading">
         <div>
           <p className="eyebrow">Workspace</p>
-          <h1>{title}</h1>
-          <p>{description}</p>
+          <h1>Shared</h1>
+          <p>Boards anyone in this workspace can open and edit.</p>
         </div>
-        {isTrash ? (
-          <Link className="button button-quiet" href="/app/boards">
-            ← Back to Boards
-          </Link>
-        ) : null}
       </section>
 
       {loading ? (
@@ -81,31 +54,14 @@ function BoardCollection({ title, description, scope }: { title: string; descrip
               </div>
               <strong>{board.title}</strong>
               <small>{new Date(board.updated_at).toLocaleString()}</small>
-              {isTrash ? (
-                auth.account && !canEditBoards(auth.account.organization.role) ? null : (
-                  <button className="button button-quiet" onClick={() => void restore(board.id)}>
-                    Restore
-                  </button>
-                )
-              ) : (
-                <Link href={`/app/boards/${board.id}`}>Open</Link>
-              )}
+              <Link href={`/app/boards/${board.id}`}>Open</Link>
             </article>
           ))}
         </div>
       ) : (
         <div className="empty-panel">
           <h3>Nothing here</h3>
-          <p>
-            {isTrash
-              ? "Deleted boards will appear here."
-              : "Share a board with your organization to see it here."}
-          </p>
-          {isTrash ? (
-            <Link className="button button-primary" href="/app/boards">
-              View your Airboards
-            </Link>
-          ) : null}
+          <p>Share a board with your organization to see it here.</p>
         </div>
       )}
     </div>

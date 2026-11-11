@@ -357,8 +357,8 @@ export function registerControlPlaneRoutes(
       .select(`id,workspace_id,title,description,latest_version,visibility,created_at,updated_at,archived_at${withPreview ? ",latest_state" : ""}`)
       .eq("organization_id", context.organizationId)
       .or(boardAccessFilter(context.profileId));
-    if (scope === "trash") query = query.not("deleted_at", "is", null);
-    else query = query.is("deleted_at", null);
+    // Boards deleted before Trash was removed wait here for the lifecycle purge.
+    query = query.is("deleted_at", null);
     if (scope === "shared") query = query.neq("visibility", "private");
     if (scope === "archived") query = query.not("archived_at", "is", null);
     if (scope === "active") query = query.is("archived_at", null);
@@ -544,6 +544,11 @@ export function registerControlPlaneRoutes(
     },
   );
 
+  // Deleting a board is permanent; there is no Trash. Its uploaded files go
+  // first, so a failure leaves the board to delete again; then the row goes,
+  // and the database removes its versions, share links, images and live
+  // sessions with it. People still in a live session on it are told it ended
+  // at their next action, when their socket finds the session gone.
   server.delete<{ Params: { boardId: string } }>("/boards/:boardId", async (request, reply) => {
     const context = await requireBoardEditor(auth, request, reply);
     if (!context) return;
@@ -551,34 +556,29 @@ export function registerControlPlaneRoutes(
       return reply.code(404).send({ error: "BOARD_NOT_FOUND" });
     }
     const client = auth.client;
-    const deletedAt = new Date().toISOString();
+    const boardId = request.params.boardId;
     const { data, error } = await writeAccessibleBoard(context.profileId, (scope) => client
       .from("boards")
-      .update({ deleted_at: deletedAt, updated_at: deletedAt })
-      .eq("id", request.params.boardId)
+      .select("id")
+      .eq("id", boardId)
       .eq("organization_id", context.organizationId)
       .filter(scope.column, scope.operator, scope.value)
       .is("deleted_at", null)
-      .select("id")
       .maybeSingle());
     if (error || !data) return reply.code(404).send({ error: "BOARD_NOT_FOUND" });
-    await writeAudit(auth, context, request, "board.deleted", "board", data.id);
+    try {
+      await removeBoardAssetObjects(client, { organizationId: context.organizationId, boardIds: [boardId] });
+    } catch {
+      return reply.code(503).send({ error: "BOARD_DELETE_FAILED" });
+    }
+    const { error: deleteError } = await client
+      .from("boards")
+      .delete()
+      .eq("id", boardId)
+      .eq("organization_id", context.organizationId);
+    if (deleteError) return reply.code(503).send({ error: "BOARD_DELETE_FAILED" });
+    await writeAudit(auth, context, request, "board.deleted", "board", boardId);
     return reply.code(204).send();
-  });
-
-  server.post<{ Params: { boardId: string } }>("/boards/:boardId/restore", async (request, reply) => {
-    const context = await requireBoardEditor(auth, request, reply);
-    if (!context) return;
-    if (!auth.client || !boundedUuid(request.params.boardId)) return reply.code(404).send({ error: "BOARD_NOT_FOUND" });
-    const client = auth.client;
-    const { data, error } = await writeAccessibleBoard(context.profileId, (scope) => client.from("boards")
-      .update({ deleted_at: null, updated_at: new Date().toISOString() })
-      .eq("id", request.params.boardId).eq("organization_id", context.organizationId)
-      .filter(scope.column, scope.operator, scope.value)
-      .not("deleted_at", "is", null).select("id,title,updated_at").maybeSingle());
-    if (error || !data) return reply.code(404).send({ error: "BOARD_NOT_FOUND" });
-    await writeAudit(auth, context, request, "board.restored", "board", data.id);
-    return { board: data };
   });
 
   registerIntegrationRoutes(server, config, auth);

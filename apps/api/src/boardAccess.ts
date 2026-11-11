@@ -38,8 +38,7 @@ export async function writeAccessibleBoard<R extends { data: unknown; error: unk
 }
 
 /**
- * Roles that may change boards: create, save, trash, restore, upload and
- * share. Viewer and Billing members can open the organization's boards but
+ * Roles that may change boards: create, save, delete, upload and share. Viewer and Billing members can open the organization's boards but
  * not change them.
  */
 export const BOARD_EDITOR_ROLES = ["owner", "admin", "member"] as const;

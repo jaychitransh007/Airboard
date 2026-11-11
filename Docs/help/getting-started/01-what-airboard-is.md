@@ -21,7 +21,6 @@ preview integration that composites the diagram into your meeting camera.
 - Use typed commands, Airo voice commands, a pointer, keyboard controls,
   touchpad writing, or supported camera gestures.
 - Present over a selected screen or camera and export a PNG.
-- Restore deleted boards during your workspace's recovery window.
 
 ## How changes are applied
 

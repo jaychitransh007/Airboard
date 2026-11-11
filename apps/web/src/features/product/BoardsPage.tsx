@@ -35,7 +35,6 @@ export function BoardsPage() {
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [recentlyDeleted, setRecentlyDeleted] = useState<Board | null>(null);
 
   useEffect(() => {
     if (!auth.accessToken) return;
@@ -43,7 +42,7 @@ export function BoardsPage() {
       .then((result) => setBoards(result.boards))
       .finally(() => setLoading(false));
     if (new URLSearchParams(window.location.search).get("deleted") === "1") {
-      setNotice("Canvas moved to Trash. You can restore it from Trash.");
+      setNotice("Canvas deleted.");
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, [auth.accessToken]);
@@ -101,31 +100,10 @@ export function BoardsPage() {
         accessToken: auth.accessToken,
       });
       setBoards((current) => current.filter((board) => board.id !== action.board.id));
-      setRecentlyDeleted(action.board);
-      setNotice("Canvas moved to Trash.");
+      setNotice("Canvas deleted.");
       setAction(null);
     } catch (caught) {
-      setActionError(
-        caught instanceof Error ? caught.message : "Could not move this canvas to Trash.",
-      );
-    } finally {
-      setActionBusy(false);
-    }
-  };
-
-  const restoreBoard = async () => {
-    if (!auth.accessToken || !recentlyDeleted || actionBusy) return;
-    setActionBusy(true);
-    try {
-      const result = await airboardApi<{ board: Board }>(
-        `/boards/${recentlyDeleted.id}/restore`,
-        { method: "POST", accessToken: auth.accessToken },
-      );
-      setBoards((current) => [{ ...recentlyDeleted, ...result.board }, ...current]);
-      setRecentlyDeleted(null);
-      setNotice("Canvas restored.");
-    } catch (caught) {
-      setNotice(caught instanceof Error ? caught.message : "Could not restore this canvas.");
+      setActionError(caught instanceof Error ? caught.message : "Could not delete this canvas.");
     } finally {
       setActionBusy(false);
     }
@@ -151,17 +129,13 @@ export function BoardsPage() {
       {notice ? (
         <div className="library-notice">
           <span>{notice}</span>
-          {recentlyDeleted ? (
-            <button type="button" disabled={actionBusy} onClick={() => void restoreBoard()}>
-              Restore
-            </button>
-          ) : null}
           <button type="button" aria-label="Dismiss message" onClick={() => setNotice(null)}>
             ×
           </button>
         </div>
       ) : null}
 
+      {/* Every board, most recently changed first. */}
       <div className="library-toolbar">
         <input
           type="search"
@@ -170,10 +144,6 @@ export function BoardsPage() {
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        <div>
-          <button className="selected">Updated</button>
-          <Link href="/app/trash">Trash</Link>
-        </div>
       </div>
 
       {loading ? (
@@ -229,7 +199,7 @@ export function BoardsPage() {
                         setActionError(null);
                       }}
                     >
-                      Move to Trash
+                      Delete canvas
                     </button>
                   </div>
                 ) : null}
@@ -254,7 +224,7 @@ export function BoardsPage() {
             aria-modal="true"
             aria-labelledby="library-board-action-title"
           >
-            <span className="eyebrow">{action.kind === "rename" ? "Rename" : "Move to Trash"}</span>
+            <span className="eyebrow">{action.kind === "rename" ? "Rename" : "Delete"}</span>
             <h2 id="library-board-action-title">
               {action.kind === "rename" ? "Rename canvas" : `Delete “${action.board.title}”?`}
             </h2>
@@ -280,8 +250,8 @@ export function BoardsPage() {
               </label>
             ) : (
               <p>
-                This canvas can be restored from Trash until your workspace retention policy
-                permanently purges it.
+                This permanently deletes the canvas with its versions, images, share
+                links and live-session history. It can&apos;t be undone.
               </p>
             )}
             {actionError ? <p className="board-lifecycle-error" role="alert">{actionError}</p> : null}
@@ -296,10 +266,12 @@ export function BoardsPage() {
                 onClick={() => void (action.kind === "rename" ? renameBoard() : deleteBoard())}
               >
                 {actionBusy
-                  ? "Saving…"
+                  ? action.kind === "rename"
+                    ? "Saving…"
+                    : "Deleting…"
                   : action.kind === "rename"
                     ? "Save name"
-                    : "Move to Trash"}
+                    : "Delete permanently"}
               </button>
             </div>
           </section>

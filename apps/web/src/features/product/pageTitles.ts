@@ -18,7 +18,6 @@ export const SETTINGS_SECTIONS = [
 const APP_SECTION_TITLES: Record<string, string> = {
   activity: "Activity",
   shared: "Shared boards",
-  trash: "Trash",
 };
 
 const ADMIN_SECTION_TITLES: Record<string, string> = {

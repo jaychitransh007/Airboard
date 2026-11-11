@@ -50,8 +50,8 @@ configuration can be more restrictive.
 ## Images and videos on boards
 
 - Images up to 32 MB and 40 megapixels; videos up to 100 MB.
-- Each workspace can hold 2 GB of board images and videos. Deleting boards
-  frees space once they leave Trash.
+- Each workspace can hold 2 GB of board images and videos. Deleting a board
+  frees its space straight away.
 - Each person can start 30 uploads a minute.
 - Uploads that never finish are cleared after a day.
 
@@ -61,7 +61,7 @@ configuration can be more restrictive.
 - Sanitized voice diagnostics: no more than 14 days.
 - User-created support diagnostics: seven days.
 - Export payloads: seven days.
-- Deleted boards: the organization recovery window.
+- Deleted boards: erased straight away.
 - Audit metadata: 365 days in the controlled-pilot runbook.
 
 Check the current portal and privacy notice before making a customer or

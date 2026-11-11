@@ -69,8 +69,8 @@ excellent *sources* (§4).
 - Keyboard shortcuts. At least eight exist and none is listed in the UI.
 - Error codes. 70+ stable codes across the API, web app, and extension.
 - The admin console — members, policies, SSO/SCIM, installation health, audit
-  log, deleted-board recovery window.
-- Trial mechanics, board versioning, Trash/restore, export.
+  log.
+- Trial mechanics, board versioning, permanent delete, export.
 - What to do when voice or hands do not work.
 
 ### 2.3 Drift that must be repaired while writing
@@ -164,11 +164,11 @@ Docs/help/
 | 06 | Gestures | Every shipped pose with exact performance; confusable pairs and how to avoid them; what is deliberately *not* a gesture and why | [Gesture Interaction Audit](./Gesture%20Interaction%20Audit.md) — the single best existing source; use its tables near-verbatim | Live session with a camera; feeds the trainer (§6) |
 | 07 | Keyboard, pointer, touchpad | Every shortcut; the complete camera-off, microphone-off parity path | **Generated** from the keydown handler (`AirboardPrototype.tsx:5924`–`6090`): `Cmd/Ctrl+Z`, `Shift+H`, `Space`, `Tab`/`Shift+Tab`, `Enter`/`F2`, `Escape`, hold `V`, `E`, `Shift`, `Alt`, `Ctrl/⌘+wheel` | Keyboard-only run of doc 03 |
 | 08 | Screen and camera composition | Use screen, camera underlay, dark overlay dial, snap-to-hide, studio recording, what the audience sees | `README.md` "Screen and camera composition"; `lightboardComposition.ts` | Manual, with a second viewer |
-| 09 | Boards, versions, export | Save, rename, versions, share/visibility, Trash and restore, PNG export | `BoardsPage.tsx`; `ProductSection.tsx`; `boardLifecycle.ts` | Manual |
+| 09 | Boards, versions, export | Save, rename, versions, share/visibility, delete, PNG export | `BoardsPage.tsx`; `ProductSection.tsx`; `boardLifecycle.ts` | Manual |
 | 10 | Google Meet | Install, connect, media confirmation, the six readiness checks by name, receiver verification, what the audience sees, uninstall/revoke | `extensions/chrome-meet-bridge/README.md`; `popup.html` readiness list; [Meet Camera Composite Verification](./Meet%20Camera%20Composite%20Verification.md) | Two-account real call |
 | 11 | Desktop overlay | Launch, click-through model, `Cmd/Ctrl+Shift+O`, `Cmd/Ctrl+Shift+H`, tray controls, and the unsigned-preview caveat | `README.md` "Native desktop overlay"; `apps/desktop/src/overlayWindow.mjs` | Manual on macOS |
 | 12 | Account, trial, billing | Sign-up, invitations, the one-month value-triggered pilot, what happens at expiry, why checkout may be unavailable | [Commercial Platform Runbook](./Commercial%20Platform%20Runbook.md); `BillingPage.tsx` | `pnpm smoke:commercial` |
-| 13 | Admin console | Members and roles, policies, SSO/SCIM configuration, installation health, audit log export, deleted-board recovery window | `AdminPage.tsx`; `controlPlaneRoutes.ts`; Commercial Platform Runbook | Manual as an owner account |
+| 13 | Admin console | Members and roles, policies, SSO/SCIM configuration, installation health, audit log export | `AdminPage.tsx`; `controlPlaneRoutes.ts`; Commercial Platform Runbook | Manual as an owner account |
 | 14 | Privacy and your data | What is processed vs. stored, per provider; voice-trace retention (14 days); analytics; export and deletion, including the 7-day cancellation window | `Official Launch Readiness.md` "Data inventory and enforced retention"; **after RGB-036 is fixed** | Cross-check against `/privacy` and the retention jobs |
 | 15 | Troubleshooting | Symptom-first: hands not detected, voice unavailable, command rejected, Meet shows no overlay, board will not save, sign-in loop | Error-code map; `chromeMeetReadiness.ts`; support intake patterns | Each entry reproduced once |
 | 16 | Error codes | Every stable code, plain-language meaning, user action, whether to contact support | **Generated** by scanning `apps/api/src`, `apps/web/src`, `extensions/chrome-meet-bridge` | Generator + CI diff gate |
