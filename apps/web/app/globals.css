@@ -3211,7 +3211,10 @@ button:disabled {
 }
 
 .canvas-toolbar .toolbar-share-button {
-  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px 0 16px;
   border-color: #6d4ce0;
   background: #6d4ce0;
   color: #fff;

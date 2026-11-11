@@ -85,7 +85,7 @@ read the chat or see people, switch back to the Airboard tab to keep drawing.
 Presenting is enough for everyone to see the board. To let people draw with
 you:
 
-1. Choose **Share** in the board's top bar.
+1. Choose **Share** in the board's top bar, then **Share with people**.
 2. Under **Work together now**, choose **Can edit**.
 3. Choose **Copy live link** and paste it into the Meet chat.
 

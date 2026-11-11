@@ -461,15 +461,19 @@ test("board: menus and dialogs hand focus back to the button that opened them", 
   await page.goto(`/app/boards/${api.boardId(fixture.title)}`);
   await expect(page.getByTestId("share-board")).toBeVisible({ timeout: 30_000 });
 
-  // A ••• item that just acts (Copy image) closes the menu and returns focus.
+  // A Share item that just acts (Copy image) closes the menu and returns focus.
+  const shareButton = page.getByRole("button", { name: "Share", exact: true });
+  await shareButton.focus();
+  await page.keyboard.press("Enter");
+  const shareMenu = page.getByRole("menu", { name: "Share and export" });
+  await shareMenu.getByRole("menuitem", { name: "Copy image" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(shareMenu).toBeHidden();
+  await expect(shareButton).toBeFocused();
+
   const more = page.getByRole("button", { name: "More board actions" });
   await more.focus();
-  await page.keyboard.press("Enter");
   const menu = page.getByRole("menu", { name: "Board actions" });
-  await menu.getByRole("menuitem", { name: "Copy image" }).focus();
-  await page.keyboard.press("Enter");
-  await expect(menu).toBeHidden();
-  await expect(more).toBeFocused();
 
   // Delete canvas opens a dialog; cancelling it returns to •••.
   await page.keyboard.press("Enter");

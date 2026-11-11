@@ -35,6 +35,7 @@ test("guests watch until the owner lets them edit, and New link stops the old li
   await expect.poll(() => page.url()).not.toContain("joinToken");
 
   await page.getByTestId("share-board").click();
+  await page.getByTestId("share-board-people").click();
   const dialog = page.getByRole("dialog", { name: `Share “${checkoutFlow.title}”` });
   const access = dialog.getByRole("radiogroup", { name: "What people with the live link can do" });
   await expect(access.getByRole("radio", { name: /Can view/ })).toBeChecked({ timeout: 30_000 });
@@ -81,6 +82,7 @@ test("after a reload the owner is back in their own session, with the same link"
   await page.goto(`/app/boards/${api.boardId(checkoutFlow.title)}`);
   await expect(page.getByTestId("share-board")).toBeVisible({ timeout: 30_000 });
   await page.getByTestId("share-board").click();
+  await page.getByTestId("share-board-people").click();
   const before = await copyLiveLink(page);
   const session = await liveSessionId(page);
   expect(session).toBeTruthy();
@@ -89,6 +91,7 @@ test("after a reload the owner is back in their own session, with the same link"
   await expect(page.getByTestId("share-board")).toBeVisible({ timeout: 30_000 });
   await expect.poll(() => liveSessionId(page), { timeout: 30_000 }).toBe(session);
   await page.getByTestId("share-board").click();
+  await page.getByTestId("share-board-people").click();
   // Owner controls are back, so this is the owner's place, not a guest's.
   await expect(page.getByRole("radiogroup", { name: "What people with the live link can do" })).toBeVisible({ timeout: 30_000 });
   expect(await copyLiveLink(page)).toBe(before);

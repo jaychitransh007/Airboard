@@ -10,7 +10,7 @@ test.beforeEach(async ({ context }) => {
 test("Copy image puts the board on the clipboard as a PNG", async ({ page, context, baseURL }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: baseURL! });
   await page.goto("/?testStandalone=1");
-  await page.getByRole("button", { name: "More board actions" }).click();
+  await page.getByTestId("share-board").click();
   await page.getByRole("menuitem", { name: "Copy image" }).click();
   await expect(page.locator(".intent-feedback")).toContainText("Copied the board as an image");
   const types = await page.evaluate(async () => (await navigator.clipboard.read()).flatMap((item) => [...item.types]));
@@ -19,7 +19,7 @@ test("Copy image puts the board on the clipboard as a PNG", async ({ page, conte
 
 test("Export PDF downloads a one-page PDF of the board", async ({ page }) => {
   await page.goto("/?testStandalone=1");
-  await page.getByRole("button", { name: "More board actions" }).click();
+  await page.getByTestId("share-board").click();
   const download = page.waitForEvent("download");
   await page.getByRole("menuitem", { name: "Export PDF" }).click();
   const file = await download;

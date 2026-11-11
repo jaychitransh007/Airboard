@@ -48,6 +48,8 @@ test("the board, its dialogs and its menus meet WCAG 2.2 AA", async ({ page }) =
   await expectNoViolations(page, "the board");
 
   await page.getByRole("button", { name: "Share", exact: true }).click();
+  await expectNoViolations(page, "the Share menu");
+  await page.getByRole("menuitem", { name: "Share with people" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await expectNoViolations(page, "the Share dialog");
   await page.keyboard.press("Escape");

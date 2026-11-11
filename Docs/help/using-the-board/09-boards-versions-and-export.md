@@ -37,7 +37,7 @@ a presentation.
 
 ## Share a board
 
-Choose **Share** in the board header.
+Choose **Share** in the board header, then **Share with people**.
 
 - **Work together now.** **Copy live link** and send it to anyone, for example
   in the meeting chat. People who open it join your board straight away, with
@@ -90,13 +90,12 @@ told the session ended.
 
 ## Export
 
-From the board menu (**•••**):
+Choose **Share** in the board header:
 
-- **Export PNG** saves the board as an image.
-- **Export PDF** saves it as a one-page PDF, ready to email or print.
+- **Export PDF** saves the board as a one-page PDF, ready to email or print.
+- **Export PNG** saves it as an image.
 - **Copy image** puts the board on your clipboard to paste into chat, a doc or
-  slides. **Share → Copy image** does the same. If your browser blocks
-  copying images, use **Export PNG** instead.
+  slides. If your browser blocks copying images, use **Export PNG** instead.
 
 Review an export for customer or confidential content before sending it outside
 your organization. If an admin turns off **Exports**, these buttons stop

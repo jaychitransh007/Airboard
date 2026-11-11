@@ -1432,6 +1432,25 @@ export function AirboardPrototype({
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const moreMenuRef = useRef<HTMLDivElement | null>(null);
   useMenuKeyboard(moreMenuRef, moreMenuOpen, () => setMoreMenuOpen(false));
+  // Share is a menu: sharing with people, and every way to take the board out.
+  const [shareMenuOpen, setShareMenuOpen] = useState(false);
+  const shareMenuRef = useRef<HTMLDivElement | null>(null);
+  const shareButtonRef = useRef<HTMLButtonElement | null>(null);
+  useMenuKeyboard(shareMenuRef, shareMenuOpen, () => {
+    setShareMenuOpen(false);
+    shareButtonRef.current?.focus();
+  });
+  useEffect(() => {
+    if (!shareMenuOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && !shareButtonRef.current?.parentElement?.contains(target)) {
+        setShareMenuOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, [shareMenuOpen]);
   const [shareOpen, setShareOpen] = useState(false);
   const [liveStartProblem, setLiveStartProblem] = useState<LiveStartFailure | null>(null);
   const [titleEditing, setTitleEditing] = useState(false);
@@ -12156,22 +12175,79 @@ export function AirboardPrototype({
                 </span>
               </div>
             </div>
-            {/* The top bar keeps Share and one menu; every other board action,
-                including Airo and settings, lives in that menu. */}
+            {/* The top bar keeps two menus: Share (sharing and exports) and
+                ••• for the board's other actions and settings. */}
             <div className="toolbar canvas-toolbar">
-              <button
-                type="button"
-                className="toolbar-share-button"
-                data-testid="share-board"
-                aria-haspopup="dialog"
-                onClick={() => {
-                  setShareOpen(true);
-                  setMoreMenuOpen(false);
-                  setSettingsOpen(false);
-                }}
-              >
-                Share
-              </button>
+              <div className="canvas-more canvas-share">
+                <button
+                  ref={shareButtonRef}
+                  type="button"
+                  className="toolbar-share-button"
+                  data-testid="share-board"
+                  aria-haspopup="menu"
+                  aria-expanded={shareMenuOpen}
+                  onClick={() => {
+                    setShareMenuOpen((value) => !value);
+                    setMoreMenuOpen(false);
+                  }}
+                >
+                  Share
+                  <svg aria-hidden="true" viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m2.5 4.5 3.5 3.5 3.5-3.5" />
+                  </svg>
+                </button>
+                {shareMenuOpen ? (
+                  <div ref={shareMenuRef} className="canvas-more-menu" role="menu" aria-label="Share and export">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      data-testid="share-board-people"
+                      onClick={() => {
+                        setShareMenuOpen(false);
+                        setSettingsOpen(false);
+                        setShareOpen(true);
+                      }}
+                    >
+                      <span aria-hidden="true">⤴</span>
+                      Share with people
+                    </button>
+                    <div className="canvas-more-separator" role="separator" />
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        exportPdf();
+                        setShareMenuOpen(false);
+                      }}
+                    >
+                      <span aria-hidden="true">⇩</span>
+                      Export PDF
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        exportPng();
+                        setShareMenuOpen(false);
+                      }}
+                    >
+                      <span aria-hidden="true">⇩</span>
+                      Export PNG
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        copyBoardImage();
+                        setShareMenuOpen(false);
+                      }}
+                    >
+                      <span aria-hidden="true">⧉</span>
+                      Copy image
+                    </button>
+                  </div>
+                ) : null}
+              </div>
               <div className="canvas-more">
                 <button
                   type="button"
@@ -12179,7 +12255,10 @@ export function AirboardPrototype({
                   aria-label="More board actions"
                   aria-haspopup="menu"
                   aria-expanded={moreMenuOpen}
-                  onClick={() => setMoreMenuOpen((value) => !value)}
+                  onClick={() => {
+                    setMoreMenuOpen((value) => !value);
+                    setShareMenuOpen(false);
+                  }}
                 >
                   <span aria-hidden="true">•••</span>
                 </button>
@@ -12205,40 +12284,6 @@ export function AirboardPrototype({
                         : screenUnderlayStatus === "active"
                           ? "Stop the screen behind the board"
                           : "Show a screen behind the board"}
-                    </button>
-                    <div className="canvas-more-separator" role="separator" />
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        exportPng();
-                        setMoreMenuOpen(false);
-                      }}
-                    >
-                      <span aria-hidden="true">⇩</span>
-                      Export PNG
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        exportPdf();
-                        setMoreMenuOpen(false);
-                      }}
-                    >
-                      <span aria-hidden="true">⇩</span>
-                      Export PDF
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        copyBoardImage();
-                        setMoreMenuOpen(false);
-                      }}
-                    >
-                      <span aria-hidden="true">⧉</span>
-                      Copy image
                     </button>
                     <div className="canvas-more-separator" role="separator" />
                     <button

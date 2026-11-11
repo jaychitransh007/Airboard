@@ -134,16 +134,25 @@ test("standalone keeps a quiet top bar and no Airo switch", async ({ page }) => 
   expect(historyBox.x + historyBox.width).toBeLessThan(dockBox.x);
   expect(Math.abs(historyBox.y + historyBox.height - (dockBox.y + dockBox.height))).toBeLessThan(3);
 
+  // Share is a menu: sharing with people and every export.
+  await toolbar.getByRole("button", { name: "Share", exact: true }).click();
+  for (const action of ["Share with people", "Export PDF", "Export PNG", "Copy image"]) {
+    await expect(page.getByRole("menu", { name: "Share and export" }).getByRole("menuitem", { name: action })).toBeVisible();
+  }
+
   // Everything else is one menu away.
   await toolbar.getByRole("button", { name: "More board actions" }).click();
+  await expect(page.getByRole("menu", { name: "Share and export" })).toHaveCount(0);
   for (const action of [
     "Show a screen behind the board",
-    "Export PNG",
     "Board settings",
   ]) {
     await expect(page.getByRole("menuitem", { name: action })).toBeVisible();
   }
   for (const removedAction of [
+    "Export PNG",
+    "Export PDF",
+    "Copy image",
     "Undo",
     "Redo",
     "Hide diagram",
@@ -168,8 +177,10 @@ test("standalone keeps a quiet top bar and no Airo switch", async ({ page }) => 
   await page.setViewportSize({ width: 375, height: 812 });
   await expect(toolbar.getByRole("button", { name: "Share" })).toBeVisible();
   await expect(history.getByRole("button", { name: "Undo", exact: true })).toBeVisible();
-  await toolbar.getByRole("button", { name: "More board actions" }).click();
+  await toolbar.getByRole("button", { name: "Share", exact: true }).click();
   await expect(page.getByRole("menuitem", { name: "Export PNG" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await toolbar.getByRole("button", { name: "More board actions" }).click();
   await expect(page.getByTestId("screen-underlay-toggle")).toBeHidden();
 });
 

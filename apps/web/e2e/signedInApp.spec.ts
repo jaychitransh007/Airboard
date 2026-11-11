@@ -32,6 +32,7 @@ async function openSavedBoard(page: Page, boardId: string) {
 
 async function openShare(page: Page) {
   await page.getByTestId("share-board").click();
+  await page.getByTestId("share-board-people").click();
   const dialog = page.getByRole("dialog", { name: `Share “${checkoutFlow.title}”` });
   await expect(dialog).toBeVisible();
   return dialog;
