@@ -46,7 +46,7 @@ Open **•••**, choose **Board settings**, and under **Appearance**:
 
 ## Hide the diagram
 
-Choose **Hide diagram** in **•••**, press `Shift+H`, or snap your thumb and
+Choose the eye icon (**Hide diagram**) at the bottom left of the board, press `Shift+H`, or snap your thumb and
 middle finger. The screen stays behind the board until you bring the diagram
 back.
 

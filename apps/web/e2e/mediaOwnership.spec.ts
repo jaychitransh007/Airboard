@@ -124,19 +124,29 @@ test("standalone keeps a quiet top bar and no Airo switch", async ({ page }) => 
   await expect(page.getByRole("button", { name: /Enable hand tracking/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Airo listening/ })).toHaveCount(0);
 
+  // Undo, redo and hide are icons at the bottom left, level with the dock.
+  const history = page.getByRole("toolbar", { name: "Undo, redo and hide" });
+  for (const action of ["Undo", "Redo", "Hide diagram"]) {
+    await expect(history.getByRole("button", { name: action, exact: true })).toBeVisible();
+  }
+  const historyBox = (await history.boundingBox())!;
+  const dockBox = (await page.getByRole("toolbar", { name: "Board creation tools" }).boundingBox())!;
+  expect(historyBox.x + historyBox.width).toBeLessThan(dockBox.x);
+  expect(Math.abs(historyBox.y + historyBox.height - (dockBox.y + dockBox.height))).toBeLessThan(3);
+
   // Everything else is one menu away.
   await toolbar.getByRole("button", { name: "More board actions" }).click();
   for (const action of [
     "Show a screen behind the board",
-    "Undo",
-    "Redo",
-    "Hide diagram",
     "Export PNG",
     "Board settings",
   ]) {
     await expect(page.getByRole("menuitem", { name: action })).toBeVisible();
   }
   for (const removedAction of [
+    "Undo",
+    "Redo",
+    "Hide diagram",
     "Turn on Airo voice and hands",
     "Turn off Airo voice and hands",
     "Rename canvas",
@@ -157,8 +167,9 @@ test("standalone keeps a quiet top bar and no Airo switch", async ({ page }) => 
   // Phones keep the same two controls; they cannot share a screen.
   await page.setViewportSize({ width: 375, height: 812 });
   await expect(toolbar.getByRole("button", { name: "Share" })).toBeVisible();
+  await expect(history.getByRole("button", { name: "Undo", exact: true })).toBeVisible();
   await toolbar.getByRole("button", { name: "More board actions" }).click();
-  await expect(page.getByRole("menuitem", { name: "Undo" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Export PNG" })).toBeVisible();
   await expect(page.getByTestId("screen-underlay-toggle")).toBeHidden();
 });
 

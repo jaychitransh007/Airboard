@@ -461,12 +461,12 @@ test("board: menus and dialogs hand focus back to the button that opened them", 
   await page.goto(`/app/boards/${api.boardId(fixture.title)}`);
   await expect(page.getByTestId("share-board")).toBeVisible({ timeout: 30_000 });
 
-  // A ••• item that just acts (Undo) closes the menu and returns focus.
+  // A ••• item that just acts (Copy image) closes the menu and returns focus.
   const more = page.getByRole("button", { name: "More board actions" });
   await more.focus();
   await page.keyboard.press("Enter");
   const menu = page.getByRole("menu", { name: "Board actions" });
-  await menu.getByRole("menuitem", { name: "Undo" }).focus();
+  await menu.getByRole("menuitem", { name: "Copy image" }).focus();
   await page.keyboard.press("Enter");
   await expect(menu).toBeHidden();
   await expect(more).toBeFocused();

@@ -3572,9 +3572,85 @@ button:disabled {
     0 3px 10px rgba(10, 7, 15, 0.1);
 }
 
-/* Centre the dock in the canvas left of the full Airo panel (396px). */
+/* Undo, redo and hide: small icons at the bottom left, level with the
+   element dock (the same height, on the same baseline). */
+.canvas-history-controls {
+  position: absolute;
+  z-index: 13;
+  bottom: 26px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 8px;
+  border: 1px solid rgba(48, 38, 61, 0.13);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow:
+    0 14px 38px rgba(10, 7, 15, 0.3),
+    0 2px 7px rgba(10, 7, 15, 0.12);
+}
+
+.canvas-history-controls button {
+  display: grid;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: #4d4853;
+}
+
+.canvas-history-controls button:hover {
+  border-color: rgba(112, 75, 229, 0.14);
+  background: #f0ebff;
+  color: #6942db;
+}
+
+.canvas-history-controls button[aria-pressed="true"] {
+  background: #f0ebff;
+  color: #6942db;
+}
+
+/* Centre the dock in the canvas left of the full Airo panel (396px), and
+   right of the undo/redo/hide card (170px). */
 .canvas-workspace.copilot-open .object-dock.catalog-dock {
-  left: calc((100% - 396px) / 2);
+  left: calc(170px + (100% - 566px) / 2);
+}
+
+/* Where the dock's row is too narrow for both, the card sits just above it. */
+@media (max-width: 1259px) {
+  .canvas-workspace.copilot-open .object-dock.catalog-dock {
+    left: calc((100% - 396px) / 2);
+  }
+
+  .canvas-workspace.copilot-open .canvas-history-controls {
+    bottom: 94px;
+  }
+}
+
+.canvas-workspace.settings-open .canvas-history-controls {
+  bottom: 94px;
+}
+
+@media (max-width: 999px) {
+  .canvas-history-controls {
+    bottom: 94px;
+  }
+}
+
+@media (max-width: 900px) {
+  .canvas-history-controls,
+  .canvas-workspace.copilot-open .canvas-history-controls,
+  .canvas-workspace.settings-open .canvas-history-controls {
+    bottom: 72px;
+    left: 8px;
+    padding: 6px;
+  }
 }
 
 .canvas-workspace.settings-open:not(.copilot-open) .object-dock.catalog-dock {

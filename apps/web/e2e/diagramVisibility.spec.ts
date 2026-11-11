@@ -85,9 +85,9 @@ test("snap, keyboard, menu, and voice share one local visibility action", async 
   await page.keyboard.press("Shift+H");
   await expect(page.locator("main.airboard-shell")).not.toHaveClass(/diagram-hidden/);
 
-  await page.getByLabel("More board actions").click();
   await page.getByTestId("diagram-visibility-menu-action").click();
-  await page.getByLabel("More board actions").click();
+  await expect(page.locator("main.airboard-shell")).toHaveClass(/diagram-hidden/);
+  await expect(page.getByTestId("diagram-visibility-menu-action")).toHaveAccessibleName("Show diagram");
   await page.getByTestId("diagram-visibility-menu-action").click();
   await expect(page.locator("main.airboard-shell")).not.toHaveClass(/diagram-hidden/);
 

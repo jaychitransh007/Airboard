@@ -70,12 +70,14 @@ test("typing a command creates and edits objects instantly", async ({ page }) =>
     })
     .toBe(1);
 
-  // The menu remains an explicit pointer-accessible Undo path too.
+  // The Undo icon at the bottom left is an explicit pointer path too.
   await input.fill("delete selected");
   await page.getByTestId("intent-primary-action").click();
   await expect(page.locator(".intent-feedback")).toContainText("Applied: Delete");
-  await page.getByRole("button", { name: "More board actions" }).click();
-  await page.getByRole("menuitem", { name: "Undo" }).click();
+  await page
+    .getByRole("toolbar", { name: "Undo, redo and hide" })
+    .getByRole("button", { name: "Undo", exact: true })
+    .click();
   const restored = await page.evaluate(() =>
     (window as never as { __airboardTestHooks: { getBoardSummary(): { objectCount: number } } })
       .__airboardTestHooks.getBoardSummary(),

@@ -57,8 +57,9 @@ The diagram appears as a presented tab, not inside your normal Meet camera
 tile. Because the tab already shows you behind the board, you can turn off
 your Meet camera while you present so you don't appear twice.
 
-To hide the diagram for a moment and keep your camera showing, choose **Hide
-diagram** in **•••**, press `Shift+H`, or snap your thumb and middle finger.
+To hide the diagram for a moment and keep your camera showing, choose the eye
+icon (**Hide diagram**) at the bottom left of the board, press `Shift+H`, or
+snap your thumb and middle finger.
 
 ## Use voice, hands, typing and the mouse
 
@@ -73,7 +74,7 @@ Everything keeps working in the Airboard tab while you present:
 - **Typing and mouse:** show the Airo panel (**✦ Airo** at the right edge)
   and type in it, or use the tool dock and the
   pointer.
-- **Undo:** press `Cmd/Ctrl+Z`, choose **•••** then **Undo**, or say “Airo,
+- **Undo:** press `Cmd/Ctrl+Z`, choose the **Undo** arrow at the bottom left of the board, or say “Airo,
   undo.”
 
 You control the board from the Airboard tab. If you switch to the Meet tab to
