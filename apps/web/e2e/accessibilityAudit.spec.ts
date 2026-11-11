@@ -145,10 +145,6 @@ test("an expired live link has a main landmark and an h1", async ({ page }) => {
 
 const SIGNED_IN_PAGES = [
   "/app",
-  "/app/boards",
-  "/app/shared",
-  "/app/activity",
-  "/app/integrations",
   "/app/billing",
   "/app/settings/profile",
   "/app/settings/preferences",
@@ -156,29 +152,46 @@ const SIGNED_IN_PAGES = [
   "/app/settings/notifications",
   "/app/settings/privacy-data",
   "/app/settings/sessions",
-  "/app/admin/overview",
-  "/app/admin/members",
-  "/app/admin/policies",
-  "/app/admin/audit-logs",
-  "/app/admin/installations",
-  "/app/admin/identity-directory",
-  "/app/nothing-here",
+  "/app/settings/workspace",
+  "/app/settings/members",
+  "/app/settings/policies",
+  "/app/settings/audit-logs",
+  "/app/settings/identity-directory",
 ];
 
 for (const path of SIGNED_IN_PAGES) {
   test(`signed-in page ${path} passes the audit`, async ({ page }) => {
     await signIn(page, { workspace: "team", boards: [{ title: fixture.title, state: fixture.state }] });
     await page.goto(path);
-    await expect(page.getByRole("navigation", { name: "Airboard", exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("button", { name: /^Account menu for / })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await page.waitForLoadState("networkidle");
     await auditPage(page, path);
   });
 }
 
+test("a first visit offers Create Airboard in the middle of an otherwise empty home page", async ({ page }) => {
+  await signIn(page, { workspace: "personal" });
+  await page.goto("/app");
+  await expect(page.getByRole("heading", { level: 1, name: "Create your first Airboard" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("link", { name: "Create Airboard" })).toHaveCount(1);
+  await expect(page.getByRole("searchbox")).toHaveCount(0);
+  await auditPage(page, "first-run home");
+});
+
+test("an unknown signed-in address says the page was not found", async ({ page }) => {
+  await signIn(page, { workspace: "team" });
+  await page.goto("/app/nothing-here");
+  await expect(page.getByRole("heading", { level: 1, name: "That page has moved or does not exist." })).toBeVisible({ timeout: 30_000 });
+  await auditPage(page, "/app/nothing-here");
+});
+
 test("a personal workspace's admin page explains itself with an h1", async ({ page }) => {
   await signIn(page, { workspace: "personal" });
   await page.goto("/app/admin/members");
-  await expect(page.getByRole("heading", { level: 1, name: "Your personal workspace is just for you" })).toBeVisible({ timeout: 30_000 });
+  await expect(page).toHaveURL(/\/app\/settings\/members$/, { timeout: 30_000 });
+  await expect(page.getByRole("heading", { level: 1, name: "Workspace settings" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Settings" }).getByRole("link", { name: "Members" })).toHaveCount(0);
   await auditPage(page, "personal admin");
 });
 
@@ -266,18 +279,13 @@ test("Tab on the canvas steps through objects and then leaves it", async ({ page
 test("navigating between pages changes the title, which Next.js announces", async ({ page }) => {
   await signIn(page, { workspace: "team", boards: [{ title: fixture.title, state: fixture.state }] });
   await page.goto("/app");
-  await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 30_000 });
-  await expect(page).toHaveTitle("Overview · Airboard");
+  await expect(page.getByRole("heading", { level: 1, name: "Airboards" })).toBeVisible({ timeout: 30_000 });
+  await expect(page).toHaveTitle("Airboards · Airboard");
   const announcement = () =>
     page.evaluate(() => document.querySelector("next-route-announcer")?.shadowRoot?.querySelector("[aria-live]")?.textContent ?? "");
 
-  const sidebar = page.getByRole("navigation", { name: "Airboard", exact: true });
-  await sidebar.getByRole("link", { name: "Boards" }).click();
-  await expect(page).toHaveTitle("Boards · Airboard");
-  await expect.poll(announcement).toBe("Boards · Airboard");
-  await expect(sidebar.getByRole("link", { name: "Boards" })).toHaveAttribute("aria-current", "page");
-
-  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: /^Account menu for / }).click();
+  await page.getByRole("menu", { name: "Account" }).getByRole("menuitem", { name: "Profile" }).click();
   await expect(page).toHaveTitle("Profile · Settings · Airboard");
   await expect.poll(announcement).toBe("Profile · Settings · Airboard");
   await page.getByRole("navigation", { name: "Settings" }).getByRole("link", { name: "Sessions" }).click();
@@ -287,36 +295,53 @@ test("navigating between pages changes the title, which Next.js announces", asyn
   await expect.poll(announcement).toMatch(/^Sessions( · Settings · Airboard)?$/);
 });
 
-test("at 320px the More menu reaches every page the sidebar holds", async ({ page }) => {
+test("at 320px the profile menu reaches every page, and Settings every section", async ({ page }) => {
   await signIn(page, { workspace: "team" });
   await page.setViewportSize({ width: 320, height: 640 });
   await page.goto("/app");
-  const bar = page.getByRole("navigation", { name: "Airboard mobile navigation" });
-  await expect(bar).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByRole("navigation", { name: "Airboard", exact: true })).toBeHidden();
+  const profile = page.getByRole("button", { name: /^Account menu for / });
+  await expect(profile).toBeVisible({ timeout: 30_000 });
+  // The header is the only navigation: no sidebar, no bottom bar.
+  await expect(page.getByRole("navigation")).toHaveCount(0);
 
-  const more = bar.getByRole("button", { name: "More", exact: true });
-  await more.focus();
+  await profile.focus();
   await page.keyboard.press("Enter");
-  await expect(more).toHaveAttribute("aria-expanded", "true");
-  const menu = page.getByRole("list", { name: "More pages" });
-  // The bar holds the first four main pages (Integrations is the fourth in a
-  // team workspace); More holds the rest.
-  await expect(bar.getByRole("link", { name: "Integrations", exact: true })).toBeVisible();
-  for (const name of ["Activity", "Members", "Policies", "Audit log", "Help center", "Plan & billing", "Settings"]) {
-    await expect(menu.getByRole("link", { name, exact: true })).toBeVisible();
+  await expect(profile).toHaveAttribute("aria-expanded", "true");
+  const menu = page.getByRole("menu", { name: "Account" });
+  await expect(menu.getByRole("menuitem", { name: "Profile" })).toBeFocused();
+  for (const name of ["Profile", "Help Center", "Plan & Billing", "Settings", "Sign out"]) {
+    await expect(menu.getByRole("menuitem", { name, exact: true })).toBeVisible();
   }
-  await expect(bar.getByRole("button", { name: "Sign out" })).toBeVisible();
+  const panel = await page.locator(".profile-menu-panel").boundingBox();
+  expect(panel && panel.x >= 0 && panel.x + panel.width <= 320, "the menu stays on screen").toBe(true);
   expect(await axeViolations(page)).toEqual([]);
 
   await page.keyboard.press("Escape");
   await expect(menu).toBeHidden();
-  await expect(more).toBeFocused();
+  await expect(profile).toBeFocused();
 
-  await more.click();
-  await menu.getByRole("link", { name: "Settings", exact: true }).click();
-  await expect(page).toHaveTitle("Profile · Settings · Airboard");
+  await profile.click();
+  await menu.getByRole("menuitem", { name: "Settings", exact: true }).click();
+  await expect(page).toHaveTitle("Preferences · Settings · Airboard");
   await expect(menu).toBeHidden();
+  const settings = page.getByRole("navigation", { name: "Settings" });
+  for (const name of ["Profile", "Sessions", "Workspace", "Members", "Policies", "SSO & SCIM", "Audit log"]) {
+    await expect(settings.getByRole("link", { name, exact: true })).toBeAttached();
+  }
+  await settings.getByRole("link", { name: "Members", exact: true }).click();
+  await expect(page).toHaveTitle("Members · Settings · Airboard");
+});
+
+test("old addresses land on the home page, the Help Center or Settings", async ({ page }) => {
+  await signIn(page, { workspace: "team", boards: [{ title: fixture.title, state: fixture.state }] });
+  for (const path of ["/app/boards", "/app/shared", "/app/activity", "/app/trash"]) {
+    await page.goto(path);
+    await expect(page, path).toHaveURL(/\/app$/, { timeout: 30_000 });
+  }
+  await page.goto("/app/integrations");
+  await expect(page).toHaveURL(/\/help\/integrations\/google-meet$/, { timeout: 30_000 });
+  await page.goto("/app/admin/overview");
+  await expect(page).toHaveURL(/\/app\/settings\/workspace$/, { timeout: 30_000 });
 });
 
 test("at 320px the public pages keep their main navigation", async ({ page }) => {
@@ -330,7 +355,7 @@ test("at 320px the public pages keep their main navigation", async ({ page }) =>
 
 test("the first Tab on a signed-in page offers the skip link, and it moves to the content", async ({ page }) => {
   await signIn(page, { workspace: "team" });
-  await page.goto("/app/boards");
+  await page.goto("/app");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 30_000 });
   await page.keyboard.press("Tab");
   // The development server's own overlay button can come first; production has none.
@@ -371,7 +396,7 @@ test("keyboard focus is always visible", async ({ page }) => {
     expect(await tabStopsWithoutRing(page, 25), `focus rings on ${path}`).toEqual([]);
   }
   await signIn(page, { workspace: "team", boards: [{ title: fixture.title, state: fixture.state }] });
-  for (const path of ["/app", "/app/settings/profile", "/app/admin/members"]) {
+  for (const path of ["/app", "/app/settings/profile", "/app/settings/members"]) {
     await page.goto(path);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 30_000 });
     expect(await tabStopsWithoutRing(page, 30), `focus rings on ${path}`).toEqual([]);
@@ -381,7 +406,7 @@ test("keyboard focus is always visible", async ({ page }) => {
   expect(await tabStopsWithoutRing(page, 22), "focus rings on the board").toEqual([]);
 });
 
-test("focus rings are solid and, on the dark sidebar, light", async ({ page }) => {
+test("focus rings are solid", async ({ page }) => {
   await signIn(page, { workspace: "team" });
   await page.goto("/app/settings/profile");
   const save = page.getByRole("button", { name: "Save profile" });
@@ -391,12 +416,12 @@ test("focus rings are solid and, on the dark sidebar, light", async ({ page }) =
   await page.keyboard.press("Tab");
   await expect(save).toBeFocused();
   expect(await save.evaluate((element) => getComputedStyle(element).outlineColor)).toBe("rgb(105, 72, 220)");
-  const signOut = page.locator(".sidebar-account");
-  await signOut.focus();
+  const profile = page.getByRole("button", { name: /^Account menu for / });
+  await profile.focus();
   await page.keyboard.press("Shift+Tab");
   await page.keyboard.press("Tab");
-  await expect(signOut).toBeFocused();
-  expect(await signOut.evaluate((element) => getComputedStyle(element).outlineColor)).toBe("rgb(196, 181, 253)");
+  await expect(profile).toBeFocused();
+  expect(await profile.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe("solid");
 });
 
 async function expectFocusReturns(page: Page, trigger: Locator, open: () => Promise<void>) {
@@ -407,7 +432,7 @@ async function expectFocusReturns(page: Page, trigger: Locator, open: () => Prom
 
 test("library: a menu item's dialog hands focus back to the menu button", async ({ page }) => {
   await signIn(page, { boards: [{ title: fixture.title, state: fixture.state }] });
-  await page.goto("/app/boards");
+  await page.goto("/app");
   const actions = page.getByRole("button", { name: `Actions for ${fixture.title}` });
   await expect(actions).toBeVisible({ timeout: 30_000 });
   await actions.focus();

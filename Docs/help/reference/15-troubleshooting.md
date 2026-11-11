@@ -6,8 +6,8 @@ categoryLabel: Troubleshooting and reference
 order: 15
 status: reference
 audiences: ["everyone", "admins"]
-lastVerified: 2026-11-05
-sources: ["apps/web/src/features/board/AirboardPrototype.tsx", "apps/web/src/features/product/chromeMeetReadiness.ts", "apps/web/src/features/product/IntegrationsPage.tsx", "apps/web/src/platform/auth.tsx"]
+lastVerified: 2026-11-11
+sources: ["apps/web/src/features/board/AirboardPrototype.tsx", "apps/web/src/features/board/screenUnderlay.ts", "apps/web/src/platform/auth.tsx"]
 ---
 
 Start with the symptom you can see. Do not include board content, transcripts,
@@ -39,12 +39,16 @@ Use one action and visible labels: `connect Customer to API`. Select the object
 before using `selected`, `this`, or `that`. If the board changed during an
 online interpretation request, repeat the command against the current state.
 
-## Meet shows no Airboard overlay
+## People in Google Meet can't see my board
 
-Open the extension popup and note the first incomplete readiness check. Refresh
-the Meet tab, turn on the normal Meet camera, and rerun preflight. If the
-extension is unreachable, reload it and reopen setup from its popup. Always ask
-a second participant to confirm the decoded image.
+1. Open Airboard in the same browser as the Meet call.
+2. In Meet, present again and choose your Airboard tab, not a window or your
+   whole screen.
+3. If your camera is busy or black in one of the tabs, turn off your Meet camera
+   while you present; the audience sees you behind the board instead.
+4. Switch back to the Airboard tab to keep drawing.
+
+See [Use Airboard in Google Meet](/help/integrations/google-meet).
 
 ## My board will not save
 
@@ -61,6 +65,5 @@ with the workspace. For an invitation, use the invited email address.
 ## Contact support
 
 Create a seven-day diagnostic in **Settings → Privacy & data**, then submit a
-[support request](/support) with the platform, app or extension version,
-browser or OS, approximate time, steps, first failed check, visible error code,
-request ID, and diagnostic bundle ID.
+[support request](/support) with the browser and OS, approximate time, steps,
+first failed check, visible error code, request ID, and diagnostic bundle ID.

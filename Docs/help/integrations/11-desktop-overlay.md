@@ -1,53 +1,65 @@
 ---
 title: Desktop overlay
-description: Run the native click-through development overlay and use its safety controls.
+description: Draw over slides, a prototype or any app on your screen, right from the Airboard web app.
 category: integrations
 categoryLabel: Integrations
 order: 11
-status: development-preview
+status: shipped
 audiences: ["everyone", "creators"]
-lastVerified: 2026-11-07
-sources: ["README.md", "apps/desktop/src/main.mjs", "apps/desktop/src/overlayWindow.mjs", "apps/desktop/src/autoUpdate.mjs"]
+lastVerified: 2026-11-11
+sources: ["apps/web/src/features/board/AirboardPrototype.tsx", "apps/web/src/features/board/screenUnderlay.ts", "apps/web/src/features/board/lightboardComposition.ts", "apps/web/src/features/board/lightboardRecorder.ts"]
 ---
 
-The desktop overlay is a native Electron development preview. It places a
-transparent, frameless, always-on-top Airboard above desktop applications and
-can pass pointer events through to the application underneath.
+The desktop overlay lets you draw over anything on your screen, such as slides,
+a prototype, a dashboard or any other app, from the Airboard web app. Airboard
+shows the screen or window you choose behind your board, and your diagram sits
+on top. There's nothing to download.
 
-The app can now be packaged as a macOS and Windows installer that updates
-itself, but it isn't distributed yet: installers have to be signed with
-Airboard's Apple and Microsoft signing accounts first. Until then, run it from
-the source code as below.
+## Draw over an app or slides
 
-The overlay lets only the Airboard page use the camera and microphone, for
-hands and Airo's voice, and refuses every other permission.
+1. Open the app or slides you want to draw over.
+2. Open an Airboard in Chrome, or in Edge on Windows.
+3. Open the board menu (**•••**) and choose **Show a screen behind the board**.
+4. In the browser's picker, choose the window or screen with your content (not
+   the Airboard tab itself), then choose **Share**.
+5. Draw, type or speak as usual. Your diagram appears on top of the screen you
+   chose.
 
-## Launch the development preview
+Airboard switches to the Lightboard theme and adds a light dim with local
+contrast behind your diagram, so it stays readable over busy content.
 
-Run the Airboard web surface and desktop shell:
+## Adjust how it looks
 
-```text
-pnpm dev:web
-pnpm dev:desktop
-```
+Open **•••**, choose **Board settings**, and under **Appearance**:
 
-The shell uses the local Airboard web origin by default. Operators can point it
-at an approved deployed origin with the documented desktop URL environment
-setting.
+- Drag **Dark overlay** to dim the screen behind the board more or less.
+- Turn **Local contrast behind diagram clusters** off or on.
 
-## Control click-through
+## Show it to others
 
-- Press `Cmd/Ctrl+Shift+O` to temporarily enable pointer control.
-- Use the setup controls to enable hands or Airo, type a command, undo, or
-  change dark-overlay strength.
-- Choose **Return to click-through** to remove the setup HUD and return pointer
-  focus to the application below.
-- Press `Cmd/Ctrl+Shift+H` to show or hide Airboard.
+- **In Google Meet:** present your Airboard tab. Everyone sees your screen with
+  the diagram on top. See [Use Airboard in Google Meet](/help/integrations/google-meet).
+- **As a video:** in **Board settings**, under **Studio**, choose **Start
+  recording** to save what a viewer sees as a video file on your computer.
+- **As a picture:** **Export PNG** in **•••** saves the diagram itself as an
+  image.
 
-Use the tray or menu-bar item to change displays or quit.
+## Hide the diagram
 
-## Safety notes
+Choose **Hide diagram** in **•••**, press `Shift+H`, or snap your thumb and
+middle finger. The screen stays behind the board until you bring the diagram
+back.
 
-Confirm which display contains the overlay before presenting or recording.
-Return to click-through after setup so Airboard does not capture pointer
-interaction intended for another application.
+## Stop
+
+Open **•••** and choose **Stop the screen behind the board**, or choose **Stop
+sharing** in the browser's sharing bar.
+
+## Good to know
+
+- The overlay lives in your Airboard tab and shows a live picture of the app
+  you chose. To click or type in that app, switch to it, then come back to
+  Airboard to keep drawing.
+- Airboard uses the screen you choose only to show it behind your board, in
+  your browser.
+- The browser asks you to choose a screen each time you start.

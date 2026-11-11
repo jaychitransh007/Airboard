@@ -6,7 +6,7 @@ categoryLabel: Account and administration
 order: 14
 status: reference
 audiences: ["everyone", "admins", "security"]
-lastVerified: 2026-11-05
+lastVerified: 2026-11-11
 sources: ["Docs/Official Launch Readiness.md", "Docs/Commercial Platform Runbook.md", "apps/web/src/features/product/SettingsPage.tsx", "apps/web/app/[marketingSlug]/page.tsx"]
 ---
 
@@ -46,7 +46,8 @@ days.
 
 ## Export or delete your data
 
-Open **Settings → Privacy & data** to:
+Open **Settings** from the profile menu at the top right, then choose
+**Privacy & data** to:
 
 - create a support diagnostic;
 - request a portable JSON export;

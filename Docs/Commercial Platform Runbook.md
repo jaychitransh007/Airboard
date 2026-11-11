@@ -28,10 +28,11 @@ This document describes the implemented customer journey, its operating data, an
 
 ### Authenticated product
 
-- `/onboarding`, `/app`, `/app/boards`, `/app/boards/:id`, `/app/boards/new`, `/app/boards/live`
-- `/app/activity`, `/app/integrations`, `/app/billing`
-- `/app/settings/profile|preferences|connected-apps|notifications|privacy-data|sessions`
-- `/app/admin/overview|members|policies|identity-directory|installations|audit-logs`
+- `/onboarding`; `/app`, the home page: every Airboard you can open, with Create Airboard
+- `/app/boards/:id`, `/app/boards/new`, `/app/boards/live`, `/app/billing`
+- `/app/settings/profile|preferences|connected-accounts|notifications|privacy-data|sessions`
+- `/app/settings/workspace`, and for team owners and admins `/app/settings/members|policies|identity-directory|audit-logs`
+- Signed-in pages have no sidebar: a top header with the profile menu (Profile, Help Center, Plan & Billing, Settings, Sign out). Old addresses redirect: `/app/boards`, `/app/shared`, `/app/activity` and `/app/trash` to `/app`; `/app/integrations` to the Google Meet help article; `/app/admin/*` to the same page in Settings.
 
 ## Data collected and why
 

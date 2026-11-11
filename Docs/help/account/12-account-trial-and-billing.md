@@ -6,7 +6,7 @@ categoryLabel: Account and administration
 order: 12
 status: gated
 audiences: ["everyone", "billing", "admins"]
-lastVerified: 2026-11-05
+lastVerified: 2026-11-11
 sources: ["Docs/Commercial Platform Runbook.md", "apps/web/src/features/product/BillingPage.tsx", "apps/web/src/features/product/planLabels.ts", "apps/web/src/features/product/OneTapRequestButton.tsx", "apps/web/src/features/product/InvitePage.tsx"]
 ---
 
@@ -25,19 +25,20 @@ already-used, or email-mismatched invitations cannot be accepted.
 ## Trial activation
 
 The pilot lasts one month (30 days) after a qualifying first-value event.
-Signup alone does not consume the trial. Successful standalone or Meet
-preflight can activate it when the product confirms the required value event.
+Signup alone does not consume the trial; it starts when you open your first
+board.
 
-**Plan & billing** shows when your pilot runs until. Before you open your
-first board, it says the pilot has not started yet.
+**Plan & Billing**, in the profile menu at the top right, shows when your
+pilot runs until. Before you open your first board, it says the pilot has not
+started yet.
 
 ## When the pilot ends
 
-**Plan & billing** shows the date your pilot ended. Your saved boards still
+**Plan & Billing** shows the date your pilot ended. Your saved boards still
 open and save, and you can still download pictures. New boards, live links and
 Airo voice are off until your pilot is extended.
 
-Choose **Ask for more pilot time** on **Plan & billing**. The request goes to
+Choose **Ask for more pilot time** on **Plan & Billing**. The request goes to
 the Airboard team, who will get back to you. The same button appears when you
 try to start a new board, and **Share** links to it.
 
@@ -52,7 +53,7 @@ billing references and entitlement state needed to provide access.
 
 ## Workspace roles
 
-Owners and administrators manage organization settings. Billing access,
-member access, and viewer capabilities depend on assigned roles and policy.
-Switch organizations from the portal workspace switcher when you belong to
-more than one.
+Owners and administrators manage the workspace in **Settings**. Billing
+access, member access, and viewer capabilities depend on assigned roles and
+policy. When you belong to more than one workspace, switch in **Settings →
+Workspace**. See [Workspace administration](/help/account/admin-console).

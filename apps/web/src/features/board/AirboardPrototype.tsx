@@ -10905,7 +10905,7 @@ export function AirboardPrototype({
             <div className="canvas-topbar-identity">
               <Link
                 className="canvas-back-link"
-                href={liveGuest ? "/" : "/app/boards"}
+                href={liveGuest ? "/" : "/app"}
                 aria-label={liveGuest ? "Leave the live board" : "Back to boards"}
               >
                 <span aria-hidden="true">←</span>

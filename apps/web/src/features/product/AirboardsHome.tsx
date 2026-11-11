@@ -20,13 +20,19 @@ type BoardAction =
   | { kind: "delete"; board: Board }
   | null;
 
-export function BoardsPage() {
+/**
+ * The signed-in home page: every Airboard you can open, yours and your team's,
+ * most recently changed first, with Create Airboard always in reach.
+ */
+export function AirboardsHome() {
   const auth = useAirboardAuth();
   // Viewer and Billing members can open boards but not create or change them.
   const readOnly = Boolean(auth.account) && !canEditBoards(auth.account?.organization.role);
   const [boards, setBoards] = useState<Board[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const loadedRef = useRef(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   // Only one board menu is open at a time, so one ref serves them all.
   const boardMenuRef = useRef<HTMLDivElement | null>(null);
@@ -39,7 +45,16 @@ export function BoardsPage() {
   useEffect(() => {
     if (!auth.accessToken) return;
     void airboardApi<{ boards: Board[] }>("/boards?preview=1", { accessToken: auth.accessToken })
-      .then((result) => setBoards(result.boards))
+      .then((result) => {
+        loadedRef.current = true;
+        setBoards(result.boards);
+        setLoadFailed(false);
+      })
+      // A failed first load must not look like an account with no boards; a
+      // failed re-fetch (after a token refresh) keeps the list already shown.
+      .catch(() => {
+        if (!loadedRef.current) setLoadFailed(true);
+      })
       .finally(() => setLoading(false));
     if (new URLSearchParams(window.location.search).get("deleted") === "1") {
       setNotice("Canvas deleted.");
@@ -109,21 +124,16 @@ export function BoardsPage() {
     }
   };
 
-  return (
-    <div>
-      <section className="app-page-heading inline">
-        <div>
-          <p className="eyebrow">Library</p>
-          <h1>Boards</h1>
-          <p>Persistent diagrams, screen annotations and meeting artifacts.</p>
-        </div>
-        {readOnly ? null : (
-          <Link className="button button-primary" href="/app/boards/new?preflight=1">
-            New Airboard
-          </Link>
-        )}
-      </section>
+  const createButton = readOnly ? null : (
+    <Link className="button button-primary create-airboard-button" href="/app/boards/new?preflight=1">
+      Create Airboard
+    </Link>
+  );
+  // With nothing saved yet the page is one invitation to create.
+  const firstRun = !loading && !loadFailed && boards.length === 0;
 
+  return (
+    <div className="airboards-home">
       {/* Mounted while empty: a status region added together with its text is often not read out. */}
       <p className="sr-only" role="status">{notice ?? ""}</p>
       {notice ? (
@@ -135,20 +145,50 @@ export function BoardsPage() {
         </div>
       ) : null}
 
-      {/* Every board, most recently changed first. */}
-      <div className="library-toolbar">
-        <input
-          type="search"
-          aria-label="Search boards"
-          placeholder="Search titles and what's on boards"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </div>
+      {/* Until the list arrives neither layout is right, so neither shows. */}
+      {loading ? (
+        <h1 className="sr-only">Airboards</h1>
+      ) : firstRun ? (
+        <section className="airboards-first-run">
+          <h1>{readOnly ? "No Airboards yet" : "Create your first Airboard"}</h1>
+          <p>
+            {readOnly
+              ? "Boards your team shares with you appear here."
+              : "Type or say what you want to see, and Airboard draws it."}
+          </p>
+          {createButton}
+        </section>
+      ) : (
+        <>
+          <section className="app-page-heading inline">
+            <h1>Airboards</h1>
+            {createButton}
+          </section>
+
+          {/* Every board, most recently changed first. */}
+          <div className="library-toolbar">
+            <input
+              type="search"
+              aria-label="Search Airboards"
+              placeholder="Search titles and what's on boards"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </div>
+        </>
+      )}
 
       {loading ? (
-        <div className="empty-panel">Loading boards…</div>
-      ) : visible.length ? (
+        <div className="empty-panel">Loading your Airboards…</div>
+      ) : loadFailed ? (
+        <div className="empty-panel" role="alert">
+          <h2>Your Airboards didn&apos;t load</h2>
+          <p>Airboard couldn&apos;t be reached. Your boards are safe. Reload to try again.</p>
+          <button className="button button-primary" type="button" onClick={() => window.location.reload()}>
+            Reload
+          </button>
+        </div>
+      ) : firstRun ? null : visible.length ? (
         <div className="board-grid large">
           {visible.map((board) => (
             <article className="board-card library-board-card" key={board.id}>
@@ -209,8 +249,8 @@ export function BoardsPage() {
         </div>
       ) : (
         <div className="empty-panel">
-          <h3>No matching boards</h3>
-          <p>Create a board or clear the search.</p>
+          <h2>No matching Airboards</h2>
+          <p>Try other words, or clear the search.</p>
         </div>
       )}
 

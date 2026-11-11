@@ -6,8 +6,8 @@ categoryLabel: Using the board
 order: 9
 status: shipped
 audiences: ["everyone"]
-lastVerified: 2026-11-06
-sources: ["apps/web/src/features/product/BoardsPage.tsx", "apps/web/src/features/board/boardExport.ts", "packages/core/src/boardPreview.ts", "apps/web/src/features/board/boardLifecycle.ts", "apps/web/src/features/board/ShareDialog.tsx", "apps/web/src/features/board/ViewLinksSection.tsx", "apps/web/src/features/share/SharedBoardView.tsx", "apps/web/src/features/product/LiveBoardJoin.tsx", "apps/web/src/features/product/ViewOnlyBoard.tsx", "apps/api/src/controlPlaneRoutes.ts", "apps/api/src/boardShareRoutes.ts", "apps/api/src/server.ts"]
+lastVerified: 2026-11-11
+sources: ["apps/web/src/features/product/AirboardsHome.tsx", "apps/web/src/features/board/boardExport.ts", "packages/core/src/boardPreview.ts", "apps/web/src/features/board/boardLifecycle.ts", "apps/web/src/features/board/ShareDialog.tsx", "apps/web/src/features/board/ViewLinksSection.tsx", "apps/web/src/features/share/SharedBoardView.tsx", "apps/web/src/features/product/LiveBoardJoin.tsx", "apps/web/src/features/product/ViewOnlyBoard.tsx", "apps/api/src/controlPlaneRoutes.ts", "apps/api/src/boardShareRoutes.ts", "apps/api/src/server.ts"]
 ---
 
 Airboard stores persistent boards and versioned board state in your workspace.
@@ -15,15 +15,16 @@ Camera and microphone media are not saved with a board.
 
 ## Find a board
 
-**Boards** shows a small preview of each board's shapes and arrows, when it was
-last updated, and whether only you or your workspace can open it. Search
+**Airboards**, the page you see after you sign in, shows a small preview of
+each board's shapes and arrows, when it was last updated, and whether only you
+or your workspace can open it. Search
 matches board titles and the words on boards, so you can find a diagram by
 anything written on it.
 
 ## Save and rename
 
 Board changes save through the authenticated workspace. The board header shows
-the current title and save state. Rename from the header or the board library.
+the current title and save state. Rename from the header, or from the board's **•••** menu on **Airboards**.
 
 If a save warning appears, keep the page open, confirm your connection, and
 retry before navigating away.
@@ -54,7 +55,7 @@ Choose **Share** in the board header.
   you in the same session with the same link.
 - **Who can open this board later.** In a team workspace, the board's owner
   chooses **Only you** or **Everyone in** the workspace. Shared boards appear
-  under **Shared** for every member, and **Copy board link** gives members a
+  on **Airboards** for every member, and **Copy board link** gives members a
   link to the saved board. Only the person who made the board can change this.
   Boards in a personal workspace stay private.
 - **Anyone with the link can view.** The board's owner chooses how long a link
@@ -66,7 +67,7 @@ Choose **Share** in the board header.
   working. A link also stops working when the person who made
   it leaves the workspace, is suspended or becomes a Viewer, and while an admin
   has turned off **External guests**. Admins can see and turn off every link in
-  **Administration → Policy**.
+  **Settings → Policies**.
 - **Send a picture.** **Download PNG** saves the board as an image.
 
 Members whose role is **Viewer** or **Billing** open boards view-only: they can
@@ -77,10 +78,11 @@ while it works, so share it only with the people you are working with.
 
 ## Find and delete boards
 
-**Boards** lists every board you can open, most recently changed first. Search
-finds boards by title or by what's on them.
+**Airboards** lists every board you can open, yours and boards shared with your
+team, most recently changed first. Search finds boards by title or by what's on
+them. **Create Airboard** starts a new one.
 
-**Delete canvas** (in a board's **•••** menu, or on its card in **Boards**)
+**Delete canvas** (in a board's **•••** menu, or on its card on **Airboards**)
 deletes the board for good, with its versions, images, view-only links and live-session
 history.
 There is no Trash, so it can't be undone. Anyone in a live session on it is

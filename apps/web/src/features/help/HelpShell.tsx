@@ -23,7 +23,7 @@ export function HelpShell({ children }: { children: ReactNode }) {
       <footer className="help-footer">
         <div>
           <strong>Airboard Help Center</strong>
-          <p>Product guidance for the controlled pilot and preview surfaces.</p>
+          <p>Product guidance for the Airboard pilot.</p>
         </div>
         <nav aria-label="Help Center footer">
           <Link href="/privacy">Privacy</Link>
@@ -32,7 +32,7 @@ export function HelpShell({ children }: { children: ReactNode }) {
           <Link href="/support">Support</Link>
         </nav>
         <small>
-          Preview and gated capabilities are labelled in their articles. Help content is
+          Help content is
           guidance, not an uptime, certification, or contractual claim.
         </small>
       </footer>

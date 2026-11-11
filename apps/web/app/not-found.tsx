@@ -15,7 +15,7 @@ export default function NotFound() {
           <Link className="button button-primary" href="/">
             Go to the home page
           </Link>
-          <Link className="button button-quiet" href="/app/boards">
+          <Link className="button button-quiet" href="/app">
             Open my boards
           </Link>
         </div>

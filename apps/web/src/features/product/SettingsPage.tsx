@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { airboardApi } from "../../platform/api";
 import { useAirboardAuth } from "../../platform/auth";
 import { FormStatus } from "./FormStatus";
-import { SETTINGS_SECTIONS } from "./pageTitles";
+import { WorkspaceAdminSection, WorkspaceSettings } from "./AdminPage";
+import { isWorkspaceAdminSection, SETTINGS_SECTIONS, WORKSPACE_ADMIN_SECTIONS, WORKSPACE_SECTIONS } from "./pageTitles";
 
 type Preferences = { overlayEnabled: boolean; neonTheme: boolean; videoEnabled: boolean; audioEnabled: boolean };
 type DataRequest = { id: string; request_type: string; status: string; requested_at: string; execute_after: string | null; completed_at: string | null; error_code: string | null };
@@ -32,20 +33,40 @@ export function SettingsPage({ section }: { section: string }) {
     if (!auth.accessToken) return;
     await airboardApi("/me/preferences", { method: "PATCH", accessToken: auth.accessToken, body: JSON.stringify(preferences) });
     localStorage.setItem("airboard.preferences.v1", JSON.stringify(preferences));
-    await auth.refreshAccount(); setSaved("Defaults saved to your account and connected installations.");
+    await auth.refreshAccount(); setSaved("Defaults saved to your account.");
   };
+
+  // Members, policies, SSO and audit have nothing to manage in a workspace of one.
+  const isAdmin = auth.account?.organization.kind !== "personal" && ["owner", "admin"].includes(auth.account?.organization.role ?? "");
+  const workspaceSections = isAdmin ? [...WORKSPACE_SECTIONS, ...WORKSPACE_ADMIN_SECTIONS] : WORKSPACE_SECTIONS;
+  const known = [...SETTINGS_SECTIONS, ...WORKSPACE_SECTIONS, ...WORKSPACE_ADMIN_SECTIONS].some(([id]) => id === section);
+  const sectionLink = ([id, label]: readonly [string, string]) => <Link className={section === id ? "active" : ""} aria-current={section === id ? "page" : undefined} href={`/app/settings/${id}`} key={id}>{label}</Link>;
+
+  // On a phone the sections are one scrolling row; keep the open one in view.
+  const navRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    navRef.current?.querySelector<HTMLElement>('[aria-current="page"]')?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [section, isAdmin]);
 
   return (
     <div className="settings-layout">
-      <nav aria-label="Settings"><h2>Settings</h2>{SETTINGS_SECTIONS.map(([id,label]) => <Link className={section === id ? "active" : ""} aria-current={section === id ? "page" : undefined} href={`/app/settings/${id}`} key={id}>{label}</Link>)}</nav>
+      <nav ref={navRef} aria-label="Settings">
+        <h2>Settings</h2>
+        <h3>Account</h3>
+        {SETTINGS_SECTIONS.map(sectionLink)}
+        <h3>Workspace</h3>
+        {workspaceSections.map(sectionLink)}
+      </nav>
       <section className="settings-panel">
         {section === "profile" ? <><p className="eyebrow">Personal account</p><h1>Profile</h1><label>Display name<input value={name} onChange={(event) => setName(event.target.value)} /></label><label>Email<input disabled value={auth.account?.profile.email ?? ""} /></label><label>Timezone<input disabled value={auth.account?.profile.timezone ?? "UTC"} /></label><button className="button button-primary" onClick={() => void saveProfile()}>Save profile</button></> : null}
-        {section === "preferences" ? <><p className="eyebrow">Default experience</p><h1>Meeting and canvas preferences</h1><p>These defaults follow your account. Media capture still requires affirmative confirmation on the first installation.</p><Toggle label="Enable Airboard overlay" detail="Composite the diagram into supported meeting cameras." value={preferences.overlayEnabled} set={(value) => setPreferences({ ...preferences, overlayEnabled: value })} /><Toggle label="Neon lightboard theme" detail="Use high-contrast glowing strokes over video and screens." value={preferences.neonTheme} set={(value) => setPreferences({ ...preferences, neonTheme: value })} /><Toggle label="Airboard video input" detail="Use the meeting camera for gesture alignment and the camera composite." value={preferences.videoEnabled} set={(value) => setPreferences({ ...preferences, videoEnabled: value })} /><Toggle label="Airboard audio input" detail="Use the microphone for Airo commands when policy allows." value={preferences.audioEnabled} set={(value) => setPreferences({ ...preferences, audioEnabled: value })} /><button className="button button-primary" onClick={() => void savePreferences()}>Save defaults</button></> : null}
+        {section === "preferences" ? <><p className="eyebrow">Default experience</p><h1>Board preferences</h1><p>These defaults follow your account. Your browser asks before Airboard uses your camera or microphone.</p><Toggle label="Neon lightboard theme" detail="Use high-contrast glowing strokes over video and screens." value={preferences.neonTheme} set={(value) => setPreferences({ ...preferences, neonTheme: value })} /><Toggle label="Airboard video input" detail="Show your camera behind the board and use it for hand gestures." value={preferences.videoEnabled} set={(value) => setPreferences({ ...preferences, videoEnabled: value })} /><Toggle label="Airboard audio input" detail="Use the microphone for Airo commands when policy allows." value={preferences.audioEnabled} set={(value) => setPreferences({ ...preferences, audioEnabled: value })} /><button className="button button-primary" onClick={() => void savePreferences()}>Save defaults</button></> : null}
         {section === "connected-accounts" ? <ConnectedAccounts /> : null}
         {section === "notifications" ? <NotificationSettings /> : null}
         {section === "privacy-data" ? <PrivacySettings /> : null}
         {section === "sessions" ? <SessionSettings /> : null}
-        {SETTINGS_SECTIONS.some(([id]) => id === section) ? null : <><h1>Settings</h1><p>That settings page doesn&apos;t exist. Choose a section from the list.</p></>}
+        {section === "workspace" ? <WorkspaceSettings isAdmin={isAdmin} /> : null}
+        {isWorkspaceAdminSection(section) ? (isAdmin ? <WorkspaceAdminSection section={section} /> : <><h1>Workspace settings</h1><p>Only the owners and admins of a team workspace can open this page.</p></>) : null}
+        {known ? null : <><h1>Settings</h1><p>That settings page doesn&apos;t exist. Choose a section from the list.</p></>}
         <FormStatus message={saved} />
       </section>
     </div>

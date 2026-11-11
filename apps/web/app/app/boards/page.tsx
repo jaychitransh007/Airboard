@@ -1,5 +1,4 @@
-import type { Metadata } from "next";
-import { BoardsPage } from "../../../src/features/product/BoardsPage";
+import { redirect } from "next/navigation";
 
-export const metadata: Metadata = { title: "Boards" };
-export default function Boards() { return <BoardsPage />; }
+// Boards live on the home page now; old links and bookmarks land there.
+export default function Boards() { redirect("/app"); }

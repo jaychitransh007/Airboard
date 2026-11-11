@@ -33,7 +33,7 @@ test("help search prioritizes title matches and requires every query term", () =
   const voice = rankHelpArticles(searchItems, "Airo voice");
   assert.equal(voice[0]?.slug, "using-the-board/airo-voice");
 
-  const meet = rankHelpArticles(searchItems, "Meet receiver verification");
+  const meet = rankHelpArticles(searchItems, "Meet present tab");
   assert.equal(meet[0]?.slug, "integrations/google-meet");
 
   assert.deepEqual(rankHelpArticles(searchItems, "Meet nonexistent-term"), []);
@@ -41,6 +41,6 @@ test("help search prioritizes title matches and requires every query term", () =
 });
 
 test("help search finds exact customer-visible error codes", () => {
-  const results = rankHelpArticles(searchItems, "CHROME_EXTENSION_NOT_REACHABLE");
+  const results = rankHelpArticles(searchItems, "TRANSCRIPTION_RECONNECT_FAILED");
   assert.equal(results[0]?.slug, "reference/error-codes");
 });

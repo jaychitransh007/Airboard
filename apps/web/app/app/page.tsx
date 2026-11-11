@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Dashboard } from "../../src/features/product/Dashboard";
+import { AirboardsHome } from "../../src/features/product/AirboardsHome";
 
-export const metadata: Metadata = { title: "Overview" };
-export default function AppHome() { return <Dashboard />; }
+export const metadata: Metadata = { title: "Airboards" };
+export default function AppHome() { return <AirboardsHome />; }

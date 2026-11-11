@@ -6,8 +6,8 @@ categoryLabel: Getting started
 order: 3
 status: shipped
 audiences: ["everyone"]
-lastVerified: 2026-11-05
-sources: ["apps/web/src/features/product/BoardsPage.tsx", "apps/web/src/features/product/AuthenticatedAirboard.tsx", "apps/web/src/features/board/AirboardPrototype.tsx"]
+lastVerified: 2026-11-11
+sources: ["apps/web/src/features/product/AirboardsHome.tsx", "apps/web/src/features/product/AuthenticatedAirboard.tsx", "apps/web/src/features/board/AirboardPrototype.tsx"]
 ---
 
 This walkthrough creates a two-object diagram. You can complete it with typed
@@ -15,7 +15,7 @@ commands and a pointer; camera and microphone input are optional.
 
 ## Create the board
 
-1. Sign in and choose **New Airboard**.
+1. Sign in. On **Airboards**, choose **Create Airboard**.
 2. The board opens as **Untitled Airboard**. Click the title in the top bar to
    rename it.
 
@@ -59,6 +59,7 @@ or **•••** then **Redo** when you are ready.
 
 ## Confirm the board was saved
 
-Return to **Boards** and reopen the board. The title, latest version, objects,
+Choose **←** (Back to boards) in the top bar to return to **Airboards**, and
+reopen the board. The title, latest version, objects,
 and connector should remain available. If saving fails, keep the board open and
 follow [Troubleshooting](/help/reference/troubleshooting).

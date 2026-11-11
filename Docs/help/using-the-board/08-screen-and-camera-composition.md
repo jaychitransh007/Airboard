@@ -6,7 +6,7 @@ categoryLabel: Using the board
 order: 8
 status: shipped
 audiences: ["everyone", "creators", "tutors"]
-lastVerified: 2026-11-05
+lastVerified: 2026-11-11
 sources: ["README.md", "apps/web/src/features/board/lightboardComposition.ts", "apps/web/src/features/board/screenUnderlay.ts", "apps/web/src/features/board/lightboardRecorder.ts"]
 ---
 
@@ -25,6 +25,10 @@ The selected screen is used locally by this composition flow. The board uses a
 light global dim and local contrast plates to keep diagram content legible.
 
 ## Use a camera
+
+Open the board menu (**•••**) and choose **Turn on Airo voice and hands** to
+start the camera. It shows behind the board while **Camera behind the dark
+canvas when no screen is selected** is on in **Board settings**.
 
 Camera composition uses a fixed order:
 
@@ -47,5 +51,5 @@ Studio recording uses the same unmirrored full-frame composition shown in the
 workspace. PNG export captures the diagram output. Verify the file before
 sharing it externally.
 
-For a meeting integration, always ask a second participant to confirm the
-receiver-side image. Local preview alone is not audience verification.
+To show the composition in a Google Meet call, present your Airboard tab. See
+[Use Airboard in Google Meet](/help/integrations/google-meet).
