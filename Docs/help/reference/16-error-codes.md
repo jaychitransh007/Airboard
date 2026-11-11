@@ -28,7 +28,7 @@ ID before retrying.
 | `JOIN_LINK_REPLACED` | The host made a new live link, so this one no longer lets anyone new in. | Ask the host for the new link. |
 | `EXTERNAL_GUESTS_DISABLED` | The board's workspace has turned off guests, so only its signed-in members can join live boards, and view-only links don't work. | Sign in with the account the workspace invited, or ask its admin. |
 | `VOICE_DISABLED_BY_ADMIN` | A workspace admin turned off voice commands. | Use typed commands, or ask your admin. |
-| `ASSET_QUOTA_EXCEEDED` | The workspace has used its 2 GB of board images and videos. | Delete boards you no longer need and empty them from Trash, or contact support. |
+| `ASSET_QUOTA_EXCEEDED` | The workspace has used its 2 GB of board images and videos. | Delete boards you no longer need, or contact support. |
 | `POLICY_UNAVAILABLE` | Airboard couldn't check your workspace's policy just now, so it refused rather than guess. | Try again in a moment. |
 | `ACTIVE_ENTITLEMENT_REQUIRED`, `OWNER_ENTITLEMENT_REQUIRED` | The workspace's pilot or plan has ended, so new boards, live sessions and Airo voice are off. Saved boards still open and save. | Choose **Ask for more pilot time** on **Plan & billing**. |
 

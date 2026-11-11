@@ -160,7 +160,7 @@ import {
   resolveBoardLink,
   uploadBoardAsset,
 } from "./boardContentClient.ts";
-import { boardDeletionSnapshot, validateBoardTitle } from "./boardLifecycle";
+import { validateBoardTitle } from "./boardLifecycle";
 import { HoldToEditTracker } from "./holdToEditTracker";
 import { selectLandmarkManipulationSignal } from "./landmarkManipulationInput";
 import {
@@ -648,7 +648,7 @@ function parseDiagramVisibilityIntent(text: string): "hide" | "show" | null {
 
 /** Limits people can act on get plain words; anything else keeps its code for support. */
 function mediaUploadFailure(code: string): string {
-  if (code === "ASSET_QUOTA_EXCEEDED") return "This workspace has used its 2 GB for board images and videos. Delete boards you no longer need and empty them from Trash.";
+  if (code === "ASSET_QUOTA_EXCEEDED") return "This workspace has used its 2 GB for board images and videos. Delete boards you no longer need to free space.";
   if (code === "RATE_LIMITED") return "That's a lot of uploads at once. Wait a minute, then add the rest.";
   if (code === "BOARD_READ_ONLY_ROLE") return "Your role in this workspace can view boards but not add to them.";
   return code ? `Media upload failed: ${code}` : "Media upload failed.";
@@ -726,7 +726,8 @@ export function AirboardPrototype({
   onPersistentBoardChange?: (state: BoardState) => void | Promise<void>;
   /** Durable board lifecycle is controlled by the authenticated route owner. */
   onRenameBoard?: (title: string) => Promise<void>;
-  onDeleteBoard?: (latestState: BoardState) => Promise<void>;
+  /** Deletes the saved board for good. */
+  onDeleteBoard?: () => Promise<void>;
   /** Durable board identity and persistence state shown in the standalone editor chrome. */
   boardTitle?: string;
   persistentSaveStatus?: "saved" | "saving" | "error";
@@ -10745,22 +10746,22 @@ export function AirboardPrototype({
       clearTimeout(persistenceTimerRef.current);
       persistenceTimerRef.current = null;
     }
+    // Nothing more to save: the board is about to be deleted for good. If the
+    // delete fails the unsaved edits are put back, to save with the next change.
+    const unsaved = pendingPersistenceRef.current;
     pendingPersistenceRef.current = null;
-    const latestState = boardDeletionSnapshot(
-      boardRef.current,
-      persistentBoardId ?? boardRef.current.boardId,
-    );
     setDeleteStatus("deleting");
     setDeleteError(null);
     try {
-      await onDeleteBoard(latestState);
+      await onDeleteBoard();
     } catch (caught) {
+      pendingPersistenceRef.current ??= unsaved;
       setDeleteStatus("error");
       setDeleteError(
-        caught instanceof Error ? caught.message : "Could not move this canvas to Trash.",
+        caught instanceof Error ? caught.message : "Could not delete this canvas.",
       );
     }
-  }, [deleteStatus, onDeleteBoard, persistentBoardId]);
+  }, [deleteStatus, onDeleteBoard]);
 
   if (surface === "meet-side-panel") {
     return (
@@ -10849,11 +10850,11 @@ export function AirboardPrototype({
             aria-modal="true"
             aria-labelledby="delete-canvas-title"
           >
-            <span className="eyebrow">Move to Trash</span>
+            <span className="eyebrow">Delete</span>
             <h2 id="delete-canvas-title">Delete “{boardTitle}”?</h2>
             <p>
-              This canvas can be restored from Trash until your workspace retention policy
-              permanently purges it.
+              This permanently deletes the canvas with its versions, images, share links and live-session history.
+              It can&apos;t be undone.
             </p>
             {deleteError ? <p className="board-lifecycle-error" role="alert">{deleteError}</p> : null}
             <div className="board-lifecycle-actions">
@@ -10874,7 +10875,7 @@ export function AirboardPrototype({
                 disabled={deleteStatus === "deleting"}
                 onClick={() => void confirmDeleteBoard()}
               >
-                {deleteStatus === "deleting" ? "Saving and moving…" : "Move to Trash"}
+                {deleteStatus === "deleting" ? "Deleting…" : "Delete permanently"}
               </button>
             </div>
           </section>
@@ -11174,7 +11175,7 @@ export function AirboardPrototype({
                         }}
                       >
                         <span aria-hidden="true">⌫</span>
-                        Move to Trash
+                        Delete canvas
                       </button>
                     ) : null}
                   </div>

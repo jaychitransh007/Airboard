@@ -20,8 +20,8 @@ boards and versions, images and videos you add to boards, visibility and
 sharing records, integration state, audit events, and billing references
 required to operate and secure the service.
 
-Active boards remain until deletion. Deleted boards are purged after the
-organization recovery window.
+Boards remain until you delete them. Deleting a board erases it straight
+away, with its versions and images.
 
 Photos you add to a board are saved without their hidden details, such as where
 and when they were taken or which camera took them.

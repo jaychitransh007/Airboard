@@ -21,14 +21,3 @@ export function validateBoardTitle(value: string): BoardTitleValidation {
   }
   return { valid: true, title };
 }
-
-/** Content-only snapshot used by the save-before-soft-delete contract. */
-export function boardDeletionSnapshot(state: BoardState, boardId: string): BoardState {
-  return {
-    ...state,
-    boardId,
-    activeStrokes: {},
-    participants: {},
-    cursors: {},
-  };
-}

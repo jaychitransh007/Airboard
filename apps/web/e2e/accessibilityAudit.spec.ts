@@ -147,7 +147,6 @@ const SIGNED_IN_PAGES = [
   "/app",
   "/app/boards",
   "/app/shared",
-  "/app/trash",
   "/app/activity",
   "/app/integrations",
   "/app/billing",
@@ -424,7 +423,7 @@ test("library: a menu item's dialog hands focus back to the menu button", async 
 
   await page.keyboard.press("Enter");
   await page.keyboard.press("ArrowDown");
-  await expect(menu.getByRole("menuitem", { name: "Move to Trash" })).toBeFocused();
+  await expect(menu.getByRole("menuitem", { name: "Delete canvas" })).toBeFocused();
   await page.keyboard.press("Enter");
   const confirm = page.getByRole("dialog", { name: `Delete “${fixture.title}”?` });
   await expect(confirm).toBeVisible();
@@ -447,9 +446,9 @@ test("board: menus and dialogs hand focus back to the button that opened them", 
   await expect(menu).toBeHidden();
   await expect(more).toBeFocused();
 
-  // Move to Trash opens a dialog; cancelling it returns to •••.
+  // Delete canvas opens a dialog; cancelling it returns to •••.
   await page.keyboard.press("Enter");
-  await menu.getByRole("menuitem", { name: "Move to Trash" }).focus();
+  await menu.getByRole("menuitem", { name: "Delete canvas" }).focus();
   await page.keyboard.press("Enter");
   const confirm = page.getByRole("dialog", { name: `Delete “${fixture.title}”?` });
   await expect(confirm).toBeVisible();

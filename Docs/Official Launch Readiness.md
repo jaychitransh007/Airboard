@@ -47,7 +47,7 @@ Zoom and Microsoft Teams require their own implementation, identity, client-matr
 
 ### 4. Core usage
 
-- Implemented: persistent boards, versions, recent/shared/archived/trash views, sharing, JSON/image export paths, live sessions, pointer, typed commands, voice/semantic routing, gesture controls, screen underlay and presentation modes.
+- Implemented: persistent boards, versions, recent and shared views, sharing, JSON/image export paths, live sessions, pointer, typed commands, voice/semantic routing, gesture controls, screen underlay and presentation modes.
 - Reliability boundary: provider-powered voice requires configured Deepgram; semantic fallback requires configured OpenAI. Deterministic typed commands remain the provider-independent path.
 - Deleted boards remain recoverable for the organization policy window and are then hard-deleted by the scheduled lifecycle job.
 - Active boards are not automatically expired.
@@ -79,7 +79,7 @@ Zoom and Microsoft Teams require their own implementation, identity, client-matr
 | --- | --- | --- |
 | Identity and profile | email, display name, provider identity, locale, timezone, preferences | account lifetime; removed by executed account deletion |
 | Organization and access | organization, membership, role, invitations, policy, directory configuration | organization/account lifetime; provider and directory obligations need contract review |
-| Boards | title, description, latest state, versions, visibility, share tokens as hashes | active until deletion; soft-deleted board purged after the configured 1–3650 day recovery window |
+| Boards | title, description, latest state, versions, visibility, share tokens as hashes | active until deletion; deletion is immediate and permanent |
 | Media | live camera frames and microphone audio | not stored by Airboard |
 | Voice processing | Deepgram receives live audio; OpenAI may receive bounded command text and board context on semantic fallback | provider handling per final vendor terms; Airboard content-free traces expire within 14 days |
 | Product analytics | allowlisted event, timestamp, bounded content-free properties | 90 days |

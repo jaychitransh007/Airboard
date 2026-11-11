@@ -279,7 +279,7 @@ async function organizationAdmin(auth: AuthService, request: FastifyRequest, rep
 
 /**
  * The board behind a link, or null when the link should not work: unknown,
- * expired or turned off; the board trashed; the link's creator no longer an
+ * expired or turned off; the board deleted; the link's creator no longer an
  * active editing member who can open the board; or external guests turned off.
  * Lookup failures count as "not working", so a link never opens by accident.
  */

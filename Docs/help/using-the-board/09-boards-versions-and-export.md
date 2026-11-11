@@ -62,24 +62,29 @@ Choose **Share** in the board header.
   view-only link**. People who open it see the saved board without an account;
   they can move around and zoom, but not edit, and they never see who joined
   your live sessions. Copy the link straight away: Airboard shows each link only
-  once. **Turn off** stops a link immediately. A board in Trash cannot be
-  opened through its links. A link also stops working when the person who made
+  once. **Turn off** stops a link immediately. A deleted board's links stop
+  working. A link also stops working when the person who made
   it leaves the workspace, is suspended or becomes a Viewer, and while an admin
   has turned off **External guests**. Admins can see and turn off every link in
   **Administration → Policy**.
 - **Send a picture.** **Download PNG** saves the board as an image.
 
 Members whose role is **Viewer** or **Billing** open boards view-only: they can
-move around and zoom, but not edit, share, move to Trash or restore.
+move around and zoom, but not edit, share or delete.
 
 When you choose **Can edit**, anyone with the live link can change the board
 while it works, so share it only with the people you are working with.
 
-## Trash and restore
+## Find and delete boards
 
-Moving a board to Trash saves its latest state and soft-deletes the board. Open
-**Boards → Trash** to restore it before the organization recovery window
-expires. Administrators can configure that window within allowed limits.
+**Boards** lists every board you can open, most recently changed first. Search
+finds boards by title or by what's on them.
+
+**Delete canvas** (in a board's **•••** menu, or on its card in **Boards**)
+deletes the board for good, with its versions, images, view-only links and live-session
+history.
+There is no Trash, so it can't be undone. Anyone in a live session on it is
+told the session ended.
 
 ## Export
 

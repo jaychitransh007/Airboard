@@ -272,22 +272,17 @@ function EditableAirboard({ boardId }: { boardId?: string }) {
     setBoard((current) => current ? { ...current, visibility: result.board.visibility } : current);
   }, [auth.accessToken, board]);
 
-  const deleteBoard = useCallback(async (latestState: BoardState) => {
+  // Deletion is permanent, so there is nothing to save first.
+  const deleteBoard = useCallback(async () => {
     if (!auth.accessToken || !board) throw new Error("The saved canvas is not available.");
-    try {
-      await saveBoardState(latestState);
-    } catch (caught) {
-      // On a version conflict the other editor's state is kept as the board's
-      // latest version and moves to Trash with it; anything else stops here.
-      if (!(caught instanceof AirboardApiError) || caught.code !== "BOARD_VERSION_CONFLICT") throw caught;
-    }
-    allowUnloadRef.current = true;
     await airboardApi(`/boards/${board.id}`, {
       method: "DELETE",
       accessToken: auth.accessToken,
     });
+    // Only once it is gone: a failed delete keeps the leave-page guard.
+    allowUnloadRef.current = true;
     router.replace("/app/boards?deleted=1");
-  }, [auth.accessToken, board, router, saveBoardState]);
+  }, [auth.accessToken, board, router]);
   const accessToken = auth.accessToken;
   const durableBoardId = board?.id;
   // Stable across renders, so the Share dialog loads the links once per opening.

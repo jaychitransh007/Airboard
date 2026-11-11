@@ -59,7 +59,7 @@ test("every page names itself in the browser title", () => {
 
 test("section pages have distinct titles, so route changes are announced", () => {
   const titles = [
-    ...["activity", "shared", "trash"].map(appSectionTitle),
+    ...["activity", "shared"].map(appSectionTitle),
     ...["overview", "members", "policies", "audit-logs", "installations", "identity-directory"].map(adminSectionTitle),
     ...SETTINGS_SECTIONS.map(([id]) => settingsSectionTitle(id)),
   ];

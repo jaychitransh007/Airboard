@@ -24,7 +24,7 @@ sign in with the address that received the invitation.
 - **Owner** and **Admin** manage the workspace and edit boards.
 - **Member** creates, edits and shares boards.
 - **Viewer** and **Billing** open the workspace's shared boards view-only. They
-  can't create, edit, share, move to Trash or restore boards, or start live
+  can't create, edit, share or delete boards, or start live
   sessions. Billing also manages the plan.
 
 ## Organization policy
@@ -41,7 +41,6 @@ extension. Review it before troubleshooting an apparently missing feature.
   doesn't start for hand gestures.
 - **Exports.** When off, **Export PNG**, **Export PDF** and **Copy image** stop
   working. People can still take screenshots.
-- **Deleted-board recovery window** sets how many days boards stay in Trash.
 
 Changes reach people the next time they open a board. People already in a live
 session keep their access until it ends.

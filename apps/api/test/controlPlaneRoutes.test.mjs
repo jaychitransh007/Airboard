@@ -379,9 +379,11 @@ test("another member's private board is invisible; organization boards stay shar
   assert.equal(client.tables.boards[0].title, "Board");
   assert.equal(client.tables.boards[0].deleted_at, null);
 
+  // A board deleted before Trash was removed stays out of every list.
   client.tables.boards[0].deleted_at = "2026-11-02T00:00:00.000Z";
-  assert.equal((await as("GET", "/boards?scope=trash")).json().boards.length, 0);
-  assert.equal((await as("POST", `/boards/${BOARD}/restore`)).statusCode, 404);
+  for (const url of ["/boards", "/boards?scope=trash"]) {
+    assert.ok(!(await as("GET", url)).json().boards.some((board) => board.id === BOARD), url);
+  }
 
   assert.equal((await as("GET", `/boards/${SHARED}`)).statusCode, 200);
   assert.equal((await as("PATCH", `/boards/${SHARED}`, { title: "Team map v2" })).statusCode, 200);
@@ -902,12 +904,13 @@ test("live sessions use the workspace's entitlement, so team members can start t
   );
 });
 
-test("team members save, trash and restore a shared board", async (t) => {
+test("team members save and permanently delete a shared board", async (t) => {
   const OTHER = "99999999-9999-4999-8999-999999999999";
   const client = createFakeSupabase({
     boards: [boardRow({ owner_profile_id: OTHER, visibility: "organization" })],
     board_versions: [],
     audit_events: [],
+    board_assets: [{ id: "asset-1", organization_id: ORG, board_id: BOARD, storage_path: `${ORG}/${BOARD}/photo.png` }],
   });
   const server = await buildApp(t, client);
   const as = (method, url, payload) =>
@@ -923,9 +926,10 @@ test("team members save, trash and restore a shared board", async (t) => {
   assert.deepEqual(client.tables.boards[0].latest_state, { nodes: ["member"] });
 
   assert.equal((await as("DELETE", `/boards/${BOARD}`)).statusCode, 204);
-  assert.notEqual(client.tables.boards[0].deleted_at, null);
-  assert.equal((await as("POST", `/boards/${BOARD}/restore`)).statusCode, 200);
-  assert.equal(client.tables.boards[0].deleted_at, null);
+  assert.equal(client.tables.boards.length, 0, "gone for good, not moved to a Trash");
+  assert.ok(JSON.stringify(client.storageCalls).includes(`${ORG}/${BOARD}/photo.png`), "its uploaded files are erased");
+  assert.equal((await as("POST", `/boards/${BOARD}/restore`)).statusCode, 404, "there is nothing to restore");
+  assert.equal((await as("DELETE", `/boards/${BOARD}`)).statusCode, 404);
 });
 
 test("session start reads the owner, entitlement and board together and still guards private boards", async () => {
@@ -1063,7 +1067,6 @@ test("Viewer and Billing members open boards but cannot change or share them", a
       ["PATCH", `/boards/${BOARD}`, { version: 4, state: { nodes: ["changed"] } }],
       ["PATCH", `/boards/${BOARD}`, { title: "Renamed" }],
       ["DELETE", `/boards/${BOARD}`],
-      ["POST", `/boards/${BOARD}/restore`],
       ["POST", `/boards/${BOARD}/share-links`, {}],
     ]) {
       const response = await as(method, url, payload);
