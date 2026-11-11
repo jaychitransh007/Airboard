@@ -133,22 +133,6 @@ export class PinchHysteresis {
   }
 }
 
-/**
- * Converts a normalized thumb/index distance into a 0..1 pinch strength.
- * Distances at or below closedDistance yield 1; distances at or above
- * openDistance yield 0. Callers should normalize distance by hand scale.
- */
-export function pinchStrengthFromDistance(
-  normalizedDistance: number,
-  closedDistance = 0.2,
-  openDistance = 0.75,
-): number {
-  if (!(openDistance > closedDistance)) {
-    throw new Error("openDistance must be greater than closedDistance");
-  }
-  return clamp((openDistance - normalizedDistance) / (openDistance - closedDistance));
-}
-
 function validateConfig(config: PinchHysteresisConfig): void {
   if (
     !Number.isFinite(config.engageThreshold) ||

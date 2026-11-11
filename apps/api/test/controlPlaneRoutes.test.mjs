@@ -379,11 +379,9 @@ test("another member's private board is invisible; organization boards stay shar
   assert.equal(client.tables.boards[0].title, "Board");
   assert.equal(client.tables.boards[0].deleted_at, null);
 
-  // A board deleted before Trash was removed stays out of every list.
+  // A board deleted before Trash was removed stays out of the list.
   client.tables.boards[0].deleted_at = "2026-11-02T00:00:00.000Z";
-  for (const url of ["/boards", "/boards?scope=trash"]) {
-    assert.ok(!(await as("GET", url)).json().boards.some((board) => board.id === BOARD), url);
-  }
+  assert.ok(!(await as("GET", "/boards")).json().boards.some((board) => board.id === BOARD));
 
   assert.equal((await as("GET", `/boards/${SHARED}`)).statusCode, 200);
   assert.equal((await as("PATCH", `/boards/${SHARED}`, { title: "Team map v2" })).statusCode, 200);
@@ -418,11 +416,10 @@ test("metadata-only board patches need no version and missing boards stay 404", 
   const client = createFakeSupabase({ boards: [boardRow()], board_versions: [], audit_events: [] });
   const server = await buildApp(t, client);
 
-  const renamed = await patchBoard(server, { title: "Renamed", archived: true });
+  const renamed = await patchBoard(server, { title: "Renamed" });
   assert.equal(renamed.statusCode, 200, renamed.body);
   assert.equal(client.tables.boards[0].title, "Renamed");
   assert.equal(client.tables.boards[0].latest_version, 3);
-  assert.ok(client.tables.boards[0].archived_at);
 
   assert.equal((await patchBoard(server, { state: { nodes: [] } })).json().error, "BOARD_VERSION_REQUIRED");
 
@@ -505,7 +502,7 @@ test("a storage failure keeps expired boards for the next lifecycle run", async 
   client.storageError = { statusCode: "500", message: "storage unavailable" };
   const server = await buildApp(t, client);
   const response = await runLifecycle(server);
-  // A failed step fails the run so Cloud Scheduler logs an error and alerts.
+  // A failed step fails the run so Cloud Scheduler logs an error.
   assert.equal(response.statusCode, 500, response.body);
   assert.equal(response.json().error, "LIFECYCLE_STEP_FAILED");
   assert.equal(response.json().failures, 1);
@@ -628,7 +625,7 @@ test("account deletion removes every personal workspace left without a member an
   const server = await buildApp(t, client);
 
   const failed = await runLifecycle(server);
-  assert.equal(failed.statusCode, 500, "a failed erasure alerts");
+  assert.equal(failed.statusCode, 500, "a failed erasure fails the run");
   assert.deepEqual(failed.json().dataRequests, { completed: 0, failed: 1, storageFailures: 0 });
   assert.equal(client.tables.data_requests[0].status, "queued", "it is retried, not abandoned");
   assert.equal(client.tables.data_requests[0].attempts, 1);
@@ -839,7 +836,7 @@ test("view-only links refuse other people's boards, expired or unknown links and
   assert.equal((await server.inject({ method: "GET", url: `/shared-boards/${token}` })).statusCode, 404, "an expired link");
   client.tables.board_shares[0].expires_at = null;
   client.tables.boards[0].deleted_at = new Date().toISOString();
-  assert.equal((await server.inject({ method: "GET", url: `/shared-boards/${token}` })).statusCode, 404, "a board in Trash");
+  assert.equal((await server.inject({ method: "GET", url: `/shared-boards/${token}` })).statusCode, 404, "a board deleted before Trash was removed");
 });
 
 test("a board holds at most 20 live view-only links", async (t) => {

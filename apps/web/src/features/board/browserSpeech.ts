@@ -1,24 +1,4 @@
 import { AIRBOARD_SEMANTIC_TRANSCRIPTION_KEYTERMS } from "@airboard/core/semantic-capabilities";
-import { blockedMediaHelp } from "./mediaPermissionHelp.ts";
-
-export type BrowserSpeechCallbacks = {
-  onStart?: () => void;
-  onInterim?: (transcript: string) => void;
-  onFinal: (transcript: string) => void;
-  onEnd?: () => void;
-  onError?: (message: string) => void;
-};
-
-export type BrowserSpeechSession = {
-  start(): void;
-  stop(): void;
-  abort(): void;
-};
-
-export type BrowserSpeechHeardEvent = {
-  transcript: string;
-  isFinal: boolean;
-};
 
 export type BrowserWakeEvent = {
   wakePhrase: string;
@@ -36,37 +16,14 @@ export type BrowserWakeTranscriptClassification = {
   commands: BrowserWakeCommandEvent[];
 };
 
-export type BrowserWakeSpeechEndReason = "stopped" | "aborted" | "error";
-
-export type BrowserWakeSpeechCallbacks = {
-  onStart?: () => void;
-  onListening?: (listening: boolean) => void;
-  onHeard?: (event: BrowserSpeechHeardEvent) => void;
-  onInterim?: (transcript: string) => void;
+export type BrowserWakeCommandCallbacks = {
   onWake?: (event: BrowserWakeEvent) => void;
   onCommand: (event: BrowserWakeCommandEvent) => void;
-  onError?: (message: string, code?: string) => void;
-  onEnd?: (reason: BrowserWakeSpeechEndReason) => void;
-};
-
-export type BrowserWakeSpeechOptions = {
-  language?: string;
-  restartDelayMs?: number;
-};
-
-export type BrowserWakeSpeechSession = BrowserSpeechSession & {
-  isListening(): boolean;
 };
 
 export type BrowserWakeCommandRouter = {
   consumeFinalTranscript(transcript: string): void;
   reset(): void;
-};
-
-export type AirboardVoiceCommandRecovery = {
-  command: string;
-  objectType: string;
-  basis: "constrained_asr_alias";
 };
 
 export const AIRBOARD_TRANSCRIPTION_KEYTERMS = [
@@ -90,252 +47,14 @@ export const AIRBOARD_TRANSCRIPTION_KEYTERMS = [
   "rectangle",
 ] as const;
 
-type SpeechResultLike = {
-  isFinal: boolean;
-  0?: { transcript?: string };
-};
-
-type SpeechResultListLike = {
-  length: number;
-  [index: number]: SpeechResultLike | undefined;
-};
-
-type SpeechRecognitionEventLike = Event & {
-  resultIndex?: number;
-  results?: SpeechResultListLike;
-};
-
-type SpeechRecognitionErrorEventLike = Event & {
-  error?: string;
-  message?: string;
-};
-
-type SpeechRecognitionLike = {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  maxAlternatives: number;
-  onstart: (() => void) | null;
-  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
-  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
-  onend: (() => void) | null;
-  start(): void;
-  stop(): void;
-  abort(): void;
-};
-
-type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
-
-type SpeechWindow = Window & {
-  SpeechRecognition?: SpeechRecognitionConstructor;
-  webkitSpeechRecognition?: SpeechRecognitionConstructor;
-};
-
-export function supportsBrowserSpeech(): boolean {
-  if (typeof window === "undefined") {
-    return false;
-  }
-  const speechWindow = window as SpeechWindow;
-  return Boolean(speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition);
-}
-
-/**
- * Creates a long-lived speech session that only emits commands introduced by
- * an Airboard wake phrase. Browser speech engines routinely end recognition
- * after a period of silence, so the session restarts those normal endings
- * until its caller explicitly stops or aborts it.
- */
-export function createBrowserWakeSpeechSession(
-  callbacks: BrowserWakeSpeechCallbacks,
-  options: BrowserWakeSpeechOptions = {},
-): BrowserWakeSpeechSession | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  const speechWindow = window as SpeechWindow;
-  const Recognition = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
-  if (!Recognition) {
-    return null;
-  }
-
-  const recognition = new Recognition();
-  const restartDelayMs = Math.max(0, options.restartDelayMs ?? 250);
-  recognition.continuous = true;
-  recognition.interimResults = true;
-  recognition.lang = options.language ?? "en-US";
-  recognition.maxAlternatives = 1;
-
-  let wantsRecognition = false;
-  let listening = false;
-  let startReported = false;
-  let endReported = false;
-  let requestedEnd: BrowserWakeSpeechEndReason | null = null;
-  let restartTimer: ReturnType<typeof setTimeout> | null = null;
-  const commandRouter = createBrowserWakeCommandRouter(callbacks);
-
-  const setListening = (nextListening: boolean) => {
-    if (listening === nextListening) {
-      return;
-    }
-    listening = nextListening;
-    callbacks.onListening?.(nextListening);
-  };
-
-  const clearRestart = () => {
-    if (restartTimer !== null) {
-      clearTimeout(restartTimer);
-      restartTimer = null;
-    }
-  };
-
-  const reportEnd = (reason: BrowserWakeSpeechEndReason) => {
-    if (endReported) {
-      return;
-    }
-    endReported = true;
-    setListening(false);
-    callbacks.onEnd?.(reason);
-  };
-
-  const failSession = (message: string, code?: string) => {
-    wantsRecognition = false;
-    requestedEnd = "error";
-    clearRestart();
-    callbacks.onError?.(message, code);
-    if (!listening) {
-      reportEnd("error");
-    }
-  };
-
-  const startRecognition = () => {
-    if (!wantsRecognition) {
-      return;
-    }
-    try {
-      recognition.start();
-    } catch (error) {
-      if (isRecognitionAlreadyStartedError(error)) {
-        return;
-      }
-      failSession(
-        error instanceof Error
-          ? error.message
-          : "Speech recognition could not be restarted.",
-      );
-    }
-  };
-
-  const scheduleRestart = () => {
-    if (!wantsRecognition || restartTimer !== null) {
-      return;
-    }
-    restartTimer = setTimeout(() => {
-      restartTimer = null;
-      startRecognition();
-    }, restartDelayMs);
-  };
-
-  recognition.onstart = () => {
-    if (!wantsRecognition) {
-      try {
-        recognition.abort();
-      } catch {
-        reportEnd(requestedEnd ?? "aborted");
-      }
-      return;
-    }
-    clearRestart();
-    setListening(true);
-    if (!startReported) {
-      startReported = true;
-      callbacks.onStart?.();
-    }
-  };
-
-  recognition.onresult = (event) => {
-    const transcripts = collectSpeechTranscripts(event);
-    if (transcripts.interim) {
-      callbacks.onHeard?.({ transcript: transcripts.interim, isFinal: false });
-      callbacks.onInterim?.(transcripts.interim);
-    }
-    if (transcripts.final) {
-      callbacks.onHeard?.({ transcript: transcripts.final, isFinal: true });
-      commandRouter.consumeFinalTranscript(transcripts.final);
-    }
-  };
-
-  recognition.onerror = (event) => {
-    if (event.error === "aborted" && requestedEnd === "aborted") {
-      return;
-    }
-
-    const message = describeContinuousSpeechError(event.error, event.message);
-    callbacks.onError?.(message, event.error);
-    if (isFatalSpeechError(event.error)) {
-      wantsRecognition = false;
-      requestedEnd = "error";
-      clearRestart();
-    }
-  };
-
-  recognition.onend = () => {
-    setListening(false);
-    if (wantsRecognition) {
-      scheduleRestart();
-      return;
-    }
-    reportEnd(requestedEnd ?? "error");
-  };
-
-  const requestEnd = (reason: Exclude<BrowserWakeSpeechEndReason, "error">) => {
-    const wasActive = wantsRecognition || listening || restartTimer !== null;
-    wantsRecognition = false;
-    requestedEnd = reason;
-    commandRouter.reset();
-    clearRestart();
-    if (!wasActive) {
-      reportEnd(reason);
-      return;
-    }
-    try {
-      if (reason === "aborted") {
-        recognition.abort();
-      } else {
-        recognition.stop();
-      }
-    } catch {
-      reportEnd(reason);
-    }
-  };
-
-  return {
-    start: () => {
-      if (wantsRecognition) {
-        return;
-      }
-      wantsRecognition = true;
-      requestedEnd = null;
-      startReported = false;
-      endReported = false;
-      commandRouter.reset();
-      clearRestart();
-      startRecognition();
-    },
-    stop: () => requestEnd("stopped"),
-    abort: () => requestEnd("aborted"),
-    isListening: () => listening,
-  };
-}
-
 export function extractBrowserWakeCommands(transcript: string): BrowserWakeCommandEvent[] {
   return classifyBrowserWakeTranscript(transcript).commands;
 }
 
 /**
- * Routes finalized transcripts from any realtime speech provider through the
- * same wake-word semantics as the browser fallback. A wake-only turn arms the
- * immediately following finalized turn, which lets users pause after “Airo”.
+ * Routes finalized transcripts from the realtime speech provider through
+ * Airboard's wake-word semantics. A wake-only turn arms the immediately
+ * following finalized turn, which lets users pause after “Airo”.
  */
 /**
  * How long a bare "Airo" stays armed before it is dropped. Without this cap a
@@ -345,7 +64,7 @@ export function extractBrowserWakeCommands(transcript: string): BrowserWakeComma
 export const WAKE_PENDING_MAX_AGE_MS = 10_000;
 
 export function createBrowserWakeCommandRouter(
-  callbacks: Pick<BrowserWakeSpeechCallbacks, "onWake" | "onCommand">,
+  callbacks: BrowserWakeCommandCallbacks,
   options: { now?: () => number } = {},
 ): BrowserWakeCommandRouter {
   const now = options.now ?? (() => Date.now());
@@ -759,79 +478,6 @@ export function normalizeBrowserWakeCommand(command: string): string {
 }
 
 /**
- * Recovers a small, auditable set of create commands when ASR returns a
- * phonetically plausible but unparsable phrase. Recovery is deliberately
- * constrained to known diagram objects and must be confirmed by the user;
- * it is never a general fuzzy match that can silently mutate the board.
- */
-export function recoverAirboardVoiceCommand(
-  command: string,
-): AirboardVoiceCommandRecovery | null {
-  const normalized = normalizeVoiceRecoveryText(command);
-  const createPrefix = String.raw`(?:(?:add|at|and|it|it\s+is|this\s+is|there\s+is)(?:\s+(?:a|an|the|her))?\s+)?`;
-  const hereSuffix = String.raw`(?:\s+(?:here|hear))?`;
-  const aliases: readonly { objectType: string; pattern: string; command: string }[] = [
-    {
-      objectType: "circle",
-      pattern: String.raw`(?:circle|circles|circular|career)`,
-      command: "add a circle here",
-    },
-    {
-      objectType: "user",
-      pattern: String.raw`(?:user|users|you\s+sir)`,
-      command: "add a user here",
-    },
-    {
-      objectType: "API",
-      pattern: String.raw`(?:api|a\s+p\s+i|endpoint|gateway)`,
-      command: "add an API here",
-    },
-    {
-      objectType: "database",
-      pattern: String.raw`(?:database|data\s*base|data\s+bass|datastore)`,
-      command: "add a database here",
-    },
-    {
-      objectType: "service",
-      pattern: String.raw`(?:service|server|microservice)`,
-      command: "add a service here",
-    },
-    {
-      objectType: "queue",
-      pattern: String.raw`(?:queue|cue|message\s+queue)`,
-      command: "add a queue here",
-    },
-    {
-      objectType: "decision",
-      pattern: String.raw`(?:decision|condition|diamond)`,
-      command: "add a decision here",
-    },
-    {
-      objectType: "note",
-      pattern: String.raw`(?:note|sticky|sticky\s+note)`,
-      command: "add a note here",
-    },
-    {
-      objectType: "box",
-      pattern: String.raw`(?:box|component|node)`,
-      command: "add a box here",
-    },
-  ];
-
-  for (const alias of aliases) {
-    const pattern = new RegExp(`^${createPrefix}${alias.pattern}${hereSuffix}$`, "iu");
-    if (pattern.test(normalized)) {
-      return {
-        command: alias.command,
-        objectType: alias.objectType,
-        basis: "constrained_asr_alias",
-      };
-    }
-  }
-  return null;
-}
-
-/**
  * Rewrites the natural phrasings a user says while holding an element
  * ("rename to Payments", "delete it", "connect to the database") into the
  * deterministic selection-targeted grammar. Utterances outside the scoped edit
@@ -934,80 +580,4 @@ export function normalizeScopedVoiceUtterance(utterance: string): string {
   }
 
   return trimmed;
-}
-
-export function isAirboardVoiceConfirmation(command: string): boolean {
-  const normalized = normalizeVoiceRecoveryText(command);
-  return /^(?:yes|yes\s+please|confirm|confirm\s+it|apply|apply\s+it|do\s+it|correct|that(?:'s|\s+is)\s+right)$/iu.test(
-    normalized,
-  );
-}
-
-function normalizeVoiceRecoveryText(command: string): string {
-  return command
-    .normalize("NFKC")
-    .toLocaleLowerCase("en-US")
-    .replace(/[^\p{L}\p{N}'\s]+/gu, " ")
-    .replace(/\s+/gu, " ")
-    .trim();
-}
-
-function collectSpeechTranscripts(event: SpeechRecognitionEventLike): {
-  interim: string;
-  final: string;
-} {
-  const results = event.results;
-  if (!results) {
-    return { interim: "", final: "" };
-  }
-
-  let interim = "";
-  let final = "";
-  const startIndex = event.resultIndex ?? 0;
-  for (let index = startIndex; index < results.length; index += 1) {
-    const result = results[index];
-    const transcript = result?.[0]?.transcript?.trim();
-    if (!result || !transcript) {
-      continue;
-    }
-    if (result.isFinal) {
-      final = `${final} ${transcript}`.trim();
-    } else {
-      interim = `${interim} ${transcript}`.trim();
-    }
-  }
-  return { interim, final };
-}
-
-function isRecognitionAlreadyStartedError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "InvalidStateError";
-}
-
-function isFatalSpeechError(error?: string): boolean {
-  return (
-    error === "not-allowed" ||
-    error === "service-not-allowed" ||
-    error === "audio-capture" ||
-    error === "language-not-supported"
-  );
-}
-
-function describeContinuousSpeechError(error?: string, message?: string): string {
-  if (error === "no-speech") {
-    return "Still listening for ‘Airo’ followed by a command.";
-  }
-  return describeSpeechError(error, message);
-}
-
-function describeSpeechError(error?: string, message?: string): string {
-  if (error === "not-allowed" || error === "service-not-allowed") {
-    return blockedMediaHelp("microphone", typeof navigator === "undefined" ? "" : navigator.userAgent);
-  }
-  if (error === "no-speech") {
-    return "No command was heard. Try again or type it below.";
-  }
-  if (error === "audio-capture") {
-    return "No microphone is available. Type the command instead.";
-  }
-  return message?.trim() || "Speech recognition stopped unexpectedly. Type the command instead.";
 }

@@ -431,17 +431,6 @@ export function sceneElementsForRender(
   );
 }
 
-/** Backward-compatible shape-only ordering helper. */
-export function orderSceneShapesForRender(
-  elements: readonly { kind: string; zIndex: number }[],
-): ShapeElement[] {
-  return elements
-    .filter((element): element is ShapeElement => element.kind === "shape")
-    .map((element, index) => ({ element, index }))
-    .sort((a, b) => a.element.zIndex - b.element.zIndex || a.index - b.index)
-    .map(({ element }) => element);
-}
-
 const CONTRAST_PLATE_ANNOTATIONS = new Set<StrokeAnnotation["type"]>([
   "ellipse",
   "rectangle",

@@ -15,3 +15,9 @@ for decisions and fixes over time see the change log in
 | Gesture Annotation Mode Implementation Notes | An earlier gesture drawing mode |
 | Google Meet Real-Client Feasibility Spike, Google Workspace Marketplace Draft Listing | The retired Meet add-on, replaced by the Chrome extension |
 | System Architecture Review and Gap Analysis, Public Beta Readiness and Platform Onboarding Checklist | Earlier readiness reviews, superseded by the Release Readiness Backlog |
+| Intent Canvas Implementation Notes | Notes for the Intent Canvas input mode as built in July; its Start Airo button, sidebar and one-to-twelve command plan have since changed |
+| Object First Gesture Mode Implementation Notes | Notes for object-first gestures; the sidebar row, Enable hands button and floating label editor they mention were removed in RGB-048 and RGB-049 |
+| Lightboard Mode Feasibility and Design Directions | The feasibility study for the screen-behind-the-board mode, implemented 2026-07-18 |
+| Hands-free Gap Audit | The 2026-11-11 audit of hands-free meeting gaps; all twelve were closed by RGB-049 |
+| Help Documentation Plan | The plan for the Help Center, superseded by the shipped articles in `Docs/help` and `scripts/generate-help-content.mjs` |
+| Supabase Move to Mumbai Plan | The record of the 2026-11-05 move to the Mumbai Supabase project; the read-only switch steps live in Incident and Breach Exercise |

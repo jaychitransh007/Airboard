@@ -38,19 +38,6 @@ export type ReplaySample = {
   grabStrength: number;
 };
 
-export function replayLandmarkTrace(trace: LandmarkTrace): ReplaySample[] {
-  return trace.frames.map((frame) => {
-    let palmScore = 0;
-    let grabStrength = 0;
-    for (const hand of frame.hands) {
-      const landmarks: HandLandmark[] = hand.landmarks.map(([x, y, z]) => ({ x, y, z }));
-      palmScore = Math.max(palmScore, estimatePalmPresentation(landmarks).score);
-      grabStrength = Math.max(grabStrength, estimateGrabStrength(landmarks).strength);
-    }
-    return { t: frame.t, palmScore, grabStrength };
-  });
-}
-
 /**
  * Offline-only replay diagnostics. These are deliberately kept out of the
  * runtime gesture pipeline: the evaluator observes the same estimators and
@@ -271,8 +258,8 @@ export type LandmarkTraceReplayReport = {
  * Replays a trace through an offline temporal/routing layer and returns
  * per-frame stage diagnostics plus action-level metrics.
  *
- * The score-only replay above remains unchanged for threshold fixtures. This
- * richer form is for corpus evaluation: it makes input degradation, ownership,
+ * Each frame carries the best palm and grab scores across its hands, which
+ * threshold fixtures assert on. It also makes input degradation, ownership,
  * suppression, state transitions, duplicate actions, and gate timing visible
  * without mutating production controller state.
  */
@@ -1127,36 +1114,6 @@ function buildReplaySummary(
     ).length,
     stageCounts,
   };
-}
-
-export type TraceSegment = { fromMs: number; toMs: number };
-
-/**
- * Contiguous time ranges where a per-frame value stays at/above a threshold.
- * Used to assert "the palm pose is detected from ~1s to ~2s and nowhere else".
- */
-export function segmentsAbove(
-  samples: readonly ReplaySample[],
-  select: (sample: ReplaySample) => number,
-  threshold: number,
-): TraceSegment[] {
-  const segments: TraceSegment[] = [];
-  let start: number | null = null;
-  let last = 0;
-  for (const sample of samples) {
-    const active = select(sample) >= threshold;
-    if (active && start === null) {
-      start = sample.t;
-    } else if (!active && start !== null) {
-      segments.push({ fromMs: start, toMs: last });
-      start = null;
-    }
-    last = sample.t;
-  }
-  if (start !== null) {
-    segments.push({ fromMs: start, toMs: last });
-  }
-  return segments;
 }
 
 export function parseLandmarkTrace(raw: unknown): LandmarkTrace {

@@ -5,7 +5,7 @@ import { launchOptionsWith } from "./support/launchOptions";
 
 /**
  * E2E path: the lightboard (neon-on-dark) theme on the standalone surface —
- * step 1 of Docs/"Lightboard Mode Feasibility and Design Directions.md".
+ * step 1 of Docs/archive/"Lightboard Mode Feasibility and Design Directions.md".
  * Asserts real pixels, not just classes: classic paints an opaque white
  * board; lightboard leaves the canvas transparent over the DOM stage and
  * renders content as bright neon; camera and selected-screen underlays sit
@@ -349,7 +349,6 @@ test("desktop mode is a full-display transparent canvas with explicit click-thro
   // same renderer transition the Electron shortcut invokes.
   await page.getByRole("button", { name: "Return to click-through" }).click();
   await expect(page.getByTestId("desktop-overlay-controls")).toHaveCount(0);
-  await expect(page.getByTestId("desktop-overlay-badge")).toHaveCount(0);
   await expect(shell).toHaveClass(/broadcast-safe/);
 });
 

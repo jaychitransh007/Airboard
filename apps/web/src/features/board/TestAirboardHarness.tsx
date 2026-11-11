@@ -5,10 +5,9 @@ import { AIRBOARD_API_URL } from "../../platform/config";
 import { AirboardPrototype } from "./AirboardPrototype";
 
 type TestAirboardHarnessProps = {
-  surface: "standalone" | "meet-side-panel" | "meet-main-stage";
+  surface: "standalone" | "meet-main-stage";
   meetingProvider?: "google_meet";
   providerMeetingId?: string;
-  embeddedMediaCapture?: boolean;
   headlessMeetOverlay?: boolean;
   desktopOverlay?: boolean;
 };

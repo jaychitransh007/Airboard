@@ -66,8 +66,8 @@ fading ghost, never a board mutation.
   ("this", "that", "here") resolve against the pointer position at the word's onset time,
   enabling "connect *this* to *that*" and "move the database *here*."
 - **Wake word fallback:** "Airo, …" continues to work everywhere (camera off, hands
-  occupied). Also accept the common STT aliases of "Airo" (already partially handled by
-  `recoverAirboardVoiceCommand`).
+  occupied). Also accept the common STT aliases of "Airo" (handled by the wake
+  classifier in `browserSpeech.ts`).
 
 ### 2.4 Ambient channel: ghost suggestions (opt-in)
 

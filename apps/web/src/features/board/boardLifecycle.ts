@@ -1,5 +1,3 @@
-import type { BoardState } from "@airboard/core";
-
 export type BoardTitleValidation =
   | { valid: true; title: string }
   | { valid: false; message: string };

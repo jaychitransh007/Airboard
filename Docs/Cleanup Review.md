@@ -60,6 +60,20 @@ Nothing has been changed. The appendix lists every finding with file paths, evid
 
 ## 2. Safe to remove now (no decision needed)
 
+> **Done 12 November 2026.** Removed:
+> - the Meet side-panel, companion-window and embedded-media code;
+> - the browser speech fallback and confirmation-era helpers;
+> - unused API routes (Activity, analytics events, board archive and scope options), the voice trace read endpoints, and old message names;
+> - the gesture-engine marker mode and its presets;
+> - the integrations scaffolding and test-only exports;
+> - the unlinked pages and about 200 lines of dead CSS;
+> - the unused dependency;
+> - the tracked copy of `next-env.d.ts`.
+>
+> Notes for shipped work moved to `Docs/archive`. `noUnusedLocals` and `noUnusedParameters` are now on everywhere.
+>
+> `GET /integrations` was kept with the extension (owner decision). `/integrations/google-meet` now redirects to its Help article.
+
 | What | Size | Where |
 | --- | --- | --- |
 | Meet side panel, companion window, embedded-media and visible overlay controls inside the board, reachable only from the test harness | ~500 lines (board, CSS, 7 browser tests) | `AirboardPrototype.tsx`, `globals.css:1019-1116` |

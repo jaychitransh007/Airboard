@@ -95,9 +95,6 @@ importers:
       '@airboard/realtime-client':
         specifier: workspace:*
         version: link:../../packages/realtime-client
-      '@mediapipe/tasks-vision':
-        specifier: ^1.2.0
-        version: 1.2.2
       '@supabase/supabase-js':
         specifier: ^2.118.0
         version: 2.118.0
@@ -149,9 +146,6 @@ importers:
 
   packages/integrations:
     dependencies:
-      '@airboard/core':
-        specifier: workspace:*
-        version: link:../core
       '@googleworkspace/meet-addons':
         specifier: 1.2.0
         version: 1.2.0

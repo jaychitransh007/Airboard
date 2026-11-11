@@ -48,8 +48,8 @@ function pageFiles(directory) {
 
 test("every page names itself in the browser title", () => {
   // The landing page keeps the site title; Meet's add-on frames are never a
-  // browser tab; onboarding and the pages folded into the home page or
-  // Settings only redirect.
+  // browser tab; onboarding and the pages folded into the home page,
+  // Settings or the Help Center only redirect.
   const exempt = new Set([
     "app/page.tsx",
     "app/onboarding/page.tsx",
@@ -57,6 +57,7 @@ test("every page names itself in the browser title", () => {
     "app/app/[section]/page.tsx",
     "app/app/integrations/page.tsx",
     "app/app/admin/[section]/page.tsx",
+    "app/integrations/google-meet/page.tsx",
   ]);
   const missing = pageFiles(join(webRoot, "app"))
     .map((path) => relative(webRoot, path))

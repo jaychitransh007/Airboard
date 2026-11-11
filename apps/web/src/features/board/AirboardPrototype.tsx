@@ -9,7 +9,6 @@ import {
   boardPreview,
   createBoardSceneElement,
   isSceneOnlyElement,
-  createDefaultTableData,
   createEraseAction,
   createEventEnvelope,
   createInitialBoardState,
@@ -34,21 +33,12 @@ import {
   type CursorState,
   type DiagramCommand,
   type MeetingProvider,
-  type SemanticObjectReference,
-  type SemanticPlacement,
   type SemanticPlan,
-  type SemanticPlanAction,
-  type Stroke,
   type StrokeAnnotation,
   type StrokeCommittedEvent,
   type StrokePoint,
 } from "@airboard/core";
-import {
-  classifyBrowserWakeTranscript,
-  createBrowserWakeSpeechSession,
-  supportsBrowserSpeech,
-  type BrowserWakeSpeechSession,
-} from "./browserSpeech";
+import { classifyBrowserWakeTranscript } from "./browserSpeech";
 import {
   allowsSemanticFallbackAfterGroundingFailure,
   boardContentChanged,
@@ -124,7 +114,6 @@ import {
   probeMeetCameraOverlayInWindow,
   probeMeetMediaBridgeInWindow,
   type MeetCameraOverlay,
-  type MeetCameraOverlayState,
   type MeetMediaBridge,
   type MeetMediaBridgeVideoSession,
 } from "../meet/meetMediaBridge";
@@ -214,7 +203,6 @@ import {
   semanticIntentIssueMessage,
   shouldUseSemanticIntentFallback,
   type SemanticIntentConfig,
-  type SemanticIntentContext,
   type SemanticIntentPendingClarification,
   type SemanticIntentAddressedBy,
   type SemanticIntentParserIssue,
@@ -305,7 +293,6 @@ import {
 import { sceneNodeLabel } from "./semanticBoardObjects";
 import {
   parseIntentCanvasCommand,
-  type IntentCanvasOperation,
   type ParsedIntentCanvasCommand,
 } from "./intentCanvasParser";
 import {
@@ -330,7 +317,7 @@ import {
   type MediaPermissionState,
 } from "./mediaPermissionPreference";
 
-type Surface = "standalone" | "meet-side-panel" | "meet-main-stage";
+type Surface = "standalone" | "meet-main-stage";
 
 type CameraStatus = "idle" | "starting" | "tracker_loading" | "active" | "blocked" | "tracker_error" | "error";
 type ScreenUnderlayStatus = "idle" | "starting" | "active" | "blocked" | "error";
@@ -416,7 +403,7 @@ type VoiceCommandTraceContext = {
   voiceTurnId: string;
   transcript: string;
   wakePhrase: string;
-  engine: "realtime" | "browser-fallback";
+  engine: "realtime";
   provider?: string | undefined;
   model?: string | undefined;
   confidence?: number | undefined;
@@ -425,9 +412,9 @@ type VoiceCommandTraceContext = {
   reference?: VoiceReference | undefined;
 };
 
-type SpeechEngine = "loading" | "realtime" | "browser-fallback" | "unavailable";
+type SpeechEngine = "loading" | "realtime" | "unavailable";
 
-type ActiveSpeechSession = BrowserWakeSpeechSession | RealtimeSpeechSession;
+type ActiveSpeechSession = RealtimeSpeechSession;
 
 type CommitStrokeOptions = {
   points?: StrokePoint[];
@@ -583,8 +570,6 @@ const PARTICIPANT_ID = "local-owner-participant";
 const OWNER_USER_ID = "local-owner";
 const AIRBOARD_API_URL =
   process.env.NEXT_PUBLIC_AIRBOARD_API_URL?.trim() || "http://127.0.0.1:4000";
-const BROWSER_SPEECH_FALLBACK_ENABLED =
-  process.env.NEXT_PUBLIC_AIRBOARD_SPEECH_FALLBACK === "browser";
 const ERASER_RADIUS = 42;
 const OBJECT_GESTURE_GRAB_THRESHOLD = 0.45;
 const OBJECT_GESTURE_RELEASE_THRESHOLD = 0.32;
@@ -617,7 +602,6 @@ const OBJECT_DOCK: readonly { label: string; tool: ObjectDockTool }[] = [
   { label: "Eraser", tool: "eraser" },
 ];
 
-const CATALOG_DRAG_MIME = "application/x-airboard-tool";
 /** How long the browser may take to answer for the camera before Airboard explains the wait. */
 const CAMERA_PROMPT_HINT_DELAY_MS = 1_500;
 const CAMERA_PROMPT_HINT =
@@ -784,7 +768,6 @@ export function AirboardPrototype({
   initialBoardSessionId,
   pendingSessionStart,
   onBoardSessionReady,
-  embeddedMediaCapture = false,
   desktopOverlay = false,
   headlessMeetOverlay = false,
   accessToken,
@@ -816,12 +799,6 @@ export function AirboardPrototype({
     participantId: string;
     role: string;
   }) => void;
-  /**
-   * Meeting surfaces only: true when the host client delegates camera and
-   * microphone permission to this frame, so explicit gesture/voice capture
-   * can run embedded. False routes gesture/voice to the companion window.
-   */
-  embeddedMediaCapture?: boolean;
   /**
    * Standalone native shell only: render the board as a full-screen transparent
    * desktop layer. The Electron host owns topmost placement and OS click-through.
@@ -998,8 +975,8 @@ export function AirboardPrototype({
   // stream the meeting origin's camera and microphone into this frame when
   // installed; capture always starts from an explicit user action here.
   const [meetMediaBridge, setMeetMediaBridge] = useState<MeetMediaBridge | null>(null);
-  const cameraCaptureAvailable = !isMeetSurface || embeddedMediaCapture || meetMediaBridge !== null;
-  const voiceCaptureAvailable = !isMeetSurface || embeddedMediaCapture || meetMediaBridge !== null;
+  const cameraCaptureAvailable = !isMeetSurface || meetMediaBridge !== null;
+  const voiceCaptureAvailable = !isMeetSurface || meetMediaBridge !== null;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const resolvedSceneImagesRef = useRef<Record<string, CanvasImageSource>>({});
   const resolvedSceneImageUrlsRef = useRef<Map<string, string>>(new Map());
@@ -1281,13 +1258,9 @@ export function AirboardPrototype({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameraPromptWaiting, setCameraPromptWaiting] = useState(false);
   const [gestureResult, setGestureResult] = useState<GestureResult | null>(null);
-  const [sensitivity, setSensitivity] = useState(1);
+  const [sensitivity] = useState(1);
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.6);
   const [inputMode, setInputMode] = useState<AirboardInputMode>("gesture");
-  const [lastGestureIntent, setLastGestureIntent] = useState<{
-    intent: string;
-    confidence: number;
-  } | null>(null);
   const [activeObjectTool, setActiveObjectTool] = useState<ObjectDockTool>("select");
   const [activeCreationTool, setActiveCreationTool] = useState<CreationToolId>("move");
   const activeCreationToolRef = useRef<CreationToolId>("move");
@@ -1337,8 +1310,8 @@ export function AirboardPrototype({
   const [pendingIntent, setPendingIntent] = useState<PendingIntent | null>(null);
   const [voiceGate, setVoiceGate] = useState<VoiceGateUi | null>(null);
   const [boardSyncStatus, setBoardSyncStatus] = useState("off");
-  // Rendered by the companion-window link on meeting surfaces; the ref alone
-  // would not re-render when the session becomes available.
+  // Rendered by the Share dialog's live link; the ref alone would not
+  // re-render when the session becomes available.
   const [activeBoardSessionId, setActiveBoardSessionId] = useState<string | null>(null);
   const [activeJoinToken, setActiveJoinToken] = useState<string | null>(null);
   // The owner's Share setting for people who join with the live link.
@@ -1369,9 +1342,6 @@ export function AirboardPrototype({
   // Camera overlay: the extension's MAIN-world compositor blends neon board
   // frames onto the outgoing Meet camera (main stage only).
   const [cameraOverlay, setCameraOverlay] = useState<MeetCameraOverlay | null>(null);
-  const [cameraOverlayState, setCameraOverlayState] = useState<MeetCameraOverlayState | null>(
-    null,
-  );
   const [cameraOverlayEnabled, setCameraOverlayEnabled] = useState(headlessMeetOverlay);
   const [diagramVisible, setDiagramVisible] = useState(true);
   const diagramVisibleRef = useRef(true);
@@ -1536,9 +1506,9 @@ export function AirboardPrototype({
   const [strokeColor, setStrokeColor] = useState("#111827");
   const [strokeThickness, setStrokeThickness] = useState(3);
   const [eraserRadius, setEraserRadius] = useState(28);
-  const [frictionPreset, setFrictionPreset] = useState<FrictionPreset>("balanced");
-  const [autoLiftEnabled, setAutoLiftEnabled] = useState(true);
-  const [strokeCleanupEnabled, setStrokeCleanupEnabled] = useState(true);
+  const [frictionPreset] = useState<FrictionPreset>("balanced");
+  const [autoLiftEnabled] = useState(true);
+  const [strokeCleanupEnabled] = useState(true);
   const [autoSnapConnectors, setAutoSnapConnectors] = useState(true);
   const [debugVisible, setDebugVisible] = useState(false);
   const [stats, setStats] = useState<Stats>({
@@ -3831,7 +3801,7 @@ export function AirboardPrototype({
   // Meet surfaces cannot capture media themselves, but the bridge extension
   // on meet.google.com can stream the meeting's camera in. Probe for it once.
   useEffect(() => {
-    if (!isMeetSurface || embeddedMediaCapture) {
+    if (!isMeetSurface) {
       return;
     }
     let cancelled = false;
@@ -3843,7 +3813,7 @@ export function AirboardPrototype({
     return () => {
       cancelled = true;
     };
-  }, [embeddedMediaCapture, isMeetSurface]);
+  }, [isMeetSurface]);
 
   // Camera-overlay compositor probe. Every renderer that arms the compositor
   // also disarms it on teardown so disabling the extension cannot leave a
@@ -3854,11 +3824,9 @@ export function AirboardPrototype({
     }
     let cancelled = false;
     let handle: MeetCameraOverlay | null = null;
-    void probeMeetCameraOverlayInWindow((state) => {
-      if (!cancelled) {
-        setCameraOverlayState(state);
-      }
-    }).then((overlay) => {
+    // The engine renders no controls, so nothing shows the compositor's
+    // state reports.
+    void probeMeetCameraOverlayInWindow(() => {}).then((overlay) => {
       if (cancelled) {
         overlay?.dispose();
         return;
@@ -4776,7 +4744,6 @@ export function AirboardPrototype({
             }
           : null,
       );
-      setLastGestureIntent(object ? { intent: object.intent, confidence: object.confidence } : null);
     },
     [createPlacementObject],
   );
@@ -4830,10 +4797,6 @@ export function AirboardPrototype({
       });
       // A new change ends any redo chain, Airo's diagram redo included.
       sceneRedoStackRef.current = [];
-      setLastGestureIntent({
-        intent: annotationResult.intent,
-        confidence: annotationResult.confidence,
-      });
 
       // Never auto-open the label editor: the augmented path is to hold the
       // element and say "rename to …" (double-click/F2 still open typing).
@@ -5232,7 +5195,6 @@ export function AirboardPrototype({
       setActiveCreationTool("move");
       activeCreationToolRef.current = "move";
     }
-    setLastGestureIntent({ intent: "cancel", confidence: 0 });
   }, [cancelSceneMove, render, updateStats]);
 
   const saveAnnotationLabel = useCallback(() => {
@@ -5496,7 +5458,6 @@ export function AirboardPrototype({
       }
       if (result === "snap") {
         setDiagramVisibility(!diagramVisibleRef.current, "snap");
-        setLastGestureIntent({ intent: "visibility", confidence: 1 });
         reportGestureStage(
           "action",
           { gesture: "visibility_toggle", applied: true },
@@ -8669,7 +8630,7 @@ export function AirboardPrototype({
     if (!voiceCaptureAvailable) {
       setSpeechRecognitionStatus("idle");
       setCommandFeedback(
-        "This meeting surface cannot capture the microphone yet. Type commands here, or open the gesture & voice companion window from the sidebar.",
+        "This meeting surface cannot capture the microphone yet. Type commands here.",
       );
       return;
     }
@@ -8738,7 +8699,7 @@ export function AirboardPrototype({
         });
       }
       reportVoiceTrace(voiceTurnId, "capture_metadata", {
-        engine: metadata?.engine ?? "browser-fallback",
+        engine: metadata?.engine ?? "realtime",
         provider: metadata?.provider,
         model: metadata?.model,
       });
@@ -8782,416 +8743,256 @@ export function AirboardPrototype({
     const captureVoiceTurnId = crypto.randomUUID();
     voiceCaptureInteractionIdRef.current = captureVoiceTurnId;
     reportVoiceTrace(captureVoiceTurnId, "capture_started", {
-      engine:
-        speechEngine === "realtime" ? "realtime" : "browser-fallback",
+      engine: "realtime",
       surface: isMeetSurface ? "meet" : "standalone",
       source:
-        isMeetSurface && !embeddedMediaCapture && meetMediaBridge
+        isMeetSurface && meetMediaBridge
           ? "meet_bridge"
           : "browser_media",
     });
 
     markVoiceDropped(false);
-    if (speechEngine === "realtime") {
-      let realtimeSession: RealtimeSpeechSession | null = null;
-      // Why this session's stream is reconnecting, until it listens again,
-      // and whether it has listened yet: a retry before the first listen is
-      // still the first connection, with its first-run hint.
-      let reconnectCause: RealtimeSpeechReconnectCause | null = null;
-      let listenedOnce = false;
-      realtimeSession = createRealtimeSpeechSession(
-        {
-          onReady: (metadata) => {
-            const voiceTurnId =
-              voiceCaptureInteractionIdRef.current ?? captureVoiceTurnId;
-            reportVoiceTrace(voiceTurnId, "stt_connection", {
-              status: "ready",
-              provider: metadata.provider,
-              model: metadata.model,
-              sampleRate: metadata.sampleRate,
-            });
-            setRealtimeSpeechMetadata(metadata);
-            setSpeechArmed(true);
-            setSpeechRecognitionStatus("waiting");
-            showVoiceStartFeedback("Starting Airo's voice…");
-          },
-          onListening: (listening) => {
-            setSpeechListening(listening);
-            if (listening) {
-              if (headlessMeetOverlay) {
-                cancelHeadlessVoiceRetry();
-                headlessVoiceRetryAttemptRef.current = 0;
-              }
-              if (standaloneEditor) {
-                void refreshStandaloneMediaPermissions();
-              }
-              setSpeechRecognitionStatus("waiting");
-              const resumedFrom = listenedOnce ? reconnectCause : null;
-              reconnectCause = null;
-              listenedOnce = true;
-              if (resumedFrom) {
-                // A time-limit rollover is silent; after a drop, say voice is back.
-                if (resumedFrom !== "rollover") {
-                  setCommandFeedback("Airo is listening again.");
-                }
-                return;
-              }
-              // Voice now starts as the board opens, so it can connect just
-              // after a first typed command; keep that command's result.
-              showVoiceStartFeedback("Airo is listening. Say “Airo, add a user.”");
+    let realtimeSession: RealtimeSpeechSession | null = null;
+    // Why this session's stream is reconnecting, until it listens again,
+    // and whether it has listened yet: a retry before the first listen is
+    // still the first connection, with its first-run hint.
+    let reconnectCause: RealtimeSpeechReconnectCause | null = null;
+    let listenedOnce = false;
+    realtimeSession = createRealtimeSpeechSession(
+      {
+        onReady: (metadata) => {
+          const voiceTurnId =
+            voiceCaptureInteractionIdRef.current ?? captureVoiceTurnId;
+          reportVoiceTrace(voiceTurnId, "stt_connection", {
+            status: "ready",
+            provider: metadata.provider,
+            model: metadata.model,
+            sampleRate: metadata.sampleRate,
+          });
+          setRealtimeSpeechMetadata(metadata);
+          setSpeechArmed(true);
+          setSpeechRecognitionStatus("waiting");
+          showVoiceStartFeedback("Starting Airo's voice…");
+        },
+        onListening: (listening) => {
+          setSpeechListening(listening);
+          if (listening) {
+            if (headlessMeetOverlay) {
+              cancelHeadlessVoiceRetry();
+              headlessVoiceRetryAttemptRef.current = 0;
             }
-          },
-          onAllowanceWarning: (warning) => {
-            // Voice keeps working; this only says the day's minutes are low.
-            setCommandFeedback(warning.message);
-            showAiroNotice({ tone: "warning", detail: warning.message });
-          },
-          onInterim: (transcript) => {
-            if (!voiceCaptureInteractionIdRef.current) {
-              captureSpeechStartPointing();
-              const voiceTurnId = crypto.randomUUID();
-              voiceCaptureInteractionIdRef.current = voiceTurnId;
-              reportVoiceTrace(voiceTurnId, "capture_started", {
-                engine: "realtime",
-                surface: isMeetSurface ? "meet" : "standalone",
-                source:
-                  isMeetSurface && !embeddedMediaCapture && meetMediaBridge
-                    ? "meet_bridge"
-                    : "browser_media",
-                continuedSession: true,
-              });
-            }
-            voiceRouter.noteSpeechActivity();
-            voiceCoalescer.noteSpeechActivity();
-            showHeardSpeech(transcript);
-            setSpeechRecognitionStatus("hearing");
-          },
-          onFinal: (transcript, event) => {
-            const metadata = realtimeSession?.getMetadata();
-            const traceMetadata = {
-              engine: "realtime" as const,
-              provider: event.provider ?? metadata?.provider,
-              model: event.model ?? metadata?.model,
-              confidence: event.confidence,
-              turnIndex: event.turnIndex,
-            };
-            // Channel priority and dedup live in the router: gates outrank
-            // the wake word, and one transcript routes at most one command.
-            const { routed, voiceTurnId } = routeFinalTranscript(
-              transcript,
-              traceMetadata,
-            );
-            reportFinalTranscript(transcript, routed, {
-              ...traceMetadata,
-              voiceTurnId,
-              finalizationReported: true,
-            });
-          },
-          onReconnecting: (cause) => {
-            reconnectCause = cause;
-            setSpeechRecognitionStatus("waiting");
-            if (cause === "busy") {
-              setCommandFeedback(
-                "Airo's voice is busy right now. Retrying in a moment; typed commands still work.",
-              );
-            } else if (cause === "dropped") {
-              setCommandFeedback("Reconnecting Airo's voice…");
-            }
-          },
-          onReconnected: (metadata) => {
-            setRealtimeSpeechMetadata(metadata);
-          },
-          onProviderStatus: (event) => {
-            if (event.provider && event.model) {
-              setRealtimeSpeechMetadata((current) => ({
-                provider: event.provider!,
-                model: event.model!,
-                sampleRate: current?.sampleRate ?? 16_000,
-              }));
-            }
-          },
-          onError: (message) => {
             if (standaloneEditor) {
               void refreshStandaloneMediaPermissions();
             }
-            setSpeechRecognitionStatus("error");
-            setCommandFeedback(message);
-          },
-          onAudioDropped: () => {
-            const voiceTurnId =
-              voiceCaptureInteractionIdRef.current ?? crypto.randomUUID();
-            voiceCaptureInteractionIdRef.current = voiceTurnId;
-            reportVoiceTrace(voiceTurnId, "audio_dropped", {
-              reason: "client_backpressure",
-            });
-            setCommandFeedback(
-              "Your network is slow, so some microphone audio was dropped. A command may be cut off — pause briefly and say it again.",
-            );
-          },
-          onEnd: (reason, detail) => {
-            // A rotated credential or model switch may already have installed
-            // a replacement session. The stale callback must not attribute its
-            // close to the new voice turn or reset the new session's router/UI.
-            if (speechSessionRef.current !== realtimeSession) {
+            setSpeechRecognitionStatus("waiting");
+            const resumedFrom = listenedOnce ? reconnectCause : null;
+            reconnectCause = null;
+            listenedOnce = true;
+            if (resumedFrom) {
+              // A time-limit rollover is silent; after a drop, say voice is back.
+              if (resumedFrom !== "rollover") {
+                setCommandFeedback("Airo is listening again.");
+              }
               return;
             }
-            const voiceTurnId = voiceCaptureInteractionIdRef.current;
-            if (voiceTurnId) {
-              reportVoiceTrace(voiceTurnId, "stt_connection", {
-                status: "ended",
-                reason,
-              });
-            }
-            voiceRouter.reset();
-            voiceCoalescer.cancel();
-            heldVoiceMetaRef.current = null;
-            setVoiceGate(null);
-            speechSessionRef.current = null;
-            setSpeechListening(false);
-            setSpeechArmed(false);
-            // Only an end that trying again can fix lets a palm or the power
-            // button bring voice back; a used-up allowance, an admin's switch
-            // or a blocked microphone must not restart it on every palm.
-            markVoiceDropped(detail?.wakeable === true);
-            if (reason === "paused") {
-              setSpeechRecognitionStatus("idle");
-              setCommandFeedback(
-                "Airo's voice paused after a long quiet stretch. Hold an open palm to resume; typed commands still work.",
-              );
-              return;
-            }
-            const shouldRetryHeadless =
-              shouldRetryHeadlessMeetVoiceAfterEnd(
-                headlessMeetOverlay,
-                reason,
-              );
-            if (
-              reason === "error" ||
-              reason === "closed" ||
-              shouldRetryHeadless
-            ) {
-              if (shouldRetryHeadless) {
-                scheduleHeadlessVoiceRetry();
-              }
-              setSpeechRecognitionStatus("error");
-              if (reason === "closed") {
-                setCommandFeedback(
-                  "Airo's voice connection closed. Hold an open palm to reconnect, or reload the board; typed commands still work.",
-                );
-              }
-            } else {
-              setSpeechRecognitionStatus("idle");
-            }
-          },
+            // Voice now starts as the board opens, so it can connect just
+            // after a first typed command; keep that command's result.
+            showVoiceStartFeedback("Airo is listening. Say “Airo, add a user.”");
+          }
         },
-        {
-          apiBaseUrl: AIRBOARD_API_URL,
-          ...(effectiveAccessToken ? { accessToken: effectiveAccessToken } : {}),
-          getAccessToken: () => latestAccessTokenRef.current,
-          // Server restarts, network drops, a busy server and the per-stream
-          // time limit replace the stream instead of ending voice, and a
-          // forgotten, quiet tab stops streaming. The Meet overlay keeps its
-          // own retry loop (scheduleHeadlessVoiceRetry) instead.
-          ...(headlessMeetOverlay ? {} : { reconnect: true, quietPauseMs: VOICE_QUIET_PAUSE_MS }),
-          language: typeof navigator === "undefined" ? "en-US" : navigator.language,
-          model:
-            selectedSpeechModelRef.current ||
-            realtimeTranscriptionConfig?.defaultModel ||
-            undefined,
-          // Board labels bias this session's recognition toward the names on
-          // screen; the transport bounds the merged list to the provider cap.
-          keyterms: buildSessionKeyterms(
-            boardRef.current,
-            selectedAnnotationIdsRef.current,
-          ),
-          dynamicKeyterms:
-            realtimeTranscriptionConfig?.dynamicKeyterms === true,
+        onAllowanceWarning: (warning) => {
+          // Voice keeps working; this only says the day's minutes are low.
+          setCommandFeedback(warning.message);
+          showAiroNotice({ tone: "warning", detail: warning.message });
         },
-        // On Meet surfaces the iframe cannot capture the microphone itself;
-        // the bridge extension streams it from the meeting page instead.
-        isMeetSurface && !embeddedMediaCapture && meetMediaBridge
-          ? {
-              startPcmInput: (handlers: {
-                onChunk: (samples: Float32Array, sampleRate: number) => void;
-                onEnded: (reason: string) => void;
-              }) => meetMediaBridge.startAudio(handlers),
-            }
-          : {},
-      );
-      if (!realtimeSession) {
-        if (headlessMeetOverlay) {
-          scheduleHeadlessVoiceRetry();
-        }
-        setSpeechRecognitionStatus("error");
-        setCommandFeedback(
-          "This browser cannot stream microphone audio. Typed commands remain available.",
-        );
-        return;
-      }
-      speechSessionRef.current = realtimeSession;
-      setSpeechArmed(true);
-      setSpeechHeardText("");
-      setSpeechRecognitionStatus("waiting");
-      showVoiceStartFeedback("Starting Airo's voice…");
-      realtimeSession.start();
-      return;
-    }
-
-    const browserSession = createBrowserWakeSpeechSession({
-      onStart: () => {
-        const voiceTurnId =
-          voiceCaptureInteractionIdRef.current ?? captureVoiceTurnId;
-        reportVoiceTrace(voiceTurnId, "stt_connection", {
-          status: "ready",
-          provider: "browser",
-          model: "Web Speech API",
-        });
-        if (standaloneEditor) {
-          void refreshStandaloneMediaPermissions();
-        }
-        setSpeechArmed(true);
-        setSpeechHeardText("");
-        setSpeechRecognitionStatus("waiting");
-        setCommandFeedback(
-          "Airo is listening through the explicit Chrome fallback. Say “Airo, add a user.”",
-        );
-      },
-      onListening: (listening) => setSpeechListening(listening),
-      onHeard: ({ transcript, isFinal }) => {
-        showHeardSpeech(transcript);
-        if (!isFinal) {
+        onInterim: (transcript) => {
           if (!voiceCaptureInteractionIdRef.current) {
             captureSpeechStartPointing();
             const voiceTurnId = crypto.randomUUID();
             voiceCaptureInteractionIdRef.current = voiceTurnId;
             reportVoiceTrace(voiceTurnId, "capture_started", {
-              engine: "browser-fallback",
+              engine: "realtime",
               surface: isMeetSurface ? "meet" : "standalone",
-              source: "browser_speech",
+              source:
+                isMeetSurface && meetMediaBridge
+                  ? "meet_bridge"
+                  : "browser_media",
               continuedSession: true,
             });
           }
           voiceRouter.noteSpeechActivity();
           voiceCoalescer.noteSpeechActivity();
+          showHeardSpeech(transcript);
           setSpeechRecognitionStatus("hearing");
-          return;
-        }
-        // Gates outrank the wake word here too. Claiming the transcript in
-        // the router is what deduplicates the session's own internal
-        // wake-routing of the same transcript (see onCommand below).
-        const gated = voiceRouter.routeGatedOnly(transcript);
-        syncVoiceGateUi();
-        if (gated) {
+        },
+        onFinal: (transcript, event) => {
+          const metadata = realtimeSession?.getMetadata();
+          const traceMetadata = {
+            engine: "realtime" as const,
+            provider: event.provider ?? metadata?.provider,
+            model: event.model ?? metadata?.model,
+            confidence: event.confidence,
+            turnIndex: event.turnIndex,
+          };
+          // Channel priority and dedup live in the router: gates outrank
+          // the wake word, and one transcript routes at most one command.
+          const { routed, voiceTurnId } = routeFinalTranscript(
+            transcript,
+            traceMetadata,
+          );
+          reportFinalTranscript(transcript, routed, {
+            ...traceMetadata,
+            voiceTurnId,
+            finalizationReported: true,
+          });
+        },
+        onReconnecting: (cause) => {
+          reconnectCause = cause;
+          setSpeechRecognitionStatus("waiting");
+          if (cause === "busy") {
+            setCommandFeedback(
+              "Airo's voice is busy right now. Retrying in a moment; typed commands still work.",
+            );
+          } else if (cause === "dropped") {
+            setCommandFeedback("Reconnecting Airo's voice…");
+          }
+        },
+        onReconnected: (metadata) => {
+          setRealtimeSpeechMetadata(metadata);
+        },
+        onProviderStatus: (event) => {
+          if (event.provider && event.model) {
+            setRealtimeSpeechMetadata((current) => ({
+              provider: event.provider!,
+              model: event.model!,
+              sampleRate: current?.sampleRate ?? 16_000,
+            }));
+          }
+        },
+        onError: (message) => {
+          if (standaloneEditor) {
+            void refreshStandaloneMediaPermissions();
+          }
+          setSpeechRecognitionStatus("error");
+          setCommandFeedback(message);
+        },
+        onAudioDropped: () => {
           const voiceTurnId =
             voiceCaptureInteractionIdRef.current ?? crypto.randomUUID();
-          voiceCaptureInteractionIdRef.current = null;
-          reportVoiceTrace(voiceTurnId, "stt_finalization", {
-            status: "final",
-            provider: "browser",
-            model: "Web Speech API",
+          voiceCaptureInteractionIdRef.current = voiceTurnId;
+          reportVoiceTrace(voiceTurnId, "audio_dropped", {
+            reason: "client_backpressure",
           });
-          dispatchVoiceDecision(gated, {
-            engine: "browser-fallback",
-            voiceTurnId,
-            provider: "browser",
-            model: "Web Speech API",
-          });
-          reportVoiceTrace(voiceTurnId, "routing", {
-            routed: true,
-            wakeDetected: false,
-            decisionCount: 1,
-            channel: voiceTraceChannel(gated),
-          });
-          return;
-        }
-        if (voiceCoalescer.offerContinuation(transcript)) {
-          return;
-        }
-        reportFinalTranscript(transcript, false, {
-          engine: "browser-fallback",
-          provider: "browser",
-          model: "Web Speech API",
-        });
-      },
-      onWake: () => {
-        setSpeechRecognitionStatus("wake-detected");
-        setCommandFeedback("Airo heard the wake word…");
-      },
-      onCommand: ({ command, transcript, wakePhrase }) => {
-        // The session wake-routes internally; the router enforces the
-        // invariant that a gate-claimed transcript never routes twice.
-        const decision = voiceRouter.acceptExternalWakeCommand({
-          transcript,
-          command,
-          wakePhrase,
-        });
-        if (!decision) {
-          return;
-        }
-        const voiceTurnId =
-          voiceCaptureInteractionIdRef.current ?? crypto.randomUUID();
-        voiceCaptureInteractionIdRef.current = null;
-        reportVoiceTrace(voiceTurnId, "stt_finalization", {
-          status: "final",
-          provider: "browser",
-          model: "Web Speech API",
-        });
-        dispatchVoiceDecision(decision, {
-          engine: "browser-fallback",
-          voiceTurnId,
-          provider: "browser",
-          model: "Web Speech API",
-        });
-        reportVoiceTrace(voiceTurnId, "routing", {
-          routed: true,
-          wakeDetected: true,
-          decisionCount: 1,
-          channel: "wake",
-        });
-      },
-      onEnd: (reason) => {
-        voiceRouter.reset();
-        voiceCoalescer.cancel();
-        heldVoiceMetaRef.current = null;
-        setVoiceGate(null);
-        setSpeechListening(false);
-        setSpeechArmed(false);
-        if (speechSessionRef.current === browserSession) {
-          speechSessionRef.current = null;
-        }
-        if (reason === "error") {
-          setSpeechRecognitionStatus("error");
           setCommandFeedback(
-            "Airo stopped after a speech-recognition error. Typed commands still work.",
+            "Your network is slow, so some microphone audio was dropped. A command may be cut off — pause briefly and say it again.",
           );
-        } else {
-          setSpeechRecognitionStatus("idle");
-        }
+        },
+        onEnd: (reason, detail) => {
+          // A rotated credential or model switch may already have installed
+          // a replacement session. The stale callback must not attribute its
+          // close to the new voice turn or reset the new session's router/UI.
+          if (speechSessionRef.current !== realtimeSession) {
+            return;
+          }
+          const voiceTurnId = voiceCaptureInteractionIdRef.current;
+          if (voiceTurnId) {
+            reportVoiceTrace(voiceTurnId, "stt_connection", {
+              status: "ended",
+              reason,
+            });
+          }
+          voiceRouter.reset();
+          voiceCoalescer.cancel();
+          heldVoiceMetaRef.current = null;
+          setVoiceGate(null);
+          speechSessionRef.current = null;
+          setSpeechListening(false);
+          setSpeechArmed(false);
+          // Only an end that trying again can fix lets a palm or the power
+          // button bring voice back; a used-up allowance, an admin's switch
+          // or a blocked microphone must not restart it on every palm.
+          markVoiceDropped(detail?.wakeable === true);
+          if (reason === "paused") {
+            setSpeechRecognitionStatus("idle");
+            setCommandFeedback(
+              "Airo's voice paused after a long quiet stretch. Hold an open palm to resume; typed commands still work.",
+            );
+            return;
+          }
+          const shouldRetryHeadless =
+            shouldRetryHeadlessMeetVoiceAfterEnd(
+              headlessMeetOverlay,
+              reason,
+            );
+          if (
+            reason === "error" ||
+            reason === "closed" ||
+            shouldRetryHeadless
+          ) {
+            if (shouldRetryHeadless) {
+              scheduleHeadlessVoiceRetry();
+            }
+            setSpeechRecognitionStatus("error");
+            if (reason === "closed") {
+              setCommandFeedback(
+                "Airo's voice connection closed. Hold an open palm to reconnect, or reload the board; typed commands still work.",
+              );
+            }
+          } else {
+            setSpeechRecognitionStatus("idle");
+          }
+        },
       },
-      onError: (message, code) => {
-        if (standaloneEditor) {
-          void refreshStandaloneMediaPermissions();
-        }
-        setSpeechRecognitionStatus(code === "no-speech" ? "waiting" : "error");
-        setCommandFeedback(message);
+      {
+        apiBaseUrl: AIRBOARD_API_URL,
+        ...(effectiveAccessToken ? { accessToken: effectiveAccessToken } : {}),
+        getAccessToken: () => latestAccessTokenRef.current,
+        // Server restarts, network drops, a busy server and the per-stream
+        // time limit replace the stream instead of ending voice, and a
+        // forgotten, quiet tab stops streaming. The Meet overlay keeps its
+        // own retry loop (scheduleHeadlessVoiceRetry) instead.
+        ...(headlessMeetOverlay ? {} : { reconnect: true, quietPauseMs: VOICE_QUIET_PAUSE_MS }),
+        language: typeof navigator === "undefined" ? "en-US" : navigator.language,
+        model:
+          selectedSpeechModelRef.current ||
+          realtimeTranscriptionConfig?.defaultModel ||
+          undefined,
+        // Board labels bias this session's recognition toward the names on
+        // screen; the transport bounds the merged list to the provider cap.
+        keyterms: buildSessionKeyterms(
+          boardRef.current,
+          selectedAnnotationIdsRef.current,
+        ),
+        dynamicKeyterms:
+          realtimeTranscriptionConfig?.dynamicKeyterms === true,
       },
-    });
-    if (!browserSession) {
+      // On Meet surfaces the iframe cannot capture the microphone itself;
+      // the bridge extension streams it from the meeting page instead.
+      isMeetSurface && meetMediaBridge
+        ? {
+            startPcmInput: (handlers: {
+              onChunk: (samples: Float32Array, sampleRate: number) => void;
+              onEnded: (reason: string) => void;
+            }) => meetMediaBridge.startAudio(handlers),
+          }
+        : {},
+    );
+    if (!realtimeSession) {
+      if (headlessMeetOverlay) {
+        scheduleHeadlessVoiceRetry();
+      }
       setSpeechRecognitionStatus("error");
-      setCommandFeedback("Speech recognition is unavailable here. Type the same command instead.");
+      setCommandFeedback(
+        "This browser cannot stream microphone audio. Typed commands remain available.",
+      );
       return;
     }
-    speechSessionRef.current = browserSession;
+    speechSessionRef.current = realtimeSession;
     setSpeechArmed(true);
-    try {
-      browserSession.start();
-    } catch {
-      speechSessionRef.current = null;
-      setSpeechArmed(false);
-      setSpeechListening(false);
-      setSpeechRecognitionStatus("error");
-      setCommandFeedback("Speech recognition is already active. Try again in a moment.");
-    }
+    setSpeechHeardText("");
+    setSpeechRecognitionStatus("waiting");
+    showVoiceStartFeedback("Starting Airo's voice…");
+    realtimeSession.start();
   }, [
     showVoiceStartFeedback,
     showHeardSpeech,
@@ -9199,7 +9000,6 @@ export function AirboardPrototype({
     showAiroNotice,
     voiceCoalescer,
     cancelHeadlessVoiceRetry,
-    dispatchVoiceDecision,
     effectiveAccessToken,
     headlessMeetOverlay,
     markVoiceDropped,
@@ -9210,12 +9010,10 @@ export function AirboardPrototype({
     speechEngine,
     speechSupported,
     standaloneEditor,
-    embeddedMediaCapture,
     isMeetSurface,
     meetMediaBridge,
     reportVoiceTrace,
     scheduleHeadlessVoiceRetry,
-    syncVoiceGateUi,
     voiceCaptureAvailable,
     voiceRouter,
   ]);
@@ -9343,10 +9141,10 @@ export function AirboardPrototype({
       return true;
     };
 
-    // On Meet surfaces without delegated permission, video arrives from the
-    // bridge extension as ImageBitmaps; a canvas capture stream feeds the same
-    // video element so the tracker and preview code stay identical.
-    const bridge = isMeetSurface && !embeddedMediaCapture ? meetMediaBridge : null;
+    // On Meet surfaces, video arrives from the bridge extension as
+    // ImageBitmaps; a canvas capture stream feeds the same video element so
+    // the tracker and preview code stay identical.
+    const bridge = isMeetSurface ? meetMediaBridge : null;
     const acquireBridgedStream = async (): Promise<MediaStream> => {
       if (!bridge) {
         throw new Error("Meet media bridge is unavailable");
@@ -9487,7 +9285,7 @@ export function AirboardPrototype({
         void trackerLoad?.then((tracker) => tracker.close(), () => undefined);
       }
     }
-  }, [appendCopilotActivity, cameraBlockedMessage, cameraCaptureAvailable, cameraStatus, confidenceThreshold, embeddedMediaCapture, enforceCameraCanvas, isMeetSurface, meetMediaBridge, refreshStandaloneMediaPermissions, standaloneEditor]);
+  }, [appendCopilotActivity, cameraBlockedMessage, cameraCaptureAvailable, cameraStatus, confidenceThreshold, enforceCameraCanvas, isMeetSurface, meetMediaBridge, refreshStandaloneMediaPermissions, standaloneEditor]);
 
   startCameraRef.current = startCamera;
 
@@ -9595,16 +9393,11 @@ export function AirboardPrototype({
   const airoInputsActive =
     (airoVoiceAvailable || airoHandsAvailable) &&
     (speechArmed || cameraStatus === "active");
-  // A camera still starting counts as on, so the panel doesn't flip to full
-  // and back while hand tracking loads.
-  const airoEngaged =
-    airoInputsActive || cameraStatus === "starting" || cameraStatus === "tracker_loading";
   // Without a switch, a blocked camera or microphone is the one thing the
   // panel must explain.
   const airoBlockedByBrowser =
     !airoInputsActive &&
     (cameraPermission === "denied" || microphonePermission === "denied" || cameraStatus === "blocked");
-  const copilotMode: "closed" | "full" = copilotOpen ? "full" : "closed";
 
   // Airo's voice and hands start as soon as a board opens: the first time,
   // the browser asks once for the camera and microphone together. There is no
@@ -9873,7 +9666,6 @@ export function AirboardPrototype({
     setAlignmentGuides([]);
     setLabelDraft("");
     setEditingAnnotationId(null);
-    setLastGestureIntent(null);
     setPendingIntent(null);
     setIntentCommandText("");
     applyLocalEvent({
@@ -10036,18 +9828,6 @@ export function AirboardPrototype({
     setSpeechEngine("loading");
     setSpeechSupported(false);
 
-    const tryExplicitBrowserFallback = (reason: string) => {
-      if (BROWSER_SPEECH_FALLBACK_ENABLED && supportsBrowserSpeech()) {
-        setSpeechEngine("browser-fallback");
-        setSpeechSupported(true);
-        setCommandFeedback(
-          `${reason} Using the explicitly enabled Chrome speech fallback; typed commands still work.`,
-        );
-        return true;
-      }
-      return false;
-    };
-
     // A failed load is retried on its own (2 s, 4 s … up to a minute), so a
     // blip while the board opens doesn't leave voice off until a reload.
     let retryTimer: number | undefined;
@@ -10079,9 +9859,6 @@ export function AirboardPrototype({
         const reason = config.available
           ? "This browser cannot stream microphone audio."
           : "Realtime voice is not configured on the Airboard API.";
-        if (tryExplicitBrowserFallback(reason)) {
-          return;
-        }
         setSpeechEngine("unavailable");
         setSpeechSupported(false);
         setCommandFeedback(
@@ -10093,9 +9870,6 @@ export function AirboardPrototype({
           return;
         }
         const reason = "The realtime transcription service is unreachable.";
-        if (tryExplicitBrowserFallback(reason)) {
-          return;
-        }
         setSpeechEngine("unavailable");
         setSpeechSupported(false);
         setCommandFeedback(
@@ -11605,7 +11379,6 @@ export function AirboardPrototype({
       if (!isPlacementTool(tool)) {
         setGhostAnnotation(null);
         setGhostAnnotations([]);
-        setLastGestureIntent(tool === "eraser" ? { intent: "erase", confidence: 1 } : null);
         setCommandFeedback(
           tool === "eraser"
             ? "Eraser ready. Move over an object while holding the erase gesture."
@@ -11690,13 +11463,12 @@ export function AirboardPrototype({
     return () => window.removeEventListener("keydown", handleCreationShortcut);
   }, [activateCreationTool]);
 
-  // Catalog drag-and-drop: dropping a shape thumbnail commits a default-size
-  // object at the drop point, reusing the placement pipeline (snap included).
+  // Catalog drag-and-drop: dropping a creation-toolbar item places it at the
+  // drop point, or arms it there when it needs a click to place.
   const handleCatalogDrop = useCallback(
     (event: ReactDragEvent<HTMLCanvasElement>) => {
       const creationTool = event.dataTransfer.getData(CREATION_DRAG_MIME) as CreationToolId;
-      const tool = event.dataTransfer.getData(CATALOG_DRAG_MIME) as ObjectDockTool;
-      if ((!tool || !isPlacementTool(tool)) && !creationTool) {
+      if (!creationTool) {
         return;
       }
       event.preventDefault();
@@ -11709,31 +11481,23 @@ export function AirboardPrototype({
         x: event.clientX - rect.left,
         y: event.clientY - rect.top,
       });
-      if (creationTool) {
-        if (creationTool === "insert:media") {
-          requestMediaAtPoint(boardPoint);
-          return;
-        }
-        if (creationTool === "insert:link") {
-          void insertLinkAtPoint(boardPoint);
-          return;
-        }
-        const created = createSceneElementAtPoint(creationTool, boardPoint);
-        if (created) return;
-        activateCreationTool(creationTool);
-        setCommandFeedback(
-          `${creationToolLabel(creationTool)} armed at the drop point. Click to place it.`,
-        );
+      if (creationTool === "insert:media") {
+        requestMediaAtPoint(boardPoint);
         return;
       }
-      commitPlacementObject(
-        tool,
-        boardPoint,
+      if (creationTool === "insert:link") {
+        void insertLinkAtPoint(boardPoint);
+        return;
+      }
+      const created = createSceneElementAtPoint(creationTool, boardPoint);
+      if (created) return;
+      activateCreationTool(creationTool);
+      setCommandFeedback(
+        `${creationToolLabel(creationTool)} armed at the drop point. Click to place it.`,
       );
     },
     [
       activateCreationTool,
-      commitPlacementObject,
       createSceneElementAtPoint,
       insertLinkAtPoint,
       requestMediaAtPoint,
@@ -11741,7 +11505,6 @@ export function AirboardPrototype({
     ],
   );
 
-  const markerStatus = getMarkerStatus(gestureResult);
   const inputModeLabel = getInputModeLabel(inputMode);
   const touchpadStatus = getTouchpadStatus({
     state: touchpadState,
@@ -11794,19 +11557,15 @@ export function AirboardPrototype({
   });
   const activeVoiceProvider =
     realtimeSpeechMetadata?.provider ?? realtimeTranscriptionConfig?.provider ?? null;
-  const configuredVoiceModel =
+  const activeVoiceModel =
     realtimeSpeechMetadata?.model ??
     (selectedSpeechModel || realtimeTranscriptionConfig?.defaultModel || null);
-  const activeVoiceModel =
-    speechEngine === "browser-fallback" ? "browser-managed" : configuredVoiceModel;
   const voiceEngineLabel =
     speechEngine === "realtime"
       ? activeVoiceProvider ?? "realtime"
-      : speechEngine === "browser-fallback"
-        ? "Chrome fallback"
-        : speechEngine === "loading"
-          ? "checking"
-          : "not configured";
+      : speechEngine === "loading"
+        ? "checking"
+        : "not configured";
 
   const beginTitleEdit = useCallback(() => {
     if (!onRenameBoard || titleStatus === "saving") return;
@@ -11885,76 +11644,9 @@ export function AirboardPrototype({
     }
   }, [deleteStatus, onDeleteBoard]);
 
-  if (surface === "meet-side-panel") {
-    return (
-      <main className="airboard-meet-panel">
-        <header className="airboard-meet-panel-header">
-          <span className="eyebrow">Google Meet add-on</span>
-          <h1>Airboard</h1>
-          <p>Start a shared visual workspace, then collaborate in Meet&apos;s main stage.</p>
-        </header>
-
-        <section className="meet-panel-card" aria-live="polite">
-          <div className="meet-panel-status-row">
-            <span>Board connection</span>
-            <strong className="pill">
-              {boardSyncStatus === "connected" ? "Ready" : boardSyncStatus}
-            </strong>
-          </div>
-          <p>
-            Airboard uses typed commands, pointer, keyboard, and direct canvas controls inside
-            Meet. The shared board opens for everyone when the activity starts.
-          </p>
-        </section>
-
-        <section className="meet-panel-card meet-media-policy">
-          {embeddedMediaCapture ? (
-            <>
-              <h2>Gesture and voice on the shared board</h2>
-              <p>
-                This Meet client shares camera and microphone permission with Airboard. Start
-                gesture or voice from the main-stage board; capture begins only when you turn it
-                on and always shows an on-screen indicator.
-              </p>
-            </>
-          ) : meetMediaBridge ? (
-            <>
-              <h2>Gesture and voice are on the shared board</h2>
-              <p>
-                The Airboard extension connects this meeting&apos;s camera and microphone to the
-                main-stage board. Click Enable hands or Start Airo there; capture starts only
-                when you turn it on and stops the moment you turn it off.
-              </p>
-            </>
-          ) : (
-            <>
-              <h2>Gesture and voice run in a companion window</h2>
-              <p>
-                This Meet client does not delegate camera or microphone to add-ons, so Airboard
-                cannot capture media inside Meet. The companion window connects to this same
-                board — gestures and voice commands there appear for everyone in Meet. Installing
-                the Airboard extension brings gesture directly into Meet.
-              </p>
-              <CompanionMediaLink boardSessionId={activeBoardSessionId} joinToken={activeJoinToken} />
-            </>
-          )}
-        </section>
-
-        <section className="meet-panel-card">
-          <h2>On the shared board</h2>
-          <ul>
-            <li>Type a command such as “add a payment service”.</li>
-            <li>Drag, select, label, connect, undo, and export with ordinary controls.</li>
-            <li>Camera and microphone are optional to the meeting, not required by Airboard.</li>
-          </ul>
-        </section>
-      </main>
-    );
-  }
-
   return (
     <main
-      className={`airboard-shell${isMeetSurface ? " airboard-meet-embedded" : ""}${
+      className={`airboard-shell${
         desktopOverlay ? " desktop-overlay" : ""
       }${
         desktopOverlay && !desktopOverlayState.clickThrough ? " desktop-overlay-interactive" : ""
@@ -12339,14 +12031,14 @@ export function AirboardPrototype({
       <div
         className={`content${standaloneEditor ? " canvas-workspace" : ""}${
           standaloneEditor && settingsOpen ? " settings-open" : ""
-        }${standaloneEditor && copilotMode === "full" ? " copilot-open" : ""}`}
+        }${standaloneEditor && copilotOpen ? " copilot-open" : ""}`}
       >
         <section
           className={`board-area${boardTheme === "lightboard" ? " lightboard" : ""}`}
           aria-label="Airboard canvas"
         >
           {standaloneEditor && inputMode === "gesture" && !broadcastSafe ? (
-            copilotMode !== "closed" ? (
+            copilotOpen ? (
               <aside
                 className="canvas-copilot"
                 data-testid="canvas-copilot"
@@ -12493,12 +12185,10 @@ export function AirboardPrototype({
                     {speechRecognitionStatus === "interpreting" ? "…" : "↑"}
                   </button>
                 </form>
-                {copilotMode === "full" ? (
-                  <footer className="canvas-copilot-hint">
-                    <span><strong>Undo:</strong> the arrow at the bottom left, Cmd/Ctrl+Z, or say “Airo, undo”</span>
-                    <span>Shift+Enter for a new line</span>
-                  </footer>
-                ) : null}
+                <footer className="canvas-copilot-hint">
+                  <span><strong>Undo:</strong> the arrow at the bottom left, Cmd/Ctrl+Z, or say “Airo, undo”</span>
+                  <span>Shift+Enter for a new line</span>
+                </footer>
               </aside>
             ) : (
               <button
@@ -12923,10 +12613,7 @@ export function AirboardPrototype({
             tabIndex={0}
             onContextMenu={(event) => event.preventDefault()}
             onDragOver={(event) => {
-              if (
-                event.dataTransfer.types.includes(CATALOG_DRAG_MIME) ||
-                event.dataTransfer.types.includes(CREATION_DRAG_MIME)
-              ) {
+              if (event.dataTransfer.types.includes(CREATION_DRAG_MIME)) {
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "copy";
               }
@@ -13159,99 +12846,105 @@ export function AirboardPrototype({
               ) : null}
             </section>
           ) : null}
-          <section className="section sidebar-diagnostics">
-            <h2>Status</h2>
-            <div className="status-grid">
-              {cameraCaptureAvailable ? (
-                <>
-                  <span>Camera</span>
-                  <strong className={cameraStatus === "active" ? "pill" : "pill warning"}>
-                    {cameraStatusLabel(cameraStatus)}
-                  </strong>
-                </>
-              ) : null}
-              <span>Input</span>
-              <strong>{inputModeLabel}</strong>
-              <span>Touchpad</span>
-              <strong className="pill">{inputMode === "touchpad" ? touchpadStatus : "inactive"}</strong>
-              {inputMode === "gesture" ? (
-                <>
-                  <span>Intent Canvas</span>
-                  <strong className="pill">active</strong>
-                  <span>Object control</span>
-                  <strong className="pill">{objectGestureState}</strong>
-                  <span>Selection</span>
-                  <strong>{selectedAnnotationIds.length}</strong>
-                  <span>Live sync</span>
-                  <strong className="pill">{boardSyncStatus}</strong>
-                  <span>Zoom</span>
-                  <strong>{`${Math.round(viewportScale * 100)}%${canvasNavMode ? ` · ${canvasNavMode}` : ""}`}</strong>
-                  <span>Command</span>
-                  <strong>
-                    {speechRecognitionStatus === "interpreting"
-                      ? "interpreting"
-                      : pendingIntent
-                        ? "preview"
-                        : speechArmed
-                          ? "waiting for Airo"
-                          : "ready"}
-                  </strong>
-                  {voiceCaptureAvailable ? (
+          {/* Status and Board diagnostics show only in the desktop-overlay and
+              Meet sidebars; the standalone settings drawer leaves them out. */}
+          {!standaloneEditor ? (
+            <>
+              <section className="section sidebar-diagnostics">
+                <h2>Status</h2>
+                <div className="status-grid">
+                  {cameraCaptureAvailable ? (
                     <>
-                      <span>Voice</span>
-                      <strong className="pill">
-                        {speechArmed ? (speechListening ? "listening" : "connecting") : "off"}
+                      <span>Camera</span>
+                      <strong className={cameraStatus === "active" ? "pill" : "pill warning"}>
+                        {cameraStatusLabel(cameraStatus)}
                       </strong>
-                      <span>Voice engine</span>
-                      <strong>{voiceEngineLabel}</strong>
-                      <span>Voice model</span>
-                      <strong>{activeVoiceModel ?? "-"}</strong>
                     </>
                   ) : null}
-                  <span>Intent AI</span>
-                  <strong>
-                    {semanticIntentConfig?.available
-                      ? `${semanticIntentConfig.provider ?? "provider"} / ${selectedSemanticIntentModel || semanticIntentConfig.defaultModel || "default"}`
-                      : "not configured"}
-                  </strong>
-                </>
-              ) : null}
-              {cameraCaptureAvailable && inputMode === "gesture" ? (
-                <>
-                  <span>Hand cursor</span>
-                  <strong className="pill">{handControlDiagnostics.controllerState}</strong>
-                  <span>Tracking confidence</span>
-                  <strong>{handControlDiagnostics.trackingConfidence.toFixed(2)}</strong>
-                  <span>Grab strength</span>
-                  <strong>{handControlDiagnostics.grabStrength.toFixed(2)}</strong>
-                  <span>Active hand</span>
-                  <strong>{gestureResult?.hand ?? "either"}</strong>
-                </>
-              ) : null}
-              {cameraCaptureAvailable ? (
-                <>
-                  <span>Hands detected</span>
-                  <strong>{stats.handsDetected}</strong>
-                </>
-              ) : null}
-            </div>
-            {cameraCaptureAvailable && cameraError ? <p className="hint">{cameraError}</p> : null}
-            {cameraCaptureAvailable && inputMode === "gesture" ? (
-              <p className="hint">{handControlCoach}</p>
-            ) : null}
-          </section>
+                  <span>Input</span>
+                  <strong>{inputModeLabel}</strong>
+                  <span>Touchpad</span>
+                  <strong className="pill">{inputMode === "touchpad" ? touchpadStatus : "inactive"}</strong>
+                  {inputMode === "gesture" ? (
+                    <>
+                      <span>Intent Canvas</span>
+                      <strong className="pill">active</strong>
+                      <span>Object control</span>
+                      <strong className="pill">{objectGestureState}</strong>
+                      <span>Selection</span>
+                      <strong>{selectedAnnotationIds.length}</strong>
+                      <span>Live sync</span>
+                      <strong className="pill">{boardSyncStatus}</strong>
+                      <span>Zoom</span>
+                      <strong>{`${Math.round(viewportScale * 100)}%${canvasNavMode ? ` · ${canvasNavMode}` : ""}`}</strong>
+                      <span>Command</span>
+                      <strong>
+                        {speechRecognitionStatus === "interpreting"
+                          ? "interpreting"
+                          : pendingIntent
+                            ? "preview"
+                            : speechArmed
+                              ? "waiting for Airo"
+                              : "ready"}
+                      </strong>
+                      {voiceCaptureAvailable ? (
+                        <>
+                          <span>Voice</span>
+                          <strong className="pill">
+                            {speechArmed ? (speechListening ? "listening" : "connecting") : "off"}
+                          </strong>
+                          <span>Voice engine</span>
+                          <strong>{voiceEngineLabel}</strong>
+                          <span>Voice model</span>
+                          <strong>{activeVoiceModel ?? "-"}</strong>
+                        </>
+                      ) : null}
+                      <span>Intent AI</span>
+                      <strong>
+                        {semanticIntentConfig?.available
+                          ? `${semanticIntentConfig.provider ?? "provider"} / ${selectedSemanticIntentModel || semanticIntentConfig.defaultModel || "default"}`
+                          : "not configured"}
+                      </strong>
+                    </>
+                  ) : null}
+                  {cameraCaptureAvailable && inputMode === "gesture" ? (
+                    <>
+                      <span>Hand cursor</span>
+                      <strong className="pill">{handControlDiagnostics.controllerState}</strong>
+                      <span>Tracking confidence</span>
+                      <strong>{handControlDiagnostics.trackingConfidence.toFixed(2)}</strong>
+                      <span>Grab strength</span>
+                      <strong>{handControlDiagnostics.grabStrength.toFixed(2)}</strong>
+                      <span>Active hand</span>
+                      <strong>{gestureResult?.hand ?? "either"}</strong>
+                    </>
+                  ) : null}
+                  {cameraCaptureAvailable ? (
+                    <>
+                      <span>Hands detected</span>
+                      <strong>{stats.handsDetected}</strong>
+                    </>
+                  ) : null}
+                </div>
+                {cameraCaptureAvailable && cameraError ? <p className="hint">{cameraError}</p> : null}
+                {cameraCaptureAvailable && inputMode === "gesture" ? (
+                  <p className="hint">{handControlCoach}</p>
+                ) : null}
+              </section>
 
-          <section className="section sidebar-diagnostics">
-            <h2>Board</h2>
-            <div className="status-grid">
-              <span>Visible strokes</span>
-              <strong>{stats.strokes}</strong>
-              <span>Deleted strokes</span>
-              <strong>{stats.deleted}</strong>
-              <span>Active strokes</span>
-              <strong>{stats.active}</strong>
-            </div>
-          </section>
+              <section className="section sidebar-diagnostics">
+                <h2>Board</h2>
+                <div className="status-grid">
+                  <span>Visible strokes</span>
+                  <strong>{stats.strokes}</strong>
+                  <span>Deleted strokes</span>
+                  <strong>{stats.deleted}</strong>
+                  <span>Active strokes</span>
+                  <strong>{stats.active}</strong>
+                </div>
+              </section>
+            </>
+          ) : null}
 
           {standaloneEditor ? (
             <section className="section media-permission-section">
@@ -13339,67 +13032,6 @@ export function AirboardPrototype({
               />
               <span>Quiet sounds when Airo applies, misses, or asks</span>
             </label>
-            {surface === "meet-main-stage" && cameraOverlay ? (
-              <>
-                <label className="check-row" htmlFor="camera-overlay-toggle">
-                  <input
-                    id="camera-overlay-toggle"
-                    type="checkbox"
-                    checked={cameraOverlayEnabled}
-                    onChange={(event) => {
-                      const enabled = event.target.checked;
-                      setCameraOverlayEnabled(enabled);
-                      if (enabled) {
-                        enforceCameraCanvas();
-                        cameraOverlay.start();
-                      } else {
-                        cameraOverlay.stop();
-                      }
-                    }}
-                  />
-                  <span>Lightboard on my camera</span>
-                </label>
-                {cameraOverlayEnabled && cameraOverlayState && !cameraOverlayState.engaged ? (
-                  <p className="hint" data-testid="camera-overlay-pending">
-                    Turn your Meet camera off and on once — the lightboard rides the next
-                    camera start.
-                  </p>
-                ) : null}
-                {cameraOverlayEnabled && cameraOverlayState?.engaged ? (
-                  <p className="hint" data-testid="camera-overlay-live">
-                    {cameraOverlayState.verification?.senderAttached &&
-                    cameraOverlayState.verification.framesComposited > 0 &&
-                    cameraOverlayState.verification.lastCompositeAt > 0 &&
-                    cameraOverlayState.verification.lastVerifiedAt > 0 &&
-                    cameraOverlayState.verification.framesEncoded > 0 &&
-                    cameraOverlayState.verification.bytesSent > 0
-                      ? "Verified in this Meet client: the composited camera track is attached to Meet and encoding outbound video."
-                      : cameraOverlayState.verification
-                        ? "The compositor is engaged. Waiting for Meet to attach and encode its output track…"
-                        : "The compositor is engaged. Reload the current extension for real outbound-track verification."}
-                  </p>
-                ) : null}
-                {cameraOverlayEnabled && cameraOverlayState?.verification ? (
-                  <div
-                    className="status-grid camera-overlay-verification"
-                    data-testid="camera-overlay-verification"
-                  >
-                    <span>Extension</span>
-                    <strong>{cameraOverlayState.verification.extensionVersion}</strong>
-                    <span>Composite frames</span>
-                    <strong>{Math.round(cameraOverlayState.verification.framesComposited)}</strong>
-                    <span>Meet sender</span>
-                    <strong>
-                      {cameraOverlayState.verification.senderAttached ? "attached" : "waiting"}
-                    </strong>
-                    <span>Encoded frames</span>
-                    <strong>{Math.round(cameraOverlayState.verification.framesEncoded)}</strong>
-                    <span>Outbound bytes</span>
-                    <strong>{Math.round(cameraOverlayState.verification.bytesSent)}</strong>
-                  </div>
-                ) : null}
-              </>
-            ) : null}
             {boardTheme === "lightboard" ? (
               <>
                 {surface === "standalone" ? (
@@ -13656,10 +13288,8 @@ export function AirboardPrototype({
                     <>
                       <p className="hint">
                         Type a command or use pointer, keyboard, and direct canvas controls.
-                        This meeting surface cannot capture camera or microphone, so gesture and
-                        voice run in a companion window connected to this same board.
+                        This meeting surface cannot capture camera or microphone.
                       </p>
-                      <CompanionMediaLink boardSessionId={activeBoardSessionId} joinToken={activeJoinToken} />
                       <label className="check-row" htmlFor="auto-snap-connectors">
                         <input
                           id="auto-snap-connectors"
@@ -13934,8 +13564,7 @@ export function AirboardPrototype({
             {!cameraCaptureAvailable ? (
               <p className="hint">
                 Type commands in the Command field, drag shapes from the catalogs, Shift-click
-                to multi-select, and press Cmd/Ctrl+Z to undo. Gesture and voice are available
-                through the companion window.
+                to multi-select, and press Cmd/Ctrl+Z to undo.
               </p>
             ) : inputMode === "touchpad" ? (
               <p className="hint">
@@ -15314,10 +14943,6 @@ function surfaceLabel(surface: Surface): string {
     return "Meet main stage";
   }
 
-  if (surface === "meet-side-panel") {
-    return "Meet side panel";
-  }
-
   return "Standalone prototype";
 }
 
@@ -15345,34 +14970,4 @@ function copilotStartsOpen(): boolean {
 /** Canvas width the open Airo panel covers on the right. */
 function copilotRightInset(panelOpen: boolean, canvasWidth: number): number {
   return panelOpen ? Math.min(400, canvasWidth * 0.45) : 0;
-}
-
-/**
- * Opens the standalone surface bound to the same live board session. On
- * meeting surfaces that cannot capture media, this window is where gesture
- * and voice run; edits sync back to the shared stage for everyone.
- */
-function CompanionMediaLink({
-  boardSessionId,
-  joinToken,
-}: {
-  boardSessionId: string | null;
-  joinToken?: string | null;
-}) {
-  if (!boardSessionId || !joinToken) {
-    return <p className="hint">The companion link appears once the board connects.</p>;
-  }
-  // The live route joins this exact session. /app/boards/live made a new saved
-  // board and dropped the session from the address, so the companion never synced.
-  return (
-    <a
-      className="companion-link"
-      href={liveBoardLink(window.location.origin, boardSessionId, joinToken)}
-      target="_blank"
-      rel="noopener noreferrer"
-      data-testid="companion-media-link"
-    >
-      Open gesture &amp; voice companion
-    </a>
-  );
 }

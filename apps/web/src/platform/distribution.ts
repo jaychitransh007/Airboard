@@ -38,5 +38,3 @@ export const CHROME_WEB_STORE_URL = normalizeChromeWebStoreUrl(
 
 export const CHROME_EXTENSION_VERSION =
   process.env.NEXT_PUBLIC_CHROME_EXTENSION_VERSION?.trim() || "0.8.0";
-
-export const CHROME_EXTENSION_PUBLICLY_INSTALLABLE = Boolean(CHROME_WEB_STORE_URL);

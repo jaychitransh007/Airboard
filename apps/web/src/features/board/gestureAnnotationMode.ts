@@ -68,13 +68,6 @@ export type AnnotationResizeHandle =
   | "start"
   | "end";
 
-export type AnnotationRenderObject = {
-  annotation: StrokeAnnotation;
-  points: StrokePoint[];
-  color: string;
-  thickness: number;
-};
-
 export type AlignmentGuide = {
   axis: "x" | "y";
   position: number;

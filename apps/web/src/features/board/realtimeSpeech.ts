@@ -292,7 +292,6 @@ type ServerMessage = {
   scope?: string;
 };
 
-const WEB_SOCKET_CONNECTING = 0;
 const WEB_SOCKET_OPEN = 1;
 const WEB_SOCKET_CLOSING = 2;
 

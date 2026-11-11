@@ -18,9 +18,8 @@ This document describes the implemented customer journey, its operating data, an
 
 ### Public
 
-- `/`, `/product`, `/pricing`, `/enterprise`, `/demo`, `/download`
-- `/integrations` and `/integrations/google-meet|zoom|teams|standalone`
-- `/use-cases/sales|engineering|teaching|consulting|workshops`
+- `/`, `/product`, `/pricing`, `/enterprise`
+- `/integrations`; `/integrations/google-meet` redirects to `/help/integrations/google-meet`
 - `/security`, `/help`, `/help/:category/:article`, `/support`, `/status`, `/changelog`
 - `/docs` is a legacy redirect to `/help`
 - `/privacy`, `/terms`, `/dpa`, `/subprocessors`, `/cookies`, `/accessibility`
@@ -29,7 +28,7 @@ This document describes the implemented customer journey, its operating data, an
 ### Authenticated product
 
 - `/onboarding`; `/app`, the home page: every Airboard you can open, with Create Airboard
-- `/app/boards/:id`, `/app/boards/new`, `/app/boards/live`, `/app/billing`
+- `/app/boards/:id`, `/app/boards/new`, `/app/billing`
 - `/app/settings/profile|preferences|connected-accounts|notifications|privacy-data|sessions`
 - `/app/settings/workspace`, and for team owners and admins `/app/settings/members|policies|identity-directory|audit-logs`
 - Signed-in pages have no sidebar: a top header with the profile menu (Profile, Help Center, Plan & Billing, Settings, Sign out). Old addresses redirect: `/app/boards`, `/app/shared`, `/app/activity` and `/app/trash` to `/app`; `/app/integrations` to the Google Meet help article; `/app/admin/*` to the same page in Settings.

@@ -257,7 +257,6 @@ for (const asset of assets) {
           }
         ).__airboardTestHooks;
         const board = hooks.getCanonicalBoardState();
-        const trace = hooks.getInteractionDiagnostics().gestureTrace;
         return {
           events: hooks.getBoardEventLog().length,
           committedObjects: Object.values(board.strokes).filter(
@@ -303,7 +302,6 @@ for (const asset of assets) {
         observation.diagnostics.viewport.scale - baseline.viewport.scale,
       );
       const oracle = asset.annotations.browserReplay;
-      const trace = observation.diagnostics.gestureTrace;
       const gestureSummary = observation.diagnostics.gestureSummary;
       const perceptionFrames =
         gestureSummary.stageCounts.perception_health ?? 0;

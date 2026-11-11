@@ -187,11 +187,9 @@ export class VirtualSurfaceFrictionEngine {
     const markerPoseActive = this.isMarkerPoseActive(marker, timestampMs);
     if (!markerPoseActive) {
       const commit = this.commitStrokeIfNeeded();
-      const markerGripDetected =
-        marker.inputSource === "physical_marker" && (marker.gripConfidence ?? 0) >= 0.35;
       const cursorStyle: MarkerCursorStyle =
         marker.gesture === "marker" ? "low_confidence" : "hand_detected";
-      this.markerState = markerGripDetected ? "MARKER_GRIP_DETECTED" : "HAND_DETECTED";
+      this.markerState = "HAND_DETECTED";
       this.virtualMarkerTip = targetPoint;
       this.previousHandPoint = targetPoint;
       this.markerGestureStartedAt = undefined;
@@ -222,7 +220,6 @@ export class VirtualSurfaceFrictionEngine {
       gestureConfidence: marker.gestureConfidence,
       handSpeedPxPerSec,
       markerGestureDurationMs,
-      marker,
     });
 
     if (
@@ -390,7 +387,6 @@ export class VirtualSurfaceFrictionEngine {
     gestureConfidence: number;
     handSpeedPxPerSec: number;
     markerGestureDurationMs: number;
-    marker?: MarkerFrameInput;
   }): number {
     const stabilityScore =
       input.handSpeedPxPerSec < this.config.stillSpeedPxPerSec
@@ -398,23 +394,6 @@ export class VirtualSurfaceFrictionEngine {
         : clamp(1 - input.handSpeedPxPerSec / this.config.normalSpeedPxPerSec);
     const speedControlScore = this.computeSpeedControlScore(input.handSpeedPxPerSec);
     const durationScore = clamp(input.markerGestureDurationMs / this.config.activationDurationMs);
-
-    if (
-      input.marker?.inputSource === "physical_marker" ||
-      input.marker?.gripConfidence !== undefined ||
-      input.marker?.tipConfidence !== undefined
-    ) {
-      const gripScore = clamp(input.marker.gripConfidence ?? input.gestureConfidence);
-      const tipScore = clamp(input.marker.tipConfidence ?? input.gestureConfidence);
-      return clamp(
-        0.3 * gripScore +
-          0.25 * tipScore +
-          0.2 * stabilityScore +
-          0.15 * speedControlScore +
-          0.1 * durationScore,
-      );
-    }
-
     const gestureScore = clamp(input.gestureConfidence);
     return clamp(
       0.4 * gestureScore + 0.25 * stabilityScore + 0.2 * speedControlScore + 0.15 * durationScore,
@@ -608,8 +587,6 @@ export class VirtualSurfaceFrictionEngine {
     };
     if (input.marker?.inputSource) {
       diagnostics.inputSource = input.marker.inputSource;
-      diagnostics.inputMode =
-        input.marker.inputSource === "physical_marker" ? "physical_marker" : "hand_marker";
     }
     if (input.marker?.trackingSource) {
       diagnostics.trackingSource = input.marker.trackingSource;

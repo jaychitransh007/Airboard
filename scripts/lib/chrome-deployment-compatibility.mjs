@@ -6,12 +6,6 @@ const CHROME_WEB_STORE_ORIGIN = "https://chromewebstore.google.com";
 export const CHROME_ORIGIN_GATED_API_SURFACES = Object.freeze([
   { id: "semantic-intent", method: "POST", path: "/intent/resolve" },
   { id: "voice-trace-write", method: "POST", path: "/voice/trace" },
-  { id: "voice-metrics", method: "GET", path: "/voice/metrics" },
-  {
-    id: "voice-trace-read",
-    method: "GET",
-    path: "/voice/trace/00000000-0000-4000-8000-000000000000",
-  },
   { id: "transcription-websocket", method: "WEBSOCKET", path: "/transcription/ws" },
 ]);
 

@@ -1,7 +1,7 @@
 # Object-First Gesture Mode Implementation Notes
 
 > **Current interaction reference:** See
-> [Gesture Interaction Audit](./Gesture%20Interaction%20Audit.md) for exact
+> [Gesture Interaction Audit](../Gesture%20Interaction%20Audit.md) for exact
 > poses, arbitration rules, missing gestures, and audience-specific gaps.
 
 ## Summary

@@ -6,7 +6,7 @@
 > scope; in-product work includes full guided gesture onboarding (`ONB-008`)
 > and personal calibration (`ONB-014`).
 > **Audiences:** corporate employees, content creators, online tutors
-> (per [Gesture Interaction Audit](./Gesture%20Interaction%20Audit.md)), plus
+> (per [Gesture Interaction Audit](../Gesture%20Interaction%20Audit.md)), plus
 > design-partner administrators.
 
 ---
@@ -75,7 +75,7 @@ excellent *sources* (§4).
 
 ### 2.3 Drift that must be repaired while writing
 
-The [Release Readiness Backlog](./Release%20Readiness%20Backlog.md) already
+The [Release Readiness Backlog](../Release%20Readiness%20Backlog.md) already
 logs four documentation-honesty defects. Writing help content on top of them
 would propagate the errors into customer-facing text:
 
@@ -156,18 +156,18 @@ Docs/help/
 
 | # | Document | Must answer | Source of truth | How it gets verified |
 | --- | --- | --- | --- | --- |
-| 01 | What Airboard is | What the product does, the four surfaces, what "no confirmation, undo is the safety net" means and why | `README.md`; [Augmented Experience Vision](./Augmented%20Experience%20Vision%20and%20Interaction%20Spec.md) §1–2 | Product read-through |
+| 01 | What Airboard is | What the product does, the four surfaces, what "no confirmation, undo is the safety net" means and why | `README.md`; [Augmented Experience Vision](../Augmented%20Experience%20Vision%20and%20Interaction%20Spec.md) §1–2 | Product read-through |
 | 02 | System requirements | Browsers, camera, microphone, lighting, network, which capabilities need which provider keys | `Intent Canvas Implementation Notes.md` "Browser and Hardware Limits"; `Platform Support Matrix.md` (after RGB-034) | Manual matrix test |
 | 03 | Your first board | Sign up → **Create Airboard** on **Airboards** → place two objects → connect them → rename → undo, with a typed-only path and a voice path | `AirboardsHome.tsx`; manual walkthrough | Perform end to end |
 | 04 | Commands | The full grammar; node types; placement words; what happens when a command is not understood; the deterministic vs. semantic distinction in plain language | **Generated** from `packages/core/src/semanticCapabilities.ts:40,205,259,277` and `OBJECT_CATALOG` (`AirboardPrototype.tsx:417`) | Generator + `pnpm eval:grammar` corpus |
 | 05 | Airo voice | Start Airo once; open-palm push-to-talk; the "Airo" wake fallback; hold-to-edit; what to do with a misheard command; why ordinary meeting talk is safe | `README.md` "Realtime Voice"; `voiceCommandRouter.ts`; Vision spec §2, §5 | Live session with a microphone |
-| 06 | Gestures | Every shipped pose with exact performance; confusable pairs and how to avoid them; what is deliberately *not* a gesture and why | [Gesture Interaction Audit](./Gesture%20Interaction%20Audit.md) — the single best existing source; use its tables near-verbatim | Live session with a camera; feeds the trainer (§6) |
+| 06 | Gestures | Every shipped pose with exact performance; confusable pairs and how to avoid them; what is deliberately *not* a gesture and why | [Gesture Interaction Audit](../Gesture%20Interaction%20Audit.md) — the single best existing source; use its tables near-verbatim | Live session with a camera; feeds the trainer (§6) |
 | 07 | Keyboard, pointer, touchpad | Every shortcut; the complete camera-off, microphone-off parity path | **Generated** from the keydown handler (`AirboardPrototype.tsx:5924`–`6090`): `Cmd/Ctrl+Z`, `Shift+H`, `Space`, `Tab`/`Shift+Tab`, `Enter`/`F2`, `Escape`, hold `V`, `E`, `Shift`, `Alt`, `Ctrl/⌘+wheel` | Keyboard-only run of doc 03 |
 | 08 | Screen and camera composition | Use screen, camera underlay, dark overlay dial, snap-to-hide, studio recording, what the audience sees | `README.md` "Screen and camera composition"; `lightboardComposition.ts` | Manual, with a second viewer |
 | 09 | Boards, versions, export | Save, rename, versions, share/visibility, delete, PNG export | `AirboardsHome.tsx`; `ShareDialog.tsx`; `boardLifecycle.ts` | Manual |
 | 10 | Use Airboard in Google Meet | Before you start (Chrome or Edge, signed in, nothing to install); present the Airboard tab (**Present now → A tab**); camera behind the board; what the audience sees; voice, gestures, typing and mouse while presenting; optional live link for co-editing; stopping; troubleshooting and honest limits (presented tab, not the Meet camera tile) | `AirboardPrototype.tsx` board menu; `ShareDialog.tsx`; `screenUnderlay.ts` | Two-account real call |
 | 11 | Desktop overlay | Draw over slides or any app from the web app via **••• → Show a screen behind the board**; dark overlay and local contrast; showing it in Meet or recording it; stopping | `AirboardPrototype.tsx`; `screenUnderlay.ts`; `lightboardComposition.ts` | Manual in Chrome and Edge |
-| 12 | Account, trial, billing | Sign-up, invitations, the one-month value-triggered pilot, what happens at expiry, why checkout may be unavailable | [Commercial Platform Runbook](./Commercial%20Platform%20Runbook.md); `BillingPage.tsx` | `pnpm smoke:commercial` |
+| 12 | Account, trial, billing | Sign-up, invitations, the one-month value-triggered pilot, what happens at expiry, why checkout may be unavailable | [Commercial Platform Runbook](../Commercial%20Platform%20Runbook.md); `BillingPage.tsx` | `pnpm smoke:commercial` |
 | 13 | Workspace administration | Settings → Workspace group: Workspace (name, switching, usage), Members and roles, Policies, SSO & SCIM, Audit log | `AdminPage.tsx`; `pageTitles.ts`; `controlPlaneRoutes.ts`; Commercial Platform Runbook | Manual as an owner account |
 | 14 | Privacy and your data | What is processed vs. stored, per provider; voice-trace retention (14 days); analytics; export and deletion, including the 7-day cancellation window | `Official Launch Readiness.md` "Data inventory and enforced retention"; **after RGB-036 is fixed** | Cross-check against `/privacy` and the retention jobs |
 | 15 | Troubleshooting | Symptom-first: hands not detected, voice unavailable, command rejected, people in Meet can't see the board, board will not save, sign-in loop | Error-code map; support intake patterns | Each entry reproduced once |
@@ -217,7 +217,7 @@ Interaction Audit is current as of 30 July 2026.
 
 Scope confirmed as full `ONB-008` + `ONB-014`. Both are P0 in the Gesture
 Interaction Audit backlog and NOT STARTED in the
-[Public Beta checklist](./archive/Public%20Beta%20Readiness%20and%20Platform%20Onboarding%20Checklist.md):
+[Public Beta checklist](./Public%20Beta%20Readiness%20and%20Platform%20Onboarding%20Checklist.md):
 
 > **ONB-008** — The user practices choose, move, place, erase, snap, pan,
 > and zoom; sees pose/contact/release quality and conflict explanations;

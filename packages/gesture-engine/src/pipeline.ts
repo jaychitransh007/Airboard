@@ -1,6 +1,5 @@
 import { classifyGesture } from "./classifier.ts";
 import { mapLandmarkToCanvas } from "./mapper.ts";
-import { PhysicalMarkerTracker } from "./physicalMarker.ts";
 import { GestureSmoother } from "./smoothing.ts";
 import { GestureStateMachine } from "./stateMachine.ts";
 import { VirtualSurfaceFrictionEngine } from "./virtualSurfaceFrictionEngine.ts";
@@ -14,8 +13,6 @@ import type {
   GestureMode,
   GestureResult,
   MarkerInputMode,
-  MarkerUserProfile,
-  PhysicalMarkerModeConfig,
   SmoothedPoint,
   VirtualSurfaceFrictionConfig,
 } from "./types.ts";
@@ -26,7 +23,6 @@ export class GesturePipeline {
   private readonly markerSmoother = new GestureSmoother();
   private readonly dusterSmoother = new GestureSmoother();
   private readonly frictionEngine = new VirtualSurfaceFrictionEngine();
-  private readonly physicalMarkerTracker = new PhysicalMarkerTracker();
   private lastDominantGesture: string | null = null;
 
   process(input: {
@@ -36,16 +32,11 @@ export class GesturePipeline {
     config?: Partial<GestureConfig>;
     frictionConfig?: Partial<VirtualSurfaceFrictionConfig>;
     frictionPreset?: FrictionPreset;
+    /** Accepted for existing callers; the hand marker is the only input mode. */
     markerInputMode?: MarkerInputMode;
-    physicalMarkerConfig?: Partial<PhysicalMarkerModeConfig> | undefined;
-    markerProfile?: MarkerUserProfile | undefined;
     paused?: boolean;
   }): GestureResult | null {
     const config = { ...defaultGestureConfig, ...input.config };
-    const markerInputMode = input.markerInputMode ?? "hand_marker";
-    if (markerInputMode !== "physical_marker") {
-      this.physicalMarkerTracker.reset();
-    }
     this.frictionEngine.setConfig({
       minMarkerConfidence: config.markerGestureConfidenceThreshold,
       minHandednessConfidence: config.minTrackingConfidence,
@@ -61,7 +52,6 @@ export class GesturePipeline {
       this.stateMachine.reset();
       this.markerSmoother.reset();
       this.dusterSmoother.reset();
-      this.physicalMarkerTracker.reset();
       const frictionOutput = this.frictionEngine.update({
         timestampMs: input.timestampMs,
         paused: true,
@@ -74,23 +64,7 @@ export class GesturePipeline {
       });
     }
 
-    const handMarkerCandidate = findMarkerCandidate(classified, config);
-    const physicalMarkerCandidate =
-      markerInputMode === "physical_marker"
-        ? this.findPhysicalMarkerCandidate({
-            hands: input.hands,
-            config,
-            timestampMs: input.timestampMs,
-            physicalMarkerConfig: input.physicalMarkerConfig,
-            markerProfile: input.markerProfile,
-          })
-        : undefined;
-    const markerCandidate = chooseMarkerCandidate({
-      markerInputMode,
-      handMarkerCandidate,
-      physicalMarkerCandidate,
-      fallbackToHandGesture: input.physicalMarkerConfig?.fallbackToHandGesture,
-    });
+    const markerCandidate = markHandGestureCandidate(findMarkerCandidate(classified, config));
     const markerFrame = markerCandidate
       ? buildMarkerFrame(markerCandidate, input.mapping, input.timestampMs)
       : undefined;
@@ -183,63 +157,6 @@ export class GesturePipeline {
       frictionPreset: input.frictionPreset,
     });
   }
-
-  private findPhysicalMarkerCandidate(input: {
-    hands: DetectedHand[];
-    config: GestureConfig;
-    timestampMs: number;
-    physicalMarkerConfig?: Partial<PhysicalMarkerModeConfig> | undefined;
-    markerProfile?: MarkerUserProfile | undefined;
-  }): GestureClassifierOutput | undefined {
-    const candidates = input.hands
-      .filter(
-        (hand) =>
-          hand.handedness !== input.config.dusterHand &&
-          (input.config.markerHand === "either" || hand.handedness === input.config.markerHand),
-      )
-      .flatMap((hand) => {
-        const detection = this.physicalMarkerTracker.detect({
-          hand,
-          timestampMs: input.timestampMs,
-          config: input.physicalMarkerConfig,
-          profile: input.markerProfile,
-        });
-        return detection ? [detection] : [];
-      })
-      .sort((a, b) => b.classifierOutput.confidence - a.classifierOutput.confidence);
-
-    return candidates[0]?.classifierOutput;
-  }
-}
-
-function chooseMarkerCandidate(input: {
-  markerInputMode: MarkerInputMode;
-  handMarkerCandidate?: GestureClassifierOutput | undefined;
-  physicalMarkerCandidate?: GestureClassifierOutput | undefined;
-  fallbackToHandGesture?: boolean | undefined;
-}): GestureClassifierOutput | undefined {
-  if (input.markerInputMode !== "physical_marker") {
-    return markHandGestureCandidate(input.handMarkerCandidate);
-  }
-
-  if (
-    input.physicalMarkerCandidate &&
-    (input.physicalMarkerCandidate.gesture === "marker" ||
-      input.physicalMarkerCandidate.confidence >= 0.2)
-  ) {
-    return input.physicalMarkerCandidate;
-  }
-
-  if (input.fallbackToHandGesture !== false && input.handMarkerCandidate) {
-    return {
-      ...input.handMarkerCandidate,
-      inputSource: "hand_gesture",
-      trackingSource: "finger_heuristic",
-      fallbackToHandGesture: true,
-    };
-  }
-
-  return input.physicalMarkerCandidate;
 }
 
 function markHandGestureCandidate(

@@ -10,7 +10,6 @@
     "test": "node --test"
   },
   "dependencies": {
-    "@airboard/core": "workspace:*",
     "@googleworkspace/meet-addons": "1.2.0"
   }
 }

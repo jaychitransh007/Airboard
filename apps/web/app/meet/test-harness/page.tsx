@@ -3,34 +3,31 @@ import { MeetBridgeEmulator } from "../../../src/features/meet/MeetBridgeEmulato
 import { TestAirboardHarness } from "../../../src/features/board/TestAirboardHarness";
 
 /**
- * E2E-only mount of the Meet-surface board. The real Meet routes require the
- * official SDK inside a Meet-provided iframe, which Playwright cannot supply,
- * so the media-ownership invariant (Meet surfaces never start Airboard
- * camera/microphone capture) is exercised here instead. Hidden unless the
- * Playwright dev server sets NEXT_PUBLIC_AIRBOARD_TEST_HOOKS.
+ * E2E-only mount of the headless Meet overlay engine. The Chrome extension
+ * loads the real engine (/meet/overlay-engine) in a frame Playwright cannot
+ * host, so the engine runs here instead, authenticated with a signed test
+ * identity. Hidden unless the Playwright dev server sets
+ * NEXT_PUBLIC_AIRBOARD_TEST_HOOKS.
  */
 export default async function MeetTestHarnessPage({
   searchParams,
 }: {
-  searchParams: Promise<{ surface?: string; media?: string; bridge?: string; headless?: string }>;
+  searchParams: Promise<{ bridge?: string }>;
 }) {
   if (process.env.NEXT_PUBLIC_AIRBOARD_TEST_HOOKS !== "1") {
     notFound();
   }
-  // media=embedded emulates a host client that delegates camera/microphone
-  // permission to the add-on frame; the default emulates no delegation.
   // bridge=emulate answers the media-bridge protocol in-page, standing in for
   // the Meet Media Bridge extension.
-  const { surface, media, bridge, headless } = await searchParams;
+  const { bridge } = await searchParams;
   return (
     <>
       {bridge === "emulate" ? <MeetBridgeEmulator /> : null}
       <TestAirboardHarness
-        surface={surface === "side-panel" ? "meet-side-panel" : "meet-main-stage"}
+        surface="meet-main-stage"
         meetingProvider="google_meet"
         providerMeetingId="test-harness-meeting"
-        embeddedMediaCapture={media === "embedded"}
-        headlessMeetOverlay={headless === "1"}
+        headlessMeetOverlay
       />
     </>
   );

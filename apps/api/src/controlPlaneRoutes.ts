@@ -39,30 +39,16 @@ const MAX_PURGE_BATCHES_PER_ORGANIZATION = 20;
 const PROFILE_ROLES: AccountRole[] = ["owner", "admin", "billing", "member", "viewer"];
 const ADMIN_ROLES: AccountRole[] = ["owner", "admin"];
 const BILLING_ROLES: AccountRole[] = ["owner", "admin", "billing"];
+/** The product events the API records; writeProductEvent drops any other name. */
 const ANALYTICS_EVENT_NAMES = new Set([
-  "landing.viewed",
-  "signup.started",
-  "signup.completed",
-  "onboarding.use_case_selected",
-  "onboarding.platform_selected",
-  "integration.install_started",
-  "integration.install_verified",
   "preflight.passed",
   "preflight.failed",
   "trial.started",
   "board.created",
-  "session.started",
-  "session.successful",
-  "overlay.engaged",
-  "overlay.sender_verified",
-  "diagram.first_action",
   "checkout.started",
-  "checkout.completed",
   "invite.sent",
   "invite.accepted",
-  "subscription.canceled",
 ]);
-const FORBIDDEN_ANALYTICS_KEYS = /audio|video|transcript|meeting.?url|meeting.?title|board.?text|label|token|secret|password|content/i;
 
 type JsonRecord = Record<string, unknown>;
 type ChromeCredentialRotationResult = {
@@ -344,25 +330,22 @@ export function registerControlPlaneRoutes(
     };
   });
 
-  server.get<{ Querystring: { scope?: string; preview?: string } }>("/boards", async (request, reply) => {
+  server.get<{ Querystring: { preview?: string } }>("/boards", async (request, reply) => {
     const context = await requireAuth(auth, request, reply);
     if (!context) return;
     if (!auth.client) return { boards: [] };
-    const scope = String(request.query.scope ?? "active");
     // The library asks for previews; other lists stay light and skip the
     // saved state entirely.
     const withPreview = request.query.preview === "1";
-    let query = auth.client
+    const { data, error } = await auth.client
       .from("boards")
       .select(`id,workspace_id,title,description,latest_version,visibility,created_at,updated_at,archived_at${withPreview ? ",latest_state" : ""}`)
       .eq("organization_id", context.organizationId)
-      .or(boardAccessFilter(context.profileId));
-    // Boards deleted before Trash was removed wait here for the lifecycle purge.
-    query = query.is("deleted_at", null);
-    if (scope === "shared") query = query.neq("visibility", "private");
-    if (scope === "archived") query = query.not("archived_at", "is", null);
-    if (scope === "active") query = query.is("archived_at", null);
-    const { data, error } = await query
+      .or(boardAccessFilter(context.profileId))
+      // Boards deleted before Trash was removed wait here for the lifecycle purge.
+      .is("deleted_at", null)
+      // Nothing archives a board any more; boards archived before that stay hidden.
+      .is("archived_at", null)
       .order("updated_at", { ascending: false })
       .limit(200);
     if (error) return reply.code(500).send({ error: "BOARD_LIST_FAILED" });
@@ -445,11 +428,9 @@ export function registerControlPlaneRoutes(
         return reply.code(400).send({ error: "INVALID_BOARD_TITLE" });
       }
       if (title) update.title = title;
-      if (typeof body.description === "string") update.description = body.description.slice(0, 2_000);
-      if (["private", "organization", "link"].includes(String(body.visibility))) {
+      if (["private", "organization"].includes(String(body.visibility))) {
         update.visibility = body.visibility;
       }
-      if (typeof body.archived === "boolean") update.archived_at = body.archived ? new Date().toISOString() : null;
       if (update.visibility !== undefined) {
         // Members may edit a shared board, but only its owner decides who can
         // open it; otherwise a member could make a teammate's board vanish.
@@ -593,22 +574,6 @@ export function registerControlPlaneRoutes(
 }
 
 function registerIntegrationRoutes(server: FastifyInstance, config: ApiConfig, auth: AuthService) {
-  server.get("/integrations", async (request, reply) => {
-    const context = await requireAuth(auth, request, reply);
-    if (!context) return;
-    if (!auth.client) return { installations: [] };
-    let installationQuery = auth.client
-      .from("platform_installations")
-      .select("id,platform,status,version,settings,external_installation_id,external_package_id,consented_at,last_seen_at,last_success_at,last_error_code,created_at")
-      .eq("organization_id", context.organizationId);
-    if (!auth.hasRole(context, ADMIN_ROLES)) {
-      installationQuery = installationQuery.eq("installed_by", context.profileId);
-    }
-    const { data, error } = await installationQuery.order("created_at", { ascending: false });
-    if (error) return reply.code(500).send({ error: "INSTALLATION_LIST_FAILED" });
-    return { installations: data ?? [] };
-  });
-
   server.post<{ Body: unknown }>("/integrations/preflight", async (request, reply) => {
     const context = await requireAuth(auth, request, reply);
     if (!context) return;
@@ -1121,32 +1086,6 @@ function registerIntegrationRoutes(server: FastifyInstance, config: ApiConfig, a
 }
 
 function registerOrganizationRoutes(server: FastifyInstance, _config: ApiConfig, auth: AuthService) {
-  server.patch<{ Body: unknown }>("/organization", async (request, reply) => {
-    const context = await requireRole(auth, request, reply, ADMIN_ROLES);
-    if (!context) return;
-    const body = record(request.body);
-    const update: JsonRecord = { updated_at: new Date().toISOString() };
-    const name = boundedString(body.name, 1, 160);
-    if (name) update.name = name;
-    if (["personal", "team", "enterprise"].includes(String(body.kind))) update.kind = body.kind;
-    const companySizeBand = boundedString(body.companySizeBand, 1, 40);
-    const countryCode = boundedString(body.countryCode, 2, 2);
-    const billingEmail = emailValue(body.billingEmail);
-    const securityContactEmail = emailValue(body.securityContactEmail);
-    if (companySizeBand) update.company_size_band = companySizeBand;
-    if (countryCode) update.country_code = countryCode.toUpperCase();
-    if (billingEmail) update.billing_email = billingEmail;
-    if (securityContactEmail) update.security_contact_email = securityContactEmail;
-    if (Object.keys(update).length === 1) return reply.code(400).send({ error: "ORGANIZATION_FIELD_REQUIRED" });
-    if (!auth.client) return { updated: true };
-    const { error } = await auth.client.from("organizations").update(update).eq("id", context.organizationId);
-    if (error) return reply.code(500).send({ error: "ORGANIZATION_UPDATE_FAILED" });
-    await writeAudit(auth, context, request, "organization.updated", "organization", context.organizationId, {
-      fields: Object.keys(update).filter((key) => key !== "updated_at"),
-    });
-    return { updated: true };
-  });
-
   server.get<{ Params: { token: string } }>("/invitations/:token", async (request, reply) => {
     if (!auth.client || request.params.token.length < 40 || request.params.token.length > 200) {
       return reply.code(404).send({ error: "INVITATION_NOT_FOUND" });
@@ -1421,34 +1360,6 @@ function registerPrivacyAndTelemetryRoutes(server: FastifyInstance, auth: AuthSe
     return reply.code(202).send({ accepted: true });
   });
 
-  server.post<{ Body: unknown }>("/analytics/events", async (request, reply) => {
-    const context = await requireAuth(auth, request, reply);
-    if (!context) return;
-    const body = record(request.body);
-    const eventName = boundedString(body.eventName, 2, 80);
-    const eventId = boundedString(body.eventId, 8, 120);
-    const properties = record(body.properties);
-    if (!eventName || !eventId || !ANALYTICS_EVENT_NAMES.has(eventName)) {
-      return reply.code(400).send({ error: "INVALID_ANALYTICS_EVENT" });
-    }
-    if (!analyticsPropertiesAllowed(properties)) {
-      return reply.code(400).send({ error: "SENSITIVE_ANALYTICS_PROPERTY" });
-    }
-    await writeProductEvent(auth, context, {
-      eventId,
-      eventName,
-      occurredAt: isoDate(body.occurredAt) ?? new Date().toISOString(),
-      properties,
-      ...(boundedUuid(body.installationId)
-        ? { installationId: boundedUuid(body.installationId) as string }
-        : {}),
-      ...(boundedUuid(body.boardSessionId)
-        ? { boardSessionId: boundedUuid(body.boardSessionId) as string }
-        : {}),
-    });
-    return reply.code(202).send({ accepted: true });
-  });
-
   server.post<{ Body: unknown }>("/consents", async (request, reply) => {
     const context = await requireAuth(auth, request, reply);
     if (!context) return;
@@ -1531,19 +1442,6 @@ function registerPrivacyAndTelemetryRoutes(server: FastifyInstance, auth: AuthSe
     if (error || !data) return reply.code(500).send({ error: "SUPPORT_REQUEST_FAILED" });
     await writeAudit(auth, context, request, "support.requested", "support_request", data.id, { category });
     return reply.code(201).send(data);
-  });
-
-  server.get("/activity", async (request, reply) => {
-    const context = await requireAuth(auth, request, reply);
-    if (!context) return;
-    if (!auth.client) return { events: [] };
-    const { data, error } = await auth.client.from("product_events")
-      .select("event_id,event_name,properties,occurred_at,board_session_id,installation_id")
-      .eq("organization_id", context.organizationId)
-      .order("occurred_at", { ascending: false })
-      .limit(100);
-    if (error) return reply.code(500).send({ error: "ACTIVITY_LIST_FAILED" });
-    return { events: data ?? [] };
   });
 
   server.get("/privacy/data-requests", async (request, reply) => {
@@ -1815,8 +1713,7 @@ function registerLifecycleRoutes(server: FastifyInstance, config: ApiConfig, aut
       abandonedUploads,
     };
     // Any failed step fails the run, so Cloud Scheduler logs the attempt as an
-    // error and the "Airboard lifecycle run failed" alert fires. Every step is
-    // retried on the next run.
+    // error (no alert is set up). Every step is retried on the next run.
     const failures = lifecycleFailureCount(summary);
     if (failures > 0) return reply.code(500).send({ error: "LIFECYCLE_STEP_FAILED", failures, ...summary });
     return summary;
@@ -2404,8 +2301,6 @@ async function writeProductEvent(
     eventName: string;
     occurredAt: string;
     properties: JsonRecord;
-    installationId?: string;
-    boardSessionId?: string;
   },
 ) {
   if (!auth.client || !ANALYTICS_EVENT_NAMES.has(event.eventName)) return;
@@ -2414,8 +2309,6 @@ async function writeProductEvent(
       event_id: event.eventId,
       profile_id: context.profileId,
       organization_id: context.organizationId,
-      installation_id: event.installationId,
-      board_session_id: event.boardSessionId,
       event_name: event.eventName,
       schema_version: 1,
       properties: event.properties,
@@ -2822,11 +2715,6 @@ function notificationMessage(template: string, payload: JsonRecord) {
   return messages[template] ?? { subject: "Airboard notification", html: "<p>There is an update to your Airboard account.</p>" };
 }
 
-function analyticsPropertiesAllowed(properties: JsonRecord): boolean {
-  const text = JSON.stringify(properties);
-  return text.length <= 16_000 && !Object.keys(properties).some((key) => FORBIDDEN_ANALYTICS_KEYS.test(key));
-}
-
 function sanitizeDiagnostics(input: JsonRecord): JsonRecord {
   const allowed = new Set([
     "appVersion",
@@ -2910,12 +2798,6 @@ function platformValue(value: unknown): string | null {
   return ["standalone", "chrome_meet", "google_workspace", "zoom", "teams", "desktop"].includes(text)
     ? text
     : null;
-}
-
-function isoDate(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const date = new Date(value);
-  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
 
 function unixDate(value: unknown): string | null {

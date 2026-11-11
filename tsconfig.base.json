@@ -13,34 +13,12 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-    "baseUrl": ".",
-    "paths": {
-      "@airboard/core": [
-        "packages/core/src/index.ts"
-      ],
-      "@airboard/core/existing-board-fan-in": [
-        "packages/core/src/existingBoardFanIn.ts"
-      ],
-      "@airboard/core/semantic-capabilities": [
-        "packages/core/src/semanticCapabilities.ts"
-      ],
-      "@airboard/drawing-engine": [
-        "packages/drawing-engine/src/index.ts"
-      ],
-      "@airboard/gesture-engine": [
-        "packages/gesture-engine/src/index.ts"
-      ],
-      "@airboard/realtime-client": [
-        "packages/realtime-client/src/index.ts"
-      ],
-      "@airboard/integrations": [
-        "packages/integrations/src/index.ts"
-      ]
-    },
     "allowImportingTsExtensions": true,
     "rewriteRelativeImportExtensions": true
   }

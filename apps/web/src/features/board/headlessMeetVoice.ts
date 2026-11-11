@@ -1,7 +1,6 @@
 export type HeadlessMeetSpeechEngine =
   | "loading"
   | "realtime"
-  | "browser-fallback"
   | "unavailable";
 
 export type HeadlessMeetVoiceStartState = {

@@ -821,25 +821,3 @@ export type BoardEvent =
   | ElementPatchedEvent
   | ElementDeletedEvent
   | ElementRestoredEvent;
-
-export type AdapterCapabilities = {
-  supportsMainStage: boolean;
-  supportsSidePanel: boolean;
-  supportsParticipantInvite: boolean;
-  supportsSharedActivity: boolean;
-  supportsScreenOverlay: boolean;
-  supportsRawMediaAccess: boolean;
-  supportsMeetingRecordingHooks: boolean;
-  supportsParticipantIdentity: boolean;
-};
-
-export type MeetingContext = {
-  provider: MeetingProvider;
-  providerMeetingId?: string;
-  providerSpaceId?: string;
-  meetingUrl?: string;
-  title?: string;
-  startedAt?: string;
-  hostUserId?: string;
-  capabilities: AdapterCapabilities;
-};

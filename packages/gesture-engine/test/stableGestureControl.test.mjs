@@ -1,14 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import {
-  HybridGestureController,
-  mapControlZonePointToCanvas,
-} from "../src/hybridGestureController.ts";
-import {
-  PinchHysteresis,
-  pinchStrengthFromDistance,
-} from "../src/pinchHysteresis.ts";
+import { HybridGestureController } from "../src/hybridGestureController.ts";
+import { PinchHysteresis } from "../src/pinchHysteresis.ts";
 import {
   acquireStickyTarget,
   findAreaTarget,
@@ -37,9 +31,6 @@ test("pinch hysteresis debounces engage and release across separate thresholds",
   assert.equal(pinch.update(0.3, 169).released, false);
   assert.equal(pinch.update(0.3, 170).released, true);
   assert.equal(pinch.snapshot().phase, "open");
-
-  assert.equal(pinchStrengthFromDistance(0.2, 0.2, 0.8), 1);
-  assert.equal(pinchStrengthFromDistance(0.8, 0.2, 0.8), 0);
 });
 
 test("area cursor acquisition prefers priority and sticky focus uses a larger release area", () => {
@@ -456,19 +447,6 @@ test("tracking loss freezes briefly, cancels once, and requires release before r
     targets: [target],
   });
   assert.equal(output.action?.type, "grab_started");
-
-  assert.deepEqual(
-    mapControlZonePointToCanvas(
-      { x: 0.25, y: 0.5 },
-      {
-        canvasWidth: 800,
-        canvasHeight: 400,
-        controlZone: { x: 0, y: 0, width: 1, height: 1 },
-        mirrorX: true,
-      },
-    ),
-    { x: 600, y: 200 },
-  );
 });
 
 test("relative drag accumulates intentional motion below the per-frame dead zone", () => {

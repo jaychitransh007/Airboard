@@ -44,9 +44,9 @@ type RoomClient = {
 };
 
 // Per-connection cache so session-status changes (lock / end / owner-disconnect)
-// are picked up within ~1s while high-frequency events (cursor moves) don't force
-// a store round-trip each time. Note: participant role and session drawing policy
-// have no mutation path today, so this TTL does NOT propagate permission changes.
+// and the owner's guest-editing switch (permission.changed) are picked up within
+// ~1s, while high-frequency events (cursor moves) don't force a store round-trip
+// each time. Participant roles have no mutation path.
 const AUTH_CACHE_TTL_MS = 1000;
 /** Largest socket message accepted; a compound board batch is a few hundred KB. */
 const MAX_SOCKET_MESSAGE_BYTES = 1024 * 1024;
@@ -328,17 +328,6 @@ export async function buildServer(
   server.get("/", async () => ({
     ok: true,
     service: "airboard-api",
-    message: "Airboard API is running. Open the web app on http://localhost:3000.",
-    routes: {
-      web: "http://localhost:3000",
-      health: "http://127.0.0.1:4000/health",
-      sessions: "POST http://127.0.0.1:4000/sessions/start",
-      transcriptionConfig: "GET http://127.0.0.1:4000/transcription/config",
-      transcription: "WS ws://127.0.0.1:4000/transcription/ws",
-      semanticIntentConfig: "GET http://127.0.0.1:4000/intent/config",
-      semanticIntent: "POST http://127.0.0.1:4000/intent/resolve",
-      voiceTrace: "POST http://127.0.0.1:4000/voice/trace",
-    },
   }));
 
   /** The session, if the signed-in caller started it. */

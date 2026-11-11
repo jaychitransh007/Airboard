@@ -5,16 +5,13 @@ import {
   AIRBOARD_TRANSCRIPTION_KEYTERMS,
   classifyBrowserWakeTranscript,
   createBrowserWakeCommandRouter,
-  createBrowserWakeSpeechSession,
   extractBrowserWakeCommands,
-  isAirboardVoiceConfirmation,
   isAddressedRequestUtterance,
   isCommandShapedUtterance,
   isConnectiveCommandUtterance,
   isReferenceAnswerUtterance,
   stripPoliteCommandLeadIn,
   normalizeScopedVoiceUtterance,
-  recoverAirboardVoiceCommand,
 } from "../src/features/board/browserSpeech.ts";
 import { parseIntentCanvasCommand } from "../src/features/board/intentCanvasParser.ts";
 
@@ -73,23 +70,9 @@ test("repairs Chrome hearing add as and after the wake word", () => {
   assert.equal(parsed.command.nodeType, "circle");
 });
 
-test("uses phrase-level prompting and safely recovers constrained ASR object aliases", () => {
+test("uses phrase-level prompting", () => {
   assert.ok(AIRBOARD_TRANSCRIPTION_KEYTERMS.includes("Airo add a circle here"));
   assert.ok(AIRBOARD_TRANSCRIPTION_KEYTERMS.includes("connect User to API"));
-
-  assert.deepEqual(recoverAirboardVoiceCommand("It is her career."), {
-    command: "add a circle here",
-    objectType: "circle",
-    basis: "constrained_asr_alias",
-  });
-  assert.equal(recoverAirboardVoiceCommand("at a data bass hear")?.command, "add a database here");
-  assert.equal(recoverAirboardVoiceCommand("you sir here")?.command, "add a user here");
-  assert.equal(recoverAirboardVoiceCommand("please discuss her career"), null);
-  assert.equal(recoverAirboardVoiceCommand("connect the service to the API"), null);
-
-  assert.equal(isAirboardVoiceConfirmation("confirm"), true);
-  assert.equal(isAirboardVoiceConfirmation("yes please"), true);
-  assert.equal(isAirboardVoiceConfirmation("add something else"), false);
 });
 
 test("classifies wake-only, command, and ordinary final transcripts", () => {
@@ -174,102 +157,6 @@ test("keeps Airboard entity mentions inside one narrative command", () => {
   assert.equal(invoked.wakeDetected, true);
   assert.deepEqual(invoked.wakePhrases, ["Airo"]);
   assert.deepEqual(invoked.commands.map(({ command }) => command), [narrative]);
-});
-
-test("continuous session emits only woken commands and carries a wake across results", async (t) => {
-  const originalWindow = globalThis.window;
-  const recognitions = [];
-
-  class FakeRecognition {
-    continuous = false;
-    interimResults = false;
-    lang = "";
-    maxAlternatives = 0;
-    onstart = null;
-    onresult = null;
-    onerror = null;
-    onend = null;
-    startCalls = 0;
-
-    constructor() {
-      recognitions.push(this);
-    }
-
-    start() {
-      this.startCalls += 1;
-      this.onstart?.();
-    }
-
-    stop() {
-      this.onend?.();
-    }
-
-    abort() {
-      this.onend?.();
-    }
-
-    emitFinal(transcript) {
-      this.onresult?.({
-        resultIndex: 0,
-        results: [{ isFinal: true, 0: { transcript } }],
-      });
-    }
-  }
-
-  globalThis.window = { SpeechRecognition: FakeRecognition };
-  t.after(() => {
-    if (originalWindow === undefined) {
-      delete globalThis.window;
-    } else {
-      globalThis.window = originalWindow;
-    }
-  });
-
-  const commands = [];
-  const wakePhrases = [];
-  const listening = [];
-  const endReasons = [];
-  const session = createBrowserWakeSpeechSession(
-    {
-      onCommand: (event) => commands.push(event.command),
-      onWake: (event) => wakePhrases.push(event.wakePhrase),
-      onListening: (active) => listening.push(active),
-      onEnd: (reason) => endReasons.push(reason),
-    },
-    { restartDelayMs: 0 },
-  );
-
-  assert.ok(session);
-  session.start();
-  const recognition = recognitions[0];
-  assert.equal(recognition.continuous, true);
-  assert.equal(recognition.interimResults, true);
-
-  recognition.emitFinal("add a user without activation");
-  recognition.emitFinal("Aero");
-  recognition.emitFinal("add a user");
-  recognition.emitFinal("Air row add an API Airoh connect user to API");
-  recognition.emitFinal("Arrow and a circle");
-  recognition.emitFinal("Arrow add a database");
-
-  assert.deepEqual(commands, [
-    "add a user",
-    "add an API",
-    "connect user to API",
-    "add a circle",
-    "add a database",
-  ]);
-  assert.deepEqual(wakePhrases, ["Aero", "Air row", "Airoh", "Arrow", "Arrow"]);
-
-  recognition.onend?.();
-  await new Promise((resolve) => setTimeout(resolve, 5));
-  assert.equal(recognition.startCalls, 2, "a normal browser end should restart recognition");
-
-  session.stop();
-  await new Promise((resolve) => setTimeout(resolve, 5));
-  assert.equal(recognition.startCalls, 2, "an explicit stop must prevent another restart");
-  assert.deepEqual(listening, [true, false, true, false]);
-  assert.deepEqual(endReasons, ["stopped"]);
 });
 
 test("scoped utterances rewrite to selection-targeted commands", () => {

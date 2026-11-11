@@ -77,8 +77,6 @@ const PUBLIC_PAGES: Array<{ path: string; siteTitle?: boolean }> = [
   { path: "/accessibility" },
   { path: "/privacy" },
   { path: "/integrations" },
-  { path: "/integrations/google-meet" },
-  { path: "/use-cases/product-teams" },
   { path: "/status" },
   { path: "/support" },
   { path: "/contact-sales" },
@@ -592,7 +590,7 @@ test("with reduced motion, nothing on the page animates", async ({ page }) => {
           return `${(animation as CSSAnimation).animationName ?? "transition"} on ${target?.tagName.toLowerCase()}.${target?.className}`;
         }),
     );
-  for (const path of ["/", "/demo", "/help", "/?testStandalone=1"]) {
+  for (const path of ["/", "/help", "/?testStandalone=1"]) {
     await page.goto(path);
     await page.waitForLoadState("networkidle");
     expect(await moving(), `animations on ${path}`).toEqual([]);

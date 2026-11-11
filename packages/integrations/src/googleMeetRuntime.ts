@@ -1,5 +1,4 @@
 import type {
-  ActivityStartingState,
   FrameOpenReason,
   FrameType,
   MeetAddonClient,
@@ -8,17 +7,10 @@ import type {
 
 export type GoogleMeetSurface = "side-panel" | "main-stage";
 
-export type GoogleMeetActivityData = {
-  protocolVersion: 1;
-  boardSessionId: string;
-};
-
 export type GoogleMeetRuntime = {
   frameType: FrameType;
   frameOpenReason: FrameOpenReason;
   meetingInfo: MeetingInfo;
-  readActivityStartingState(): Promise<ActivityStartingState | null>;
-  startActivity(state: ActivityStartingState): Promise<void>;
   endActivity(): Promise<void>;
   closeAddon(): Promise<void>;
 };
@@ -66,53 +58,8 @@ export async function createGoogleMeetRuntime(input: {
     frameType,
     frameOpenReason,
     meetingInfo,
-    readActivityStartingState: async () => {
-      try {
-        return await client.getActivityStartingState();
-      } catch (error) {
-        if (meetAddonErrorType(error) === "NoActivityFound") {
-          return null;
-        }
-        throw error;
-      }
-    },
-    startActivity: (state) => client.startActivity(state),
     endActivity: () => client.endActivity(),
     closeAddon: () => client.closeAddon(),
-  };
-}
-
-export function serializeGoogleMeetActivityData(input: {
-  boardSessionId: string;
-}): string {
-  const boardSessionId = input.boardSessionId.trim();
-  if (!isSafeBoardSessionId(boardSessionId)) {
-    throw new Error("Invalid Airboard session ID for Google Meet activity state");
-  }
-  return JSON.stringify({ protocolVersion: 1, boardSessionId });
-}
-
-export function parseGoogleMeetActivityData(value: string | undefined): GoogleMeetActivityData {
-  if (!value) {
-    throw new Error("Google Meet activity state is missing Airboard session data");
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    throw new Error("Google Meet activity state is not valid JSON");
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("Google Meet activity state has an invalid shape");
-  }
-  const record = parsed as Record<string, unknown>;
-  if (record.protocolVersion !== 1 || !isSafeBoardSessionId(record.boardSessionId)) {
-    throw new Error("Google Meet activity state has an unsupported or invalid payload");
-  }
-  return {
-    protocolVersion: 1,
-    boardSessionId: record.boardSessionId,
   };
 }
 
@@ -131,13 +78,3 @@ function meetAddonErrorType(error: unknown): string | null {
   const errorType = (error as { errorType?: unknown }).errorType;
   return typeof errorType === "string" ? errorType : null;
 }
-
-function isSafeBoardSessionId(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.length >= 1 &&
-    value.length <= 200 &&
-    /^[A-Za-z0-9_-]+$/.test(value)
-  );
-}
-

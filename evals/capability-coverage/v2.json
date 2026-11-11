@@ -46,19 +46,17 @@
       }
     },
     "surfaces": {
-      "reason": "The production Surface union is type-only. Values here cover every routable board surface; Meet values remain private-preview surfaces rather than a public availability claim.",
+      "reason": "The production Surface union is type-only. Values here cover every routable board surface; the Meet value (the extension's headless overlay engine) remains a private-preview surface rather than a public availability claim.",
       "productionTypeUnion": {
         "path": "apps/web/src/features/board/AirboardPrototype.tsx",
         "typeName": "Surface"
       },
       "values": [
         "standalone",
-        "meet-side-panel",
         "meet-main-stage"
       ],
       "availability": {
         "standalone": "controlled_pilot",
-        "meet-side-panel": "private_preview",
         "meet-main-stage": "private_preview"
       }
     }
@@ -698,25 +696,16 @@
       "rationale": "The standalone surface fails closed without a browser grant."
     },
     {
-      "evidenceId": "browser:apps/web/e2e/mediaOwnership.spec.ts#delegated main stage restores gesture and voice entry points without auto-starting capture",
+      "evidenceId": "browser:apps/web/e2e/meetMediaBridge.spec.ts#the extension engine is control-free and starts the camera overlay automatically",
       "capabilities": [
         "surface:meet-main-stage"
       ],
       "facets": [
         "positive",
-        "grounding"
-      ],
-      "rationale": "The mounted delegated main-stage route exposes the intended controls without violating media-start policy."
-    },
-    {
-      "evidenceId": "browser:apps/web/e2e/mediaOwnership.spec.ts#undelegated main stage offers the companion window instead of media buttons",
-      "capabilities": [
-        "surface:meet-main-stage"
-      ],
-      "facets": [
+        "grounding",
         "negative"
       ],
-      "rationale": "The undelegated main-stage route removes invalid embedded media controls."
+      "rationale": "The mounted headless main-stage engine starts the camera overlay and pumps board frames on its own, and renders no presenter controls (top bar, sidebar, dock or buttons) into the outgoing composite."
     },
     {
       "evidenceId": "browser:apps/web/e2e/meetMediaBridge.spec.ts#hidden diagram restores raw Meet camera and resumes the compositor without recapturing",
@@ -727,28 +716,6 @@
         "final_state"
       ],
       "rationale": "The mounted bridge reaches and recovers the final main-stage compositor state."
-    },
-    {
-      "evidenceId": "browser:apps/web/e2e/mediaOwnership.spec.ts#delegated side panel stays compact and points at the shared board",
-      "capabilities": [
-        "surface:meet-side-panel"
-      ],
-      "facets": [
-        "positive",
-        "grounding",
-        "final_state"
-      ],
-      "rationale": "The mounted delegated side panel resolves to its compact shared-board UI."
-    },
-    {
-      "evidenceId": "browser:apps/web/e2e/mediaOwnership.spec.ts#undelegated side panel stays compact and routes media to the companion window",
-      "capabilities": [
-        "surface:meet-side-panel"
-      ],
-      "facets": [
-        "negative"
-      ],
-      "rationale": "The undelegated side panel fails over instead of exposing invalid capture."
     },
     {
       "evidenceId": "test:packages/core/test/semanticPlan.test.mjs#plans hold a two-minute narration and the new edit actions",

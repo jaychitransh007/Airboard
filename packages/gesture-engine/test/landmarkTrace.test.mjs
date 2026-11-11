@@ -4,16 +4,14 @@ import test from "node:test";
 
 import {
   parseLandmarkTrace,
-  replayLandmarkTrace,
   replayLandmarkTraceWithDiagnostics,
-  segmentsAbove,
 } from "../src/landmarkTrace.ts";
 
 const FIXTURE = new URL("./fixtures/palm-grab-pointing.trace.json", import.meta.url);
 
 test("replaying the reference trace detects each pose only in its segment", async () => {
   const trace = parseLandmarkTrace(JSON.parse(await readFile(FIXTURE, "utf8")));
-  const samples = replayLandmarkTrace(trace);
+  const samples = replayLandmarkTraceWithDiagnostics(trace).frames;
   assert.equal(samples.length, trace.frames.length);
 
   // Palm-presentation pose: exactly one contiguous segment covering the
@@ -40,6 +38,30 @@ test("replaying the reference trace detects each pose only in its segment", asyn
     assert.ok(sample.grabStrength < 0.68, `pointing frame at ${sample.t} scored grab ${sample.grabStrength}`);
   }
 });
+
+/**
+ * Contiguous time ranges where a per-frame value stays at/above a threshold.
+ * Used to assert "the palm pose is detected from ~1s to ~2s and nowhere else".
+ */
+function segmentsAbove(samples, select, threshold) {
+  const segments = [];
+  let start = null;
+  let last = 0;
+  for (const sample of samples) {
+    const active = select(sample) >= threshold;
+    if (active && start === null) {
+      start = sample.t;
+    } else if (!active && start !== null) {
+      segments.push({ fromMs: start, toMs: last });
+      start = null;
+    }
+    last = sample.t;
+  }
+  if (start !== null) {
+    segments.push({ fromMs: start, toMs: last });
+  }
+  return segments;
+}
 
 test("parseLandmarkTrace rejects malformed traces", () => {
   assert.throws(() => parseLandmarkTrace(null));

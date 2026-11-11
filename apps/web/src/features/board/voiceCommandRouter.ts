@@ -34,8 +34,7 @@ import {
  * (speech that began before the palm went up is not the gate's), and —
  * critically — the dedup invariant: **one transcript can produce at most one
  * routed command**, even when a gate/window and the wake router would both
- * claim it, and even when a speech engine wake-routes internally (browser
- * fallback). The class is pure over an injectable clock, so every rule is
+ * claim it. The class is pure over an injectable clock, so every rule is
  * unit-testable.
  */
 
@@ -95,8 +94,6 @@ export type VoiceCommandRouterConfig = {
   pttGraceMs?: number;
   /** Post-release routing grace for hold-to-edit ("grab, let go, speak"). */
   scopedGraceMs?: number;
-  /** How long a gate's claim on a transcript blocks re-routing of it. */
-  claimWindowMs?: number;
   /** Maximum time an utterance that began inside a gate may take to finalize. */
   utteranceClaimMs?: number;
   /** See VOICE_FOLLOW_UP_WINDOW_MS. 0 disables the follow-up channel. */
@@ -245,7 +242,6 @@ export class VoiceCommandRouter {
   private readonly now: () => number;
   private readonly pttGraceMs: number;
   private readonly scopedGraceMs: number;
-  private readonly claimWindowMs: number;
   private readonly utteranceClaimMs: number;
   private readonly followUpWindowMs: number;
   private readonly answerWindowMs: number;
@@ -255,7 +251,6 @@ export class VoiceCommandRouter {
 
   private gate: GateState | null = null;
   private utteranceGate: { gate: GateState; capturedAt: number } | null = null;
-  private claims: { transcript: string; at: number }[] = [];
   private collectingWake: VoiceRouteDecision[] | null = null;
   private speechStartedAt: number | null = null;
   private lastSpeechAt: number | null = null;
@@ -266,7 +261,6 @@ export class VoiceCommandRouter {
     this.now = config.now ?? (() => Date.now());
     this.pttGraceMs = config.pttGraceMs ?? 1_600;
     this.scopedGraceMs = config.scopedGraceMs ?? 8_000;
-    this.claimWindowMs = config.claimWindowMs ?? 5_000;
     this.utteranceClaimMs = config.utteranceClaimMs ?? 15_000;
     this.followUpWindowMs = config.followUpWindowMs ?? VOICE_FOLLOW_UP_WINDOW_MS;
     this.answerWindowMs = config.answerWindowMs ?? VOICE_ANSWER_WINDOW_MS;
@@ -416,9 +410,9 @@ export class VoiceCommandRouter {
   }
 
   /**
-   * Full routing for engines that do not wake-route internally (realtime
-   * transcription, test hooks). Gates outrank the wake router, which outranks
-   * the answer and follow-up windows; at most one channel claims a transcript.
+   * Full routing for a final transcript (realtime transcription, test hooks).
+   * Gates outrank the wake router, which outranks the answer and follow-up
+   * windows; at most one channel claims a transcript.
    */
   handleFinalTranscript(transcript: string): {
     decisions: VoiceRouteDecision[];
@@ -440,7 +434,6 @@ export class VoiceCommandRouter {
     }
     const wakeDetected = classifyBrowserWakeTranscript(transcript).wakeDetected;
     if (decisions.length > 0) {
-      this.claim(transcript);
       this.noteRouted();
       return { decisions, wakeDetected };
     }
@@ -448,52 +441,11 @@ export class VoiceCommandRouter {
     return { decisions: windowed ? [windowed] : [], wakeDetected };
   }
 
-  /**
-   * Non-wake routing for the browser-fallback engine, whose session runs its
-   * own internal wake router: gates first, then (for transcripts without a
-   * wake word) the answer and follow-up windows. Claiming here is what makes
-   * the later internally-routed command for the same transcript deduplicate.
-   */
-  routeGatedOnly(transcript: string): VoiceRouteDecision | null {
-    const gated = this.routeGated(transcript);
-    if (gated) {
-      return gated;
-    }
-    if (classifyBrowserWakeTranscript(transcript).wakeDetected) {
-      return null;
-    }
-    return this.routeWindowed(transcript);
-  }
-
-  /**
-   * Dedup guard for commands wake-routed inside a speech session. Returns
-   * null when a gate or window already claimed this transcript — the
-   * invariant that a transcript never executes twice is enforced here, not by
-   * callback ordering in the UI layer.
-   */
-  acceptExternalWakeCommand(event: {
-    transcript: string;
-    command: string;
-    wakePhrase: string;
-  }): VoiceRouteDecision | null {
-    if (this.isClaimed(event.transcript)) {
-      return null;
-    }
-    this.noteRouted();
-    return {
-      channel: "wake",
-      command: event.command,
-      transcript: event.transcript,
-      wakePhrase: event.wakePhrase,
-    };
-  }
-
-  /** Session teardown: forget wake carryover, gates, windows, and claims. */
+  /** Session teardown: forget wake carryover, gates, and windows. */
   reset(): void {
     this.wakeRouter.reset();
     this.gate = null;
     this.utteranceGate = null;
-    this.claims = [];
     this.speechStartedAt = null;
     this.lastSpeechAt = null;
     this.followUpUntil = null;
@@ -547,7 +499,6 @@ export class VoiceCommandRouter {
       // routing every sentence until the palm drops.
       this.gate = null;
     }
-    this.claim(transcript);
     this.noteRouted();
     const decision: VoiceRouteDecision = {
       channel: gate.mode === "scoped" ? "gated-scoped" : "gated-ptt",
@@ -572,7 +523,6 @@ export class VoiceCommandRouter {
     if (this.answerUntil !== null && now <= this.answerUntil) {
       if (isAnswerShapedUtterance(text)) {
         this.answerUntil = null;
-        this.claim(transcript);
         this.noteRouted();
         return { channel: "answer", command: text, transcript, wakePhrase: "answer" };
       }
@@ -582,7 +532,6 @@ export class VoiceCommandRouter {
     this.answerUntil = null;
     if (this.followUpUntil !== null && now <= this.followUpUntil) {
       if (isBoardFollowUpUtterance(text)) {
-        this.claim(transcript);
         this.noteRouted();
         return { channel: "follow-up", command: text, transcript, wakePhrase: "follow-up" };
       }
@@ -598,19 +547,6 @@ export class VoiceCommandRouter {
     this.answerUntil = null;
     this.followUpUntil =
       this.followUpWindowMs > 0 ? this.now() + this.followUpWindowMs : null;
-  }
-
-  private claim(transcript: string): void {
-    const now = this.now();
-    this.claims = this.claims.filter((c) => now - c.at <= this.claimWindowMs);
-    this.claims.push({ transcript, at: now });
-  }
-
-  private isClaimed(transcript: string): boolean {
-    const now = this.now();
-    return this.claims.some(
-      (c) => c.transcript === transcript && now - c.at <= this.claimWindowMs,
-    );
   }
 }
 

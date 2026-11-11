@@ -3,7 +3,6 @@ import { test } from "node:test";
 
 import {
   estimateGrabStrength,
-  grabStrengthFromHand,
   grabStrengthFromLandmarks,
 } from "../src/grabStrength.ts";
 
@@ -47,7 +46,6 @@ test("partial and noisy landmarks retain a usable grab without false certainty",
   assert.ok(estimate.confidence >= 0.55 && estimate.confidence < 0.9);
 
   assert.equal(grabStrengthFromLandmarks([]), 0);
-  assert.equal(grabStrengthFromHand(null), 0);
 });
 
 test("an isolated curled-finger fragment cannot engage a grab by itself", () => {

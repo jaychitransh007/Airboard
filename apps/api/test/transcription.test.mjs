@@ -66,7 +66,7 @@ test("rejects inconsistent model and turn-threshold environment configuration", 
   );
 });
 
-test("parses canonical and migration-compatible client messages", () => {
+test("parses the client control messages", () => {
   assert.deepEqual(
     parseTranscriptionControlMessage(
       JSON.stringify({
@@ -108,12 +108,6 @@ test("parses canonical and migration-compatible client messages", () => {
       JSON.stringify({ type: "transcription.configure" }),
     ).ok,
     false,
-  );
-  assert.deepEqual(
-    parseTranscriptionControlMessage(
-      JSON.stringify({ type: "start", config: { sampleRateHz: 48000 } }),
-    ),
-    { ok: true, value: { type: "transcription.start", sampleRate: 48000 } },
   );
   assert.equal(
     parseTranscriptionControlMessage(
