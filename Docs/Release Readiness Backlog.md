@@ -1287,6 +1287,7 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
 - **2026-11-11** — RGB-048: voice and camera start on their own when a board opens; the on/off and permission buttons are gone.
 - **2026-11-11** — RGB-049: hands-free meetings. Voice failures no longer land in the typing box, Airo guesses instead of asking, follow-ups need no wake word, pointing resolves "here/this/that", hands work on every shape without a keyboard, and voice minutes count only speech.
 - **2026-11-11** — Deployed RGB-049: both services serve `launch-928def2`. No migration. The API was promoted first (the web sends a new `addressedBy` field). Launch check READY 21/21. Rollback both to `launch-7430e61`, the web first. Not yet tried with a real microphone and camera in a meeting.
+- **2026-11-11** — The Airo panel is shown or hidden (no shrink/expand strip) and starts hidden as a tab on the board's right edge (owner request). The web serves `launch-9d5003b`; the API stays `launch-928def2`. Rollback the web to `launch-928def2`. Launch check READY 21/21.
   - **Server:**
     - `/start`, `/join` and `/resume` also return a `refreshToken`. It lasts 12 hours and only ever travels in JSON bodies.
     - `POST /sessions/:id/ticket` trades it for a fresh 30-minute ticket while the session is open. An owner must also be signed in, and their refresh revives a locked (not ended) session, as their heartbeat does. The URL-borne ticket itself renews nothing.
