@@ -392,7 +392,10 @@ export function createBrowserWakeCommandRouter(
       const carriedWake = takeFreshPendingWake();
       if (carriedWake && firstWake) {
         const commandBeforeWake = transcript.slice(0, firstWake.index);
-        if (normalizeBrowserWakeCommand(commandBeforeWake)) {
+        const beforeWake = normalizeBrowserWakeCommand(commandBeforeWake);
+        // Text before an in-sentence wake ("and now Airo …", "thanks Airo …")
+        // is only a command for the carried wake when it reads as one.
+        if (beforeWake && !isWakeLeadInOnly(beforeWake)) {
           emitCommand(carriedWake, commandBeforeWake, pendingWakeArmedAt);
         } else {
           pendingWake = null;
@@ -422,13 +425,31 @@ export function createBrowserWakeCommandRouter(
   };
 }
 
+const WAKE_LEAD_IN_ONLY_PATTERN =
+  /^(?:(?:hey(?:\s+there)?|hi|hello|okay|ok|please|uh|um|erm|ah|well|so|alright|right|and|now|then|next|also|thanks|thank\s+you|cheers)(?:[\s,.:;!?\u2013\u2014-]+|$))+$/iu;
+
+function isWakeLeadInOnly(text: string): boolean {
+  return WAKE_LEAD_IN_ONLY_PATTERN.test(text);
+}
+
 /**
  * Classifies a final browser transcript without mutating a speech session.
  *
  * Chrome commonly renders the intended "Airo" wake word as "Aero", "Airoh",
  * "Air row", or "Arrow". "Arrow" is deliberately accepted only at the start
- * of a transcript so ordinary diagram requests such as "draw an arrow here"
- * do not accidentally activate the assistant.
+ * of a transcript (optionally after "Hey") and only when a command follows, so
+ * ordinary diagram requests such as "draw an arrow here" and narration such as
+ * "arrow keys are broken" do not activate the assistant. "Aero" and "Airboard"
+ * likewise need a request after them: a command, a polite request ("Aero, can
+ * you add a database", "Arrow please add…", "Aero, I need a cache"), or — for
+ * "Aero" / "Airboard" followed by a vocative comma or pause — a narrated
+ * request ("Airboard, users sign in through auth"). "Airo" itself is accepted
+ * at the start of a turn or sentence. Mid-sentence, a wake word counts only in
+ * address position — after a connective or lead-in ("and now Airo add…",
+ * "thanks Airo add…", "so as I was saying airo add…") or a vocative comma — and
+ * only when a request immediately follows. Narration about Airo ("I told the
+ * team Airo can add a database", "did you see Airo delete the database") is
+ * never a command.
  */
 export function classifyBrowserWakeTranscript(
   transcript: string,
@@ -465,7 +486,10 @@ type WakePhraseMatch = {
 const WAKE_PHRASE_PATTERN =
   /\b(?:air\s*board|air[\s-]+row|air[\s-]+oh|air[\s-]+o|airoh|airo|aero)\b/giu;
 
-const PREFIX_ARROW_PATTERN = /^\s*(arrow)\b/iu;
+// "Arrow" is a common Chrome rendering of "Airo", but it is also an ordinary
+// diagram word. It is only considered at the very start of a turn (optionally
+// after a greeting such as "Hey"), and only when a command follows.
+const PREFIX_ARROW_PATTERN = /^\s*(?:(?:hey|hi|hello|okay|ok)[\s,.:;!?\u2013\u2014-]+)*(arrow)\b/iu;
 
 // A brand mention inside a diagram narrative is content, not activation.
 // Accept wake phrases where a person would address Airo: at the beginning of
@@ -477,34 +501,228 @@ const PREFIX_ARROW_PATTERN = /^\s*(arrow)\b/iu;
 const WAKE_ADDRESS_LEAD_IN_PATTERN =
   /^\s*(?:(?:hey(?:\s+there)?|hi|hello|okay|ok|please|uh|um|erm|ah|well|so|alright|right)(?:[\s,.:;!?\u2013\u2014-]+|$))*$/iu;
 
+/**
+ * Imperative board verbs. An utterance that starts with one of these (after
+ * fillers and an optional connective such as "and" / "then" / "now") is
+ * "command-shaped": it reads as an instruction to the board rather than as
+ * narration. Used for mid-sentence wakes, mishearing-prefixed wakes, the
+ * post-command follow-up window, and continuation merging.
+ */
+const BOARD_COMMAND_VERB_SOURCE = String.raw`(?:add|create|draw|put|place|insert|connect|link|join|attach|delete|remove|erase|rename|relabel|call|name|label|make|change|turn|convert|move|shift|group|ungroup|align|arrange|distribute|lay\s+(?:out|them|it|these)|layout|undo|redo|zoom|focus|fit|show|hide|duplicate|copy|color|colour|paint|fill|resize|swap|replace|select|clear)`;
+
+const COMMAND_FILLER_SOURCE = String.raw`(?:(?:uh|um|erm|ah|hmm|okay|ok|alright|right|so|please)(?:[\s,.:;!?\u2013\u2014-]+))*`;
+const COMMAND_CONNECTIVE_SOURCE = String.raw`(?:(?:and\s+then|and\s+now|and\s+also|and|also|then|now|next)(?:[\s,.:;!?\u2013\u2014-]+)(?:please[\s,]+)?)?`;
+
+const COMMAND_SHAPED_PATTERN = new RegExp(
+  String.raw`^\s*${COMMAND_FILLER_SOURCE}${COMMAND_CONNECTIVE_SOURCE}${BOARD_COMMAND_VERB_SOURCE}\b`,
+  "iu",
+);
+
+const CONNECTIVE_COMMAND_PATTERN = new RegExp(
+  String.raw`^\s*${COMMAND_FILLER_SOURCE}(?:and\s+then|and\s+now|and\s+also|and|also|then)(?:[\s,.:;!?\u2013\u2014-]+)(?:please[\s,]+)?${BOARD_COMMAND_VERB_SOURCE}\b`,
+  "iu",
+);
+
+// Idioms that start with a board verb but are ordinary talk, and verbs used
+// as nouns ("undo is broken", "zoom doesn't work").
+const COMMAND_SHAPED_IDIOM_PATTERN = new RegExp(
+  String.raw`^\s*${COMMAND_FILLER_SOURCE}${COMMAND_CONNECTIVE_SOURCE}(?:${BOARD_COMMAND_VERB_SOURCE}\s+(?:is|was|are|were|isn't|wasn't|doesn't|didn't|works?|worked|button|buttons|feature|key|keys|shortcut)\b|make\s+sure|make\s+(?:an?|the)\s+end\b|make\s+a\s+note\s+(?:that|of|to)|draw\s+a\s+line\s+under|move\s+on|show\s+you|call\s+(?:me|him|her|us|them|you|back|it\s+a\s+(?:day|night|wrap)|it\s+(?:done|quits|even|good))|turn\s+(?:up|down)\b(?!\s+the\s+(?:size|width|height)))\b`,
+  "iu",
+);
+
+const REFERENCE_ANSWER_PATTERN =
+  /^(?:(?:uh|um|erm|ah|oh|okay|ok|so|yes|yeah|no|sorry)[\s,.]+)*(?:(?:the|that|this)\s+(?:[\p{L}\p{N}'-]+\s+){0,3}one|(?:the\s+)?(?:first|second|third|fourth|fifth|last|top|bottom|left|right|left-most|right-most|other|new|old|newest|oldest)(?:\s+one)?|both(?:\s+of\s+them)?|neither|number\s+[\p{L}\p{N}]+)(?:\s+please)?$/iu;
+
+/**
+ * True when an utterance reads as an instruction to the board: it starts with
+ * an imperative board verb ("add a cache", "rename it to Orders"), optionally
+ * after fillers and a connective ("and connect it to the API", "now delete
+ * that"). Narrative talk ("the arrow keys are broken", "so the user hits the
+ * API") is not command-shaped. ASR punctuation is ignored.
+ */
+export function isCommandShapedUtterance(utterance: string): boolean {
+  const text = utterance.normalize("NFKC");
+  return COMMAND_SHAPED_PATTERN.test(text) && !COMMAND_SHAPED_IDIOM_PATTERN.test(text);
+}
+
+/** True when a command-shaped utterance opens with a connective ("and connect…"). */
+export function isConnectiveCommandUtterance(utterance: string): boolean {
+  const text = utterance.normalize("NFKC");
+  return CONNECTIVE_COMMAND_PATTERN.test(text) && !COMMAND_SHAPED_IDIOM_PATTERN.test(text);
+}
+
+const POLITE_ASK_LEAD_IN_PATTERN = new RegExp(
+  String.raw`^\s*${COMMAND_FILLER_SOURCE}(?:(?:and|also|then|now)[\s,]+)?(?:(?:can|could|would|will)\s+you(?:\s+(?:please|also|just|now))*|please(?:\s+(?:also|just|now))*)(?:[\s,.:;!?\u2013\u2014-]+|$)`,
+  "iu",
+);
+
+const WANT_REQUEST_LEAD_IN_PATTERN = new RegExp(
+  String.raw`^\s*${COMMAND_FILLER_SOURCE}(?:i|we)(?:'d\s+like|\s+(?:really\s+|also\s+|just\s+)?(?:want|need|would\s+like))(?:\s+(?:you\s+)?to)?(?:[\s,]+)`,
+  "iu",
+);
+
+const REQUESTED_OBJECT_PATTERN =
+  /^(?:a|an|another|one|two|three|four|five|some|the|more)\s+\S/iu;
+
+function normalizeApostrophes(text: string): string {
+  return text.normalize("NFKC").replace(/[\u2018\u2019\u02bc]/gu, "'");
+}
+
+/**
+ * Removes a polite ask ("can you", "could you please", "please also") from
+ * the start of an utterance so the board command behind it can be tested.
+ * Returns the utterance unchanged when it has no such lead-in.
+ */
+export function stripPoliteCommandLeadIn(utterance: string): string {
+  const text = normalizeApostrophes(utterance);
+  const match = POLITE_ASK_LEAD_IN_PATTERN.exec(text);
+  return match ? text.slice(match[0].length).trim() : text.trim();
+}
+
+/**
+ * True when an utterance spoken right after a wake word is a request to the
+ * board: command-shaped ("add a cache"), a polite ask in front of a command
+ * ("can you add a database", "could you please connect it"), or a stated want
+ * ("I need a cache in front of the API", "we'd like to add a queue").
+ */
+export function isAddressedRequestUtterance(utterance: string): boolean {
+  const text = normalizeApostrophes(utterance).trim();
+  if (isCommandShapedUtterance(text)) {
+    return true;
+  }
+  const polite = POLITE_ASK_LEAD_IN_PATTERN.exec(text);
+  if (polite) {
+    const rest = text.slice(polite[0].length).trim();
+    if (rest && isCommandShapedUtterance(rest)) {
+      return true;
+    }
+  }
+  const want = WANT_REQUEST_LEAD_IN_PATTERN.exec(text);
+  if (want) {
+    const rest = text.slice(want[0].length).trim();
+    return isCommandShapedUtterance(rest) || REQUESTED_OBJECT_PATTERN.test(rest);
+  }
+  return false;
+}
+
+/**
+ * True for a short spoken answer that picks out a board element, such as
+ * "the billing one", "the second one", "that one" or "the last". These carry
+ * no verb, so they only route while a follow-up or answer window is open.
+ */
+export function isReferenceAnswerUtterance(utterance: string): boolean {
+  const text = utterance
+    .normalize("NFKC")
+    .replace(/[\s,.;:!?]+$/u, "")
+    .replace(/^[\s,.;:!?]+/u, "")
+    .trim();
+  if (!text || text.split(/\s+/u).length > 7) {
+    return false;
+  }
+  return REFERENCE_ANSWER_PATTERN.test(text);
+}
+
 function findWakePhrases(transcript: string): WakePhraseMatch[] {
   const matches: WakePhraseMatch[] = [];
   const arrowPrefix = PREFIX_ARROW_PATTERN.exec(transcript);
   const arrowWakePhrase = arrowPrefix?.[1];
   if (arrowPrefix && arrowWakePhrase) {
     const index = arrowPrefix[0].lastIndexOf(arrowWakePhrase);
-    matches.push({
-      wakePhrase: arrowWakePhrase,
-      index,
-      end: index + arrowWakePhrase.length,
-    });
+    const end = index + arrowWakePhrase.length;
+    if (isAddressedRemainder(transcript.slice(end), false)) {
+      matches.push({ wakePhrase: arrowWakePhrase, index, end });
+    }
   }
   for (const match of transcript.matchAll(WAKE_PHRASE_PATTERN)) {
     if (match.index === undefined) {
       continue;
     }
     const wakePhrase = match[0];
-    const followsAcceptedWake =
-      matches.length > 0 && !isCanonicalAirboardWake(wakePhrase);
-    if (
-      !isWakeAddressPosition(transcript, match.index) &&
-      !followsAcceptedWake
-    ) {
+    const index = match.index;
+    const end = index + wakePhrase.length;
+    const canonicalAirboard = isCanonicalAirboardWake(wakePhrase);
+    const followsAcceptedWake = matches.length > 0 && !canonicalAirboard;
+    const addressPosition = isWakeAddressPosition(transcript, index);
+    const remainder = transcript.slice(end);
+    // Mid-sentence, a wake word addresses Airo only after a connective /
+    // lead-in ("and now", "thanks", "so as I was saying") or a vocative comma,
+    // and only when a request immediately follows. After a subject or verb
+    // ("I told Airo…", "watch Airo draw…", "Airo can add…") it is narration.
+    if (isWakeAsSubject(remainder)) {
+      // "Airo can add a database for us", "Airo is part of the demo": Airo is
+      // the subject of the sentence, not the one being addressed.
       continue;
     }
-    matches.push({ wakePhrase, index: match.index, end: match.index + wakePhrase.length });
+    const midSentenceAddress =
+      !addressPosition &&
+      isMidSentenceAddressPosition(transcript, index, end) &&
+      isAddressedRequestUtterance(normalizeBrowserWakeCommand(remainder));
+    let accepted: boolean;
+    if (isMishearingWake(wakePhrase)) {
+      // "Aero…" / "Airboard…" are also real words and product names. They
+      // count as addressing Airo only when a request follows (or the turn is
+      // the bare word, which arms the next sentence).
+      accepted =
+        (addressPosition && isAddressedRemainder(remainder, true)) ||
+        (followsAcceptedWake && !canonicalAirboard) ||
+        (!canonicalAirboard && midSentenceAddress);
+    } else {
+      // "Airo" itself: accepted at the start of a turn / sentence, or in
+      // mid-sentence address position when a request follows.
+      accepted = addressPosition || followsAcceptedWake || midSentenceAddress;
+    }
+    if (!accepted) {
+      continue;
+    }
+    matches.push({ wakePhrase, index, end });
   }
   return matches.sort((left, right) => left.index - right.index);
+}
+
+function isMishearingWake(wakePhrase: string): boolean {
+  return /^(?:aero|air\s*board)$/iu.test(wakePhrase);
+}
+
+/**
+ * A wake remainder that is empty (bare wake), a request (command-shaped or a
+ * polite / "I need…" ask) or — when `allowVocativePause` — any multi-word
+ * narration separated from the wake word by a comma or pause ("Aero, users
+ * sign in through the auth service").
+ */
+function isAddressedRemainder(remainder: string, allowVocativePause: boolean): boolean {
+  const normalized = normalizeBrowserWakeCommand(remainder).replace(/[\s.!?]+$/u, "");
+  if (normalized === "" || isAddressedRequestUtterance(normalized)) {
+    return true;
+  }
+  return (
+    allowVocativePause &&
+    /^\s*[,.:;!?\u2013\u2014-]/u.test(remainder) &&
+    normalized.split(/\s+/u).length >= 2
+  );
+}
+
+// A wake word directly followed (no vocative comma) by a verb or modal that
+// takes it as the subject: "Airo can…", "Airo will…", "Airo is…". "Airo can
+// you…" is still a question addressed to Airo.
+const WAKE_AS_SUBJECT_PATTERN =
+  /^\s+(?:can|could|will|would|should|might|may|must|shall|is|was|isn't|wasn't|does|doesn't|did|didn't|has|hasn't|had|just|already|really|never|always|keeps|seems|works|handles|knows|thinks|said|says|told|went|got|gets|made|added|drew|deleted|created)\b(?!\s+(?:you|u)\b)/iu;
+
+function isWakeAsSubject(remainder: string): boolean {
+  return WAKE_AS_SUBJECT_PATTERN.test(normalizeApostrophes(remainder));
+}
+
+// Words that put an in-sentence wake word in address position: connectives,
+// acknowledgements and discourse lead-ins, directly before the wake word.
+const MID_SENTENCE_WAKE_LEAD_IN_PATTERN =
+  /(?:^|[\s,.:;!?\u2013\u2014-])(?:and|now|then|next|also|okay|ok|so|alright|right|well|anyway|thanks|thank\s+you|cheers|great|perfect|cool|nice|hey|hi|hello|please|as\s+i\s+was\s+saying|um|uh|erm)[\s,.:;!?\u2013\u2014-]*$/iu;
+
+function isMidSentenceAddressPosition(transcript: string, index: number, end: number): boolean {
+  const before = transcript.slice(0, index);
+  if (/,\s*$/u.test(before) || /^\s*,/u.test(transcript.slice(end))) {
+    // Vocative comma: "…, Airo add…" / "thanks Airo, add…".
+    return true;
+  }
+  return MID_SENTENCE_WAKE_LEAD_IN_PATTERN.test(before);
 }
 
 function isCanonicalAirboardWake(wakePhrase: string): boolean {

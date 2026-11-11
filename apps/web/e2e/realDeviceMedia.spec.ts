@@ -47,7 +47,7 @@ test("@real-device validates physical media and production HandLandmarker health
   ).toEqual([]);
 
   const onboarding = page.getByRole("button", {
-    name: "Start building",
+    name: "Got it",
   });
   if (await onboarding.isVisible()) await onboarding.click();
   await page.getByRole("button", { name: "More board actions" }).click();
@@ -56,7 +56,7 @@ test("@real-device validates physical media and production HandLandmarker health
     .locator(".media-permission-row")
     .filter({ hasText: "Camera" });
   await expect(cameraRow).toBeVisible();
-  await cameraRow.getByRole("button", { name: /^(?:Allow|Use)$/u }).click();
+  // The camera starts on its own as the board opens; the row only reports it.
 
   await expect
     .poll(async () => {
@@ -84,16 +84,8 @@ test("@real-device validates physical media and production HandLandmarker health
     "camera acquired by Airboard production path",
   ).toEqual([]);
 
-  await cameraRow.getByRole("button", { name: "Turn off" }).click();
-  await expect
-    .poll(() =>
-      page.evaluate(() => {
-        const video = document.querySelector<HTMLVideoElement>(".camera-preview");
-        const stream = video?.srcObject as MediaStream | null;
-        return stream?.getVideoTracks().some((track) => track.readyState === "live") ?? false;
-      }),
-    )
-    .toBe(false);
+  // There is no in-app camera switch any more; leaving the board releases it.
+  await page.close();
 });
 
 async function acquireAndInspectPhysicalMedia(page: Page): Promise<{

@@ -10,6 +10,13 @@
  *   mic armed but no gate open. A false accept is a routed command that also
  *   parses as a board mutation.
  *
+ *   Channel C (follow-up window): the utterance is the very next sentence
+ *   after a routed command, so no wake word is needed if it is clearly a
+ *   board edit. Every routed sentence is a false accept here: it reaches the
+ *   fast rules (parseBoardSceneIntent, which the UI runs first, then the
+ *   intent parser) or the planner as a board request. Parses are reported
+ *   with the same HARD/SOFT rules as channel A.
+ *
  *   Channel B (gated): the worst case — a push-to-talk/hold-to-edit gate is
  *   open while the speaker addresses a colleague, so the transcript reaches
  *   the deterministic parser as externally activated. A false accept is a
@@ -30,11 +37,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { classifyBrowserWakeTranscript } from "../apps/web/src/features/board/browserSpeech.ts";
+import { VoiceCommandRouter } from "../apps/web/src/features/board/voiceCommandRouter.ts";
 import { parseIntentCanvasCommand } from "../apps/web/src/features/board/intentCanvasParser.ts";
 import { resolveIntentOperation } from "../apps/web/src/features/board/intentPipeline.ts";
 import {
   applyDiagramCommand,
   createInitialBoardState,
+  parseBoardSceneIntent,
 } from "../packages/core/src/index.ts";
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
@@ -66,6 +75,7 @@ async function main() {
 
   const wake = { activations: [], hard: [], soft: [], groundedMutations: [] };
   const gated = { hard: [], soft: [], groundedMutations: [], clarifications: [] };
+  const followUp = { activations: [], sceneIntents: [], hard: [], soft: [], groundedMutations: [] };
 
   for (const { id, text } of corpus.utterances) {
     // Channel A — wake router.
@@ -83,6 +93,36 @@ async function main() {
           wake.soft.push(item);
           if (wouldMutateAgainstTemptingBoard(parsed.command)) {
             wake.groundedMutations.push(item);
+          }
+        }
+      }
+    }
+
+    // Channel C — follow-up window right after a routed command.
+    {
+      let clock = 1_000_000;
+      const router = new VoiceCommandRouter({ now: () => clock });
+      router.handleFinalTranscript("Airo, add a database");
+      clock += 2_000;
+      for (const routed of router.handleFinalTranscript(text).decisions) {
+        if (routed.channel !== "follow-up") continue;
+        followUp.activations.push({ id, command: routed.command });
+        const sceneIntent = parseBoardSceneIntent(routed.command);
+        if (sceneIntent) {
+          followUp.sceneIntents.push({ id, command: routed.command, kind: sceneIntent.type });
+        }
+        const parsed = parseIntentCanvasCommand(routed.command, {
+          activationPolicy: "externally_activated",
+        });
+        if (parsed.status === "parsed") {
+          const risk = classifyParsedRisk(parsed.command);
+          const item = { id, command: routed.command, kind: parsed.command.kind };
+          if (risk === "hard") followUp.hard.push(item);
+          if (risk === "soft") {
+            followUp.soft.push(item);
+            if (wouldMutateAgainstTemptingBoard(parsed.command)) {
+              followUp.groundedMutations.push(item);
+            }
           }
         }
       }
@@ -123,6 +163,20 @@ async function main() {
     (item) => `${item.id}: routed “${item.command}” would mutate a tempting board`,
   );
 
+  console.log("\nChannel C — follow-up window (sentence right after a routed command):");
+  console.log(`  activations:          ${followUp.activations.length}/${total}  (each is actionable)`);
+  console.log(`  fast-rule intents:    ${followUp.sceneIntents.length}/${total}`);
+  console.log(`  HARD false accepts:   ${followUp.hard.length}/${total}`);
+  console.log(`  soft (named-ref):     ${followUp.soft.length}/${total}`);
+  console.log(`  grounded mutations:   ${followUp.groundedMutations.length}/${total}`);
+  printItems(followUp.activations, (item) => `${item.id}: routed “${item.command}”`, "  (reaches the planner)");
+  printItems(followUp.sceneIntents, (item) => `${item.id}: routed “${item.command}” → fast rule ${item.kind}`);
+  printItems(followUp.hard, (item) => `${item.id}: routed “${item.command}” → ${item.kind}`);
+  printItems(
+    followUp.groundedMutations,
+    (item) => `${item.id}: routed “${item.command}” would mutate a tempting board`,
+  );
+
   console.log("\nChannel B — open push-to-talk gate (worst case):");
   console.log(`  HARD false accepts:   ${gated.hard.length}/${total}`);
   console.log(`  soft (named-ref):     ${gated.soft.length}/${total}`);
@@ -144,7 +198,8 @@ async function main() {
     wake.hard.length +
     gated.hard.length +
     wake.groundedMutations.length +
-    gated.groundedMutations.length;
+    gated.groundedMutations.length +
+    followUp.activations.length;
   console.log(
     `\nResult: ${hardTotal === 0 ? "PASS" : "FAIL"} — ${hardTotal} actionable false accept(s); target is 0.`,
   );

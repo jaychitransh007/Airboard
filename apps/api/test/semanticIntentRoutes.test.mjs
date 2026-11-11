@@ -24,9 +24,10 @@ registerHooks({
   },
 });
 
-const { registerSemanticIntentRoutes } = await import(
+const { createRecentKeys, registerSemanticIntentRoutes, semanticIntentTimeoutForTranscript } = await import(
   "../src/semanticIntent/routes.ts"
 );
+const { loadSemanticIntentConfig } = await import("../src/config.ts");
 
 const origin = "https://airboard.test";
 const closedContext = {
@@ -420,7 +421,9 @@ test("a provider outage trips the breaker so later commands fail fast", async (t
 
   const fastFail = await send();
   assert.equal(fastFail.statusCode, 503);
-  assert.equal(fastFail.json().error, "SEMANTIC_INTENT_UNAVAILABLE");
+  // A cool-down is temporary, so it is not reported as "not configured".
+  assert.equal(fastFail.json().error, "SEMANTIC_INTENT_COOLING_DOWN");
+  assert.ok(fastFail.json().retryAfterMs > 0);
   assert.ok(Number(fastFail.headers["retry-after"]) > 0);
   assert.equal(providerCalls, 3, "the provider is not called while the breaker is open");
 });
@@ -513,6 +516,71 @@ test("a person's daily Airo allowance is checked before the model is called", as
   assert.equal(providerCalls, 2);
 });
 
+test("a retried spoken turn is charged once, while a new turn is charged again", async (t) => {
+  const { createServer } = await import("node:http");
+  let providerCalls = 0;
+  const provider = createServer((_request, response) => {
+    providerCalls += 1;
+    response.writeHead(500, { "content-type": "application/json" });
+    response.end(JSON.stringify({ error: { code: "server_error" } }));
+  });
+  await new Promise((resolve) => provider.listen(0, "127.0.0.1", resolve));
+  t.after(() => provider.close());
+  const charges = [];
+  const auth = {
+    ...fakeAuth({ entitledOrganizations: ["org-a"] }),
+    client: {
+      async rpc(name, params) {
+        if (name === "consume_rate_limit") return { data: true, error: null };
+        if (name === "consume_service_daily_usage") return { data: 1, error: null };
+        charges.push(params);
+        return { data: 1, error: null };
+      },
+    },
+  };
+  const server = Fastify();
+  t.after(() => server.close());
+  const config = productionConfig();
+  registerSemanticIntentRoutes(server, {
+    ...config,
+    dailyUsage: { airoCommands: 300, voiceSeconds: 600 },
+    semanticIntent: {
+      ...config.semanticIntent,
+      provider: "openai",
+      apiKey: "test-key",
+      endpoint: `http://127.0.0.1:${provider.address().port}/v1/responses`,
+    },
+  }, undefined, auth);
+  const body = requestBody("make the planner talk to the dataset");
+  const send = (payload) =>
+    server.inject({
+      method: "POST",
+      url: "/intent/resolve",
+      headers: { origin, authorization: "Bearer user:a" },
+      payload,
+    });
+  await send(body);
+  await send(body);
+  assert.equal(charges.length, 1, "the same voice turn is charged once");
+  await send(requestBody("make the planner talk to the dataset"));
+  assert.equal(charges.length, 2, "a new voice turn is charged");
+});
+
+test("recent keys expire after their window and stay bounded", () => {
+  let now = 0;
+  const keys = createRecentKeys(1_000, 2, () => now);
+  keys.remember("a");
+  assert.equal(keys.has("a"), true);
+  now = 1_001;
+  assert.equal(keys.has("a"), false);
+  keys.remember("b");
+  keys.remember("c");
+  keys.remember("d");
+  assert.equal(keys.has("b"), false, "the oldest key is dropped past the limit");
+  assert.equal(keys.has("c"), true);
+  assert.equal(keys.has("d"), true);
+});
+
 test("the service's daily Airo total stops every account once reached, and refused people never count against it", async (t) => {
   const { createServer } = await import("node:http");
   let providerCalls = 0;
@@ -601,4 +669,12 @@ test("the service's daily Airo total stops every account once reached, and refus
   const before = calls.length;
   assert.equal((await send("b", busy)).json().error, "SEMANTIC_INTENT_CAPACITY_REACHED");
   assert.equal(calls.length, before);
+});
+
+test("long narrations get a longer planning budget and fit the transcript limit", () => {
+  assert.equal(semanticIntentTimeoutForTranscript(5_000, 80), 5_000, "a short command keeps the base budget");
+  assert.equal(semanticIntentTimeoutForTranscript(5_000, 1_000), 5_000 + 760 * 9);
+  assert.equal(semanticIntentTimeoutForTranscript(5_000, 2_000), 20_000, "capped at 20 s");
+  assert.equal(semanticIntentTimeoutForTranscript(30_000, 2_000), 30_000, "a larger configured budget wins");
+  assert.equal(loadSemanticIntentConfig({ OPENAI_API_KEY: "k" }).maxTranscriptCharacters, 2_000);
 });

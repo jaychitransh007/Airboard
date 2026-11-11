@@ -53,9 +53,10 @@ Select the API object and press `Enter` or `F2` to edit its label. Change it to
 
 ## Undo safely
 
-Press `Cmd/Ctrl+Z`, choose **•••** then **Undo**, or say “Airo, undo.” Airboard
-reverts the latest board transaction. Redo the rename with `Cmd/Ctrl+Shift+Z`
-or **•••** then **Redo** when you are ready.
+Press `Cmd/Ctrl+Z`, choose the **Undo** arrow at the bottom left of the board,
+or say “Airo, undo.” Airboard reverts the latest board transaction. Redo the
+rename with `Cmd/Ctrl+Shift+Z`, the **Redo** arrow beside it, or “Airo, redo”
+when you are ready.
 
 ## Confirm the board was saved
 

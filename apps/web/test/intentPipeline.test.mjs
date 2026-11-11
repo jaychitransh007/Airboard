@@ -836,7 +836,7 @@ test("semantic connect safely repairs a uniquely anchored data/dataset label", (
   assert.deepEqual(resolution.repairKinds, ["data_dataset_alias"]);
 });
 
-test("data/dataset grounding keeps exact precedence and fails closed on ambiguity", () => {
+test("data/dataset grounding keeps exact precedence and best-guesses ambiguity", () => {
   const node = (id, label, x) => ({
     id, boardId: BOARD_ID, userId: "u", color: "#000", thickness: 3,
     status: "committed", points: [], createdAt: new Date().toISOString(),
@@ -881,9 +881,11 @@ test("data/dataset grounding keeps exact precedence and fails closed on ambiguit
     { ...groundingContext(board), pointerAvailable: false },
     new Map(),
   );
-  assert.ok("error" in ambiguous);
-  assert.equal(ambiguous.errorCode, "grounding_ambiguous_label");
-  assert.equal(ambiguous.candidateCount, 2);
+  // "Datasets" is the plural of the visible "Dataset", so the partial-name
+  // match finds Historical Dataset instead of refusing (gap 6).
+  assert.ok(!("error" in ambiguous), JSON.stringify(ambiguous));
+  assert.equal(ambiguous.commands[0].fromId, "historicalDataset");
+  assert.deepEqual(ambiguous.repairKinds, ["best_guess_reference"]);
 
   const exactDuplicate = resolveSemanticPlanAction(
     {
@@ -908,9 +910,9 @@ test("data/dataset grounding keeps exact precedence and fails closed on ambiguit
     },
     new Map(),
   );
-  assert.ok("error" in exactDuplicate);
-  assert.equal(exactDuplicate.errorCode, "grounding_ambiguous_label");
-  assert.equal(exactDuplicate.candidateCount, 2);
+  assert.ok(!("error" in exactDuplicate), JSON.stringify(exactDuplicate));
+  assert.ok(["historicalData", "historicalData2"].includes(exactDuplicate.commands[0].fromId));
+  assert.deepEqual(exactDuplicate.repairKinds, ["best_guess_reference"]);
 });
 
 test("data/dataset repair is additive-only and requires a non-alias anchor", () => {
@@ -940,8 +942,14 @@ test("data/dataset repair is additive-only and requires a non-alias anchor", () 
     { ...groundingContext(board), pointerAvailable: false },
     new Map(),
   );
-  assert.ok("error" in bare);
-  assert.equal(bare.errorCode, "grounding_missing_label");
+  // "Data" matches nothing (the alias needs a non-alias anchor word), so it
+  // is a shape the speaker expects to exist: it is created, then connected.
+  assert.ok(!("error" in bare), JSON.stringify(bare));
+  assert.deepEqual(bare.commands.map(({ type }) => type), ["node.create", "nodes.connect"]);
+  assert.equal(bare.commands[0].label, "Data");
+  assert.equal(bare.commands[1].fromId, bare.commands[0].nodeId);
+  assert.equal(bare.commands[1].toId, "planner");
+  assert.deepEqual(bare.repairKinds, ["created_missing_object"]);
 
   const destructive = resolveSemanticPlanAction(
     {

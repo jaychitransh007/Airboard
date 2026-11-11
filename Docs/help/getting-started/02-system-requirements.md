@@ -48,9 +48,9 @@ input. Airboard must not block the board because camera input is missing.
 ## Airo voice
 
 Airo requires microphone permission and a configured realtime transcription
-provider. If voice is unavailable, turning Airo on (**⏻** on the Airo panel, or
-**Turn on Airo voice and hands** in the **•••** menu) starts hand tracking only,
-and the Airo panel says why voice is off. Typed commands keep working.
+provider. A board asks for the camera and microphone as soon as it opens. If
+voice is unavailable, hand tracking still starts and the Airo panel says why
+voice is off. Typed commands keep working.
 
 Natural-language recovery additionally depends on the semantic intent provider.
 Canonical commands continue to work when that provider is unavailable.

@@ -5,11 +5,13 @@ import {
   applyBoardEvent,
   applyDiagramUndo,
   createEventEnvelope,
+  createBoardSceneElement,
   createInitialBoardState,
 } from "@airboard/core";
 import {
   commandTurnSnapshotChanged,
   commitCommandTurn,
+  diagramRedoEvents,
 } from "../src/features/board/commandTurnCoordinator.ts";
 
 const contextForCommand = (index) => {
@@ -146,4 +148,41 @@ test("a failing later command cannot leak an earlier command", () => {
     }),
   );
   assert.deepEqual(initial.strokes, {});
+});
+
+test("redo of an undone turn restores the elements it created instead of replaying their creation", () => {
+  let state = createInitialBoardState("eval-board");
+  const envelope = (id) => ({
+    ...createEventEnvelope({ boardSessionId: "eval-board", actorParticipantId: "eval-participant" }),
+    id,
+  });
+  const connector = createBoardSceneElement({
+    id: "connector-1",
+    boardId: "eval-board",
+    kind: "connector",
+    pathKind: "bent",
+    transform: { x: 0, y: 0, width: 100, height: 10, rotation: 0 },
+    start: { point: { x: 0, y: 0 }, decoration: "none" },
+    end: { point: { x: 100, y: 0 }, decoration: "solid_arrow" },
+  });
+  const forward = [{ ...envelope("create"), type: "element.created", element: connector }];
+  const undo = [{ ...envelope("delete"), type: "element.deleted", elementId: connector.id }];
+  for (const event of forward) state = applyBoardEvent(state, event);
+  state = applyDiagramUndo(state, { undoEvents: undo }).state;
+  assert.equal(state.elements[connector.id].status, "deleted");
+
+  // Replaying the creation is a no-op: the element is still there, deleted.
+  const replayed = applyDiagramUndo(state, { undoEvents: forward }).state;
+  assert.equal(replayed.elements[connector.id].status, "deleted");
+
+  const redo = diagramRedoEvents(state, forward);
+  assert.equal(redo[0].type, "element.restored");
+  assert.equal(redo[0].elementId, connector.id);
+  assert.equal(redo[0].id, "create");
+  const redone = applyDiagramUndo(state, { undoEvents: redo }).state;
+  assert.equal(redone.elements[connector.id].status, "active");
+
+  // An element the board never had is still created.
+  const fresh = diagramRedoEvents(createInitialBoardState("eval-board"), forward);
+  assert.equal(fresh[0].type, "element.created");
 });

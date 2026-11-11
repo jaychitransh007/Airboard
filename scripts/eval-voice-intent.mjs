@@ -18,6 +18,7 @@ import {
   AIRBOARD_SEMANTIC_CAPABILITY_REGISTRY,
 } from "../packages/core/src/semanticCapabilities.ts";
 import {
+  SEMANTIC_INTENT_ADDRESSED_BY,
   SEMANTIC_INTENT_RECOVERABLE_PARSER_ISSUES,
 } from "../apps/api/src/semanticIntent/types.ts";
 import {
@@ -274,6 +275,8 @@ async function runCaseOnce({
         ...(fixtureCase.pendingClarification
           ? { pendingClarification: fixtureCase.pendingClarification }
           : {}),
+        // Production strips the wake word and says how Airo was addressed.
+        ...(fixtureCase.addressedBy ? { addressedBy: fixtureCase.addressedBy } : {}),
         ...(model ? { model } : {}),
       }),
       signal: controller.signal,
@@ -1046,6 +1049,12 @@ function validateCorpus(corpus, fixturePath) {
         ))
     ) {
       throw new Error(`${fixturePath} contains a malformed pending clarification`);
+    }
+    if (
+      fixtureCase.addressedBy !== undefined &&
+      !SEMANTIC_INTENT_ADDRESSED_BY.includes(fixtureCase.addressedBy)
+    ) {
+      throw new Error(`${fixturePath} case ${fixtureCase.id} has an invalid addressedBy`);
     }
     if (!VALID_EXPECTED_OUTCOMES.has(fixtureCase.expected.status)) {
       throw new Error(`${fixturePath} case ${fixtureCase.id} has an invalid expected status`);

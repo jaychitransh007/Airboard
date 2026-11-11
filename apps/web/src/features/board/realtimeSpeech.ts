@@ -7,6 +7,18 @@ export const REALTIME_TRANSCRIPTION_FRAME_SAMPLES = 1_280;
 // One second of 16 kHz mono PCM16. Anything beyond this is stale for an
 // interactive board command and is dropped until the socket drains.
 export const DEFAULT_REALTIME_TRANSCRIPTION_MAX_BUFFERED_BYTES = 32 * 1024;
+// The speech gate (createSpeechGate): frames quieter than this RMS level
+// (about -48 dBFS, below speech even after the browser's noise suppression
+// and gain control) are silence and are not streamed, since the provider
+// bills streamed audio and the API charges voice minutes for it.
+export const DEFAULT_SPEECH_GATE_THRESHOLD = 0.004;
+// Audio keeps flowing this long after the last loud frame. It must outlast
+// the provider's end-of-turn timeout (1.2 s by default) so every turn is
+// finished before the stream goes quiet.
+export const DEFAULT_SPEECH_GATE_HANGOVER_MS = 2_000;
+// The quiet audio just before speech is sent with it, so the first syllable
+// ("Ai-ro") is never clipped.
+export const DEFAULT_SPEECH_GATE_PRE_ROLL_MS = 480;
 
 const AUDIO_WORKLET_PROCESSOR_NAME = "airboard-pcm-capture";
 const AUDIO_WORKLET_PROCESSOR_SOURCE = `
@@ -62,6 +74,18 @@ export type RealtimeSpeechEndReason = "stopped" | "aborted" | "error" | "closed"
  */
 export type RealtimeSpeechReconnectCause = "rollover" | "dropped" | "busy";
 
+/**
+ * Today's voice minutes are running low. Sent once as the remainder falls to
+ * 15 minutes and once at 5 minutes; `scope` "service" means the pilot-wide
+ * total, not the person's own allowance, is the nearer limit. `message` is
+ * ready to show as is.
+ */
+export type RealtimeSpeechAllowanceWarning = {
+  remainingMinutes: number;
+  scope: "personal" | "service";
+  message: string;
+};
+
 export type RealtimeSpeechCallbacks = {
   /** The first stream is ready; replacement streams report onReconnected instead. */
   onReady?: (metadata: RealtimeSpeechMetadata) => void;
@@ -87,6 +111,14 @@ export type RealtimeSpeechCallbacks = {
    * off, rather than surfacing a generic "not recognized" failure.
    */
   onAudioDropped?: () => void;
+  /** Today's voice minutes are running low; voice keeps working until they run out. */
+  onAllowanceWarning?: (warning: RealtimeSpeechAllowanceWarning) => void;
+};
+
+export type RealtimeSpeechGateOptions = {
+  threshold?: number;
+  hangoverMs?: number;
+  preRollMs?: number;
 };
 
 export type RealtimeSpeechOptions = {
@@ -128,6 +160,12 @@ export type RealtimeSpeechOptions = {
   quietPauseMs?: number;
   /** Reconnect attempts in a row before giving up. */
   maxReconnectAttempts?: number;
+  /**
+   * Hold back silence instead of streaming it (on by default): only speech,
+   * with a moment before and after, is sent. The API keeps the provider
+   * stream open meanwhile, so nothing reconnects when speech returns.
+   */
+  silenceGate?: boolean | RealtimeSpeechGateOptions;
 };
 
 export type RealtimeSpeechSession = {
@@ -250,6 +288,8 @@ type ServerMessage = {
   code?: string;
   fatal?: boolean;
   keytermCount?: number;
+  remainingMinutes?: number;
+  scope?: string;
 };
 
 const WEB_SOCKET_CONNECTING = 0;
@@ -446,6 +486,10 @@ export function createRealtimeSpeechSession(
   let consecutiveDroppedFrames = 0;
   let dropWarningActive = false;
   let currentKeyterms = boundedKeyterms(options.keyterms ?? []);
+  const speechGate =
+    options.silenceGate === false
+      ? null
+      : createSpeechGate(typeof options.silenceGate === "object" ? options.silenceGate : {});
   let lastSentKeytermFingerprint: string | null = null;
 
   const setListening = (nextListening: boolean) => {
@@ -635,7 +679,7 @@ export function createRealtimeSpeechSession(
       lastCause === "busy"
         ? "Airo's voice is busy right now. Try again in a minute; typed commands still work."
         : everReady
-          ? "Airo's voice connection dropped and couldn't reconnect. Turn Airo on again; typed commands still work."
+          ? "Airo's voice connection dropped and couldn't reconnect. Hold an open palm, click the board, or reload it to try again; typed commands still work."
           : "Could not connect to the realtime transcription service.",
       code ?? "TRANSCRIPTION_RECONNECT_FAILED",
     );
@@ -706,6 +750,16 @@ export function createRealtimeSpeechSession(
     }
   };
 
+  const sendGatedFrame = (frame: Float32Array) => {
+    if (!speechGate) {
+      sendPcmFrame(frame);
+      return;
+    }
+    for (const gated of speechGate.push(frame)) {
+      sendPcmFrame(gated);
+    }
+  };
+
   const ingestAudio = (input: Float32Array) => {
     if (!listening || input.length === 0) {
       return;
@@ -722,7 +776,7 @@ export function createRealtimeSpeechSession(
     while (pendingInput.length >= inputFrameSamples) {
       const frame = pendingInput.slice(0, inputFrameSamples);
       pendingInput = pendingInput.slice(inputFrameSamples);
-      sendPcmFrame(frame);
+      sendGatedFrame(frame);
     }
   };
 
@@ -737,7 +791,7 @@ export function createRealtimeSpeechSession(
     const paddedFrame = new Float32Array(inputFrameSamples);
     paddedFrame.set(pendingInput.slice(0, inputFrameSamples));
     pendingInput = new Float32Array(0);
-    sendPcmFrame(paddedFrame);
+    sendGatedFrame(paddedFrame);
   };
 
   // Listening starts now, or once a replacement stream is ready if the
@@ -941,6 +995,36 @@ export function createRealtimeSpeechSession(
         handleFailure(errorMessage, errorCode, recoverableCause(errorCode));
         return;
       }
+      case "transcription.allowance_warning": {
+        if (typeof message.remainingMinutes !== "number" || !Number.isFinite(message.remainingMinutes)) {
+          return;
+        }
+        const remainingMinutes = Math.max(0, Math.floor(message.remainingMinutes));
+        const scope = message.scope === "service" ? "service" : "personal";
+        callbacks.onAllowanceWarning?.({
+          remainingMinutes,
+          scope,
+          message:
+            cleanOptionalString(message.message) ??
+            `About ${remainingMinutes} minutes of Airo voice left today. Typed commands keep working.`,
+        });
+        return;
+      }
+      case "transcription.renewing":
+        // The server is replacing the provider stream behind this one, with
+        // no gap. A forgotten tab that has heard nobody for a long time
+        // pauses here instead, as it did when streams were cut at the limit.
+        if (
+          options.reconnect &&
+          options.quietPauseMs !== undefined &&
+          state === "active" &&
+          now() - lastSpeechAt >= options.quietPauseMs
+        ) {
+          releaseAudio();
+          reportEnd("paused");
+          closeSocket("transcription paused");
+        }
+        return;
       case "transcription.stopped":
         // Nobody asked this stream to stop: the provider closed it.
         if (options.reconnect && (state === "starting" || state === "active")) {
@@ -1152,6 +1236,73 @@ export function createRealtimeSpeechSession(
   };
 }
 
+export type SpeechGate = {
+  /** Takes one capture frame and returns the frames to send now, oldest first. */
+  push(frame: Float32Array): Float32Array[];
+  isOpen(): boolean;
+};
+
+/**
+ * Holds back silence: frames are sent from a little before the first loud
+ * frame until the hangover after the last one. Assumes the session's
+ * 80 ms capture frames.
+ */
+export function createSpeechGate(options: RealtimeSpeechGateOptions = {}): SpeechGate {
+  const threshold = options.threshold ?? DEFAULT_SPEECH_GATE_THRESHOLD;
+  const hangoverFrames = Math.max(
+    1,
+    Math.ceil((options.hangoverMs ?? DEFAULT_SPEECH_GATE_HANGOVER_MS) / REALTIME_TRANSCRIPTION_FRAME_DURATION_MS),
+  );
+  const preRollFrames = Math.max(
+    0,
+    Math.ceil((options.preRollMs ?? DEFAULT_SPEECH_GATE_PRE_ROLL_MS) / REALTIME_TRANSCRIPTION_FRAME_DURATION_MS),
+  );
+  let open = false;
+  let quietFrames = 0;
+  let preRoll: Float32Array[] = [];
+  return {
+    push(frame) {
+      if (rmsLevel(frame) >= threshold) {
+        quietFrames = 0;
+        if (open) {
+          return [frame];
+        }
+        open = true;
+        const frames = [...preRoll, frame];
+        preRoll = [];
+        return frames;
+      }
+      if (open) {
+        quietFrames += 1;
+        if (quietFrames <= hangoverFrames) {
+          return [frame];
+        }
+        open = false;
+      }
+      if (preRollFrames > 0) {
+        preRoll.push(frame);
+        if (preRoll.length > preRollFrames) {
+          preRoll.shift();
+        }
+      }
+      return [];
+    },
+    isOpen: () => open,
+  };
+}
+
+function rmsLevel(frame: Float32Array): number {
+  if (frame.length === 0) {
+    return 0;
+  }
+  let sum = 0;
+  for (let index = 0; index < frame.length; index += 1) {
+    const sample = frame[index]!;
+    sum += sample * sample;
+  }
+  return Math.sqrt(sum / frame.length);
+}
+
 /** Resamples mono Float32 audio and encodes signed little-endian PCM16. */
 export function encodePcm16Frame(
   input: Float32Array,
@@ -1320,7 +1471,9 @@ function describeTranscriptionCloseRefusal(reason: string): string | null {
       return "Your workspace admin turned off voice. Typed commands and pointer edits still work.";
     case "AUTHORIZATION_UNAVAILABLE":
     case "POLICY_UNAVAILABLE":
-      return "Airo couldn't confirm your access just now. Turn Airo on again in a moment.";
+      return "Airo couldn't confirm your access just now. Reload the board in a moment to try again.";
+    case "Airboard authentication required":
+      return "Sign in to Airboard to use Airo's voice. Typed commands and pointer edits still work.";
     default:
       return null;
   }

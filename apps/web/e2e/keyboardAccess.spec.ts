@@ -10,6 +10,7 @@ test("Share keeps keyboard focus inside, closes on Escape and hands focus back",
   await page.goto("/?testStandalone=1");
   const share = page.getByRole("button", { name: "Share", exact: true });
   await share.click();
+  await page.getByRole("menuitem", { name: "Share with people" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
 

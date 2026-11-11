@@ -8,6 +8,11 @@ import {
   createBrowserWakeSpeechSession,
   extractBrowserWakeCommands,
   isAirboardVoiceConfirmation,
+  isAddressedRequestUtterance,
+  isCommandShapedUtterance,
+  isConnectiveCommandUtterance,
+  isReferenceAnswerUtterance,
+  stripPoliteCommandLeadIn,
   normalizeScopedVoiceUtterance,
   recoverAirboardVoiceCommand,
 } from "../src/features/board/browserSpeech.ts";
@@ -308,4 +313,137 @@ test("non-scoped utterances pass through the scoped normalizer unchanged", () =>
     normalizeScopedVoiceUtterance("delete the whole board"),
     "delete the whole board",
   );
+});
+
+const commandsOf = (transcript) =>
+  extractBrowserWakeCommands(transcript).map(({ command }) => command);
+
+test("accepts Airo after connective lead-ins when a command follows (unpunctuated ASR too)", () => {
+  assert.deepEqual(commandsOf("And now Airo, add a database"), ["add a database"]);
+  assert.deepEqual(commandsOf("and now airo add a database"), ["add a database"]);
+  assert.deepEqual(commandsOf("Then Airo add a database"), ["add a database"]);
+  assert.deepEqual(commandsOf("Next, Airo, put a cache between the API and the database"), [
+    "put a cache between the API and the database",
+  ]);
+  assert.deepEqual(commandsOf("Thanks Airo. Add a database."), ["Add a database."]);
+  assert.deepEqual(commandsOf("thank you airo connect the cache to the API"), ["connect the cache to the API"]);
+  assert.deepEqual(commandsOf("okay so airo add a cache"), ["add a cache"]);
+  assert.deepEqual(commandsOf("so as I was saying airo add a database"), ["add a database"]);
+  assert.deepEqual(commandsOf("Hey Arrow, add a database"), ["add a database"]);
+});
+
+test("mid-sentence Airo without a command, and brand mentions in narration, do not activate", () => {
+  for (const talk of [
+    "I told Airo about it yesterday",
+    "thanks Airo",
+    "and now Airo is part of the demo",
+    "the Airboard page loads after sign in",
+    "we moved to Airboard and add a database every sprint",
+    "draw an arrow here",
+    "draw an arrow connect them later",
+  ]) {
+    assert.equal(classifyBrowserWakeTranscript(talk).wakeDetected, false, talk);
+  }
+});
+
+test("Arrow, Aero and Airboard prefixes count only when a command follows", () => {
+  assert.deepEqual(commandsOf("Arrow keys are broken"), []);
+  assert.equal(classifyBrowserWakeTranscript("Arrow keys are broken").wakeDetected, false);
+  assert.equal(classifyBrowserWakeTranscript("Aero dynamics is a whole other team").wakeDetected, false);
+  assert.equal(classifyBrowserWakeTranscript("Airboard is what we use for diagrams").wakeDetected, false);
+  assert.deepEqual(commandsOf("Arrow, add a user"), ["add a user"]);
+  assert.deepEqual(commandsOf("Aero rename the API to Gateway"), ["rename the API to Gateway"]);
+  assert.deepEqual(commandsOf("Airboard connect them"), ["connect them"]);
+  // The bare word still arms the next sentence, as "Airo" does.
+  assert.equal(classifyBrowserWakeTranscript("Aero").wakeDetected, true);
+  // Canonical Airo keeps accepting narrative descriptions (semantic requests).
+  assert.deepEqual(commandsOf("Airo, users sign in through the auth service"), [
+    "users sign in through the auth service",
+  ]);
+});
+
+test("narration about Airo is not a command; only address position wakes mid-sentence", () => {
+  for (const talk of [
+    "I told the team Airo can add a database for us",
+    "did you see airo delete the database",
+    "watch airo draw this",
+    "I think we should make sure Airo add more color",
+    "Airo will add it later",
+    "Airo can add a database for us",
+    "Airo is part of the demo",
+  ]) {
+    assert.equal(classifyBrowserWakeTranscript(talk).wakeDetected, false, talk);
+  }
+  assert.deepEqual(commandsOf("we're nearly done, Airo add a cache"), ["add a cache"]);
+  assert.deepEqual(commandsOf("Airo can you add a cache"), ["can you add a cache"]);
+  assert.deepEqual(commandsOf("and Airo, could you connect it to the API"), ["could you connect it to the API"]);
+});
+
+test("Aero, Arrow and Airboard accept polite and narrated requests", () => {
+  assert.deepEqual(commandsOf("Aero, can you add a database"), ["can you add a database"]);
+  assert.deepEqual(commandsOf("Arrow, can you add a database"), ["can you add a database"]);
+  assert.deepEqual(commandsOf("Arrow please add a user"), ["please add a user"]);
+  assert.deepEqual(commandsOf("Aero, we need a cache in front of the API"), ["we need a cache in front of the API"]);
+  assert.deepEqual(commandsOf("Aero I'd like to add a queue"), ["I'd like to add a queue"]);
+  assert.deepEqual(
+    commandsOf("Aero, users sign in through the auth service, which checks the user database"),
+    ["users sign in through the auth service, which checks the user database"],
+  );
+  assert.deepEqual(commandsOf("Airboard, users sign in through auth"), ["users sign in through auth"]);
+  // Without a vocative pause, narration after the mishearings stays content.
+  assert.equal(classifyBrowserWakeTranscript("Aero dynamics is a whole other team").wakeDetected, false);
+  assert.equal(classifyBrowserWakeTranscript("Airboard is what we use for diagrams").wakeDetected, false);
+  assert.equal(classifyBrowserWakeTranscript("Arrow, users sign in").wakeDetected, false);
+  assert.equal(isAddressedRequestUtterance("could you please connect it to the API"), true);
+  assert.equal(isAddressedRequestUtterance("can you hear me"), false);
+  assert.equal(stripPoliteCommandLeadIn("can you also connect it"), "connect it");
+});
+
+test("a carried wake ignores a connective lead-in before an in-sentence wake", () => {
+  const commands = [];
+  const router = createBrowserWakeCommandRouter({ onCommand: (event) => commands.push(event.command) });
+  router.consumeFinalTranscript("Airo");
+  router.consumeFinalTranscript("and now Airo add a database");
+  assert.deepEqual(commands, ["add a database"]);
+});
+
+test("command-shape and reference-answer classifiers", () => {
+  for (const command of [
+    "add a cache",
+    "Add a database.",
+    "and connect it to the API",
+    "then delete the queue",
+    "now rename it to Orders",
+    "um please make it blue",
+    "undo",
+    "zoom to fit",
+    "lay out the diagram left to right",
+  ]) {
+    assert.equal(isCommandShapedUtterance(command), true, command);
+  }
+  for (const talk of [
+    "so the user hits the payment API",
+    "called Orders",
+    "make sure we ship",
+    "let's move on",
+    "move on to the next slide",
+    "call me after lunch",
+    "the arrow keys are broken",
+    "can you hear me",
+    "undo is broken in the editor",
+    "zoom doesn't work on my laptop",
+    "so call it done",
+    "make a note that we owe legal a response",
+    "draw a line under it and let's move on",
+  ]) {
+    assert.equal(isCommandShapedUtterance(talk), false, talk);
+  }
+  assert.equal(isConnectiveCommandUtterance("and connect it to the API"), true);
+  assert.equal(isConnectiveCommandUtterance("connect it to the API"), false);
+  for (const answer of ["the billing one", "The second one.", "that one", "the last", "number two"]) {
+    assert.equal(isReferenceAnswerUtterance(answer), true, answer);
+  }
+  for (const talk of ["the billing team is late", "one more thing", "that"]) {
+    assert.equal(isReferenceAnswerUtterance(talk), false, talk);
+  }
 });

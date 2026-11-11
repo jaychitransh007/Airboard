@@ -6,70 +6,112 @@ categoryLabel: Using the board
 order: 5
 status: shipped
 audiences: ["everyone"]
-lastVerified: 2026-11-07
+lastVerified: 2026-11-11
 sources: ["apps/web/src/features/board/voiceCommandRouter.ts", "apps/web/src/features/board/palmVoiceGestureTracker.ts", "apps/web/src/features/board/holdToEditTracker.ts", "apps/web/src/features/board/realtimeSpeech.ts", "apps/web/src/features/board/semanticBoardObjects.ts", "packages/core/src/sceneDiagramCommands.ts"]
 ---
 
 Airo turns finalized speech into the same command pipeline used by typed input.
-Turn Airo on once before using voice: use **⏻** on the Airo panel, or
-**Turn on Airo voice and hands** in the board menu (**•••**). The interface
-shows whether realtime voice is available in the current environment. While
-Airo listens, its panel shrinks to a strip in the corner with what it heard,
-what it is doing and a line to type into; **⤢** shows its full activity.
+Airo starts listening as soon as a board opens; there is nothing to turn on.
+The first time, the browser asks once for the camera and microphone. To keep
+the microphone off on every board, turn off **Airboard audio input** in
+**Settings → Preferences**.
+
+The Airo panel starts hidden at the right edge of the board, so the board
+stays clear. Choose **✦ Airo** there to show it: it lists what Airo heard and
+did, says when voice isn't available, and has a box for typing a command.
+Choose **›** to hide it again. Airboard remembers your choice.
 
 Voice stays on for the whole meeting. If the connection drops, for example on
 a network blip, Airo reconnects on its own and says when it is listening
 again. If nobody has spoken for about 20 minutes, voice pauses so a forgotten
-tab doesn't keep streaming; hold an open palm, or press **⏻** (Resume voice) on the
-Airo panel, to wake it.
+tab doesn't keep streaming; hold an open palm, or click the board, to wake it.
+
+If you have Airboard open in more than one tab, only the tab you are using
+listens. Going back to another tab moves Airo's voice there.
 
 ## Address Airo
 
-Use either explicit method:
+Use either method, whichever suits the moment:
 
-- Say the `Airo` wake word as part of a command.
-- With supported camera input, hold one open palm still for about 0.4 seconds,
-  speak, then lower or relax the hand.
+- Say `Airo` with your command, at the start of a sentence or in the middle
+  of one: “Airo, add a database” and “and now Airo, add a database” both work.
+- With a camera, hold one open palm still for about 0.4 seconds and speak.
+  Airo keeps listening for as long as you hold it, so you can say several
+  commands in a row; lower your hand when you're done.
 
-Ordinary meeting conversation is not treated as a board command unless it
-passes the product's explicit activation and routing gates.
+For about 8 seconds after a command, you can carry on without saying `Airo`
+again: “add a cache”, “and connect it to the API”, “make it red”. Anything
+that isn't a board command, such as ordinary talk with the room, ends that
+window and is ignored.
 
-Without a camera, use the wake word or type the command. Core board work does
-not depend on the open-palm gesture.
+You can pause to think in the middle of a command: “Airo, add a database…
+called Orders” is one command.
+
+Holding your palm flat to aim at a shape or a tool in the dock doesn't turn
+the microphone on; only an open palm held still in empty space does.
+
+Ordinary meeting conversation never changes the board, and it isn't shown
+on screen: the Airo panel only shows what you said to Airo.
+
+Without a camera, use the wake word or type the command.
+
+## Describe it, and Airo draws it
+
+You can describe a system in plain words and Airo draws the whole diagram:
+“Airo, users sign in through the auth service, which checks the user
+database.” A description can run to a minute or so. If one part can't be
+matched, Airo draws the rest and says what it skipped.
+
+## Point while you talk
+
+“Here”, “this” and “that” mean what your hand (or mouse) points at when you
+start speaking:
+
+- `Airo, add a database here`
+- `Airo, connect this to that`: point at one shape as you start, and at the
+  other as you finish.
+- `Airo, make it red`, `delete it`, `call it Payments`: “it” is what you
+  pointed at, or else what's selected, or else the shape you added last.
 
 ## Edit one object
 
-Select one object, then hold `V` while speaking to scope voice to that object.
-With camera input, close one hand over the object and hold it still for about
-0.6 seconds before speaking.
-
-Examples:
-
-- `rename to Payments`
-- `delete`
-- `connect to the database`
-
-Release the key or hand pose when you finish.
+With a camera, close one hand over a shape and hold it still for about 0.6
+seconds, then speak: `rename to Payments`, `delete`, `connect to the
+database`. Without one, select the shape and hold `V` while speaking.
 
 ## Shapes already on the board
 
-Airo sees every shape on the board, including those you added from the toolbar
-or with a typed command such as `add a user`. Ask it to connect, rename, move,
-line up, spread out, tidy, copy, group or delete them by their label, and it
-reuses them rather than drawing a second copy. Grouping draws a section around
-them, as the toolbar does.
+Airo sees every shape on the board, whether it drew it, you added it from
+the toolbar, or you placed it by hand. Ask it to connect, rename, recolour,
+move, resize, change the type of, line up, spread out, group or delete them
+by name, and it reuses them rather than drawing a second copy.
 
-Airo can't yet put its own diagram shapes and toolbar shapes in one group. It
-says so instead of guessing; select them and use the toolbar.
+When a name matches more than one shape, Airo picks the selected one, else
+the newest. When you mention a shape that isn't there yet (“connect the user
+to the cache”), Airo adds it. Airo only asks a question when it truly can't
+tell what you mean; answer it out loud within about 10 seconds, without
+saying `Airo` first.
 
-## If speech is misheard
+## Undo, redo and the view
 
-Read the finalized transcript before repeating the command. Use a shorter
-phrase with the visible object label. If a wrong action was safely applied,
-undo it immediately.
+- `Airo, undo`, `scratch that`, `undo twice`
+- `Airo, redo`
+- `No, I meant a database` swaps the last change for what you meant.
+- `Airo, zoom to fit`, `focus on payments`
+- `Airo, bring it to the front`, `send it to the back`
 
-If realtime transcription is unavailable, switch to the typed composer. If
-only semantic recovery is unavailable, canonical commands still work.
+## How you know what happened
+
+Every change applies at once, and a short **Undo** appears on the board.
+When Airo can't apply something, or asks a question, a short note appears on
+the board itself, so you see it even with the Airo panel hidden. Airo also
+plays quiet sounds: a tick when it hears a command, a rising note when it
+applies one, a falling note when it can't, and three notes for a question.
+Turn the sounds off in the board's settings under **Appearance**. If you
+present the tab in Meet with tab audio shared, the audience may hear them.
+
+Voice commands never go into the typing box. If Airo misses one, say it
+again, in other words if you can.
 
 ## Privacy
 

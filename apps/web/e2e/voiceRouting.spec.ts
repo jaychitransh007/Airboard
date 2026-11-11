@@ -121,11 +121,14 @@ test("wake-word transcripts execute; meeting talk never does", async ({ page }) 
   expect(ambient.routed).toBe(false);
   expect((await summary(page)).objectCount).toBe(0);
 
-  // A wake-word command executes instantly — including disfluencies.
+  // Room talk isn't shown on the (presented) panel.
+  await expect(page.getByTestId("copilot-transcript")).not.toContainText("payment API");
+
+  // A wake-word command executes instantly — including disfluencies. The
+  // panel shows the command; the typing box stays empty.
   await emit(page, "Hey, Airo. Uh, add a circle.");
-  await expect(page.getByTestId("copilot-transcript")).toContainText(
-    "Hey, Airo. Uh, add a circle.",
-  );
+  await expect(page.getByTestId("copilot-transcript")).toContainText("Uh, add a circle.");
+  await expect(page.getByTestId("intent-command-input")).toHaveValue("");
   await expect(page.locator(".intent-feedback")).toContainText("Applied:", {
     timeout: 15_000,
   });
@@ -160,7 +163,7 @@ test("right-side copilot is collapsible and voice applies without its Send butto
     .toBe(3);
   await expect(page.getByTestId("copilot-activity")).toContainText("Board updated");
 
-  await page.getByRole("button", { name: "Hide Airo copilot" }).click();
+  await page.getByRole("button", { name: "Hide Airo panel" }).click();
   await expect(copilot).toHaveCount(0);
   const reopen = page.getByTestId("canvas-copilot-toggle");
   await expect(reopen).toBeVisible();

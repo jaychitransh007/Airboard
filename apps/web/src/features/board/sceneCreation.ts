@@ -5,6 +5,7 @@ import {
   shapeCatalogEntry,
   type BoardSceneElement,
   type CodeLanguage,
+  type ConnectorEndpoint,
   type ConnectorPathKind,
 } from "@airboard/core";
 import {
@@ -20,6 +21,11 @@ export type SceneCreationOptions = {
   table?: { rows: number; columns: number };
   label?: string;
   language?: CodeLanguage;
+  /**
+   * Connector ends, for a connector placed by hand between shapes. Without
+   * them a connector is a loose default-length line centred on `point`.
+   */
+  connector?: { start: ConnectorEndpoint; end: ConnectorEndpoint };
 };
 
 /** Create every synchronous v2 toolbar object at a board-space point. */
@@ -108,6 +114,23 @@ export function createSceneElementForTool(
     case "connector:curved":
     case "connector:straight": {
       const pathKind = tool.slice("connector:".length) as ConnectorPathKind;
+      if (options.connector) {
+        const { start, end } = options.connector;
+        return createBoardSceneElement({
+          ...base,
+          kind: "connector",
+          pathKind,
+          transform: {
+            x: Math.min(start.point.x, end.point.x),
+            y: Math.min(start.point.y, end.point.y),
+            width: Math.max(1, Math.abs(end.point.x - start.point.x)),
+            height: Math.max(1, Math.abs(end.point.y - start.point.y)),
+            rotation: 0,
+          },
+          start: structuredClone(start),
+          end: structuredClone(end),
+        });
+      }
       const transform = centeredTransform(options.point, { width: 180, height: 80 });
       return createBoardSceneElement({ ...base, kind: "connector", transform, pathKind });
     }

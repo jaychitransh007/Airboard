@@ -1,9 +1,43 @@
 import { AIRBOARD_SEMANTIC_NODE_CAPABILITIES } from "./semanticCapabilities.ts";
-import type { AnnotationNodeType } from "./types.ts";
+import { BOARD_SHAPE_CATALOG } from "./shapeCatalog.ts";
+import type { AnnotationNodeType, ShapeKind } from "./types.ts";
 
 export const AIRBOARD_SEMANTIC_PLAN_CONTRACT_VERSION = "1.1" as const;
 export const AIRBOARD_SEMANTIC_PLAN_TOOL_NAME = "propose_diagram_plan" as const;
-export const AIRBOARD_SEMANTIC_PLAN_MAX_ACTIONS = 12;
+/**
+ * A presenter narrating a system for a minute or two names a dozen or so
+ * shapes and as many arrows, and every shape and every arrow is a step. Forty
+ * steps fits that without splitting the explanation (it was 12).
+ */
+export const AIRBOARD_SEMANTIC_PLAN_MAX_ACTIONS = 40;
+/**
+ * The most board changes one plan may expand to once grounded. A step can
+ * expand to several changes (a layout moves every object), so this sits well
+ * above the step limit.
+ */
+export const AIRBOARD_SEMANTIC_PLAN_MAX_DIAGRAM_COMMANDS = 150;
+
+export const SEMANTIC_PLAN_LAYOUT_DIRECTIONS = [
+  "left_to_right",
+  "right_to_left",
+  "top_to_bottom",
+  "bottom_to_top",
+  "grid",
+  "tree",
+  "radial",
+] as const;
+export type SemanticLayoutDirection = (typeof SEMANTIC_PLAN_LAYOUT_DIRECTIONS)[number];
+
+export const SEMANTIC_PLAN_CONNECTOR_LINE_STYLES = ["solid", "dashed", "dotted"] as const;
+export type SemanticConnectorLineStyle = (typeof SEMANTIC_PLAN_CONNECTOR_LINE_STYLES)[number];
+
+export const SEMANTIC_PLAN_RESIZE_CHANGES = ["bigger", "smaller"] as const;
+export type SemanticResizeChange = (typeof SEMANTIC_PLAN_RESIZE_CHANGES)[number];
+
+/** Every catalogue shape a plan may draw, once each (File sits in two categories). */
+export const SEMANTIC_PLAN_SHAPE_KINDS = [
+  ...new Set(BOARD_SHAPE_CATALOG.map(({ kind }) => kind)),
+] as readonly ShapeKind[];
 
 export const SEMANTIC_PLAN_RESOLUTION_STATUSES = [
   "resolved",
@@ -85,6 +119,11 @@ export type SemanticPlacement =
 export type SemanticCreateAction = {
   type: "create";
   nodeType: AnnotationNodeType;
+  /**
+   * Catalogue shape to draw, such as horizontal-cylinder for a cache. Null or
+   * absent draws the node type's own shape. Older plans have no field.
+   */
+  shape?: ShapeKind | null;
   label: string | null;
   handle: string;
   placement: SemanticPlacement;
@@ -142,7 +181,8 @@ export type SemanticDistributeAction = {
 export type SemanticLayoutAction = {
   type: "layout";
   targets: SemanticObjectReference[];
-  direction: "left_to_right" | "right_to_left" | "top_to_bottom" | "bottom_to_top" | "grid";
+  /** tree follows the connectors from the roots down; radial puts the first target in the middle. */
+  direction: SemanticLayoutDirection;
 };
 export type SemanticGroupAction = {
   type: "group";
@@ -154,6 +194,28 @@ export type SemanticSelectAction = {
   type: "select";
   targets: SemanticObjectReference[];
   mode: "replace" | "add" | "remove";
+};
+/** Turns objects into another node type or catalogue shape, keeping labels and arrows. */
+export type SemanticChangeTypeAction = {
+  type: "change_type";
+  targets: SemanticObjectReference[];
+  nodeType: AnnotationNodeType;
+  shape: ShapeKind | null;
+};
+export type SemanticResizeAction = {
+  type: "resize";
+  targets: SemanticObjectReference[];
+  change: SemanticResizeChange;
+};
+export type SemanticLabelConnectionAction = {
+  type: "label_connection";
+  connection: SemanticConnectionReference;
+  label: string;
+};
+export type SemanticStyleConnectionAction = {
+  type: "style_connection";
+  connection: SemanticConnectionReference;
+  lineStyle: SemanticConnectorLineStyle;
 };
 export type SemanticUndoAction = { type: "undo" };
 export type SemanticCancelAction = { type: "cancel" };
@@ -173,6 +235,10 @@ export type SemanticPlanAction =
   | SemanticLayoutAction
   | SemanticGroupAction
   | SemanticSelectAction
+  | SemanticChangeTypeAction
+  | SemanticResizeAction
+  | SemanticLabelConnectionAction
+  | SemanticStyleConnectionAction
   | SemanticUndoAction
   | SemanticCancelAction;
 
@@ -186,6 +252,9 @@ export type SemanticPlan = {
 };
 
 const nodeTypeEnum = AIRBOARD_SEMANTIC_NODE_CAPABILITIES.map(({ nodeType }) => nodeType);
+const nullableShapeSchema = {
+  anyOf: [{ type: "string", enum: SEMANTIC_PLAN_SHAPE_KINDS }, { type: "null" }],
+} as const;
 const labelSchema = { type: "string", minLength: 1, maxLength: 120, pattern: "^[^\\u0000-\\u001F\\u007F]+$" } as const;
 const nullableLabelSchema = { anyOf: [labelSchema, { type: "null" }] } as const;
 const handleSchema = { type: "string", minLength: 1, maxLength: 64, pattern: "^[a-z][a-z0-9_-]*$" } as const;
@@ -369,11 +438,12 @@ export const AIRBOARD_SEMANTIC_PLAN_JSON_SCHEMA = {
           properties: {
             type: { type: "string", enum: ["create"] },
             nodeType: { type: "string", enum: nodeTypeEnum },
+            shape: nullableShapeSchema,
             label: nullableLabelSchema,
             handle: handleSchema,
             placement: { $ref: "#/$defs/placement" },
           },
-          required: ["type", "nodeType", "label", "handle", "placement"],
+          required: ["type", "nodeType", "shape", "label", "handle", "placement"],
           additionalProperties: false,
         },
         {
@@ -477,7 +547,7 @@ export const AIRBOARD_SEMANTIC_PLAN_JSON_SCHEMA = {
           properties: {
             type: { type: "string", enum: ["layout"] },
             targets: referenceArraySchemaWithMinimum(2),
-            direction: { type: "string", enum: ["left_to_right", "right_to_left", "top_to_bottom", "bottom_to_top", "grid"] },
+            direction: { type: "string", enum: SEMANTIC_PLAN_LAYOUT_DIRECTIONS },
           },
           required: ["type", "targets", "direction"],
           additionalProperties: false,
@@ -501,6 +571,47 @@ export const AIRBOARD_SEMANTIC_PLAN_JSON_SCHEMA = {
             mode: { type: "string", enum: ["replace", "add", "remove"] },
           },
           required: ["type", "targets", "mode"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            type: { type: "string", enum: ["change_type"] },
+            targets: referenceArraySchema,
+            nodeType: { type: "string", enum: nodeTypeEnum },
+            shape: nullableShapeSchema,
+          },
+          required: ["type", "targets", "nodeType", "shape"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            type: { type: "string", enum: ["resize"] },
+            targets: referenceArraySchema,
+            change: { type: "string", enum: SEMANTIC_PLAN_RESIZE_CHANGES },
+          },
+          required: ["type", "targets", "change"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            type: { type: "string", enum: ["label_connection"] },
+            connection: { $ref: "#/$defs/connectionReference" },
+            label: labelSchema,
+          },
+          required: ["type", "connection", "label"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            type: { type: "string", enum: ["style_connection"] },
+            connection: { $ref: "#/$defs/connectionReference" },
+            lineStyle: { type: "string", enum: SEMANTIC_PLAN_CONNECTOR_LINE_STYLES },
+          },
+          required: ["type", "connection", "lineStyle"],
           additionalProperties: false,
         },
         {
@@ -602,8 +713,12 @@ function validateAction(value: unknown, path: string): SemanticPlanParseError | 
   if (!isRecord(value) || typeof value.type !== "string") return issue("invalid_shape", path, "Action must be an object with a type.");
   switch (value.type) {
     case "create":
-      if (!isExactRecord(value, ["type", "nodeType", "label", "handle", "placement"])) return shape(path);
-      if (!isNodeType(value.nodeType) || !validNullableText(value.label, 120) || !validHandle(value.handle)) return issue("invalid_value", path, "Create action fields are invalid.");
+      // Plans recorded before catalogue shapes have no shape field.
+      if (
+        !isExactRecord(value, ["type", "nodeType", "shape", "label", "handle", "placement"]) &&
+        !isExactRecord(value, ["type", "nodeType", "label", "handle", "placement"])
+      ) return shape(path);
+      if (!isNodeType(value.nodeType) || !validNullableShape(value.shape) || !validNullableText(value.label, 120) || !validHandle(value.handle)) return issue("invalid_value", path, "Create action fields are invalid.");
       return validatePlacement(value.placement, `${path}.placement`);
     case "connect":
       if (!isExactRecord(value, ["type", "from", "to", "label"])) return shape(path);
@@ -660,13 +775,25 @@ function validateAction(value: unknown, path: string): SemanticPlanParseError | 
       return validateReferences(value.targets, `${path}.targets`, 3) ?? (!includes(["horizontal", "vertical"] as const, value.axis) ? issue("invalid_value", `${path}.axis`, "Distribution axis is invalid.") : null);
     case "layout":
       if (!isExactRecord(value, ["type", "targets", "direction"])) return shape(path);
-      return validateReferences(value.targets, `${path}.targets`, 2) ?? (!includes(["left_to_right", "right_to_left", "top_to_bottom", "bottom_to_top", "grid"] as const, value.direction) ? issue("invalid_value", `${path}.direction`, "Layout direction is invalid.") : null);
+      return validateReferences(value.targets, `${path}.targets`, 2) ?? (!includes(SEMANTIC_PLAN_LAYOUT_DIRECTIONS, value.direction) ? issue("invalid_value", `${path}.direction`, "Layout direction is invalid.") : null);
     case "group":
       if (!isExactRecord(value, ["type", "targets", "label", "handle"])) return shape(path);
       return validateReferences(value.targets, `${path}.targets`, 1) ?? (!validNullableText(value.label, 120) || !validHandle(value.handle) ? issue("invalid_value", path, "Group fields are invalid.") : null);
     case "select":
       if (!isExactRecord(value, ["type", "targets", "mode"])) return shape(path);
       return validateReferences(value.targets, `${path}.targets`, 1) ?? (!includes(["replace", "add", "remove"] as const, value.mode) ? issue("invalid_value", `${path}.mode`, "Selection mode is invalid.") : null);
+    case "change_type":
+      if (!isExactRecord(value, ["type", "targets", "nodeType", "shape"])) return shape(path);
+      return validateReferences(value.targets, `${path}.targets`, 1) ?? (!isNodeType(value.nodeType) || !validNullableShape(value.shape) ? issue("invalid_value", path, "Change-type fields are invalid.") : null);
+    case "resize":
+      if (!isExactRecord(value, ["type", "targets", "change"])) return shape(path);
+      return validateReferences(value.targets, `${path}.targets`, 1) ?? (!includes(SEMANTIC_PLAN_RESIZE_CHANGES, value.change) ? issue("invalid_value", `${path}.change`, "Resize change is invalid.") : null);
+    case "label_connection":
+      if (!isExactRecord(value, ["type", "connection", "label"])) return shape(path);
+      return validateConnectionReference(value.connection, `${path}.connection`) ?? (!validText(value.label, 120) ? issue("invalid_value", `${path}.label`, "Connector label is invalid.") : null);
+    case "style_connection":
+      if (!isExactRecord(value, ["type", "connection", "lineStyle"])) return shape(path);
+      return validateConnectionReference(value.connection, `${path}.connection`) ?? (!includes(SEMANTIC_PLAN_CONNECTOR_LINE_STYLES, value.lineStyle) ? issue("invalid_value", `${path}.lineStyle`, "Connector line style is invalid.") : null);
     case "undo":
     case "cancel":
       return isExactRecord(value, ["type"]) ? null : shape(path);
@@ -792,6 +919,8 @@ function referencesInAction(action: SemanticPlanAction): SemanticObjectReference
     case "connect": return [action.from, action.to];
     case "reverse_connection":
     case "delete_connection":
+    case "label_connection":
+    case "style_connection":
       return [action.connection.from, action.connection.to];
     case "branch": return [action.from, ...action.branches.map(({ to }) => to)];
     case "rename": return [action.target];
@@ -800,7 +929,9 @@ function referencesInAction(action: SemanticPlanAction): SemanticObjectReference
     case "distribute":
     case "layout":
     case "group":
-    case "select": return action.targets;
+    case "select":
+    case "change_type":
+    case "resize": return action.targets;
     case "duplicate":
     case "move": return [...action.targets, ...placementReferences(action.placement)];
     case "undo":
@@ -833,3 +964,4 @@ function validText(value: unknown, maximum: number): value is string {
 }
 function validNullableText(value: unknown, maximum: number): value is string | null { return value === null || validText(value, maximum); }
 function isNodeType(value: unknown): value is AnnotationNodeType { return nodeTypeEnum.includes(value as AnnotationNodeType); }
+function validNullableShape(value: unknown): boolean { return value === undefined || value === null || SEMANTIC_PLAN_SHAPE_KINDS.includes(value as ShapeKind); }

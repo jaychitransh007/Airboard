@@ -5,6 +5,7 @@ import {
   boundedKeyterms,
   buildRealtimeTranscriptionWebSocketUrl,
   createRealtimeSpeechSession,
+  createSpeechGate,
   DEFAULT_REALTIME_TRANSCRIPTION_MAX_BUFFERED_BYTES,
   encodePcm16Frame,
   fetchRealtimeTranscriptionConfig,
@@ -482,11 +483,11 @@ test("drops audio while websocket backpressure exceeds the bounded latency queue
   await new Promise((resolve) => setImmediate(resolve));
 
   socket.bufferedAmount = 100;
-  audio.worklet.emit(new Float32Array(1_280));
+  audio.worklet.emit(new Float32Array(1_280).fill(0.2));
   assert.equal(socket.sent.filter((entry) => entry instanceof ArrayBuffer).length, 0);
 
   socket.bufferedAmount = 0;
-  audio.worklet.emit(new Float32Array(1_280));
+  audio.worklet.emit(new Float32Array(1_280).fill(0.2));
   assert.equal(socket.sent.filter((entry) => entry instanceof ArrayBuffer).length, 1);
   session.abort();
   assert.deepEqual(JSON.parse(socket.sent.at(-1)), { type: "transcription.abort" });
@@ -804,7 +805,7 @@ test("a server restart or network drop reopens the stream with a fresh ticket wh
 
   // Audio flows to the new stream, not the dropped one.
   const sentBefore = voice.sockets[0].sent.length;
-  voice.audio.worklet.emit(new Float32Array(1_280));
+  voice.audio.worklet.emit(new Float32Array(1_280).fill(0.2));
   assert.equal(voice.sockets[0].sent.length, sentBefore);
   assert.ok(voice.sockets[1].sent.some((data) => data instanceof ArrayBuffer));
   voice.session.abort();
@@ -1001,4 +1002,128 @@ test("reconnect waits are spread between half and all of each step, and a rate-l
   serverClose(voice.latest(), 1006);
   assert.equal(await voice.runTimer(), 1_000);
   voice.session.abort();
+});
+
+test("the speech gate sends speech with a moment either side, and holds back silence", () => {
+  const gate = createSpeechGate({ hangoverMs: 160, preRollMs: 160 });
+  const quiet = (tag) => Object.assign(new Float32Array(1_280).fill(0.001), { tag });
+  const loud = (tag) => Object.assign(new Float32Array(1_280).fill(0.2), { tag });
+  const tags = (frames) => frames.map((frame) => frame.tag);
+
+  // Silence is held back; only the last two quiet frames are kept.
+  assert.deepEqual(tags(gate.push(quiet("q1"))), []);
+  assert.deepEqual(tags(gate.push(quiet("q2"))), []);
+  assert.deepEqual(tags(gate.push(quiet("q3"))), []);
+  assert.equal(gate.isOpen(), false);
+  // Speech opens the gate with the quiet lead-in, so the onset is not clipped.
+  assert.deepEqual(tags(gate.push(loud("s1"))), ["q2", "q3", "s1"]);
+  assert.deepEqual(tags(gate.push(loud("s2"))), ["s2"]);
+  // A short pause inside speech is still sent.
+  assert.deepEqual(tags(gate.push(quiet("p1"))), ["p1"]);
+  assert.deepEqual(tags(gate.push(loud("s3"))), ["s3"]);
+  // After the hangover the gate closes again.
+  assert.deepEqual(tags(gate.push(quiet("t1"))), ["t1"]);
+  assert.deepEqual(tags(gate.push(quiet("t2"))), ["t2"]);
+  assert.deepEqual(tags(gate.push(quiet("t3"))), []);
+  assert.equal(gate.isOpen(), false);
+});
+
+test("a session streams only speech, unless the gate is turned off", async () => {
+  for (const silenceGate of [undefined, false]) {
+    const socket = new FakeSocket();
+    const media = createMediaStreamHarness();
+    const audio = createWorkletAudioHarness();
+    const session = createRealtimeSpeechSession(
+      { onFinal() {} },
+      { url: "ws://localhost/transcription/ws", ...(silenceGate === false ? { silenceGate } : {}) },
+      {
+        createWebSocket: () => socket,
+        getUserMedia: async () => media.stream,
+        createAudioContext: () => audio.context,
+        createAudioWorkletNode: () => audio.worklet,
+        createAudioWorkletModuleUrl: () => "blob:test",
+        revokeAudioWorkletModuleUrl() {},
+      },
+    );
+    session.start();
+    await new Promise((resolve) => setImmediate(resolve));
+    socket.open();
+    socket.serverMessage({ type: "transcription.ready", provider: "test", model: "m", sampleRate: 16_000 });
+    await new Promise((resolve) => setImmediate(resolve));
+    const binary = () => socket.sent.filter((entry) => entry instanceof ArrayBuffer).length;
+
+    // Ten seconds of silence.
+    for (let frame = 0; frame < 125; frame += 1) audio.worklet.emit(new Float32Array(1_280));
+    assert.equal(binary(), silenceGate === false ? 125 : 0);
+    // Then a word: it goes out with its lead-in.
+    audio.worklet.emit(new Float32Array(1_280).fill(0.1));
+    assert.equal(binary(), silenceGate === false ? 126 : 7);
+    session.abort();
+  }
+});
+
+test("allowance warnings from the API reach the page", async () => {
+  const warnings = [];
+  const socket = new FakeSocket();
+  const media = createMediaStreamHarness();
+  const audio = createWorkletAudioHarness();
+  const session = createRealtimeSpeechSession(
+    { onFinal() {}, onAllowanceWarning: (warning) => warnings.push(warning) },
+    { url: "ws://localhost/transcription/ws" },
+    {
+      createWebSocket: () => socket,
+      getUserMedia: async () => media.stream,
+      createAudioContext: () => audio.context,
+      createAudioWorkletNode: () => audio.worklet,
+      createAudioWorkletModuleUrl: () => "blob:test",
+      revokeAudioWorkletModuleUrl() {},
+    },
+  );
+  session.start();
+  await new Promise((resolve) => setImmediate(resolve));
+  socket.open();
+  socket.serverMessage({ type: "transcription.ready", provider: "test", model: "m", sampleRate: 16_000 });
+  await new Promise((resolve) => setImmediate(resolve));
+  socket.serverMessage({
+    type: "transcription.allowance_warning",
+    remainingMinutes: 14,
+    scope: "personal",
+    message: "About 14 minutes of Airo voice left today. Typed commands keep working, and voice is back at midnight UTC.",
+  });
+  socket.serverMessage({ type: "transcription.allowance_warning", remainingMinutes: 4.6, scope: "service" });
+  socket.serverMessage({ type: "transcription.allowance_warning", scope: "personal" });
+  assert.deepEqual(warnings, [
+    {
+      remainingMinutes: 14,
+      scope: "personal",
+      message: "About 14 minutes of Airo voice left today. Typed commands keep working, and voice is back at midnight UTC.",
+    },
+    { remainingMinutes: 4, scope: "service", message: "About 4 minutes of Airo voice left today. Typed commands keep working." },
+  ]);
+  assert.equal(session.isListening(), true, "a warning does not interrupt voice");
+  session.abort();
+});
+
+test("a server-side stream renewal is invisible while people talk, and pauses a quiet tab", async () => {
+  const talking = createReconnectHarness({ quietPauseMs: 20 * MINUTE });
+  await talking.start();
+  await talking.openAndReady();
+  talking.advance(25 * MINUTE);
+  talking.latest().serverMessage({ type: "transcription.partial", transcript: "so the API calls the queue" });
+  talking.advance(5 * MINUTE);
+  const eventsBefore = talking.events.length;
+  talking.latest().serverMessage({ type: "transcription.renewing" });
+  assert.equal(talking.events.length, eventsBefore, "no reconnect, no listening change");
+  assert.equal(talking.sockets.length, 1);
+  assert.equal(talking.session.isListening(), true);
+  talking.session.abort();
+
+  const quiet = createReconnectHarness({ quietPauseMs: 20 * MINUTE });
+  await quiet.start();
+  await quiet.openAndReady();
+  quiet.advance(30 * MINUTE);
+  quiet.latest().serverMessage({ type: "transcription.renewing" });
+  assert.deepEqual(quiet.ends, [{ reason: "paused", wakeable: true }]);
+  assert.deepEqual(quiet.sockets[0].closeCalls, [{ code: 1000, reason: "transcription paused" }]);
+  assert.equal(quiet.media.track.stopCalls, 1);
 });

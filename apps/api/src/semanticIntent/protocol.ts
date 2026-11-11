@@ -1,5 +1,6 @@
 import { parseVoiceTurnId } from "../voiceTrace/protocol";
 import {
+  SEMANTIC_INTENT_ADDRESSED_BY,
   SEMANTIC_INTENT_RECOVERABLE_PARSER_ISSUES,
   type SemanticIntentContext,
   type SemanticIntentEdgeSummary,
@@ -17,7 +18,8 @@ const MAX_CONTEXT_EDGES = 160;
 const MAX_PROJECT_GLOSSARY_ENTRIES = 100;
 const MAX_LABEL_CHARACTERS = 120;
 const MAX_NODE_TYPE_CHARACTERS = 40;
-const MAX_DIALOGUE_CHARACTERS = 500;
+// A pending question can follow a long narrated request, so it carries as much text.
+const MAX_DIALOGUE_CHARACTERS = 2_000;
 const MAX_MISSING_SLOTS = 12;
 const MAX_MISSING_SLOT_CHARACTERS = 80;
 const CONTROL_CHARACTERS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u;
@@ -78,6 +80,16 @@ export function parseSemanticIntentRequest(
   }
 
   if (
+    input.addressedBy !== undefined &&
+    !(SEMANTIC_INTENT_ADDRESSED_BY as readonly unknown[]).includes(input.addressedBy)
+  ) {
+    return error(
+      "INVALID_ADDRESSED_BY",
+      `addressedBy must be one of ${SEMANTIC_INTENT_ADDRESSED_BY.join(", ")} when provided.`,
+    );
+  }
+
+  if (
     input.model !== undefined &&
     (typeof input.model !== "string" || !input.model.trim())
   ) {
@@ -98,6 +110,9 @@ export function parseSemanticIntentRequest(
       context: context.value,
       ...(pendingClarification.value
         ? { pendingClarification: pendingClarification.value }
+        : {}),
+      ...(input.addressedBy !== undefined
+        ? { addressedBy: input.addressedBy as NonNullable<SemanticIntentRequest["addressedBy"]> }
         : {}),
       ...(requestedModel ? { model } : {}),
     },

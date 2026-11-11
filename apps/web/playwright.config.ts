@@ -24,7 +24,12 @@ export default defineConfig({
       origins: [
         {
           origin: "http://127.0.0.1:3100",
-          localStorage: [{ name: "airboard.cookie-choice.v1", value: "necessary" }],
+          localStorage: [
+            { name: "airboard.cookie-choice.v1", value: "necessary" },
+            // The Airo panel starts hidden; most specs type into it, so they
+            // start with it shown. boardLayout.spec checks the hidden default.
+            { name: "airboard.copilot.v2", value: "open" },
+          ],
         },
       ],
     },

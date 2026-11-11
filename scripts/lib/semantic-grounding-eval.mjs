@@ -1,4 +1,5 @@
 import {
+  AIRBOARD_SEMANTIC_PLAN_MAX_DIAGRAM_COMMANDS,
   applyBoardEvent,
   applyDiagramCommand,
   applyDiagramUndo,
@@ -315,9 +316,9 @@ export function evaluateGroundedSemanticPlan(plan, semanticContext) {
         actionType: action.type,
       });
     }
-    if (commands.length + resolved.commands.length > 40) {
+    if (commands.length + resolved.commands.length > AIRBOARD_SEMANTIC_PLAN_MAX_DIAGRAM_COMMANDS) {
       return groundingFailure({
-        error: "The semantic plan expands to more than 40 diagram commands.",
+        error: `The semantic plan expands to more than ${AIRBOARD_SEMANTIC_PLAN_MAX_DIAGRAM_COMMANDS} diagram commands.`,
         startedAt,
         initialBoardState,
         initialSelectionIds,

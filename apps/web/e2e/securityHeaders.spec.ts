@@ -138,13 +138,13 @@ test("the camera, MediaPipe hand tracking and Airo's microphone worklet run unde
     timeout: 60_000,
   });
   await page.goto("/?testStandalone=1");
-  await page.getByRole("button", { name: "Start building" }).click();
+  await page.getByRole("button", { name: "Got it" }).click();
 
+  // The camera starts on its own as the board opens.
   const copilot = page.getByTestId("canvas-copilot");
-  await copilot.getByRole("button", { name: "Enable Airo voice and hand tracking" }).click();
   expect((await wasm).ok()).toBe(true);
   expect((await model).ok()).toBe(true);
-  await expect(copilot.getByRole("button", { name: "Turn off Airo voice and hand tracking" })).toBeEnabled({
+  await expect(copilot.getByText(/Watching for your hands|Listening continuously/)).toBeVisible({
     timeout: 30_000,
   });
   await expect

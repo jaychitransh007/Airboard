@@ -311,11 +311,13 @@ export function loadSemanticIntentConfig(
       100,
       "AIRBOARD_INTENT_MAX_CONCURRENT_REQUESTS",
     ),
+    // About two minutes of narration, so a presenter can describe a whole
+    // flow in one go instead of splitting it (it was 500, about 30 s).
     maxTranscriptCharacters: parseNumber(
       env.AIRBOARD_INTENT_MAX_TRANSCRIPT_CHARACTERS,
-      500,
-      64,
       2_000,
+      64,
+      4_000,
       "AIRBOARD_INTENT_MAX_TRANSCRIPT_CHARACTERS",
     ),
     ...(apiKey ? { apiKey } : {}),
@@ -414,6 +416,10 @@ export function loadTranscriptionConfig(
       20,
       "AIRBOARD_TRANSCRIPTION_MAX_STREAMS_PER_PROFILE",
     ),
+    // The longest one provider stream lives. A few seconds before it, the API
+    // opens a replacement behind the same browser socket and switches over
+    // (transcription/routes.ts), replaying the turn in progress, so the
+    // browser never sees the cut and no extra stream slot is taken.
     maxSessionMs: parseNumber(
       env.AIRBOARD_TRANSCRIPTION_MAX_SESSION_MS,
       30 * 60 * 1_000,

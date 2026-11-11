@@ -1,10 +1,12 @@
 import { createBoardSceneElement, createRichTextDocument } from "./sceneElements.ts";
 import type {
+  AnnotationBounds,
   AnnotationPoint,
   BoardElementPatchOperation,
   BoardSceneElement,
   BoardState,
   ConnectorElement,
+  ShapeKind,
 } from "./types.ts";
 
 /**
@@ -351,4 +353,57 @@ export function reverseConnector(sink: SceneEventSink, connectorId: string, labe
     inverse.push({ op: "field.set", path: ["label"], value: structuredClone(connector.label) });
   }
   sink.add({ type: "element.patched", elementId: connectorId, patches }, { type: "element.patched", elementId: connectorId, patches: inverse });
+}
+
+/** Gives a v2 node a new box (for "make it bigger"), keeping its connectors attached. */
+export function resizeElement(sink: SceneEventSink, elementId: string, bounds: AnnotationBounds): void {
+  const { transform } = activeNode(sink.state, elementId);
+  const width = Math.max(8, bounds.width);
+  const height = Math.max(8, bounds.height);
+  sink.add(
+    {
+      type: "element.patched",
+      elementId,
+      patches: [
+        { op: "field.set", path: ["transform", "x"], value: bounds.x },
+        { op: "field.set", path: ["transform", "y"], value: bounds.y },
+        { op: "field.set", path: ["transform", "width"], value: width },
+        { op: "field.set", path: ["transform", "height"], value: height },
+      ],
+    },
+    {
+      type: "element.patched",
+      elementId,
+      patches: [
+        { op: "field.set", path: ["transform", "x"], value: transform.x },
+        { op: "field.set", path: ["transform", "y"], value: transform.y },
+        { op: "field.set", path: ["transform", "width"], value: transform.width },
+        { op: "field.set", path: ["transform", "height"], value: transform.height },
+      ],
+    },
+  );
+  refreshAttachedConnectors(sink, [elementId]);
+}
+
+/** Gives a v2 shape another catalogue shape ("turn it into a decision"). */
+export function retypeElement(sink: SceneEventSink, elementId: string, shapeKind: ShapeKind): void {
+  const element = activeNode(sink.state, elementId);
+  if (element.kind !== "shape") throw new Error("Only a shape can change to another shape.");
+  sink.add(
+    { type: "element.patched", elementId, patches: [{ op: "field.set", path: ["shapeKind"], value: shapeKind }] },
+    { type: "element.patched", elementId, patches: [{ op: "field.set", path: ["shapeKind"], value: element.shapeKind }] },
+  );
+}
+
+/** Draws a v2 connector solid, dashed or dotted. */
+export function restyleConnectorElement(
+  sink: SceneEventSink,
+  connectorId: string,
+  lineStyle: ConnectorElement["style"]["strokeStyle"],
+): void {
+  const connector = activeConnector(sink.state, connectorId);
+  sink.add(
+    { type: "element.patched", elementId: connectorId, patches: [{ op: "field.set", path: ["style", "strokeStyle"], value: lineStyle }] },
+    { type: "element.patched", elementId: connectorId, patches: [{ op: "field.set", path: ["style", "strokeStyle"], value: connector.style.strokeStyle }] },
+  );
 }

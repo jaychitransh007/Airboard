@@ -54,6 +54,18 @@ export type SemanticIntentPendingClarification = {
   missingSlots: string[];
 };
 
+/**
+ * How the speaker got Airo's attention for this sentence. Production strips
+ * the wake word before the planner sees the text, and palm-activated speech
+ * never had one, so without this the planner can't tell a request narrated
+ * to Airo from the room talking among itself.
+ * - wake: said "Airo" first. palm: held an open palm. hold: held a shape
+ *   (hold-to-edit). typed: typed into the Airo box. follow_up: spoke inside
+ *   the short window after an applied command, with no wake word.
+ */
+export const SEMANTIC_INTENT_ADDRESSED_BY = ["wake", "palm", "hold", "typed", "follow_up"] as const;
+export type SemanticIntentAddressedBy = (typeof SEMANTIC_INTENT_ADDRESSED_BY)[number];
+
 export type SemanticIntentParserIssue =
   | "compound_command"
   | "missing_node_type"
@@ -119,9 +131,32 @@ export type ResolveSemanticIntentOptions = {
   parserIssue: SemanticIntentParserIssue;
   context: SemanticIntentContext;
   pendingClarification?: SemanticIntentPendingClarification;
+  /** Set whenever the sentence was addressed to Airo; see SemanticIntentAddressedBy. */
+  addressedBy?: SemanticIntentAddressedBy;
   model?: string;
+  /** Per attempt. Defaults to semanticIntentTimeoutMs(transcript length). */
   timeoutMs?: number;
+  /** Attempts in all, including the first. Defaults to 2: one retry on a failure the planner never ran. */
+  maxAttempts?: number;
+  /** Test seam for the wait before a retry. */
+  sleep?: (ms: number) => Promise<void>;
 };
+
+/**
+ * The browser's wait for one planning attempt. A long narrated flow makes a
+ * long plan, which takes the model longer to write, so the budget grows with
+ * the transcript: 6 s for a short command, up to 21 s for 2,000 characters.
+ * It stays one second above the server's own budget for the same text, so the
+ * server's answer (or its timeout error) always arrives first.
+ */
+export function semanticIntentTimeoutMs(transcriptLength: number): number {
+  return Math.min(21_000, 6_000 + Math.max(0, transcriptLength - 240) * 9);
+}
+
+/** The longest Retry-After worth waiting for before retrying a command. */
+const SEMANTIC_INTENT_MAX_RETRY_WAIT_MS = 3_000;
+/** Pause before retrying a failure that gave no Retry-After. */
+const SEMANTIC_INTENT_DEFAULT_RETRY_WAIT_MS = 400;
 
 export function shouldUseSemanticIntentFallback(
   result: IntentCanvasParseResult,
@@ -139,15 +174,95 @@ export class SemanticIntentClientError extends Error {
   readonly code: string;
   readonly status: number;
   readonly providerRequestId: string | null;
+  /** How long the server asked us to wait, when it said. */
+  readonly retryAfterMs: number | null;
 
-  constructor(code: string, status: number, serverMessage?: string, providerRequestId?: string) {
+  constructor(
+    code: string,
+    status: number,
+    serverMessage?: string,
+    providerRequestId?: string,
+    retryAfterMs?: number | null,
+  ) {
     super(describeSemanticIntentError(code, serverMessage));
     this.name = "SemanticIntentClientError";
     this.code = code;
     this.status = status;
     this.providerRequestId = providerRequestId?.trim() || null;
+    this.retryAfterMs = retryAfterMs ?? null;
+  }
+
+  /**
+   * True for a failure that should pass on its own (a timeout, a network
+   * blip, a server error, a short rate limit or cool-down), as opposed to one
+   * that needs someone to act (no access, daily limit, bad key or model).
+   */
+  get temporary(): boolean {
+    return isTemporarySemanticIntentFailure(this.code, this.status, this.retryAfterMs);
   }
 }
+
+const PERMANENT_SEMANTIC_INTENT_CODES = new Set([
+  "SEMANTIC_INTENT_UNAVAILABLE",
+  "SEMANTIC_INTENT_QUOTA_EXHAUSTED",
+  "SEMANTIC_INTENT_AUTH_FAILED",
+  "SEMANTIC_INTENT_PROVIDER_AUTH_FAILED",
+  "SEMANTIC_INTENT_MODEL_UNAVAILABLE",
+  "SEMANTIC_INTENT_PROVIDER_REQUEST_REJECTED",
+  "DAILY_AIRO_LIMIT",
+  "SERVICE_AIRO_LIMIT",
+  "ACTIVE_ENTITLEMENT_REQUIRED",
+]);
+
+function isTemporarySemanticIntentFailure(code: string, status: number, retryAfterMs: number | null): boolean {
+  if (code === "SEMANTIC_INTENT_COOLING_DOWN") return true;
+  // Older servers answered a cool-down with this code plus a wait.
+  if (code === "SEMANTIC_INTENT_UNAVAILABLE") return retryAfterMs !== null;
+  if (PERMANENT_SEMANTIC_INTENT_CODES.has(code)) return false;
+  if (status === 429) return code !== "RATE_LIMITED" || retryAfterMs !== null;
+  return status >= 500 || code === "SEMANTIC_INTENT_TIMEOUT" || code === "SEMANTIC_INTENT_NETWORK_ERROR";
+}
+
+/**
+ * Failures where the planner certainly did not run the request, so asking
+ * again neither charges the Airo allowance twice nor pays for a second model
+ * call: the request never got an answer from the network, the server refused
+ * it before charging (cool-down, rate limit with a stated wait), the model
+ * provider itself turned it away with a stated wait, or the edge in front of
+ * the API answered (no Airboard error code).
+ *
+ * A timeout is not one of these: the server may still be planning (and
+ * billing) after the browser gives up, so a retry would run the same command
+ * twice. Neither is a provider failure or bad provider output, which the
+ * provider has already been paid for.
+ */
+function semanticIntentRetrySafe(error: SemanticIntentClientError): boolean {
+  if (error.code === "SEMANTIC_INTENT_NETWORK_ERROR") return true;
+  if (error.code === "SEMANTIC_INTENT_COOLING_DOWN") return true;
+  if (error.code === "SEMANTIC_INTENT_UNAVAILABLE") return error.retryAfterMs !== null;
+  if (error.code === "RATE_LIMITED" || error.code === "SEMANTIC_INTENT_RATE_LIMITED") {
+    return error.retryAfterMs !== null;
+  }
+  // No Airboard error code: a load balancer or proxy answered for the API.
+  return (
+    error.code === `SEMANTIC_INTENT_HTTP_${error.status}` &&
+    (error.status === 502 || error.status === 503 || error.status === 504)
+  );
+}
+
+/** Whether one quick retry is worth it, and after how long. */
+function semanticIntentRetryWaitMs(error: unknown): number | null {
+  if (!(error instanceof SemanticIntentClientError) || !error.temporary) return null;
+  if (!semanticIntentRetrySafe(error)) return null;
+  if (error.retryAfterMs !== null) {
+    return error.retryAfterMs <= SEMANTIC_INTENT_MAX_RETRY_WAIT_MS ? error.retryAfterMs : null;
+  }
+  // A 429 without a stated wait could last a minute; don't stall the presenter on it.
+  if (error.status === 429) return null;
+  return SEMANTIC_INTENT_DEFAULT_RETRY_WAIT_MS;
+}
+
+const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export async function fetchSemanticIntentConfig(
   apiBaseUrl: string,
@@ -168,12 +283,97 @@ export async function fetchSemanticIntentConfig(
   };
 }
 
+export type LoadSemanticIntentConfigOptions = {
+  apiBaseUrl: string;
+  fetchImpl?: typeof fetch;
+  /** Stops the retries; the promise then rejects with the signal's reason. */
+  signal?: AbortSignal;
+  /** Waits between attempts; the last one repeats until it works or is aborted. */
+  delaysMs?: readonly number[];
+  /** Attempts in all; unlimited by default. */
+  maxAttempts?: number;
+  /** Called after each failed attempt, for a quiet status line or a trace. */
+  onAttemptFailed?: (error: unknown, attempt: number, nextDelayMs: number) => void;
+  /** Test seam for the wait between attempts. */
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+};
+
+/**
+ * Loads the planner settings, retrying with backoff (1, 2, 4, 8, 15, then
+ * every 30 s) until it works or the signal aborts. A board opened during a
+ * blip otherwise keeps Airo's planner off until a reload. An answer of
+ * "not available" is a real answer and ends the retries.
+ */
+export async function loadSemanticIntentConfigWithRetry(
+  options: LoadSemanticIntentConfigOptions,
+): Promise<SemanticIntentConfig> {
+  const delays = options.delaysMs?.length ? options.delaysMs : [1_000, 2_000, 4_000, 8_000, 15_000, 30_000];
+  const sleep = options.sleep ?? abortableSleep;
+  for (let attempt = 1; ; attempt += 1) {
+    options.signal?.throwIfAborted();
+    try {
+      return await fetchSemanticIntentConfig(options.apiBaseUrl, options.fetchImpl ?? fetch);
+    } catch (caught) {
+      options.signal?.throwIfAborted();
+      if (options.maxAttempts !== undefined && attempt >= options.maxAttempts) throw caught;
+      const delay = delays[Math.min(attempt - 1, delays.length - 1)]!;
+      options.onAttemptFailed?.(caught, attempt, delay);
+      await sleep(delay, options.signal);
+    }
+  }
+}
+
+function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * Asks the planner for a plan. A temporary failure the planner certainly did
+ * not run (no answer from the network, an edge error, or a rate limit or
+ * cool-down of 3 s or less) is retried once, so a single hiccup doesn't throw
+ * away a spoken command. A timeout or provider failure is not retried, since
+ * the first request may already have been charged and billed.
+ */
 export async function resolveSemanticIntent(
   options: ResolveSemanticIntentOptions,
   fetchImpl: typeof fetch = fetch,
 ): Promise<SemanticIntentResolution> {
+  const maxAttempts = Math.max(1, options.maxAttempts ?? 2);
+  const sleep = options.sleep ?? defaultSleep;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await resolveSemanticIntentOnce(options, fetchImpl);
+    } catch (caught) {
+      const wait = attempt < maxAttempts ? semanticIntentRetryWaitMs(caught) : null;
+      if (wait === null) throw caught;
+      await sleep(wait);
+    }
+  }
+}
+
+async function resolveSemanticIntentOnce(
+  options: ResolveSemanticIntentOptions,
+  fetchImpl: typeof fetch,
+): Promise<SemanticIntentResolution> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 6_000);
+  const timeout = setTimeout(
+    () => controller.abort(),
+    options.timeoutMs ?? semanticIntentTimeoutMs(options.transcript.length),
+  );
   try {
     const response = await fetchImpl(new URL("/intent/resolve", options.apiBaseUrl), {
       method: "POST",
@@ -189,6 +389,7 @@ export async function resolveSemanticIntent(
         ...(options.pendingClarification
           ? { pendingClarification: options.pendingClarification }
           : {}),
+        ...(options.addressedBy ? { addressedBy: options.addressedBy } : {}),
         ...(options.model ? { model: options.model } : {}),
       }),
       signal: controller.signal,
@@ -204,7 +405,13 @@ export async function resolveSemanticIntent(
         payload && typeof payload.providerRequestId === "string"
           ? payload.providerRequestId.slice(0, 160)
           : undefined;
-      throw new SemanticIntentClientError(code, response.status, message, providerRequestId);
+      throw new SemanticIntentClientError(
+        code,
+        response.status,
+        message,
+        providerRequestId,
+        readRetryAfterMs(response, payload),
+      );
     }
     return parseSemanticIntentResolution(await response.json());
   } catch (caught) {
@@ -241,7 +448,7 @@ export function semanticIntentIssueMessage(
     case "incomplete_request":
       return "Airo heard an incomplete request and needs one more detail.";
     case "plan_too_large":
-      return "That diagram is too large for one safe preview. Split it into two requests.";
+      return "That's more than Airo can draw in one go. Describe the first part, then the rest.";
     case "unsupported_operation":
       return "That board operation is not supported yet.";
     case "not_board_command":
@@ -395,6 +602,15 @@ function nullableNonNegativeNumber(input: unknown): boolean {
   return input === null || (typeof input === "number" && Number.isFinite(input) && input >= 0);
 }
 
+function readRetryAfterMs(response: Response, payload: Record<string, unknown> | null): number | null {
+  if (payload && typeof payload.retryAfterMs === "number" && Number.isFinite(payload.retryAfterMs) && payload.retryAfterMs >= 0) {
+    return payload.retryAfterMs;
+  }
+  const header = response.headers?.get?.("retry-after");
+  const seconds = header ? Number(header) : Number.NaN;
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1_000 : null;
+}
+
 async function safeJson(response: Response): Promise<Record<string, unknown> | null> {
   try {
     const value = (await response.json()) as unknown;
@@ -410,6 +626,8 @@ function describeSemanticIntentError(code: string, serverMessage?: string): stri
       return "Airo's semantic command interpretation timed out.";
     case "SEMANTIC_INTENT_UNAVAILABLE":
       return "Airo's semantic command interpretation is not configured.";
+    case "SEMANTIC_INTENT_COOLING_DOWN":
+      return "Airo's planner is pausing for a few seconds after repeated failures. Built-in commands still work.";
     case "SEMANTIC_INTENT_CAPACITY_REACHED":
       return "Airo's semantic command interpreter is busy.";
     case "SEMANTIC_INTENT_AUTH_FAILED":

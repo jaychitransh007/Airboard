@@ -42,3 +42,18 @@ test("catalog shape aliases resolve to canonical v2 kinds", () => {
   assert.equal(createSceneElementForTool("shape:advanced-database", options).shapeKind, "database");
   assert.equal(createSceneElementForTool("shape:airboard-queue", options).shapeKind, "queue");
 });
+
+test("a hand-placed connector keeps its attached ends", () => {
+  const connector = createSceneElementForTool("connector:bent", {
+    ...options,
+    connector: {
+      start: { point: { x: 200, y: 140 }, binding: { elementId: "a", anchor: "auto" }, decoration: "none" },
+      end: { point: { x: 500, y: 180 }, binding: { elementId: "b", anchor: "auto" }, decoration: "solid_arrow" },
+    },
+  });
+  assert.equal(connector.kind, "connector");
+  assert.equal(connector.pathKind, "bent");
+  assert.equal(connector.start.binding?.elementId, "a");
+  assert.equal(connector.end.binding?.elementId, "b");
+  assert.deepEqual(connector.transform, { x: 200, y: 140, width: 300, height: 40, rotation: 0 });
+});

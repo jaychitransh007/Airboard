@@ -6,6 +6,11 @@
  * engaged as ONE mode and never morphs — switching poses releases (with
  * hysteresis) and re-engages, so a zoom can never smear into a pan.
  *
+ * Starting is deliberate (gap 7 of the hands-free audit): both hands must
+ * hold the pan or zoom pose steadily for `engageMs` (about half a second)
+ * before anything moves, so hands talking in a meeting don't drift the board.
+ * A frame marked `blocked` (a grab or carry is in progress) never engages.
+ *
  * Pure over injected timestamps; all timing rules are unit-testable.
  */
 
@@ -19,6 +24,8 @@ export type NavHand = {
 export type NavFrame = {
   hands: readonly NavHand[];
   timestampMs: number;
+  /** A one-hand grab or carry owns the hands; navigation must not start. */
+  blocked?: boolean;
 };
 
 export type NavUpdate =
@@ -33,6 +40,11 @@ export type CanvasNavigationConfig = {
   closedMin: number;
   /** A candidate pose must hold this long before navigation engages. */
   engageMs: number;
+  /**
+   * Canvas-pixel drift of the hands' midpoint or spread that still counts as
+   * holding the pose steadily; more restarts the engage clock.
+   */
+  steadyTolerancePx: number;
   /** Pose loss must persist this long before navigation releases. */
   releaseMs: number;
 };
@@ -40,7 +52,8 @@ export type CanvasNavigationConfig = {
 export const defaultCanvasNavigationConfig: CanvasNavigationConfig = {
   openMax: 0.35,
   closedMin: 0.68,
-  engageMs: 150,
+  engageMs: 500,
+  steadyTolerancePx: 48,
   releaseMs: 200,
 };
 
@@ -50,6 +63,7 @@ export class CanvasNavigationTracker {
   private readonly config: CanvasNavigationConfig;
   private candidateMode: NavMode | null = null;
   private candidateSince = 0;
+  private candidateBaseline: { midpoint: { x: number; y: number }; distance: number } | null = null;
   private engagedMode: NavMode | null = null;
   private mismatchSince: number | null = null;
   private baseline: { midpoint: { x: number; y: number }; distance: number } | null = null;
@@ -79,16 +93,31 @@ export class CanvasNavigationTracker {
   }
 
   update(frame: NavFrame): NavUpdate {
+    if (frame.blocked && this.engagedMode === null) {
+      this.candidateMode = null;
+      this.candidateBaseline = null;
+      return { mode: "idle" };
+    }
     const pose = this.classify(frame.hands);
 
     if (this.engagedMode === null) {
       if (!pose) {
         this.candidateMode = null;
+        this.candidateBaseline = null;
         return { mode: "idle" };
       }
-      if (this.candidateMode !== pose.mode) {
+      const baseline = this.candidateBaseline;
+      const unsteady =
+        baseline !== null &&
+        (Math.hypot(
+          pose.midpoint.x - baseline.midpoint.x,
+          pose.midpoint.y - baseline.midpoint.y,
+        ) > this.config.steadyTolerancePx ||
+          Math.abs(pose.distance - baseline.distance) > this.config.steadyTolerancePx);
+      if (this.candidateMode !== pose.mode || unsteady) {
         this.candidateMode = pose.mode;
         this.candidateSince = frame.timestampMs;
+        this.candidateBaseline = { midpoint: pose.midpoint, distance: pose.distance };
         return { mode: "idle" };
       }
       if (frame.timestampMs - this.candidateSince >= this.config.engageMs) {
@@ -134,6 +163,7 @@ export class CanvasNavigationTracker {
 
   reset(): void {
     this.candidateMode = null;
+    this.candidateBaseline = null;
     this.engagedMode = null;
     this.mismatchSince = null;
     this.baseline = null;

@@ -985,7 +985,8 @@ async function exerciseRealtimeTransport(congested) {
   socket.bufferedAmount = congested ? 100 : 0;
   const inputFrames = 8;
   for (let index = 0; index < inputFrames; index += 1) {
-    pcmHandlers.onChunk(new Float32Array(1_280), 16_000);
+    // Audible frames: the session holds back silence, which isn't speech.
+    pcmHandlers.onChunk(new Float32Array(1_280).fill(0.1), 16_000);
   }
   const sentFrames = socket.sent.filter(
     (entry) => entry instanceof ArrayBuffer,

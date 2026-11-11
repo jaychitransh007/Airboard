@@ -48,6 +48,14 @@ export type PalmVoiceGestureFrame = {
   timestampMs: number;
   /** True while a higher-priority gesture or interaction owns the hand stream. */
   suppressed: boolean;
+  /**
+   * True while the hand is aiming at a target (a dock tile or a shape under
+   * the hand). Aiming uses the same flat-palm pose as talking, so while it is
+   * set the palm cannot open the voice gate; the 0.4 s still-hold restarts
+   * once the hand stops aiming. An already-open gate is not closed by aiming.
+   * Optional for backward compatibility (absent = not aiming).
+   */
+  aiming?: boolean;
 };
 
 export type PalmVoiceGestureEvent = "activate" | "release" | null;
@@ -84,6 +92,7 @@ export class PalmVoiceGestureTracker {
 
   update(frame: PalmVoiceGestureFrame): PalmVoiceGestureEvent {
     const { score, point, timestampMs, suppressed } = frame;
+    const aiming = frame.aiming === true;
     const posePresent = point !== null && score >= this.config.releaseScore;
     if (posePresent) {
       this.lastPoseSeenAt = timestampMs;
@@ -121,6 +130,11 @@ export class PalmVoiceGestureTracker {
     }
 
     this.releaseSince = null;
+    if (aiming && !poseReleased) {
+      // Pointing a flat palm at a tile or shape is targeting, not talking.
+      this.clearCandidate();
+      return null;
+    }
     if (suppressed || timestampMs < this.cooldownUntil || poseReleased) {
       this.clearCandidate();
       if (suppressed || poseReleased) {

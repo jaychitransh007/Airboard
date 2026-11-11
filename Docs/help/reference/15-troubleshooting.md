@@ -23,9 +23,9 @@ meeting URLs, credentials, or raw media in a support request.
 
 ## Airo voice is unavailable
 
-1. Confirm microphone permission.
-2. Turn Airo on (**⏻** on the Airo panel, or **Turn on Airo voice and hands**
-   in the **•••** menu) and check the displayed provider state.
+1. Confirm the browser allows the microphone for this site, then reload the
+   board; Airo starts on its own.
+2. Check that **Airboard audio input** is on in **Settings → Preferences**.
 3. Check whether organization policy permits audio input.
 4. Use the typed composer.
 

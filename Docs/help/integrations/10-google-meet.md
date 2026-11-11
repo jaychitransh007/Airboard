@@ -28,10 +28,9 @@ install.
 
 1. Open the board in its own tab: on **Airboards**, open a board or choose
    **Create Airboard**.
-2. Optional: to appear behind your diagram, open the board menu (**•••**) and
-   choose **Turn on Airo voice and hands**. Allow the camera and microphone if
-   the browser asks. Your camera now shows behind the board, and Airo listens
-   for voice and hand commands.
+2. The first time, choose **Allow** when the browser asks for the camera and
+   microphone. Airo then starts on its own on every board: your camera shows
+   behind the board, and Airo listens for voice and hand commands.
 3. Go to the Meet tab and choose **Present now** (newer versions of Meet call
    it **Share screen**).
 4. Choose **A tab** (Chrome may call it **Chrome Tab**), select your Airboard
@@ -46,28 +45,36 @@ screen behind the board** in **•••** before you present. See
 
 - Your Airboard tab, presented in the call: the diagram, with your camera or
   chosen screen behind it.
-- The board's top bar, tool dock and Airo panel, exactly as they look on your
-  screen.
+- The board's top bar and tool dock, exactly as they look on your screen.
+  The Airo panel starts hidden; if you show it, it lists only what you say to
+  Airo, never the rest of the conversation.
+- Airo's short notes on the board, such as **Undo** after a change, or a note
+  when it couldn't apply a command. If you share tab audio, people may also
+  hear Airo's quiet sounds; turn them off in the board's settings under
+  **Appearance**.
 
 The diagram appears as a presented tab, not inside your normal Meet camera
 tile. Because the tab already shows you behind the board, you can turn off
 your Meet camera while you present so you don't appear twice.
 
-To hide the diagram for a moment and keep your camera showing, choose **Hide
-diagram** in **•••**, press `Shift+H`, or snap your thumb and middle finger.
+To hide the diagram for a moment and keep your camera showing, choose the eye
+icon (**Hide diagram**) at the bottom left of the board, press `Shift+H`, or
+snap your thumb and middle finger.
 
 ## Use voice, hands, typing and the mouse
 
 Everything keeps working in the Airboard tab while you present:
 
-- **Voice:** say `Airo` with your command, or hold one open palm still for
-  about 0.4 seconds, then speak. Ordinary conversation in the call doesn't
+- **Voice:** say `Airo` with your command, or hold one open palm still and
+  speak. For a few seconds after a command you can carry on without `Airo`.
+  Describe a flow and Airo draws it. Ordinary conversation in the call doesn't
   change the board. See [Airo voice](/help/using-the-board/airo-voice).
 - **Hands:** aim, choose, move and place objects with
   [camera gestures](/help/using-the-board/gestures).
-- **Typing and mouse:** type in the Airo panel, or use the tool dock and the
+- **Typing and mouse:** show the Airo panel (**✦ Airo** at the right edge)
+  and type in it, or use the tool dock and the
   pointer.
-- **Undo:** press `Cmd/Ctrl+Z`, choose **•••** then **Undo**, or say “Airo,
+- **Undo:** press `Cmd/Ctrl+Z`, choose the **Undo** arrow at the bottom left of the board, or say “Airo,
   undo.”
 
 You control the board from the Airboard tab. If you switch to the Meet tab to
@@ -78,7 +85,7 @@ read the chat or see people, switch back to the Airboard tab to keep drawing.
 Presenting is enough for everyone to see the board. To let people draw with
 you:
 
-1. Choose **Share** in the board's top bar.
+1. Choose **Share** in the board's top bar, then **Share with people**.
 2. Under **Work together now**, choose **Can edit**.
 3. Choose **Copy live link** and paste it into the Meet chat.
 
@@ -90,8 +97,9 @@ for how live links work.
 
 1. In Meet, choose **Stop presenting**, or choose **Stop sharing** in the bar
    the browser shows above the shared tab.
-2. To turn off your camera and microphone in Airboard, open **•••** and choose
-   **Turn off Airo voice and hands**.
+2. Airboard stops using your camera and microphone when you leave the board.
+   To keep either one off on every board, turn it off in **Settings →
+   Preferences**.
 
 Your board saves as you go.
 
@@ -103,8 +111,10 @@ Your board saves as you go.
   while you present; the audience sees you behind the board instead. If the
   browser asks, allow the camera for Airboard.
 - **Airo doesn't respond.** Switch to the Airboard tab and check the Airo
-  panel. If Airo is off, press **⏻** to turn it on. You can always type the
-  command instead.
+  panel. If it says the camera and microphone are blocked, allow them for
+  this site in your browser's settings, then reload the board. If voice
+  paused, hold an open palm to wake it. You can always type the command
+  instead.
 - **Someone can't join with the live link.** New people can join for 2 hours.
   If you chose **New link**, send the new one. If your workspace admin turned
   off external guests, only signed-in members of your workspace can join.

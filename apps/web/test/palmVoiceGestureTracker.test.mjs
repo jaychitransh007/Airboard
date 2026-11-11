@@ -144,3 +144,28 @@ test("reset clears a partial or latched activation immediately", () => {
   assert.equal(tracker.update(frame(500)), null);
   assert.equal(tracker.update(frame(900)), "activate");
 });
+
+test("an open palm aiming at a target never opens the voice gate", () => {
+  const tracker = new PalmVoiceGestureTracker();
+  for (let t = 0; t <= 1_200; t += 100) {
+    assert.equal(tracker.update(frame(t, { aiming: true })), null, `aiming frame ${t}`);
+  }
+  assert.equal(tracker.reserving, false, "aiming leaves the hand stream to targeting");
+  assert.equal(tracker.engaged, false);
+  // Once the hand stops aiming the full 0.4 s still-hold starts over.
+  assert.equal(tracker.update(frame(1_300)), null);
+  assert.equal(tracker.update(frame(1_699)), null);
+  assert.equal(tracker.update(frame(1_700)), "activate");
+});
+
+test("aiming mid-hold cancels the candidate; aiming after activation keeps the gate", () => {
+  const tracker = new PalmVoiceGestureTracker();
+  tracker.update(frame(0));
+  tracker.update(frame(300));
+  assert.equal(tracker.update(frame(350, { aiming: true })), null);
+  assert.equal(tracker.update(frame(450)), null, "hold restarts after aiming");
+  assert.equal(tracker.update(frame(849)), null);
+  assert.equal(tracker.update(frame(850)), "activate");
+  assert.equal(tracker.update(frame(1_000, { aiming: true })), null);
+  assert.equal(tracker.engaged, true, "an open gate is not closed by aiming");
+});

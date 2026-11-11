@@ -3,7 +3,11 @@ import test from "node:test";
 
 import { HybridGestureController } from "@airboard/gesture-engine";
 
-import { selectLandmarkManipulationSignal } from "../src/features/board/landmarkManipulationInput.ts";
+import {
+  LOOSE_GRAB_GRACE_MS,
+  LooseGrabHold,
+  selectLandmarkManipulationSignal,
+} from "../src/features/board/landmarkManipulationInput.ts";
 
 const MAPPING = {
   canvasWidth: 1_000,
@@ -203,5 +207,68 @@ test("missing or non-finite palm anchors fail closed", () => {
   assert.equal(
     selectLandmarkManipulationSignal([hand(invalid)], "right", MAPPING),
     null,
+  );
+});
+
+function shifted(landmarks, dx) {
+  return landmarks.map((landmark) => ({ ...landmark, x: landmark.x + dx }));
+}
+
+test("while holding, a loosened fist keeps the pointer instead of vanishing", () => {
+  const loose = selectLandmarkManipulationSignal(
+    [hand(partialTwoFingerLandmarks())],
+    "right",
+    MAPPING,
+    { holding: true },
+  );
+  assert.ok(loose, "a partial pose keeps the pointer during a grab");
+  assert.equal(loose.loose, true);
+});
+
+test("a loosened fist holds the grab for about a second, then lets go", () => {
+  const holdFilter = new LooseGrabHold();
+  const loose = selectLandmarkManipulationSignal(
+    [hand(partialTwoFingerLandmarks())],
+    "right",
+    MAPPING,
+    { holding: true },
+  );
+  const early = holdFilter.apply(loose, { holding: true, timestampMs: 1_000 });
+  assert.ok(early.grabStrength >= 0.6, `held strength ${early.grabStrength}`);
+  assert.equal(holdFilter.bridging, true);
+  const stillHeld = holdFilter.apply(loose, {
+    holding: true,
+    timestampMs: 1_000 + LOOSE_GRAB_GRACE_MS - 50,
+  });
+  assert.ok(stillHeld.grabStrength >= 0.6);
+  const expired = holdFilter.apply(loose, {
+    holding: true,
+    timestampMs: 1_000 + LOOSE_GRAB_GRACE_MS + 10,
+  });
+  assert.equal(expired.grabStrength, loose.grabStrength, "after the grace the real pose decides");
+
+  // A presented open palm is not loose: opening the hand drops at once.
+  const openPalm = selectLandmarkManipulationSignal([hand(openHandLandmarks())], "right", MAPPING, {
+    holding: true,
+  });
+  holdFilter.reset();
+  const dropped = holdFilter.apply(openPalm, { holding: true, timestampMs: 5_000 });
+  assert.equal(dropped.grabStrength, openPalm.grabStrength);
+  assert.equal(holdFilter.bridging, false);
+});
+
+test("with two hands in frame the hand nearest the grab keeps it", () => {
+  const carrying = { ...hand(shifted(closedFistLandmarks(), -0.25)), handedness: "left", handednessScore: 0.6 };
+  const visitor = { ...hand(shifted(closedFistLandmarks(), 0.25)), handedness: "right", handednessScore: 0.99 };
+  const first = selectLandmarkManipulationSignal([carrying], "left", MAPPING, { holding: true });
+  assert.ok(first);
+  const next = selectLandmarkManipulationSignal([visitor, carrying], "right", MAPPING, {
+    holding: true,
+    anchor: first.point,
+  });
+  assert.ok(next);
+  assert.ok(
+    Math.hypot(next.point.x - first.point.x, next.point.y - first.point.y) < 1e-9,
+    "the carrying hand, not the higher-scored newcomer, drives the pointer",
   );
 });

@@ -433,7 +433,7 @@ export function boardSceneElementFromLegacyStroke(
         color: annotation.strokeColor ?? stroke.color,
         opacity: annotation.opacity ?? 1,
         thickness: stroke.thickness > 4 ? "thick" : "thin",
-        strokeStyle: "solid",
+        strokeStyle: annotation.lineStyle ?? "solid",
         labelBackground: "none",
       },
     };
