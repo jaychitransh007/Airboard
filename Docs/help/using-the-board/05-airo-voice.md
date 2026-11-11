@@ -11,17 +11,21 @@ sources: ["apps/web/src/features/board/voiceCommandRouter.ts", "apps/web/src/fea
 ---
 
 Airo turns finalized speech into the same command pipeline used by typed input.
-Turn Airo on once before using voice: use **⏻** on the Airo panel, or
-**Turn on Airo voice and hands** in the board menu (**•••**). The interface
-shows whether realtime voice is available in the current environment. While
+Airo starts listening as soon as a board opens; there is nothing to turn on.
+The first time, the browser asks once for the camera and microphone. To keep
+the microphone off on every board, turn off **Airboard audio input** in
+**Settings → Preferences**. The Airo panel says when voice isn't available.
+While
 Airo listens, its panel shrinks to a strip in the corner with what it heard,
 what it is doing and a line to type into; **⤢** shows its full activity.
 
 Voice stays on for the whole meeting. If the connection drops, for example on
 a network blip, Airo reconnects on its own and says when it is listening
 again. If nobody has spoken for about 20 minutes, voice pauses so a forgotten
-tab doesn't keep streaming; hold an open palm, or press **⏻** (Resume voice) on the
-Airo panel, to wake it.
+tab doesn't keep streaming; hold an open palm, or click the board, to wake it.
+
+If you have Airboard open in more than one tab, only the tab you are using
+listens. Going back to another tab moves Airo's voice there.
 
 ## Address Airo
 

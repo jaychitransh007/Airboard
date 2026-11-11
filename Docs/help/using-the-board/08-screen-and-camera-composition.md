@@ -26,9 +26,11 @@ light global dim and local contrast plates to keep diagram content legible.
 
 ## Use a camera
 
-Open the board menu (**•••**) and choose **Turn on Airo voice and hands** to
-start the camera. It shows behind the board while **Camera behind the dark
-canvas when no screen is selected** is on in **Board settings**.
+The camera starts on its own when a board opens, after you allow it once in
+the browser. It shows behind the board while **Camera behind the dark canvas
+when no screen is selected** is on in **Board settings**. While the camera is
+on, the board uses the dark neon theme. To keep the camera off on every board,
+turn off **Airboard video input** in **Settings → Preferences**.
 
 Camera composition uses a fixed order:
 

@@ -28,10 +28,9 @@ install.
 
 1. Open the board in its own tab: on **Airboards**, open a board or choose
    **Create Airboard**.
-2. Optional: to appear behind your diagram, open the board menu (**•••**) and
-   choose **Turn on Airo voice and hands**. Allow the camera and microphone if
-   the browser asks. Your camera now shows behind the board, and Airo listens
-   for voice and hand commands.
+2. The first time, choose **Allow** when the browser asks for the camera and
+   microphone. Airo then starts on its own on every board: your camera shows
+   behind the board, and Airo listens for voice and hand commands.
 3. Go to the Meet tab and choose **Present now** (newer versions of Meet call
    it **Share screen**).
 4. Choose **A tab** (Chrome may call it **Chrome Tab**), select your Airboard
@@ -90,8 +89,9 @@ for how live links work.
 
 1. In Meet, choose **Stop presenting**, or choose **Stop sharing** in the bar
    the browser shows above the shared tab.
-2. To turn off your camera and microphone in Airboard, open **•••** and choose
-   **Turn off Airo voice and hands**.
+2. Airboard stops using your camera and microphone when you leave the board.
+   To keep either one off on every board, turn it off in **Settings →
+   Preferences**.
 
 Your board saves as you go.
 
@@ -103,8 +103,10 @@ Your board saves as you go.
   while you present; the audience sees you behind the board instead. If the
   browser asks, allow the camera for Airboard.
 - **Airo doesn't respond.** Switch to the Airboard tab and check the Airo
-  panel. If Airo is off, press **⏻** to turn it on. You can always type the
-  command instead.
+  panel. If it says the camera and microphone are blocked, allow them for
+  this site in your browser's settings, then reload the board. If voice
+  paused, hold an open palm to wake it. You can always type the command
+  instead.
 - **Someone can't join with the live link.** New people can join for 2 hours.
   If you chose **New link**, send the new one. If your workspace admin turned
   off external guests, only signed-in members of your workspace can join.

@@ -2,37 +2,68 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  airoStartPlan,
   mediaPermissionLabel,
-  mediaResumeEnabled,
   queryMediaPermission,
-  setMediaResumeEnabled,
-  shouldResumeMedia,
+  requestMediaAccess,
 } from "../src/features/board/mediaPermissionPreference.ts";
 
-function memoryStorage() {
-  const values = new Map();
-  return {
-    getItem: (key) => values.get(key) ?? null,
-    setItem: (key, value) => values.set(key, value),
-    removeItem: (key) => values.delete(key),
+function fakeMedia(outcomes) {
+  const calls = [];
+  const stopped = [];
+  const getUserMedia = async (constraints) => {
+    calls.push(constraints);
+    const outcome = outcomes.shift();
+    if (outcome !== "ok") throw Object.assign(new Error(outcome), { name: outcome });
+    const track = { stop: () => stopped.push(constraints) };
+    return { getTracks: () => [track] };
   };
+  return { calls, stopped, getUserMedia };
 }
 
-test("media resume intent persists independently for microphone and camera", () => {
-  const storage = memoryStorage();
-  setMediaResumeEnabled("microphone", true, storage);
-  assert.equal(mediaResumeEnabled("microphone", storage), true);
-  assert.equal(mediaResumeEnabled("camera", storage), false);
-  setMediaResumeEnabled("microphone", false, storage);
-  assert.equal(mediaResumeEnabled("microphone", storage), false);
+test("a board starts every input that isn't blocked or turned off, and asks only for what isn't granted", () => {
+  assert.deepEqual(
+    airoStartPlan({ voice: true, camera: true, microphonePermission: "prompt", cameraPermission: "prompt" }),
+    { voice: true, camera: true, ask: { audio: true, video: true } },
+  );
+  assert.deepEqual(
+    airoStartPlan({ voice: true, camera: true, microphonePermission: "granted", cameraPermission: "unsupported" }),
+    { voice: true, camera: true, ask: { audio: false, video: true } },
+  );
+  assert.deepEqual(
+    airoStartPlan({ voice: true, camera: true, microphonePermission: "denied", cameraPermission: "granted" }),
+    { voice: false, camera: true, ask: { audio: false, video: false } },
+  );
+  assert.deepEqual(
+    airoStartPlan({ voice: false, camera: true, microphonePermission: "prompt", cameraPermission: "prompt" }),
+    { voice: false, camera: true, ask: { audio: false, video: true } },
+  );
 });
 
-test("automatic resume requires both remembered intent and an existing browser grant", () => {
-  assert.equal(shouldResumeMedia("granted", true), true);
-  assert.equal(shouldResumeMedia("granted", false), false);
-  assert.equal(shouldResumeMedia("prompt", true), false);
-  assert.equal(shouldResumeMedia("denied", true), false);
-  assert.equal(shouldResumeMedia("unsupported", true), false);
+test("camera and microphone are asked for in one prompt, and the test stream is released", async () => {
+  const media = fakeMedia(["ok"]);
+  assert.deepEqual(await requestMediaAccess({ audio: true, video: true }, media.getUserMedia), { audio: true, video: true });
+  assert.deepEqual(media.calls, [{ audio: true, video: true }]);
+  assert.equal(media.stopped.length, 1);
+});
+
+test("a refusal leaves both off without asking again", async () => {
+  const media = fakeMedia(["NotAllowedError"]);
+  assert.deepEqual(await requestMediaAccess({ audio: true, video: true }, media.getUserMedia), { audio: false, video: false });
+  assert.equal(media.calls.length, 1);
+});
+
+test("a missing camera still lets voice start", async () => {
+  const media = fakeMedia(["NotFoundError", "ok", "NotFoundError"]);
+  assert.deepEqual(await requestMediaAccess({ audio: true, video: true }, media.getUserMedia), { audio: true, video: false });
+  assert.deepEqual(media.calls, [{ audio: true, video: true }, { audio: true, video: false }, { audio: false, video: true }]);
+});
+
+test("nothing is asked when everything is already granted", async () => {
+  const media = fakeMedia([]);
+  assert.deepEqual(await requestMediaAccess({ audio: false, video: false }, media.getUserMedia), { audio: true, video: true });
+  assert.equal(media.calls.length, 0);
+  assert.deepEqual(await requestMediaAccess({ audio: true, video: false }, undefined), { audio: false, video: true });
 });
 
 test("permission queries fail closed without creating a browser prompt", async () => {

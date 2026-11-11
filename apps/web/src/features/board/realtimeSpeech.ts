@@ -635,7 +635,7 @@ export function createRealtimeSpeechSession(
       lastCause === "busy"
         ? "Airo's voice is busy right now. Try again in a minute; typed commands still work."
         : everReady
-          ? "Airo's voice connection dropped and couldn't reconnect. Turn Airo on again; typed commands still work."
+          ? "Airo's voice connection dropped and couldn't reconnect. Hold an open palm, click the board, or reload it to try again; typed commands still work."
           : "Could not connect to the realtime transcription service.",
       code ?? "TRANSCRIPTION_RECONNECT_FAILED",
     );
@@ -1320,7 +1320,9 @@ function describeTranscriptionCloseRefusal(reason: string): string | null {
       return "Your workspace admin turned off voice. Typed commands and pointer edits still work.";
     case "AUTHORIZATION_UNAVAILABLE":
     case "POLICY_UNAVAILABLE":
-      return "Airo couldn't confirm your access just now. Turn Airo on again in a moment.";
+      return "Airo couldn't confirm your access just now. Reload the board in a moment to try again.";
+    case "Airboard authentication required":
+      return "Sign in to Airboard to use Airo's voice. Typed commands and pointer edits still work.";
     default:
       return null;
   }

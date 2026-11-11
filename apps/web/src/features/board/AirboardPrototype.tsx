@@ -294,11 +294,10 @@ import {
   type DesktopOverlayState,
 } from "./desktopOverlay";
 import {
+  airoStartPlan,
   mediaPermissionLabel,
-  mediaResumeEnabled,
   queryMediaPermission,
-  setMediaResumeEnabled,
-  shouldResumeMedia,
+  requestMediaAccess,
   type MediaPermissionState,
 } from "./mediaPermissionPreference";
 
@@ -754,7 +753,7 @@ export function AirboardPrototype({
    * downloads never reach the API, so the board itself honours those switches;
    * the API enforces voice and guests.
    */
-  organizationPolicy?: { cameraEnabled: boolean; gestureEnabled: boolean; exportsEnabled: boolean };
+  organizationPolicy?: { cameraEnabled: boolean; gestureEnabled: boolean; exportsEnabled: boolean; voiceEnabled?: boolean };
 }) {
   const exportsBlocked = organizationPolicy?.exportsEnabled === false;
   const cameraBlockedMessage =
@@ -920,6 +919,13 @@ export function AirboardPrototype({
     setVoiceDropped(dropped);
   }, []);
   const startVoiceCommandRef = useRef<(() => void) | null>(null);
+  // Read by callbacks defined before the values they need.
+  const standaloneEditorRef = useRef(false);
+  const voiceOffReasonRef = useRef("");
+  // False while another Airboard tab is the one in use: only one tab listens.
+  const voiceOwnerRef = useRef(true);
+  // What the board started on opening, so a failed camera can be retried.
+  const airoCameraWantedRef = useRef(false);
   useEffect(() => {
     latestAccessTokenRef.current = effectiveAccessToken;
   }, [effectiveAccessToken]);
@@ -929,8 +935,16 @@ export function AirboardPrototype({
   const headlessSpeechConfigRetryTimerRef =
     useRef<ReturnType<typeof setTimeout> | null>(null);
   const [headlessVoiceRetryRevision, setHeadlessVoiceRetryRevision] = useState(0);
-  const standaloneCameraResumeAttemptedRef = useRef(false);
-  const standaloneVoiceResumeAttemptedRef = useRef(false);
+  const airoAutoStartAttemptedRef = useRef(false);
+  // Set false on unmount, so a permission prompt answered after leaving the
+  // board starts nothing.
+  const boardMountedRef = useRef(true);
+  useEffect(() => {
+    boardMountedRef.current = true;
+    return () => {
+      boardMountedRef.current = false;
+    };
+  }, []);
   const pipelineRef = useRef(new GesturePipeline());
   const rawLandmarkFrameProcessorRef = useRef<
     ((frame: RawLandmarkFrameRequest) => RawLandmarkFrameOutcome) | null
@@ -1204,6 +1218,10 @@ export function AirboardPrototype({
   ]);
   const [openCatalogId, setOpenCatalogId] = useState<string | null>(null);
   const openCatalogIdRef = useRef<string | null>(null);
+  // Hand tracking may close only a menu a hand opened. With the camera on from
+  // the moment a board opens, a menu opened with the mouse must stay open
+  // while no hand is over the dock.
+  const catalogOpenedByHandRef = useRef(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const moreMenuRef = useRef<HTMLDivElement | null>(null);
@@ -1415,6 +1433,7 @@ export function AirboardPrototype({
   const broadcastSafe =
     headlessMeetOverlay || (desktopOverlay && desktopOverlayState.clickThrough);
   const standaloneEditor = surface === "standalone" && !desktopOverlay;
+  standaloneEditorRef.current = standaloneEditor;
   const setCopilotVisibility = useCallback((visible: boolean) => {
     setCopilotOpen(visible);
     try {
@@ -4803,10 +4822,12 @@ export function AirboardPrototype({
     }
     catalogCloseTimerRef.current = setTimeout(() => {
       catalogCloseTimerRef.current = null;
-      openCatalogIdRef.current = null;
       dockGestureHoverRef.current = null;
-      setOpenCatalogId(null);
       setDockGestureHover(null);
+      if (!catalogOpenedByHandRef.current) return;
+      catalogOpenedByHandRef.current = false;
+      openCatalogIdRef.current = null;
+      setOpenCatalogId(null);
     }, 520);
   }, []);
 
@@ -4891,6 +4912,7 @@ export function AirboardPrototype({
           currentCatalogId === hoveredCatalogId ||
           preciseCatalogId === hoveredCatalogId
         ) {
+          if (currentCatalogId !== hoveredCatalogId) catalogOpenedByHandRef.current = true;
           openCatalogIdRef.current = hoveredCatalogId;
           setOpenCatalogId((current) =>
             current === hoveredCatalogId ? current : hoveredCatalogId,
@@ -7305,7 +7327,8 @@ export function AirboardPrototype({
       voiceRouter.openGate(gate);
       syncVoiceGateUi();
       const micArmed = Boolean(speechSessionRef.current);
-      if (!micArmed && voiceDroppedRef.current && startVoiceCommandRef.current) {
+      // Only the tab in use wakes: a second visible window sees the same palm.
+      if (!micArmed && voiceDroppedRef.current && voiceOwnerRef.current && startVoiceCommandRef.current) {
         // Voice paused or dropped on its own; an open palm means the person
         // wants to talk, so wake it. The gate stays open for the command.
         startVoiceCommandRef.current();
@@ -7316,7 +7339,9 @@ export function AirboardPrototype({
         setCommandFeedback(
           micArmed
             ? "Open palm recognized — speak a board command, then relax your hand."
-            : "Open palm recognized. Turn Airo on once to enable voice commands.",
+            : standaloneEditorRef.current
+              ? `Open palm recognized, but Airo's voice is off: ${voiceOffReasonRef.current}`
+              : "Open palm recognized. Turn Airo on once to enable voice commands.",
         );
         return;
       }
@@ -7327,7 +7352,9 @@ export function AirboardPrototype({
       setCommandFeedback(
         micArmed
           ? `Editing “${label}”: say “rename to …”, “delete”, “duplicate”, or “connect to …”.`
-          : `Holding “${label}”. Turn Airo on once to enable voice edits.`,
+          : standaloneEditorRef.current
+            ? `Holding “${label}”, but Airo's voice is off: ${voiceOffReasonRef.current}`
+            : `Holding “${label}”. Turn Airo on once to enable voice edits.`,
       );
     },
     [syncVoiceGateUi, voiceRouter],
@@ -7744,6 +7771,12 @@ export function AirboardPrototype({
     }, delayMs);
   }, [headlessMeetOverlay]);
 
+  // Voice starts as the board opens, so it can connect just after a first
+  // typed command; its start-up messages keep that command's result.
+  const showVoiceStartFeedback = useCallback((text: string) => {
+    setCommandFeedback((current) => (current.startsWith("Applied:") ? current : text));
+  }, []);
+
   const startVoiceCommand = useCallback(() => {
     if (!voiceCaptureAvailable) {
       setSpeechRecognitionStatus("idle");
@@ -7891,9 +7924,7 @@ export function AirboardPrototype({
             setRealtimeSpeechMetadata(metadata);
             setSpeechArmed(true);
             setSpeechRecognitionStatus("waiting");
-            setCommandFeedback(
-              `${metadata.provider} / ${metadata.model} connected. Preparing realtime microphone capture…`,
-            );
+            showVoiceStartFeedback("Starting Airo's voice…");
           },
           onListening: (listening) => {
             setSpeechListening(listening);
@@ -7903,7 +7934,6 @@ export function AirboardPrototype({
                 headlessVoiceRetryAttemptRef.current = 0;
               }
               if (standaloneEditor) {
-                setMediaResumeEnabled("microphone", true, window.localStorage);
                 void refreshStandaloneMediaPermissions();
               }
               setSpeechRecognitionStatus("waiting");
@@ -7917,10 +7947,9 @@ export function AirboardPrototype({
                 }
                 return;
               }
-              const metadata = realtimeSession?.getMetadata();
-              setCommandFeedback(
-                `Airo is listening${metadata ? ` via ${metadata.provider} / ${metadata.model}` : ""}. Say “Airo, add a user.”`,
-              );
+              // Voice now starts as the board opens, so it can connect just
+              // after a first typed command; keep that command's result.
+              showVoiceStartFeedback("Airo is listening. Say “Airo, add a user.”");
             }
           },
           onInterim: (transcript) => {
@@ -8029,7 +8058,7 @@ export function AirboardPrototype({
             if (reason === "paused") {
               setSpeechRecognitionStatus("idle");
               setCommandFeedback(
-                "Airo's voice paused after a long quiet stretch. Hold an open palm or press ⏻ to resume; typed commands still work.",
+                "Airo's voice paused after a long quiet stretch. Hold an open palm to resume; typed commands still work.",
               );
               return;
             }
@@ -8049,7 +8078,7 @@ export function AirboardPrototype({
               setSpeechRecognitionStatus("error");
               if (reason === "closed") {
                 setCommandFeedback(
-                  "The realtime transcription connection closed. Turn Airo on again to reconnect; typed commands still work.",
+                  "Airo's voice connection closed. Hold an open palm to reconnect, or reload the board; typed commands still work.",
                 );
               }
             } else {
@@ -8105,7 +8134,7 @@ export function AirboardPrototype({
       setSpeechArmed(true);
       setSpeechHeardText("");
       setSpeechRecognitionStatus("waiting");
-      setCommandFeedback("Connecting Airo to the realtime transcription service…");
+      showVoiceStartFeedback("Starting Airo's voice…");
       realtimeSession.start();
       return;
     }
@@ -8120,7 +8149,6 @@ export function AirboardPrototype({
           model: "Web Speech API",
         });
         if (standaloneEditor) {
-          setMediaResumeEnabled("microphone", true, window.localStorage);
           void refreshStandaloneMediaPermissions();
         }
         setSpeechArmed(true);
@@ -8261,6 +8289,7 @@ export function AirboardPrototype({
       setCommandFeedback("Speech recognition is already active. Try again in a moment.");
     }
   }, [
+    showVoiceStartFeedback,
     cancelHeadlessVoiceRetry,
     dispatchVoiceDecision,
     effectiveAccessToken,
@@ -8286,46 +8315,6 @@ export function AirboardPrototype({
   useEffect(() => {
     startVoiceCommandRef.current = startVoiceCommand;
   }, [startVoiceCommand]);
-
-  const toggleVoiceInput = useCallback(() => {
-    if (standaloneEditor && (speechSessionRef.current || speechArmed)) {
-      setMediaResumeEnabled("microphone", false, window.localStorage);
-    }
-    startVoiceCommand();
-  }, [speechArmed, standaloneEditor, startVoiceCommand]);
-
-  useEffect(() => {
-    if (
-      !standaloneEditor ||
-      initialPreferences?.audioEnabled === false ||
-      !speechSupported ||
-      speechEngine === "loading" ||
-      speechEngine === "unavailable" ||
-      speechSessionRef.current ||
-      standaloneVoiceResumeAttemptedRef.current
-    ) {
-      return;
-    }
-    standaloneVoiceResumeAttemptedRef.current = true;
-    void queryMediaPermission("microphone").then((permission) => {
-      setMicrophonePermission(permission);
-      if (
-        shouldResumeMedia(
-          permission,
-          mediaResumeEnabled("microphone", window.localStorage),
-        ) &&
-        !speechSessionRef.current
-      ) {
-        startVoiceCommand();
-      }
-    });
-  }, [
-    initialPreferences?.audioEnabled,
-    speechEngine,
-    speechSupported,
-    standaloneEditor,
-    startVoiceCommand,
-  ]);
 
   const changeSpeechModel = useCallback((nextModel: string) => {
     const normalizedModel = nextModel.trim();
@@ -8547,7 +8536,6 @@ export function AirboardPrototype({
       gestureInteractionIdRef.current = crypto.randomUUID();
       setCameraStatus("active");
       if (standaloneEditor) {
-        setMediaResumeEnabled("camera", true, window.localStorage);
         void refreshStandaloneMediaPermissions();
       }
     } catch (error) {
@@ -8590,17 +8578,6 @@ export function AirboardPrototype({
     void startCamera();
   }, [cameraStatus, startCamera]);
 
-  const toggleCameraInput = useCallback(() => {
-    if (cameraStatus === "active") {
-      if (standaloneEditor) {
-        setMediaResumeEnabled("camera", false, window.localStorage);
-      }
-      stopCamera();
-      return;
-    }
-    void startCamera();
-  }, [cameraStatus, standaloneEditor, startCamera, stopCamera]);
-
   const airoVoiceAvailable = voiceCaptureAvailable && speechSupported;
   const airoHandsAvailable = cameraCaptureAvailable;
   const airoInputsActive =
@@ -8610,82 +8587,186 @@ export function AirboardPrototype({
   // and back while hand tracking loads.
   const airoEngaged =
     airoInputsActive || cameraStatus === "starting" || cameraStatus === "tracker_loading";
+  // Without a switch, a blocked camera or microphone is the one thing the
+  // panel must explain.
+  const airoBlockedByBrowser =
+    !airoInputsActive &&
+    (cameraPermission === "denied" || microphonePermission === "denied" || cameraStatus === "blocked");
   const copilotMode: "closed" | "slim" | "full" = !copilotOpen
     ? "closed"
     : airoEngaged && !copilotExpanded
       ? "slim"
       : "full";
 
-  const toggleAiroInputs = useCallback(() => {
-    // Turning Airo on starts from the strip; turning it off leaves the full panel.
-    setCopilotExpanded(false);
-    if (airoInputsActive) {
-      markVoiceDropped(false);
-      if (airoVoiceAvailable && speechArmed) {
-        toggleVoiceInput();
-      }
-      if (airoHandsAvailable && cameraStatus === "active") {
-        toggleCameraInput();
-      }
-      return;
-    }
-
-    if (airoVoiceAvailable) {
-      toggleVoiceInput();
-    }
-    if (airoHandsAvailable) {
-      toggleCameraInput();
-    }
-    if (!airoVoiceAvailable && !airoHandsAvailable) {
-      setCopilotVisibility(true);
-      requestAnimationFrame(() => intentCommandInputRef.current?.focus());
-    }
-  }, [
-    airoHandsAvailable,
-    airoInputsActive,
-    airoVoiceAvailable,
-    cameraStatus,
-    markVoiceDropped,
-    setCopilotVisibility,
-    speechArmed,
-    toggleCameraInput,
-    toggleVoiceInput,
-  ]);
-
-  // Hands stayed on while voice paused or gave up reconnecting: the power
-  // button resumes voice instead of turning everything off. The board menu
-  // still turns everything off.
-  const airoVoiceResumable =
-    airoInputsActive && voiceDropped && airoVoiceAvailable && !speechArmed;
-
+  // Airo's voice and hands start as soon as a board opens: the first time,
+  // the browser asks once for the camera and microphone together. There is no
+  // switch to turn them on. Only an input the person blocked in the browser,
+  // turned off in Settings → Preferences, or their workspace admin turned off,
+  // stays off; a board opened in a background tab waits until it is shown.
+  const startCameraRef = useRef(startCamera);
+  startCameraRef.current = startCamera;
+  const cameraStatusRef = useRef(cameraStatus);
+  cameraStatusRef.current = cameraStatus;
+  const [boardTabVisible, setBoardTabVisible] = useState(true);
+  // The browser didn't allow an input it was asked for (dismissed or refused).
+  const [airoAskDeclined, setAiroAskDeclined] = useState(false);
+  // Voice needs an Airboard sign-in; an anonymous live-link guest has none.
+  const voiceSignInMissing = liveGuest && !effectiveAccessToken;
   useEffect(() => {
     if (
       !standaloneEditor ||
-      initialPreferences?.videoEnabled === false ||
-      cameraStatus !== "idle" ||
-      standaloneCameraResumeAttemptedRef.current
+      !boardTabVisible ||
+      airoAutoStartAttemptedRef.current ||
+      speechEngine === "loading"
     ) {
       return;
     }
-    standaloneCameraResumeAttemptedRef.current = true;
-    void queryMediaPermission("camera").then((permission) => {
-      setCameraPermission(permission);
-      if (
-        shouldResumeMedia(
-          permission,
-          mediaResumeEnabled("camera", window.localStorage),
-        ) &&
-        cameraStatus === "idle"
-      ) {
-        void startCamera();
+    airoAutoStartAttemptedRef.current = true;
+    void (async () => {
+      const [microphone, camera] = await Promise.all([
+        queryMediaPermission("microphone"),
+        queryMediaPermission("camera"),
+      ]);
+      const plan = airoStartPlan({
+        voice:
+          voiceCaptureAvailable &&
+          speechSupported &&
+          !voiceSignInMissing &&
+          initialPreferences?.audioEnabled !== false &&
+          organizationPolicy?.voiceEnabled !== false,
+        camera:
+          cameraCaptureAvailable && initialPreferences?.videoEnabled !== false && !cameraBlockedMessage,
+        microphonePermission: microphone,
+        cameraPermission: camera,
+      });
+      const access = await requestMediaAccess(
+        plan.ask,
+        navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices),
+      );
+      if (!boardMountedRef.current) return;
+      void refreshStandaloneMediaPermissions();
+      airoCameraWantedRef.current = plan.camera && access.video;
+      // The Airo panel explains it; the command line keeps whatever the person
+      // did while the prompt was open.
+      // Declined means nothing asked for came through; a missing camera with a
+      // working microphone is not a refusal.
+      const askedAny = plan.ask.audio || plan.ask.video;
+      if (askedAny && !(plan.ask.audio && access.audio) && !(plan.ask.video && access.video)) {
+        setAiroAskDeclined(true);
       }
-    });
+      if (plan.camera && access.video) void startCameraRef.current();
+      if (plan.voice && access.audio && !speechSessionRef.current) {
+        // Another board tab took voice while this one was starting: wake it
+        // when this tab is used again.
+        if (voiceOwnerRef.current) startVoiceCommandRef.current?.();
+        else markVoiceDropped(true);
+      }
+    })();
   }, [
-    cameraStatus,
+    boardTabVisible,
+    cameraBlockedMessage,
+    markVoiceDropped,
+    cameraCaptureAvailable,
+    initialPreferences?.audioEnabled,
     initialPreferences?.videoEnabled,
+    organizationPolicy?.voiceEnabled,
+    refreshStandaloneMediaPermissions,
+    speechEngine,
+    speechSupported,
     standaloneEditor,
-    startCamera,
+    voiceCaptureAvailable,
+    voiceSignInMissing,
   ]);
+
+  // Without a switch, the Airo panel must say why an input is off.
+  const airoNotAllowed = airoBlockedByBrowser || (airoAskDeclined && !airoInputsActive);
+  const voiceOffReason =
+    organizationPolicy?.voiceEnabled === false
+      ? "your workspace admin turned voice off."
+      : initialPreferences?.audioEnabled === false
+        ? "Airboard audio input is off in Settings → Preferences."
+        : voiceSignInMissing
+          ? "sign in to Airboard to use voice on a live board."
+          : microphonePermission === "denied"
+            ? "the microphone is blocked for this site in your browser."
+            : !speechSupported && speechEngine !== "loading"
+              ? "voice isn't available right now."
+              : airoAskDeclined
+                ? "the browser didn't allow the microphone. Reload the board to be asked again."
+                : null;
+  voiceOffReasonRef.current = voiceOffReason ?? "it isn't listening right now. Type the command below.";
+
+  // One board tab listens at a time: the one in use. Coming back to a tab,
+  // or clicking or typing on its board, wakes voice that paused, dropped or
+  // moved to another tab, and retries a camera that failed to start.
+  useEffect(() => {
+    if (!standaloneEditor) return;
+    const tabId =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : String(performance.now());
+    const channel =
+      typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel("airboard.voice-tab.v1");
+    const wakeVoice = () => {
+      if (
+        boardMountedRef.current &&
+        voiceOwnerRef.current &&
+        voiceDroppedRef.current &&
+        !speechSessionRef.current
+      ) {
+        startVoiceCommandRef.current?.();
+      }
+    };
+    const claimVoice = () => {
+      if (!voiceOwnerRef.current) {
+        voiceOwnerRef.current = true;
+      }
+      channel?.postMessage({ type: "claim", tabId });
+    };
+    const onShown = () => {
+      const visible = document.visibilityState === "visible";
+      setBoardTabVisible(visible);
+      if (!visible) return;
+      // Uncovering a window isn't using it; focus claims too.
+      if (document.hasFocus()) claimVoice();
+      wakeVoice();
+      const camera = cameraStatusRef.current;
+      if (airoCameraWantedRef.current && (camera === "error" || camera === "tracker_error")) {
+        void startCameraRef.current();
+      }
+    };
+    const onInteract = () => {
+      if (!voiceOwnerRef.current) claimVoice();
+      wakeVoice();
+    };
+    if (channel) {
+      channel.onmessage = (event: MessageEvent) => {
+        const data = event.data as { type?: unknown; tabId?: unknown } | null;
+        if (data?.type !== "claim" || data.tabId === tabId) return;
+        voiceOwnerRef.current = false;
+        if (speechSessionRef.current) {
+          // startVoiceCommand stops a running session.
+          startVoiceCommandRef.current?.();
+          markVoiceDropped(true);
+          setCommandFeedback(
+            "Airo's voice moved to your other Airboard tab. Come back to this tab to bring it back; typed commands still work.",
+          );
+        }
+      };
+    }
+    onShown();
+    window.addEventListener("focus", onShown);
+    document.addEventListener("visibilitychange", onShown);
+    window.addEventListener("pointerdown", onInteract, true);
+    window.addEventListener("keydown", onInteract, true);
+    return () => {
+      window.removeEventListener("focus", onShown);
+      document.removeEventListener("visibilitychange", onShown);
+      window.removeEventListener("pointerdown", onInteract, true);
+      window.removeEventListener("keydown", onInteract, true);
+      channel?.close();
+    };
+  }, [markVoiceDropped, standaloneEditor]);
 
   // The extension-owned engine has no visible controls by design. Once its
   // bridge and transcription configuration are ready, enable both Airboard
@@ -8979,7 +9060,7 @@ export function AirboardPrototype({
         if (config.available && supportsRealtimeSpeech()) {
           setSpeechEngine("realtime");
           setSpeechSupported(true);
-          setCommandFeedback("Airo is ready. Turn it on to talk, or type below.");
+          setCommandFeedback("Airo is ready. Hold an open palm and speak, or type below.");
           return;
         }
 
@@ -9632,7 +9713,9 @@ export function AirboardPrototype({
           stopCamera();
           setCameraStatus("tracker_error");
           setCameraError(
-            "Hand tracking stopped after an inference error. Click Enable hands to retry.",
+            standaloneEditorRef.current
+              ? "Hand tracking stopped after an inference error. Come back to this tab or reload the board to retry."
+              : "Hand tracking stopped after an inference error. Click Enable hands to retry.",
           );
           return;
         }
@@ -11041,18 +11124,6 @@ export function AirboardPrototype({
                     <button
                       type="button"
                       role="menuitem"
-                      disabled={cameraStatus === "starting" || cameraStatus === "tracker_loading"}
-                      onClick={() => {
-                        toggleAiroInputs();
-                        setMoreMenuOpen(false);
-                      }}
-                    >
-                      <span aria-hidden="true">✦</span>
-                      {airoInputsActive ? "Turn off Airo voice and hands" : "Turn on Airo voice and hands"}
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
                       data-testid="screen-underlay-toggle"
                       disabled={screenUnderlayStatus === "starting" || recordingState === "recording"}
                       onClick={() => {
@@ -11262,34 +11333,21 @@ export function AirboardPrototype({
                           ? "Listening continuously"
                           : cameraStatus === "active"
                             ? "Watching for your hands"
-                            : "Off · turn on for voice and hands"}
+                            : cameraStatus === "starting" || cameraStatus === "tracker_loading"
+                              ? "Starting voice and hands…"
+                              : voiceDropped
+                                ? "Voice paused"
+                                : airoBlockedByBrowser
+                                ? "Camera and microphone are blocked"
+                                : airoNotAllowed
+                                  ? "Camera and microphone aren't allowed"
+                                  : cameraStatus === "error" || cameraStatus === "tracker_error"
+                                    ? "The camera couldn't start"
+                                    : "Type a command below"}
                       </small>
                     </span>
                   </div>
                   <div className="canvas-copilot-header-actions">
-                    <button
-                      type="button"
-                      className={`canvas-copilot-power${airoInputsActive ? " on" : ""}`}
-                      aria-pressed={airoVoiceResumable ? undefined : airoInputsActive}
-                      disabled={cameraStatus === "starting" || cameraStatus === "tracker_loading"}
-                      aria-label={
-                        airoVoiceResumable
-                          ? "Resume Airo voice"
-                          : airoInputsActive
-                            ? "Turn off Airo voice and hand tracking"
-                            : "Enable Airo voice and hand tracking"
-                      }
-                      title={
-                        airoVoiceResumable
-                          ? "Resume voice"
-                          : airoInputsActive
-                            ? "Turn off voice and hands"
-                            : "Turn on voice and hands"
-                      }
-                      onClick={airoVoiceResumable ? toggleVoiceInput : toggleAiroInputs}
-                    >
-                      ⏻
-                    </button>
                     {airoEngaged ? (
                       <button
                         type="button"
@@ -11336,7 +11394,19 @@ export function AirboardPrototype({
                           ? `“${truncateSpeechTranscript(speechHeardText, 180)}”`
                           : speechArmed
                             ? "Listening for your next command…"
-                            : "Turn Airo on with ⏻, then hold an open palm for 0.4 seconds and speak."}
+                            : voiceDropped
+                              ? "Airo's voice paused. Hold an open palm, or click the board, to wake it."
+                              : airoBlockedByBrowser
+                                ? "Allow the camera and microphone for this site in your browser's settings, then reload the board."
+                                : airoNotAllowed
+                                  ? "Reload the board to be asked again, or allow the camera and microphone in your browser's site settings."
+                                  : voiceOffReason
+                                    ? `Airo's voice is off: ${voiceOffReason}`
+                                    : cameraStatus === "error" || cameraStatus === "tracker_error"
+                                      ? "Close other apps using the camera, then come back to this tab to try again."
+                                      : cameraStatus === "active"
+                                        ? "Hold an open palm for 0.4 seconds and speak."
+                                        : "Type a command below."}
                       </p>
                       <small className={`copilot-status ${speechRecognitionStatus}`}>
                         {speechRecognitionLabel(speechRecognitionStatus)}
@@ -11650,7 +11720,12 @@ export function AirboardPrototype({
                 activeTool={temporaryHandActive ? "hand" : activeCreationTool}
                 openPanel={openCatalogId}
                 gestureHover={dockGestureHover}
-                onOpenPanelChange={setOpenCatalogId}
+                onOpenPanelChange={(panel) => {
+                  // Opened or closed with the mouse or keyboard: the hand leaves it alone.
+                  catalogOpenedByHandRef.current = false;
+                  cancelCatalogClose();
+                  setOpenCatalogId(panel);
+                }}
                 onToolSelect={activateCreationTool}
                 onStampSelect={(emoji) => {
                   setSelectedStampEmoji(emoji);
@@ -11707,10 +11782,14 @@ export function AirboardPrototype({
               {voiceGate.mode === "ptt"
                 ? speechArmed
                   ? "Listening — speak a board command"
-                  : "Open palm detected — turn Airo on once to enable voice commands"
+                  : standaloneEditor
+                    ? "Open palm detected — Airo's voice is off"
+                    : "Open palm detected — turn Airo on once to enable voice commands"
                 : speechArmed
                   ? `Editing “${voiceGate.label}” — “rename to …”, “delete”, “connect to …”`
-                  : `Holding “${voiceGate.label}” — turn Airo on once to enable voice edits`}
+                  : standaloneEditor
+                    ? `Holding “${voiceGate.label}” — Airo's voice is off`
+                    : `Holding “${voiceGate.label}” — turn Airo on once to enable voice edits`}
             </div>
           ) : null}
           {inputMode === "gesture" &&
@@ -11748,8 +11827,9 @@ export function AirboardPrototype({
                   type to name it. Double-click anything to change its text.
                 </p>
                 <p className="onboarding-aside">
-                  Turn on <strong>Airo</strong> in the top bar to use your voice and hands: hold an
-                  open palm still and speak, or close your hand over a shape to move it.{" "}
+                  <strong>Airo</strong> listens and watches for your hands as soon as the board
+                  opens: hold an open palm still and speak, or close your hand over a shape to
+                  move it.{" "}
                   <a href="/help/using-the-board/gestures" target="_blank" rel="noreferrer">
                     All camera gestures
                   </a>
@@ -12123,7 +12203,7 @@ export function AirboardPrototype({
               <div className="section-heading-inline">
                 <div>
                   <h2>Camera & microphone</h2>
-                  <p>Granted once for this site, then reused on every Airboard.</p>
+                  <p>Airboard asks for both when a board opens, then reuses them on every Airboard.</p>
                 </div>
               </div>
               <div className="media-permission-row">
@@ -12135,13 +12215,6 @@ export function AirboardPrototype({
                 <span className={`permission-state ${microphonePermission}`}>
                   {mediaPermissionLabel(microphonePermission)}
                 </span>
-                <button
-                  type="button"
-                  disabled={!speechSupported}
-                  onClick={toggleVoiceInput}
-                >
-                  {speechArmed ? "Turn off" : microphonePermission === "granted" ? "Use" : "Allow"}
-                </button>
               </div>
               <div className="media-permission-row">
                 <span className="media-permission-icon" aria-hidden="true">◎</span>
@@ -12152,27 +12225,15 @@ export function AirboardPrototype({
                 <span className={`permission-state ${cameraPermission}`}>
                   {mediaPermissionLabel(cameraPermission)}
                 </span>
-                <button
-                  type="button"
-                  disabled={cameraStatus === "starting" || cameraStatus === "tracker_loading"}
-                  onClick={toggleCameraInput}
-                >
-                  {cameraStatus === "starting" || cameraStatus === "tracker_loading"
-                    ? "Starting…"
-                    : cameraStatus === "active"
-                      ? "Turn off"
-                      : cameraPermission === "granted"
-                        ? "Use"
-                        : "Allow"}
-                </button>
               </div>
               {cameraPromptWaiting ? (
                 <p className="permission-warning" role="status">{CAMERA_PROMPT_HINT}</p>
               ) : null}
               <p className="permission-note">
-                Choose <strong>Allow while visiting the site</strong> in the browser prompt.
-                Airboard will then resume an input you previously enabled without asking again.
-                Screen/window sharing must still be chosen for each capture session.
+                Choose <strong>Allow while visiting the site</strong> in the browser prompt, so
+                Airboard doesn&apos;t ask again. To keep the camera or microphone off on every
+                board, turn it off in Settings → Preferences. Screen sharing is still chosen each
+                time.
               </p>
               {deniedMediaHelp(cameraPermission, microphonePermission, navigator.userAgent) ? (
                 <p className="permission-warning">
@@ -12546,7 +12607,9 @@ export function AirboardPrototype({
                     <>
                     <p className="hint">
                       {voiceCaptureAvailable
-                        ? "Turn Airo on once. Hold an open palm still for 0.4 seconds to speak. Use a relaxed hand to aim and a closed hand to move."
+                        ? standaloneEditor
+                          ? "Hold an open palm still for 0.4 seconds to speak. Use a relaxed hand to aim and a closed hand to move."
+                          : "Turn Airo on once. Hold an open palm still for 0.4 seconds to speak. Use a relaxed hand to aim and a closed hand to move."
                         : "Click Enable hands to use the meeting camera. Use a relaxed hand to aim and a closed hand to move. Voice is not available on this surface yet."}
                     </p>
                     <details className="advanced-settings gesture-guide">
@@ -12590,9 +12653,9 @@ export function AirboardPrototype({
                             <div>
                               <dt>Speak to Airo</dt>
                               <dd>
-                                Turn Airo on once, then hold one open palm still (no
-                                sideways motion) for about 0.4 seconds. Lower or relax it
-                                when finished.
+                                {standaloneEditor ? "Hold" : "Turn Airo on once, then hold"} one open
+                                palm still (no sideways motion) for about 0.4 seconds. Lower or
+                                relax it when finished.
                               </dd>
                             </div>
                             <div>
@@ -12918,7 +12981,7 @@ function describeCameraError(error: unknown, hasVideoStream: boolean): string {
   if (hasVideoStream) {
     const detail = error instanceof Error ? error.message : "Unknown tracker error";
     if (/chunkloaderror|loading chunk .+ failed/iu.test(detail)) {
-      return "Airboard was updated while this page was open. Reload the page, then click Enable hands again.";
+      return "Airboard was updated while this page was open. Reload the page to start hand tracking again.";
     }
     return `Camera started, but hand tracking failed: ${detail}`;
   }
@@ -13971,7 +14034,7 @@ function getHandControlCoach(input: {
   diagnostics: HandControlDiagnostics;
 }): string {
   if (input.cameraStatus !== "active") {
-    return "Enable hands, then keep one full hand visible in the camera.";
+    return "Hand tracking isn't on yet. Once the camera starts, keep one full hand visible.";
   }
   if (input.handsDetected === 0) {
     return "No hand detected. Raise one open hand, keep every fingertip in frame, and face the palm toward the camera.";

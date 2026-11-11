@@ -41,7 +41,8 @@ test("a selected shape gets a compact toolbar beside it, with every field behind
   const canvasBox = (await canvas.boundingBox())!;
   const dock = page.getByRole("toolbar", { name: "Board creation tools" });
   await dock.getByRole("button", { name: "Shape", exact: true }).click();
-  const target = { x: canvasBox.width * 0.4, y: canvasBox.height * 0.55 };
+  // Clear of the open shape menu above the dock.
+  const target = { x: canvasBox.width * 0.4, y: canvasBox.height * 0.4 };
   await page
     .getByRole("menu", { name: "Recent shapes and connectors" })
     .getByRole("menuitem", { name: "Square", exact: true })
@@ -71,13 +72,12 @@ test("a selected shape gets a compact toolbar beside it, with every field behind
   await expect(toolbar.getByLabel("Element width")).toHaveCount(0);
 });
 
-test("Airo shrinks to a strip while it listens and expands on request", async ({ page }) => {
+test("Airo starts as a strip when the board opens and expands on request", async ({ page }) => {
   await openBoard(page);
   const copilot = page.getByTestId("canvas-copilot");
-  await expect(copilot.getByTestId("copilot-activity")).toBeVisible();
-
-  await copilot.getByRole("button", { name: "Enable Airo voice and hand tracking" }).click();
+  // Voice and hands start on their own; there is no switch to press.
   await expect(copilot).toHaveClass(/canvas-copilot-slim/, { timeout: 30_000 });
+  await expect(copilot.getByRole("button", { name: /Airo voice and hand tracking/ })).toHaveCount(0);
   await expect(copilot.getByTestId("copilot-activity")).toHaveCount(0);
   // Typing still works from the strip.
   await expect(page.getByTestId("intent-command-input")).toBeVisible();
@@ -88,12 +88,6 @@ test("Airo shrinks to a strip while it listens and expands on request", async ({
   await expect(copilot.getByTestId("copilot-activity")).toBeVisible();
   await copilot.getByRole("button", { name: "Shrink Airo panel" }).click();
   await expect(copilot.getByTestId("copilot-activity")).toHaveCount(0);
-
-  const turnOff = copilot.getByRole("button", { name: "Turn off Airo voice and hand tracking" });
-  await expect(turnOff).toBeEnabled({ timeout: 30_000 });
-  await turnOff.click();
-  await expect(copilot).not.toHaveClass(/canvas-copilot-slim/);
-  await expect(copilot.getByTestId("copilot-activity")).toBeVisible();
 });
 
 test("zoom lives at the end of the tool dock", async ({ page }) => {

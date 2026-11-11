@@ -5,15 +5,16 @@ import { expect, test, type Page } from "@playwright/test";
  * gesture/voice entry points only when the host client delegates
  * camera/microphone permission to the add-on frame ("embedded"); otherwise
  * the companion window — bound to the same board session — is the
- * gesture/voice surface. Meeting capture never auto-starts. Standalone
- * capture resumes only after the user enabled it and the browser reports an
- * existing persistent grant. The harness emulates both delegation outcomes
+ * gesture/voice surface. Meeting capture never auto-starts. A standalone
+ * board starts voice and hands as soon as it opens, asking the browser once
+ * for both; there is no switch. The harness emulates both delegation outcomes
  * because the real Meet iframe cannot run in Playwright.
  */
 
 declare global {
   interface Window {
     __gumCalls: number;
+    __gumConstraints: MediaStreamConstraints[];
   }
 }
 
@@ -100,7 +101,7 @@ test("delegated side panel stays compact and points at the shared board", async 
   expect(await page.evaluate(() => window.__gumCalls)).toBe(0);
 });
 
-test("standalone keeps a quiet top bar and one Airo entry point", async ({ page }) => {
+test("standalone keeps a quiet top bar and no Airo switch", async ({ page }) => {
   await spyOnGetUserMedia(page);
   await page.goto("/?testStandalone=1");
 
@@ -117,16 +118,15 @@ test("standalone keeps a quiet top bar and one Airo entry point", async ({ page 
     );
   expect(controlOrder).toEqual(["Share", "More board actions"]);
 
-  // Airo's single switch lives on the Airo panel: camera and voice together.
+  // Voice and hands start on their own, so there is nothing to switch on.
   const copilot = page.getByTestId("canvas-copilot");
-  await expect(copilot.getByRole("button", { name: "Enable Airo voice and hand tracking" })).toBeVisible();
+  await expect(copilot.getByRole("button", { name: /Airo voice and hand tracking/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Enable hand tracking/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Airo listening/ })).toHaveCount(0);
 
-  // Everything else is one menu away, and nothing captures until asked.
+  // Everything else is one menu away.
   await toolbar.getByRole("button", { name: "More board actions" }).click();
   for (const action of [
-    "Turn on Airo voice and hands",
     "Show a screen behind the board",
     "Undo",
     "Redo",
@@ -137,6 +137,8 @@ test("standalone keeps a quiet top bar and one Airo entry point", async ({ page 
     await expect(page.getByRole("menuitem", { name: action })).toBeVisible();
   }
   for (const removedAction of [
+    "Turn on Airo voice and hands",
+    "Turn off Airo voice and hands",
     "Rename canvas",
     "Clear board",
     "Pause inputs",
@@ -147,7 +149,10 @@ test("standalone keeps a quiet top bar and one Airo entry point", async ({ page 
   }
   await page.getByRole("menuitem", { name: "Board settings" }).click();
   await expect(page.locator("#canvas-settings")).toBeVisible();
-  expect(await page.evaluate(() => window.__gumCalls)).toBe(0);
+  // Board settings report camera and microphone access, with nothing to press.
+  const permissions = page.locator(".media-permission-section");
+  await expect(permissions.locator(".media-permission-row")).toHaveCount(2);
+  await expect(permissions.getByRole("button")).toHaveCount(0);
 
   // Phones keep the same two controls; they cannot share a screen.
   await page.setViewportSize({ width: 375, height: 812 });
@@ -157,54 +162,52 @@ test("standalone keeps a quiet top bar and one Airo entry point", async ({ page 
   await expect(page.getByTestId("screen-underlay-toggle")).toBeHidden();
 });
 
-test("standalone resumes a previously enabled camera when site permission is already granted", async ({
-  page,
-}) => {
+test("a board asks for the camera as soon as it opens, without a click", async ({ page }) => {
   await page.addInitScript(() => {
     window.__gumCalls = 0;
-    window.localStorage.setItem("airboard.media-resume.v1.camera", "enabled");
-    Object.defineProperty(navigator.permissions, "query", {
-      configurable: true,
-      value: async ({ name }: PermissionDescriptor) => ({
-        state: name === "camera" ? "granted" : "prompt",
-      }),
-    });
-    Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
-      configurable: true,
-      value: async () => {
-        window.__gumCalls += 1;
-        throw new DOMException("Synthetic device failure after acquisition attempt", "NotReadableError");
-      },
-    });
-  });
-
-  await page.goto("/?testStandalone=1");
-  await expect.poll(() => page.evaluate(() => window.__gumCalls)).toBe(1);
-});
-
-test("standalone never opens a surprise prompt when remembered permission is not granted", async ({
-  page,
-}) => {
-  await page.addInitScript(() => {
-    window.__gumCalls = 0;
-    window.localStorage.setItem("airboard.media-resume.v1.camera", "enabled");
+    window.__gumConstraints = [];
     Object.defineProperty(navigator.permissions, "query", {
       configurable: true,
       value: async () => ({ state: "prompt" }),
     });
     Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
       configurable: true,
-      value: async () => {
+      value: async (constraints: MediaStreamConstraints) => {
         window.__gumCalls += 1;
-        throw new Error("getUserMedia must not run while permission is prompt");
+        window.__gumConstraints.push(constraints);
+        throw new DOMException("The person dismissed the prompt", "NotAllowedError");
       },
     });
   });
 
   await page.goto("/?testStandalone=1");
-  await expect(
-    page.getByRole("button", { name: "Enable Airo voice and hand tracking" }),
-  ).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.__gumCalls)).toBe(1);
+  // One prompt covers everything Airo can use here. (This test API has no
+  // voice provider, so only the camera is asked for.)
+  expect(await page.evaluate(() => window.__gumConstraints[0])).toMatchObject({ video: true });
+  // A refusal isn't asked again on its own.
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => window.__gumCalls)).toBe(1);
+});
+
+test("a board never prompts for what the browser has blocked, and says so", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__gumCalls = 0;
+    Object.defineProperty(navigator.permissions, "query", {
+      configurable: true,
+      value: async () => ({ state: "denied" }),
+    });
+    Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
+      configurable: true,
+      value: async () => {
+        window.__gumCalls += 1;
+        throw new Error("getUserMedia must not run while permission is denied");
+      },
+    });
+  });
+
+  await page.goto("/?testStandalone=1");
+  await expect(page.getByTestId("canvas-copilot").getByText("Camera and microphone are blocked")).toBeVisible();
   await page.waitForTimeout(500);
   expect(await page.evaluate(() => window.__gumCalls)).toBe(0);
 });

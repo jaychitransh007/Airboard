@@ -66,6 +66,14 @@ function cornerPixel(page: Page) {
 }
 
 test("classic theme paints an opaque white board", async ({ page }) => {
+  // The camera locks the board to neon, and it starts on its own; with the
+  // camera blocked in the browser, classic is free to choose.
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator.permissions, "query", {
+      configurable: true,
+      value: async () => ({ state: "denied" }),
+    });
+  });
   await openStandalone(page);
   // Neon is the product default; this assertion deliberately exercises the
   // user-selectable classic rendering branch.
@@ -174,7 +182,7 @@ test("camera, dark scrim, and diagrams keep their strict layer order", async ({ 
   });
   await openStandalone(page);
 
-  await page.getByRole("button", { name: "Enable Airo voice and hand tracking" }).click();
+  // The camera starts on its own as the board opens.
   await expect(page.getByLabel("Lightboard (neon) theme")).toBeChecked();
   await expect(page.getByLabel("Camera behind the dark canvas")).toBeChecked();
   await expect(page.getByTestId("scrim-value")).toHaveText("60%");
@@ -229,7 +237,7 @@ test("camera, dark scrim, and diagrams keep their strict layer order", async ({ 
 test("studio records the composite to a local webm download", async ({ page }) => {
   await openStandalone(page);
   await page.getByLabel("Lightboard (neon) theme").check();
-  await page.getByRole("button", { name: "Enable Airo voice and hand tracking" }).click();
+  // The camera starts on its own as the board opens.
 
   const input = page.getByTestId("intent-command-input");
   await input.fill("add a circle here");

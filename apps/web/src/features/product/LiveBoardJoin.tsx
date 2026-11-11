@@ -52,6 +52,9 @@ export function LiveBoardJoin({ sessionId, joinToken }: { sessionId: string; joi
         participantName={displayName}
         {...(auth.accessToken ? { accessToken: auth.accessToken } : {})}
         {...(auth.account ? { accountUserId: auth.account.profile.id } : {})}
+        // A signed-in guest's own camera and voice settings apply here too.
+        {...(auth.account?.policy ? { organizationPolicy: auth.account.policy } : {})}
+        {...(auth.account?.profile.preferences ? { initialPreferences: auth.account.profile.preferences } : {})}
         onLiveJoinFailed={(message) => setFailure(liveJoinFailure(message))}
         onGuestEditingChange={(allowed) => {
           if (!allowed) setMode("view");

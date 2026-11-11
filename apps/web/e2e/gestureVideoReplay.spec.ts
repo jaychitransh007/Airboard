@@ -145,6 +145,21 @@ for (const asset of assets) {
         "mounted recorded-video hash",
       ).toBe(asset.hash.value);
 
+      // The camera starts on its own as the board opens; hold it until the setup
+      // and baseline are done, so the replay starts from a known board.
+      await page.addInitScript(() => {
+        const media = navigator.mediaDevices;
+        const original = media.getUserMedia.bind(media);
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        (window as unknown as { __releaseReplayCamera: () => void }).__releaseReplayCamera = release;
+        media.getUserMedia = async (constraints) => {
+          await gate;
+          return original(constraints);
+        };
+      });
       await page.goto("/?testStandalone=1");
       const onboarding = page.getByRole("button", {
         name: "Start building",
@@ -199,11 +214,9 @@ for (const asset of assets) {
         ).__airboardTestHooks.clearEvalJournals();
       });
       const baseline = await readOutcomeSnapshot(page);
-      await page
-        .getByRole("button", {
-          name: "Enable Airo voice and hand tracking",
-        })
-        .click();
+      await page.evaluate(() =>
+        (window as unknown as { __releaseReplayCamera: () => void }).__releaseReplayCamera(),
+      );
       await expect(
         page.locator(".status-grid").getByText("On", { exact: true }),
       ).toBeVisible({ timeout: 30_000 });

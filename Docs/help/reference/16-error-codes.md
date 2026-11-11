@@ -43,10 +43,10 @@ ID before retrying.
 | Code | Meaning | What to do |
 | --- | --- | --- |
 | `TRANSCRIPTION_UNAVAILABLE` | Realtime transcription is not configured. | Use typed commands and notify the operator if voice is expected. |
-| `TRANSCRIPTION_SESSION_LIMIT` | A voice stream reached its maximum length (30 minutes). | Nothing: Airo opens a new stream on its own. If nobody spoke for 20 minutes, voice pauses instead; hold an open palm or press ⏻ (Resume voice) to wake it. |
+| `TRANSCRIPTION_SESSION_LIMIT` | A voice stream reached its maximum length (30 minutes). | Nothing: Airo opens a new stream on its own. If nobody spoke for 20 minutes, voice pauses instead; hold an open palm, or click the board, to wake it. |
 | `TRANSCRIPTION_CAPACITY_REACHED` | Airboard's voice service is at capacity. | Airo retries on its own for up to about a minute. If it still can't connect, use typed commands and try again in a minute. |
-| `TRANSCRIPTION_PROFILE_LIMIT` | Your account already has Airo voice on in other tabs. | Turn Airo off in the other tab, then turn it on here. |
-| `TRANSCRIPTION_RECONNECT_FAILED` | Airo's voice connection dropped and couldn't come back. | Check your network, then press ⏻ (Resume voice) on the Airo panel. Typed commands still work. |
+| `TRANSCRIPTION_PROFILE_LIMIT` | Your account already has Airo voice on in other tabs. | Close Airboard in another tab, then reload this board. Typed commands still work. |
+| `TRANSCRIPTION_RECONNECT_FAILED` | Airo's voice connection dropped and couldn't come back. | Check your network, then hold an open palm, or reload the board. Typed commands still work. |
 | `DAILY_VOICE_LIMIT` | You've used today's Airo voice minutes. Each person has a daily allowance. | Use typed commands; voice comes back at midnight UTC. |
 | `DAILY_AIRO_LIMIT` | You've reached today's limit for Airo commands that need its language model. | Built-in commands still work; the limit resets at midnight UTC. |
 | `SERVICE_VOICE_LIMIT` | Airo voice has reached its daily limit for everyone in the pilot. | Use typed commands; voice comes back at midnight UTC. |

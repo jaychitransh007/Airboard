@@ -333,7 +333,7 @@ export function registerTranscriptionRoutes(
         sendError(
           clientSocket,
           slotRefusal,
-          "This account already has the maximum number of live transcription streams. Stop Airo in another tab and try again.",
+          "This account already has Airo voice on in other tabs. Close Airboard in another tab, then reload this board.",
           true,
         );
         return;
