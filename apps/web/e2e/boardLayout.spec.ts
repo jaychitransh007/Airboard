@@ -72,22 +72,34 @@ test("a selected shape gets a compact toolbar beside it, with every field behind
   await expect(toolbar.getByLabel("Element width")).toHaveCount(0);
 });
 
-test("Airo starts as a strip when the board opens and expands on request", async ({ page }) => {
+test("Airo starts hidden on the right and is shown or hidden, never shrunk", async ({ page }) => {
+  // A first visit: no saved choice (the suite otherwise opens the panel).
+  await page.addInitScript(() => {
+    if (window.sessionStorage.getItem("first-visit-done")) return;
+    window.sessionStorage.setItem("first-visit-done", "1");
+    window.localStorage.removeItem("airboard.copilot.v2");
+  });
   await openBoard(page);
-  const copilot = page.getByTestId("canvas-copilot");
-  // Voice and hands start on their own; there is no switch to press.
-  await expect(copilot).toHaveClass(/canvas-copilot-slim/, { timeout: 30_000 });
-  await expect(copilot.getByRole("button", { name: /Airo voice and hand tracking/ })).toHaveCount(0);
-  await expect(copilot.getByTestId("copilot-activity")).toHaveCount(0);
-  // Typing still works from the strip.
-  await expect(page.getByTestId("intent-command-input")).toBeVisible();
-  const slimBox = (await copilot.boundingBox())!;
-  expect(slimBox.height).toBeLessThan(260);
+  const show = page.getByTestId("canvas-copilot-toggle");
+  await expect(show).toBeVisible();
+  await expect(page.getByTestId("canvas-copilot")).toHaveCount(0);
+  // The toggle sits at the right edge of the board.
+  const board = (await page.locator("canvas.board-canvas").boundingBox())!;
+  const toggleBox = (await show.boundingBox())!;
+  expect(toggleBox.x + toggleBox.width).toBeGreaterThan(board.x + board.width - 80);
 
-  await copilot.getByRole("button", { name: "Expand Airo panel" }).click();
+  await show.click();
+  const copilot = page.getByTestId("canvas-copilot");
   await expect(copilot.getByTestId("copilot-activity")).toBeVisible();
-  await copilot.getByRole("button", { name: "Shrink Airo panel" }).click();
-  await expect(copilot.getByTestId("copilot-activity")).toHaveCount(0);
+  await expect(copilot.getByRole("button", { name: /Expand|Shrink/ })).toHaveCount(0);
+  await expect(page.getByTestId("intent-command-input")).toBeVisible();
+
+  await copilot.getByRole("button", { name: "Hide Airo panel" }).click();
+  await expect(page.getByTestId("canvas-copilot")).toHaveCount(0);
+  // The choice is kept for the next board.
+  await show.click();
+  await page.reload();
+  await expect(page.getByTestId("canvas-copilot")).toBeVisible();
 });
 
 test("zoom lives at the end of the tool dock", async ({ page }) => {
@@ -106,7 +118,7 @@ test("on a phone the element toolbar is one full-width bar under the top bar", a
   await page.setViewportSize({ width: 375, height: 760 });
   await openBoard(page);
   // On a phone the Airo panel covers the canvas; close it to reach the dock.
-  const hideAiro = page.getByRole("button", { name: "Hide Airo copilot" });
+  const hideAiro = page.getByRole("button", { name: "Hide Airo panel" });
   if (await hideAiro.isVisible()) await hideAiro.click();
   const canvas = page.locator("canvas.board-canvas");
   const canvasBox = (await canvas.boundingBox())!;

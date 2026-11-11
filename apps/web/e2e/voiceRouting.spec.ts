@@ -163,7 +163,7 @@ test("right-side copilot is collapsible and voice applies without its Send butto
     .toBe(3);
   await expect(page.getByTestId("copilot-activity")).toContainText("Board updated");
 
-  await page.getByRole("button", { name: "Hide Airo copilot" }).click();
+  await page.getByRole("button", { name: "Hide Airo panel" }).click();
   await expect(copilot).toHaveCount(0);
   const reopen = page.getByTestId("canvas-copilot-toggle");
   await expect(reopen).toBeVisible();

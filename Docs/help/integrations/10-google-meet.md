@@ -45,9 +45,9 @@ screen behind the board** in **•••** before you present. See
 
 - Your Airboard tab, presented in the call: the diagram, with your camera or
   chosen screen behind it.
-- The board's top bar, tool dock and Airo panel, exactly as they look on your
-  screen. The Airo panel shows only what you say to Airo, never the rest of
-  the conversation.
+- The board's top bar and tool dock, exactly as they look on your screen.
+  The Airo panel starts hidden; if you show it, it lists only what you say to
+  Airo, never the rest of the conversation.
 - Airo's short notes on the board, such as **Undo** after a change, or a note
   when it couldn't apply a command. If you share tab audio, people may also
   hear Airo's quiet sounds; turn them off in the board's settings under
@@ -70,7 +70,8 @@ Everything keeps working in the Airboard tab while you present:
   change the board. See [Airo voice](/help/using-the-board/airo-voice).
 - **Hands:** aim, choose, move and place objects with
   [camera gestures](/help/using-the-board/gestures).
-- **Typing and mouse:** type in the Airo panel, or use the tool dock and the
+- **Typing and mouse:** show the Airo panel (**✦ Airo** at the right edge)
+  and type in it, or use the tool dock and the
   pointer.
 - **Undo:** press `Cmd/Ctrl+Z`, choose **•••** then **Undo**, or say “Airo,
   undo.”

@@ -4,7 +4,7 @@ test.beforeEach(async ({ context }) => {
   await context.addInitScript(() => {
     window.localStorage.setItem("airboard.onboarding.v1", "done");
     window.localStorage.setItem("airboard.cookie-choice.v1", "necessary");
-    window.localStorage.setItem("airboard.copilot.v1", "closed");
+    window.localStorage.setItem("airboard.copilot.v2", "closed");
     window.localStorage.removeItem("airboard.creation.recent-shapes.v1");
   });
 });
@@ -477,7 +477,7 @@ test("creation popovers and the shape library become reachable drawers on narrow
 test("the responsive shape drawer remains beside Airo", async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 760 });
   const toolbar = await openStableStandalone(page);
-  await page.getByRole("button", { name: "Open Airo copilot" }).click();
+  await page.getByRole("button", { name: "Show Airo panel" }).click();
   const copilot = page.getByTestId("canvas-copilot");
   await expect(copilot).toBeVisible();
 

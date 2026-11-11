@@ -14,9 +14,12 @@ Airo turns finalized speech into the same command pipeline used by typed input.
 Airo starts listening as soon as a board opens; there is nothing to turn on.
 The first time, the browser asks once for the camera and microphone. To keep
 the microphone off on every board, turn off **Airboard audio input** in
-**Settings → Preferences**. The Airo panel says when voice isn't available.
-While Airo listens, its panel shrinks to a strip in the corner with what it heard,
-what it is doing and a line to type into; **⤢** shows its full activity.
+**Settings → Preferences**.
+
+The Airo panel starts hidden at the right edge of the board, so the board
+stays clear. Choose **✦ Airo** there to show it: it lists what Airo heard and
+did, says when voice isn't available, and has a box for typing a command.
+Choose **›** to hide it again. Airboard remembers your choice.
 
 Voice stays on for the whole meeting. If the connection drops, for example on
 a network blip, Airo reconnects on its own and says when it is listening

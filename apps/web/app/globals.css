@@ -3606,6 +3606,20 @@ button:disabled {
   backdrop-filter: blur(24px) saturate(135%);
   -webkit-backdrop-filter: blur(24px) saturate(135%);
   transition: right 180ms ease;
+  animation: canvas-copilot-slide-in 180ms ease-out;
+}
+
+@keyframes canvas-copilot-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-copilot {
+    animation: none;
+  }
 }
 
 .canvas-workspace.settings-open .canvas-copilot {
@@ -3689,60 +3703,6 @@ button:disabled {
   border-color: rgba(207, 191, 255, 0.5);
   background: rgba(126, 91, 239, 0.5);
   color: #fff;
-}
-
-/* While Airo listens the panel is a strip in the top-right corner: what it
-   heard, what it is doing, and one line to type into. */
-.canvas-copilot.canvas-copilot-slim {
-  bottom: auto;
-  width: min(320px, calc(100% - 36px));
-  padding-bottom: 10px;
-}
-
-.canvas-copilot-slim .canvas-copilot-header {
-  padding: 10px 10px 9px 12px;
-}
-
-.canvas-copilot-slim-heard,
-.canvas-copilot-slim-status {
-  margin: 0;
-  padding: 0 14px;
-}
-
-.canvas-copilot-slim-heard {
-  overflow: hidden;
-  padding-top: 10px;
-  color: rgba(255, 255, 255, 0.92);
-  font-size: 12px;
-  line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.canvas-copilot-slim-status {
-  display: -webkit-box;
-  overflow: hidden;
-  padding-top: 3px;
-  color: rgba(255, 255, 255, 0.58);
-  font-size: 11px;
-  line-height: 1.4;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.canvas-copilot-slim .canvas-copilot-composer {
-  margin-top: 9px;
-  padding: 5px;
-}
-
-.canvas-copilot-slim .canvas-copilot-composer textarea {
-  min-height: 30px;
-  resize: none;
-}
-
-.canvas-copilot-slim .canvas-copilot-composer .primary {
-  min-height: 30px;
-  height: 30px;
 }
 
 .canvas-copilot-heard,
@@ -3974,18 +3934,22 @@ button:disabled {
   color: rgba(220, 210, 255, 0.65);
 }
 
+/* The hidden Airo panel is a tab on the board's right edge, like a drawer
+   pulled shut; choosing it slides the panel back in. */
 .canvas-copilot-toggle {
   position: absolute;
   z-index: 26;
-  top: 18px;
-  right: 18px;
+  top: 50%;
+  right: 0;
   display: flex;
   align-items: center;
   gap: 7px;
   min-height: 38px;
-  padding: 0 12px;
+  padding: 0 12px 0 14px;
   border: 1px solid rgba(210, 197, 255, 0.25);
-  border-radius: 12px;
+  border-right: none;
+  border-radius: 12px 0 0 12px;
+  transform: translateY(-50%);
   background: rgba(31, 23, 43, 0.82);
   color: rgba(255, 255, 255, 0.86);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
@@ -4518,11 +4482,6 @@ button:disabled {
   .canvas-workspace.settings-open .canvas-copilot {
     right: 8px;
     width: calc(100% - 16px);
-  }
-
-  .canvas-copilot-toggle {
-    top: 10px;
-    right: 10px;
   }
 
   /* Phones pinch to zoom; the dock keeps its width for tools. A desktop

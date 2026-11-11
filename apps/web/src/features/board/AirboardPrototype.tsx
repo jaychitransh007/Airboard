@@ -1409,9 +1409,9 @@ export function AirboardPrototype({
   const dockGestureHoverRef = useRef<string | null>(null);
   const catalogCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dockRef = useRef<HTMLDivElement | null>(null);
-  const [copilotOpen, setCopilotOpen] = useState(true);
-  // Expanded by hand while Airo listens; otherwise the panel shrinks to a strip.
-  const [copilotExpanded, setCopilotExpanded] = useState(false);
+  // The Airo panel is shown or hidden, nothing in between; it starts hidden
+  // so the board (and the presented tab) stays clear.
+  const [copilotOpen, setCopilotOpen] = useState(false);
   const copilotActivitySequenceRef = useRef(1);
   const [copilotActivity, setCopilotActivity] = useState<CopilotActivityEntry[]>([
     {
@@ -1643,7 +1643,7 @@ export function AirboardPrototype({
   const setCopilotVisibility = useCallback((visible: boolean) => {
     setCopilotOpen(visible);
     try {
-      window.localStorage.setItem("airboard.copilot.v1", visible ? "open" : "closed");
+      window.localStorage.setItem(COPILOT_VISIBILITY_KEY, visible ? "open" : "closed");
     } catch {
       // Preference persistence is best-effort.
     }
@@ -9623,11 +9623,7 @@ export function AirboardPrototype({
   const airoBlockedByBrowser =
     !airoInputsActive &&
     (cameraPermission === "denied" || microphonePermission === "denied" || cameraStatus === "blocked");
-  const copilotMode: "closed" | "slim" | "full" = !copilotOpen
-    ? "closed"
-    : airoEngaged && !copilotExpanded
-      ? "slim"
-      : "full";
+  const copilotMode: "closed" | "full" = copilotOpen ? "full" : "closed";
 
   // Airo's voice and hands start as soon as a board opens: the first time,
   // the browser asks once for the camera and microphone together. There is no
@@ -12376,9 +12372,7 @@ export function AirboardPrototype({
       <div
         className={`content${standaloneEditor ? " canvas-workspace" : ""}${
           standaloneEditor && settingsOpen ? " settings-open" : ""
-        }${standaloneEditor && copilotMode === "full" ? " copilot-open" : ""}${
-          standaloneEditor && copilotMode === "slim" ? " copilot-slim" : ""
-        }`}
+        }${standaloneEditor && copilotMode === "full" ? " copilot-open" : ""}`}
       >
         <section
           className={`board-area${boardTheme === "lightboard" ? " lightboard" : ""}`}
@@ -12387,7 +12381,7 @@ export function AirboardPrototype({
           {standaloneEditor && inputMode === "gesture" && !broadcastSafe ? (
             copilotMode !== "closed" ? (
               <aside
-                className={`canvas-copilot${copilotMode === "slim" ? " canvas-copilot-slim" : ""}`}
+                className="canvas-copilot"
                 data-testid="canvas-copilot"
                 aria-label="Airo copilot"
               >
@@ -12416,19 +12410,10 @@ export function AirboardPrototype({
                     </span>
                   </div>
                   <div className="canvas-copilot-header-actions">
-                    {airoEngaged ? (
-                      <button
-                        type="button"
-                        aria-label={copilotMode === "slim" ? "Expand Airo panel" : "Shrink Airo panel"}
-                        title={copilotMode === "slim" ? "Show activity" : "Shrink"}
-                        onClick={() => setCopilotExpanded(copilotMode === "slim")}
-                      >
-                        {copilotMode === "slim" ? "⤢" : "⤡"}
-                      </button>
-                    ) : null}
                     <button
                       type="button"
-                      aria-label="Hide Airo copilot"
+                      aria-label="Hide Airo panel"
+                      title="Hide"
                       onClick={() => setCopilotVisibility(false)}
                     >
                       ›
@@ -12436,25 +12421,7 @@ export function AirboardPrototype({
                   </div>
                 </header>
 
-                {copilotMode === "slim" ? (
-                  // While Airo listens it stays out of the way: what it heard,
-                  // what it is doing, and one line to type into.
-                  <>
-                    <p className="canvas-copilot-slim-heard" data-testid="copilot-transcript">
-                      {speechHeardText
-                        ? `“${truncateSpeechTranscript(speechHeardText, 120)}”`
-                        : "Listening for your next command…"}
-                    </p>
-                    <p
-                      id="canvas-command-feedback"
-                      className="intent-feedback canvas-copilot-slim-status"
-                      aria-live="polite"
-                    >
-                      {commandFeedback}
-                    </p>
-                  </>
-                ) : (
-                  <>
+                <>
                     <section className="canvas-copilot-heard" data-testid="copilot-transcript">
                       <span>What I heard</span>
                       <p>
@@ -12508,8 +12475,7 @@ export function AirboardPrototype({
                         {commandFeedback}
                       </p>
                     </section>
-                  </>
-                )}
+                </>
 
                 <form
                   className="canvas-copilot-composer"
@@ -12528,7 +12494,7 @@ export function AirboardPrototype({
                     ref={intentCommandInputRef}
                     data-testid="intent-command-input"
                     value={intentCommandText}
-                    rows={copilotMode === "slim" ? 1 : 2}
+                    rows={2}
                     onChange={(event) => {
                       semanticIntentRequestIdRef.current += 1;
                       if (speechRecognitionStatus === "interpreting") {
@@ -12572,7 +12538,8 @@ export function AirboardPrototype({
                 type="button"
                 className="canvas-copilot-toggle"
                 data-testid="canvas-copilot-toggle"
-                aria-label="Open Airo copilot"
+                aria-label="Show Airo panel"
+                title="Show Airo"
                 onClick={() => setCopilotVisibility(true)}
               >
                 <span aria-hidden="true">✦</span>
@@ -15339,17 +15306,23 @@ function surfaceLabel(surface: Surface): string {
 }
 
 /**
- * Whether the Airo panel opens with the board. On a phone it would cover the
- * whole canvas, so the board opens canvas-first and Airo waits behind its
- * button; elsewhere the person's last choice holds.
+ * The Airo panel's show/hide choice. A new key: the panel used to start open,
+ * and now starts hidden for everyone until they choose to show it.
+ */
+const COPILOT_VISIBILITY_KEY = "airboard.copilot.v2";
+
+/**
+ * Whether the Airo panel opens with the board: hidden by default, so voice,
+ * hands and the on-board notices carry the board; shown only once the person
+ * chose to show it. On a phone it would cover the canvas, so it starts hidden.
  */
 function copilotStartsOpen(): boolean {
-  if (typeof window === "undefined") return true;
+  if (typeof window === "undefined") return false;
   if (window.matchMedia?.("(max-width: 700px)").matches) return false;
   try {
-    return window.localStorage.getItem("airboard.copilot.v1") !== "closed";
+    return window.localStorage.getItem(COPILOT_VISIBILITY_KEY) === "open";
   } catch {
-    return true;
+    return false;
   }
 }
 
