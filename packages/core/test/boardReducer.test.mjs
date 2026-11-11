@@ -6,12 +6,12 @@ import {
   createInitialBoardState,
   createStroke,
   upgradeBoardStateToSceneVersion,
-} from "../dist/boardReducer.js";
+} from "../src/boardReducer.ts";
 import {
   createBoardSceneElement,
   createDefaultTableData,
   createRichTextDocument,
-} from "../dist/sceneElements.js";
+} from "../src/sceneElements.ts";
 
 const envelope = (createdAt = "2026-07-09T00:00:00.000Z") => ({
   id: crypto.randomUUID(),

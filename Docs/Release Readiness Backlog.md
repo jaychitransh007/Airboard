@@ -1,6 +1,6 @@
 # Release Readiness Backlog
 
-> **Status:** Living register. Each item's Status column is current as of 2026-11-05; the change log at the end records the evidence.
+> **Status:** Living register. Each item's Status column is current as of 2026-11-12; the change log at the end records the evidence.
 > **Created:** 2026-07-29
 > **Source:** 9-dimension code/product audit on branch `codex/production-readiness` (2026-07-28).
 > **Relationship to other docs:** This is the engineering gap register that sits *underneath*
@@ -15,7 +15,9 @@
 - **Verification column:** `Verified` = confirmed by reading source during the audit · `Reported` = auditor-reported, not independently re-verified (the audit's automated verify pass was cut short — see [Coverage gaps](#coverage-gaps)).
 - Promote an item out of Backlog only when a named owner accepts it. Closing an item requires evidence, same as the launch gates.
 
-## Ground-truth snapshot at time of audit
+## Ground-truth snapshot at time of audit (28 July 2026)
+
+> Historical. Today (12 November 2026) the unit suites pass in full (web 531, API 229, core 87, plus the other packages), the browser suite passes 172 tests, and `pnpm launch:check:deployed` reports READY 21/21 for the controlled pilot. See [Project Status](<Project Status.md>).
 
 - `pnpm -r build` ✓ · `pnpm typecheck` ✓ · `pnpm test` = **350/350 unit tests pass** · web build emits 27 static pages.
 - `pnpm launch:check` (controlled-pilot) = 4/23; the 19 failures are deploy-time config + external human/legal/ops evidence, **not broken code**.
@@ -120,7 +122,7 @@ These are fixable in the repo and each would make a public "supported product" c
 
 These are already enforced fail-closed by `ops/launch-evidence.json` / `pnpm launch:check` and are **not** duplicated as backlog items. Summary of what remains human/legal/ops/deploy:
 
-- Production config: `NODE_ENV=production`, non-local HTTPS/WSS URLs, real Supabase keys, ≥32-char signing/API/cron secrets, `AIRBOARD_LOCAL_ENTITLEMENTS=false`, `AIRBOARD_CHROME_EXTENSION_ENABLED=true` for the active Meet release, Resend key.
+- Production config: `NODE_ENV=production`, non-local HTTPS/WSS URLs, real Supabase keys, ≥32-char signing/API/cron secrets, `AIRBOARD_LOCAL_ENTITLEMENTS=false`, `AIRBOARD_CHROME_EXTENSION_ENABLED` left unset (the extension is off; Meet works by presenting the Airboard tab), no email sender for the Google-only pilot.
 - Applied production migrations; deployment + commercial smoke evidence.
 - Legal/counsel approval; subprocessor review; threat model; independent pentest.
 - Backup/restore drill; incident tabletop; monitoring/alert routing; real public status page; support SLA/staffing.
@@ -1282,14 +1284,6 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - The test board is in Trash. The `launch-306c7a5-api` and `launch-4ae4227-web` tags were removed.
   - **Rollback:** the API to `launch-306c7a5` and the web to `launch-4ae4227`. The old API ignores the new table.
 - **2026-11-07** — RGB-045: live sessions survive the 60-minute WebSocket cut and the 30-minute ticket.
-- **2026-11-11** — RGB-046: Trash removed; deleting a board is permanent, and Boards is one list by last change.
-- **2026-11-11** — RGB-047: creation-first web app: one Airboards home page, a top header with a profile menu, admin in Settings, Google Meet taught in the Help Center.
-- **2026-11-11** — RGB-048: voice and camera start on their own when a board opens; the on/off and permission buttons are gone.
-- **2026-11-11** — RGB-049: hands-free meetings. Voice failures no longer land in the typing box, Airo guesses instead of asking, follow-ups need no wake word, pointing resolves "here/this/that", hands work on every shape without a keyboard, and voice minutes count only speech.
-- **2026-11-11** — Deployed RGB-049: both services serve `launch-928def2`. No migration. The API was promoted first (the web sends a new `addressedBy` field). Launch check READY 21/21. Rollback both to `launch-7430e61`, the web first. Not yet tried with a real microphone and camera in a meeting.
-- **2026-11-11** — The Airo panel is shown or hidden (no shrink/expand strip) and starts hidden as a tab on the board's right edge (owner request). The web serves `launch-9d5003b`; the API stays `launch-928def2`. Rollback the web to `launch-928def2`. Launch check READY 21/21.
-- **2026-11-11** — Undo, Redo and Hide diagram are small icons at the board's bottom left, level with the element dock, instead of ••• menu items (owner request). The web serves `launch-0f306bc`; the API stays `launch-928def2`. Rollback the web to `launch-9d5003b`. Launch check READY 21/21.
-- **2026-11-11** — Share is a menu: Share with people, Export PDF, Export PNG and Copy image; the exports left the ••• menu (owner request). The web serves `launch-d9e6580`; the API stays `launch-928def2`. Rollback the web to `launch-0f306bc`. Launch check READY 21/21.
   - **Server:**
     - `/start`, `/join` and `/resume` also return a `refreshToken`. It lasts 12 hours and only ever travels in JSON bodies.
     - `POST /sessions/:id/ticket` trades it for a fresh 30-minute ticket while the session is open. An owner must also be signed in, and their refresh revives a locked (not ended) session, as their heartbeat does. The URL-borne ticket itself renews nothing.
@@ -1315,9 +1309,6 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - Against a real local Supabase: a resent batch stored only its new event, and a missing session read as not found.
   - **Deploy order:** the API first, then the web. The new API works with the old web, which never calls the new routes.
 - **2026-11-07** — Deployed RGB-045: both services serve `launch-b8b681e`. No migration was needed. The API was promoted before the web, so the new web never ran against an API without its routes.
-- **2026-11-11** — Deployed RGB-046: both services serve `launch-7a68082` (Trash removed, permanent delete). No migration. The API was promoted first. The staged API's first fan-out probe hit a transient Supabase Realtime `MissingPartition` error just after midnight UTC; it passed on the 30-second retry and stayed ready.
-- **2026-11-11** — Deployed RGB-047: the web serves `launch-afc149b` (creation-first redesign); the API stays on `launch-7a68082`. No migration. Old addresses redirect inside the page (Next.js sends the 307 in the stream, so `curl` sees 200 with `NEXT_REDIRECT`; browsers follow it).
-- **2026-11-11** — Deployed RGB-048: both services serve `launch-7430e61` (voice and camera start when a board opens). No migration. The API was promoted first.
   - **Staged checks:**
     - The API reported ready; refused a forged refresh token (`REFRESH_TOKEN_REQUIRED`) and a forged catch-up ticket (`REALTIME_TICKET_REQUIRED`); closed a forged socket ticket with 1008; and answered 401 signed out and 400 for malformed JSON.
     - The web served its pages with the security headers, and its bundle carries the new live-link status and the "waiting for the host" notice.
@@ -1330,4 +1321,15 @@ The audit workflow hit the org monthly spend limit mid-run, so the following wer
     - The status line read "Saved", and the test board is in Trash.
   - **Not yet seen live:** a session kept open past the 60-minute cut. The behaviour is covered by tests.
   - **Rollback:** the web to `launch-99ae9d0` first, then the API. The `launch-99ae9d0-*` tags were removed.
+- **2026-11-11** — RGB-046: Trash removed; deleting a board is permanent, and Boards is one list by last change.
+- **2026-11-11** — Deployed RGB-046: both services serve `launch-7a68082` (Trash removed, permanent delete). No migration. The API was promoted first. The staged API's first fan-out probe hit a transient Supabase Realtime `MissingPartition` error just after midnight UTC; it passed on the 30-second retry and stayed ready.
+- **2026-11-11** — RGB-047: creation-first web app: one Airboards home page, a top header with a profile menu, admin in Settings, Google Meet taught in the Help Center.
+- **2026-11-11** — Deployed RGB-047: the web serves `launch-afc149b` (creation-first redesign); the API stays on `launch-7a68082`. No migration. Old addresses redirect inside the page (Next.js sends the 307 in the stream, so `curl` sees 200 with `NEXT_REDIRECT`; browsers follow it).
+- **2026-11-11** — RGB-048: voice and camera start on their own when a board opens; the on/off and permission buttons are gone.
+- **2026-11-11** — Deployed RGB-048: both services serve `launch-7430e61` (voice and camera start when a board opens). No migration. The API was promoted first.
+- **2026-11-11** — RGB-049: hands-free meetings. Voice failures no longer land in the typing box, Airo guesses instead of asking, follow-ups need no wake word, pointing resolves "here/this/that", hands work on every shape without a keyboard, and voice minutes count only speech.
+- **2026-11-11** — Deployed RGB-049: both services serve `launch-928def2`. No migration. The API was promoted first (the web sends a new `addressedBy` field). Launch check READY 21/21. Rollback both to `launch-7430e61`, the web first. Not yet tried with a real microphone and camera in a meeting.
+- **2026-11-11** — The Airo panel is shown or hidden (no shrink/expand strip) and starts hidden as a tab on the board's right edge (owner request). The web serves `launch-9d5003b`; the API stays `launch-928def2`. Rollback the web to `launch-928def2`. Launch check READY 21/21.
+- **2026-11-11** — Undo, Redo and Hide diagram are small icons at the board's bottom left, level with the element dock, instead of ••• menu items (owner request). The web serves `launch-0f306bc`; the API stays `launch-928def2`. Rollback the web to `launch-9d5003b`. Launch check READY 21/21.
+- **2026-11-11** — Share is a menu: Share with people, Export PDF, Export PNG and Copy image; the exports left the ••• menu (owner request). The web serves `launch-d9e6580`; the API stays `launch-928def2`. Rollback the web to `launch-0f306bc`. Launch check READY 21/21.
 

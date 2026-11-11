@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 
 import {
   AIRBOARD_SEMANTIC_CAPABILITY_REGISTRY,
-} from "../../packages/core/dist/semanticCapabilities.js";
+} from "../../packages/core/src/semanticCapabilities.ts";
 import {
   INTERACTION_EVAL_CASE_SCHEMA_VERSION,
   INTERACTION_EVAL_RESULT_SCHEMA_VERSION,

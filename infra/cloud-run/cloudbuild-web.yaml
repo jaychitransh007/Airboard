@@ -18,8 +18,8 @@ images:
 substitutions:
   _CHROME_WEB_STORE_URL: ""
   _CHROME_EXTENSION_VERSION: "0.8.0"
-  # Deliberately empty: canonical production builds fail until the reviewed
-  # Chrome Web Store item ID is supplied as a build substitution.
+  # Empty while the Chrome extension is switched off: the overlay engine then
+  # refuses framing. Supply the reviewed Web Store ID only if it returns.
   _AIRBOARD_CHROME_EXTENSION_ID: ""
   _CHROME_EXTENSION_COMPATIBLE_VERSIONS: "0.8.0"
 options:

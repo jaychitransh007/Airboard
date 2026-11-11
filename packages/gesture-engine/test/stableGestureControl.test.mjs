@@ -4,15 +4,15 @@ import { test } from "node:test";
 import {
   HybridGestureController,
   mapControlZonePointToCanvas,
-} from "../dist/hybridGestureController.js";
+} from "../src/hybridGestureController.ts";
 import {
   PinchHysteresis,
   pinchStrengthFromDistance,
-} from "../dist/pinchHysteresis.js";
+} from "../src/pinchHysteresis.ts";
 import {
   acquireStickyTarget,
   findAreaTarget,
-} from "../dist/targetAcquisition.js";
+} from "../src/targetAcquisition.ts";
 
 test("pinch hysteresis debounces engage and release across separate thresholds", () => {
   const pinch = new PinchHysteresis({

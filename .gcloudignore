@@ -1,0 +1,20 @@
+# What `gcloud builds submit .` must not upload (infra/cloud-run/release.sh).
+# Without this file gcloud uploads the whole working tree, including files git
+# deliberately leaves out, such as the private Docs/Threat Model.md.
+#!include:.gitignore
+.git
+.gitignore
+.claude/
+node_modules/
+**/node_modules/
+**/.next/
+**/.next-production/
+**/dist/
+artifacts/
+test-results/
+playwright-report/
+.env
+.env.*
+!.env.example
+Docs/Threat Model.md
+Docs/archive/

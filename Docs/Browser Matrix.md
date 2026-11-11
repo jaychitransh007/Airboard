@@ -8,7 +8,7 @@ Windows hasn't been run, so the gate stays pending.
 
 ## What is promised
 
-From the [Platform Support Matrix](Platform%20Support%20Matrix.md):
+From the [Platform Support Matrix](Platform%20Support%20Matrix.md) (browser support):
 
 | Browser | Versions | Systems | Status |
 | --- | --- | --- | --- |

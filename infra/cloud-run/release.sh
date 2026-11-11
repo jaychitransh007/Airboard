@@ -27,9 +27,10 @@ BUILD_ACCOUNT=projects/$PROJECT/serviceAccounts/634900453473-compute@developer.g
 API_URL=https://airboard-pilot-api-634900453473.asia-south1.run.app
 SUPABASE_REF=ujotgzjpkocuhtfrvbzu
 MEET_PROJECT_NUMBER=634900453473
-# Placeholder until the Chrome Web Store item is reviewed; the Meet extension
-# is a private preview loaded unpacked.
-CHROME_EXTENSION_ID=${CHROME_EXTENSION_ID:-abcdefghijklmnopabcdefghijklmnop}
+# The Chrome Meet extension is switched off (launch scope, 11 Nov 2026), so no
+# extension ID is built in and nothing may frame the overlay engine. Set
+# CHROME_EXTENSION_ID to the reviewed Web Store ID only if the extension returns.
+CHROME_EXTENSION_ID=${CHROME_EXTENSION_ID:-}
 CHROME_EXTENSION_VERSION=0.8.0
 
 RELEASE=${AIRBOARD_RELEASE:-launch-$(git rev-parse --short=7 HEAD)}

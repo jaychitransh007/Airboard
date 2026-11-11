@@ -41,7 +41,7 @@ export function SupportPage() {
               rows={6}
               value={message}
               onChange={(event) => setMessage(event.target.value)}
-              placeholder="Include platform, app/extension version, browser or OS, steps, diagnostic bundle ID, and any visible error code."
+              placeholder="Include your browser and OS, steps, diagnostic bundle ID, and any visible error code."
             />
           </label>
           <button className="button button-primary" disabled={busy}>

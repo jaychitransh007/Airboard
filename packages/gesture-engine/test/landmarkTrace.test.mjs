@@ -7,7 +7,7 @@ import {
   replayLandmarkTrace,
   replayLandmarkTraceWithDiagnostics,
   segmentsAbove,
-} from "../dist/landmarkTrace.js";
+} from "../src/landmarkTrace.ts";
 
 const FIXTURE = new URL("./fixtures/palm-grab-pointing.trace.json", import.meta.url);
 

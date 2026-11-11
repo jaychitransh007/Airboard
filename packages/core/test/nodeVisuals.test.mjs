@@ -7,7 +7,7 @@ import {
   nodeVisualDefaultSize,
   nodeVisualKind,
   pointOnNodeBoundary,
-} from "../dist/index.js";
+} from "../src/index.ts";
 
 test("every semantic node has one canonical visual and default size", () => {
   const kinds = new Set();

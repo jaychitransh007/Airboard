@@ -25,11 +25,13 @@ board in Google Meet.
 ## How changes are applied
 
 Airboard applies valid commands immediately. There is no Preview or Apply step.
-Undo is the safety net: use the board menu (**•••**), press `Cmd/Ctrl+Z`, or say
-“Airo, undo.”
+Undo is the safety net: choose the **Undo** arrow at the bottom left of the
+board, press `Cmd/Ctrl+Z`, or say “Airo, undo.”
 
-If Airboard cannot safely understand or ground a command, it rejects the
-command or asks a focused question instead of guessing.
+When a command could mean more than one thing, Airo applies its best guess
+(the selected shape, else the newest), and you can undo it. It asks a short
+question only when it truly can't tell what you mean. If a command can't be
+applied safely, Airo says so on the board and you can say it again.
 
 ## Product surfaces
 

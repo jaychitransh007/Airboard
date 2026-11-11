@@ -60,7 +60,9 @@ IP addresses are not stored in product analytics. The lead form stores only a sh
 - Every API response carries `x-request-id`; an incoming W3C `traceparent` is echoed and structured request logs correlate the route and duration.
 - `/internal/lifecycle/run` requires the cron secret. It expires trials and entitlements, executes queued exports/deletions, delivers lifecycle notifications, purges expired deleted boards and enforces operational retention.
 - Stripe webhook payloads are signature-verified and first persisted to an idempotent inbox. Unknown configured price IDs fail closed rather than granting an arbitrary plan.
-- The reusable local acceptance test is `pnpm smoke:commercial`. It verifies account bootstrap, preferences, trial activation, persistent boards, a live session, extension linking/consent/sender verification, invitations, SCIM, privacy requests, usage, audit and product telemetry; temporary credentials are revoked at the end.
+- Two smoke tests run against a live or local API (`AIRBOARD_API_URL`). Neither touches the Chrome extension, which is off in production.
+  - `pnpm smoke:deploy` (also needs `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`) creates a throwaway account with the Supabase admin key. It checks the entitlement gate (402 until the pilot starts), a board save, the stale-version 409, the reload, a data-export request and permanent delete: afterwards the board returns 404 and is gone from the list. It removes the account whether or not the run passed.
+  - `pnpm smoke:commercial` is the wider acceptance test. Give it a disposable account's `AIRBOARD_ACCESS_TOKEN` and an API backed by Supabase; the in-memory API keeps no boards. It covers account bootstrap, preferences, the board-opening preflight and pilot activation, compare-and-swap saves, reload and rename, and a live session: start, a guest joining on the live link, ticket renewal, and ending it from Settings. It also covers invitations, SCIM, a privacy request, usage and audit, and permanent delete, which also removes the board's live session. Temporary credentials are revoked as it goes.
 
 ## Required production configuration
 

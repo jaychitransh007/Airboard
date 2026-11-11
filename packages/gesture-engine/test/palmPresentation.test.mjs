@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { estimatePalmPresentation } from "../dist/palmPresentation.js";
+import { estimatePalmPresentation } from "../src/palmPresentation.ts";
 
 // Synthetic 21-landmark hands in normalized image coordinates (y grows down).
 // Only the joints the estimator reads are meaningful; the rest are filler.

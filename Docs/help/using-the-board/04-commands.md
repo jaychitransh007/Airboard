@@ -63,6 +63,7 @@ Airboard first uses its deterministic command grammar. An explicitly activated
 but unclear command may use bounded semantic recovery when that provider is
 available. The model proposes a typed plan; it cannot mutate the board directly.
 
-If the request is ambiguous, Airboard asks a focused question. If it is unsafe,
-unsupported, stale, or still unclear, Airboard rejects it. Rephrase with a
-visible object label and one clear action.
+If the request is ambiguous, Airo applies its best guess (the selected shape,
+else the newest) and you can undo it; it asks a short question only when it
+truly can't tell. If it is unsafe or unsupported, Airboard rejects it.
+Rephrase with a visible object label and one clear action.

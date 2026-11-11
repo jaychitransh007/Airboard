@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { authorizeBoardEvent, canJoinBoard, shouldLockForOwnerAbsence } from "../dist/permissions.js";
+import { authorizeBoardEvent, canJoinBoard, shouldLockForOwnerAbsence } from "../src/permissions.ts";
 
 const FUTURE = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 const PAST = new Date(Date.now() - 60 * 60 * 1000).toISOString();

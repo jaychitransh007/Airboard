@@ -55,9 +55,8 @@ import {
   buildSemanticIntentContext,
   describeSemanticPlan,
   resolveIntentOperation,
-  resolveSemanticPlanAction,
+  groundSemanticPlan,
 } from "./intentPipeline";
-import { computeSemanticAutoLayout } from "./semanticAutoLayout";
 import { commitCommandTurn, diagramRedoEvents } from "./commandTurnCoordinator";
 import { strokeInputSourceForPointer } from "./inputCapabilities";
 import { parseDesiredGraphCorrection } from "./desiredGraphCorrection";
@@ -210,7 +209,7 @@ import {
   shouldStartHeadlessMeetVoice,
 } from "./headlessMeetVoice";
 import {
-  fetchSemanticIntentConfig,
+  loadSemanticIntentConfigWithRetry,
   resolveSemanticIntent,
   semanticIntentIssueMessage,
   shouldUseSemanticIntentFallback,
@@ -6913,15 +6912,11 @@ export function AirboardPrototype({
         x: viewOrigin.x + canvasWidth / 2,
         y: viewOrigin.y + canvasHeight / 2,
       };
-      let previewState = baseState;
       const initialSelectionIds = executionSnapshot?.selectionIds ?? selectedAnnotationIds;
       // current_selection is a reference to the user's request-time snapshot.
       // Actions may change the final UI selection, but those incidental
       // selectionAfter values must not retarget later actions in the same plan.
       const referenceSelectionIds = [...initialSelectionIds];
-      let workingSelectionIds = initialSelectionIds.filter(
-        (strokeId) => previewState.strokes[strokeId]?.status === "committed",
-      );
       const initialPrimarySelectionId =
         executionSnapshot?.primarySelectionId ?? selectedAnnotationId;
       const referencePrimarySelectionId =
@@ -6929,97 +6924,68 @@ export function AirboardPrototype({
         referenceSelectionIds.includes(initialPrimarySelectionId)
           ? initialPrimarySelectionId
           : (referenceSelectionIds[referenceSelectionIds.length - 1] ?? null);
-      let workingPrimarySelectionId =
-        initialPrimarySelectionId && workingSelectionIds.includes(initialPrimarySelectionId)
-          ? initialPrimarySelectionId
-          : (workingSelectionIds[workingSelectionIds.length - 1] ?? null);
-      const workingHoverStrokeId = executionSnapshot?.hoverStrokeId ?? hoverStrokeId;
-      const autoCreateCenters = computeSemanticAutoLayout({
-        actions: plan.actions,
-        boardState: baseState,
-        canvasWidth,
-        canvasHeight,
-        viewOrigin,
-      });
-      const planHandles = new Map<string, string[]>();
-      let commands: DiagramCommand[] = [];
-      let affectedStrokeIds: string[] = [];
-      const skippedSteps: string[] = [];
 
       try {
-        for (const action of plan.actions) {
-          const resolved = resolveSemanticPlanAction(
-            action,
-            {
-              boardState: previewState,
-              pointer,
-              pointerAvailable: Boolean(actualPointer),
-              canvasWidth,
-              canvasHeight,
-              viewOrigin,
-              autoCreateCenters,
-              selectionIds: referenceSelectionIds,
-              ...(executionSnapshot?.requestSelectionIds
-                ? { requestSelectionIds: executionSnapshot.requestSelectionIds }
-                : {}),
-              primarySelectionId: referencePrimarySelectionId,
-              hoverStrokeId: workingHoverStrokeId,
-              strokeColor,
-            },
-            planHandles,
-          );
-          if ("error" in resolved) {
-            if (voiceTurnId) {
-              reportVoiceTrace(voiceTurnId, "grounding", {
-                status: "rejected",
-                source: "semantic",
-                actionType: action.type,
-                issueCode: resolved.errorCode ?? "grounding_failed",
-                ...(resolved.candidateCount !== undefined
-                  ? { candidateCount: resolved.candidateCount }
-                  : {}),
-              });
-              reportVoiceTrace(voiceTurnId, "action_failed", {
-                phase: "semantic_grounding",
-                actionType: action.type,
-                issueCode: resolved.errorCode ?? "grounding_failed",
-              });
-            }
-            // One misheard name shouldn't throw away the rest of a narrated
-            // diagram: skip this step (and any that build on it, which fail
-            // the same way) and apply what could be matched.
-            skippedSteps.push(resolved.error);
-            continue;
-          }
-          if (voiceTurnId && resolved.repairKinds?.length) {
+        // The tested grounding helper: it applies the steps it can match, skips
+        // a step whose names it can't find (and the steps built on it), and
+        // rejects the plan only when nothing, or a needed first step, fails.
+        const grounding = groundSemanticPlan({
+          actions: plan.actions,
+          context: {
+            boardState: baseState,
+            pointer,
+            pointerAvailable: Boolean(actualPointer),
+            canvasWidth,
+            canvasHeight,
+            viewOrigin,
+            selectionIds: referenceSelectionIds,
+            ...(executionSnapshot?.requestSelectionIds
+              ? { requestSelectionIds: executionSnapshot.requestSelectionIds }
+              : {}),
+            primarySelectionId: referencePrimarySelectionId,
+            hoverStrokeId: executionSnapshot?.hoverStrokeId ?? hoverStrokeId,
+            strokeColor,
+          },
+          applyCommand: (state, command) =>
+            applyDiagramCommand(state, command, diagramCommandContext(boardSessionIdRef.current)),
+          maxCommands: MAX_PLAN_BOARD_CHANGES,
+        });
+        if (voiceTurnId) {
+          for (const step of grounding.skipped) {
             reportVoiceTrace(voiceTurnId, "grounding", {
-              status: "repaired",
+              status: "rejected",
               source: "semantic",
-              actionType: action.type,
-              repairKinds: resolved.repairKinds,
+              actionType: step.actionType,
+              issueCode: step.errorCode,
+            });
+            reportVoiceTrace(voiceTurnId, "action_failed", {
+              phase: "semantic_grounding",
+              actionType: step.actionType,
+              issueCode: step.errorCode,
             });
           }
-          if (commands.length + resolved.commands.length > MAX_PLAN_BOARD_CHANGES) {
-            cancelPendingIntent("That plan expands to too many board changes. Split it into two requests.");
-            return "rejected";
-          }
-          for (const command of resolved.commands) {
-            const result = applyDiagramCommand(previewState, command, diagramCommandContext(boardSessionIdRef.current));
-            previewState = result.state;
-            affectedStrokeIds = [...affectedStrokeIds, ...result.affectedStrokeIds];
-          }
-          commands = [...commands, ...resolved.commands];
-          for (const [handle, ids] of Object.entries(resolved.handleAssignments ?? {})) {
-            planHandles.set(handle, ids);
-          }
-          if (resolved.selectionAfter) {
-            workingSelectionIds = resolved.selectionAfter.filter(
-              (id) => previewState.strokes[id]?.status === "committed" || isSceneOnlyElement(previewState, id),
-            );
-            workingPrimarySelectionId =
-              workingSelectionIds[workingSelectionIds.length - 1] ?? null;
+          if (grounding.status === "grounded") {
+            for (const repair of grounding.repairs) {
+              reportVoiceTrace(voiceTurnId, "grounding", {
+                status: "repaired",
+                source: "semantic",
+                actionType: repair.actionType,
+                repairKinds: repair.repairKinds,
+              });
+            }
           }
         }
+        if (grounding.status === "rejected") {
+          cancelPendingIntent(`Plan could not be grounded: ${grounding.reason}`);
+          return "rejected";
+        }
+        const { previewState, commands, affectedStrokeIds } = grounding;
+        const skippedSteps = grounding.skipped.map((step) => step.reason);
+        const workingSelectionIds = grounding.selectionIds;
+        const workingPrimarySelectionId =
+          initialPrimarySelectionId && workingSelectionIds.includes(initialPrimarySelectionId)
+            ? initialPrimarySelectionId
+            : grounding.primarySelectionId;
 
         if (voiceTurnId) {
           reportVoiceTrace(voiceTurnId, "grounding", {
@@ -7029,10 +6995,6 @@ export function AirboardPrototype({
             diagramCommandCount: commands.length,
             selectionCount: workingSelectionIds.length,
           });
-        }
-        if (skippedSteps.length === plan.actions.length) {
-          cancelPendingIntent(`Plan could not be grounded: ${skippedSteps[0]}`);
-          return "rejected";
         }
         if (commands.length === 0) {
           setSelectedAnnotationIds(workingSelectionIds);
@@ -10163,16 +10125,20 @@ export function AirboardPrototype({
   ]);
 
   useEffect(() => {
-    let cancelled = false;
-    // Without these settings every command the fast rules miss is refused,
-    // so a failed load keeps retrying in the background.
-    let retryTimer: number | undefined;
-    let attempt = 0;
-    const loadConfig = (): void => { void fetchSemanticIntentConfig(AIRBOARD_API_URL)
+    // Without these settings every command the fast rules miss is refused, so
+    // a failed load keeps retrying in the background (1, 2, 4, 8, 15, then
+    // every 30 s) until it works or the board closes.
+    const controller = new AbortController();
+    void loadSemanticIntentConfigWithRetry({
+      apiBaseUrl: AIRBOARD_API_URL,
+      signal: controller.signal,
+      onAttemptFailed: () => {
+        semanticIntentConfigRef.current = null;
+        setSemanticIntentConfig(null);
+      },
+    })
       .then((config) => {
-        if (cancelled) {
-          return;
-        }
+        if (controller.signal.aborted) return;
         semanticIntentConfigRef.current = config;
         setSemanticIntentConfig(config);
         const configuredModel = config.defaultModel ?? config.allowedModels[0] ?? "";
@@ -10184,19 +10150,9 @@ export function AirboardPrototype({
         });
       })
       .catch(() => {
-        if (cancelled) {
-          return;
-        }
-        semanticIntentConfigRef.current = null;
-        setSemanticIntentConfig(null);
-        attempt += 1;
-        retryTimer = window.setTimeout(loadConfig, configRetryDelayMs(attempt));
-      }); };
-    loadConfig();
-    return () => {
-      cancelled = true;
-      window.clearTimeout(retryTimer);
-    };
+        // Aborted when the board closes or the settings are reloaded.
+      });
+    return () => controller.abort();
   }, [speechConfigRevision]);
 
   useEffect(() => {
@@ -13545,8 +13501,8 @@ export function AirboardPrototype({
                   <p className="hint" data-testid="screen-underlay-notice">
                     {screenUnderlayNotice ??
                       (cameraUnderlayEnabled && cameraStatus === "active"
-                        ? "Camera is behind the board. Use screen to replace it with a screen or window."
-                        : "No live background is selected, so the dark overlay appears solid. Click Use screen, or enable hands for the camera background.")}
+                        ? "Camera is behind the board. Choose Show a screen behind the board in ••• to use a screen or window instead."
+                        : "No live background is selected, so the dark overlay appears solid. Choose Show a screen behind the board in •••, or allow the camera for this site.")}
                   </p>
                 ) : null}
               </>

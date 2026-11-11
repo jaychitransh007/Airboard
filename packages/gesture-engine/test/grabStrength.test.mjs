@@ -5,7 +5,7 @@ import {
   estimateGrabStrength,
   grabStrengthFromHand,
   grabStrengthFromLandmarks,
-} from "../dist/grabStrength.js";
+} from "../src/grabStrength.ts";
 
 test("open hand stays released while a closed fist produces a strong grab", () => {
   const open = estimateGrabStrength(openHandLandmarks());

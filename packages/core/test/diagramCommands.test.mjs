@@ -5,7 +5,7 @@ import {
   applyDiagramCommand,
   applyDiagramUndo,
   createInitialBoardState,
-} from "../dist/index.js";
+} from "../src/index.ts";
 
 let eventCounter = 0;
 const context = (createdAt = "2026-07-11T00:00:00.000Z") => ({
