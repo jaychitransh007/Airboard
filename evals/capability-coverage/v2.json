@@ -676,7 +676,7 @@
       "rationale": "A snap emitted through the production gesture hook reaches the shared visibility action and the mounted final hidden state."
     },
     {
-      "evidenceId": "browser:apps/web/e2e/mediaOwnership.spec.ts#standalone keeps a quiet top bar and one Airo entry point",
+      "evidenceId": "browser:apps/web/e2e/mediaOwnership.spec.ts#standalone keeps a quiet top bar and no Airo switch",
       "capabilities": [
         "surface:standalone"
       ],
@@ -688,7 +688,7 @@
       "rationale": "The mounted standalone route reaches its final media-entry UI."
     },
     {
-      "evidenceId": "browser:apps/web/e2e/mediaOwnership.spec.ts#standalone never opens a surprise prompt when remembered permission is not granted",
+      "evidenceId": "browser:apps/web/e2e/mediaOwnership.spec.ts#a board never prompts for what the browser has blocked, and says so",
       "capabilities": [
         "surface:standalone"
       ],
