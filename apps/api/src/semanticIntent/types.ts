@@ -79,12 +79,22 @@ export const SEMANTIC_INTENT_RECOVERABLE_PARSER_ISSUES = [
 export type SemanticIntentRecoverableParserIssue =
   (typeof SEMANTIC_INTENT_RECOVERABLE_PARSER_ISSUES)[number];
 
+/**
+ * How the speaker got Airo's attention: the wake word, an open palm, holding
+ * a shape, typing, or the short follow-up window after a command. Present
+ * only when the sentence was addressed to Airo; the wake word itself is
+ * stripped before the transcript reaches the planner.
+ */
+export const SEMANTIC_INTENT_ADDRESSED_BY = ["wake", "palm", "hold", "typed", "follow_up"] as const;
+export type SemanticIntentAddressedBy = (typeof SEMANTIC_INTENT_ADDRESSED_BY)[number];
+
 export type SemanticIntentRequest = {
   voiceTurnId: string;
   transcript: string;
   parserIssue: SemanticIntentRecoverableParserIssue;
   context: SemanticIntentContext;
   pendingClarification?: SemanticIntentPendingClarification;
+  addressedBy?: SemanticIntentAddressedBy;
   model?: string;
 };
 

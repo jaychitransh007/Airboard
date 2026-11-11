@@ -14,11 +14,19 @@ const PALM_ANCHOR_INDEXES = [5, 9, 13, 17] as const;
  * are mixed or temporarily ambiguous. This prevents an open↔closed transition
  * from leaking one of those hands into Move/Place/Erase. An existing tracker
  * reservation also survives its release debounce after one hand disappears.
+ *
+ * A grab or carry already in progress outranks that: a second hand entering
+ * the frame (the presenter talking with both hands, or a colleague's hand)
+ * must not cancel it, so the stream stays with the holding hand.
  */
 export function shouldReserveLandmarkNavigation(
   detectedHandCount: number,
   trackerReserving: boolean,
+  holdingActive = false,
 ): boolean {
+  if (holdingActive) {
+    return false;
+  }
   return detectedHandCount >= 2 || trackerReserving;
 }
 

@@ -109,7 +109,7 @@ test("two raw closed-hand landmark streams engage Zoom and preserve distance mot
     mode: "idle",
   });
   assert.equal(tracker.reserving, true);
-  assert.deepEqual(tracker.update({ hands: initial, timestampMs: 150 }), {
+  assert.deepEqual(tracker.update({ hands: initial, timestampMs: 500 }), {
     mode: "idle",
   });
   assert.equal(tracker.mode, "zoom");
@@ -118,7 +118,7 @@ test("two raw closed-hand landmark streams engage Zoom and preserve distance mot
     pair(closedFistLandmarks, -0.3, 0.2),
     MAPPING,
   );
-  const update = tracker.update({ hands: spread, timestampMs: 200 });
+  const update = tracker.update({ hands: spread, timestampMs: 550 });
   assert.equal(update.mode, "zoom");
   assert.ok(update.factor > 1.2, `zoom factor ${update.factor}`);
 });
@@ -133,14 +133,14 @@ test("two raw open-hand landmark streams engage Pan and preserve shared motion",
   assert.ok(initial.every((hand) => hand.grabStrength <= 0.35));
 
   tracker.update({ hands: initial, timestampMs: 0 });
-  tracker.update({ hands: initial, timestampMs: 150 });
+  tracker.update({ hands: initial, timestampMs: 500 });
   assert.equal(tracker.mode, "pan");
 
   const moved = collectLandmarkNavigationHands(
     pair(openHandLandmarks, -0.2, 0.2),
     MAPPING,
   );
-  const update = tracker.update({ hands: moved, timestampMs: 200 });
+  const update = tracker.update({ hands: moved, timestampMs: 550 });
   assert.equal(update.mode, "pan");
   assert.ok(update.dx < -40, `mirrored pan dx ${update.dx}`);
   assert.ok(Math.abs(update.dy) < 1e-9);
@@ -163,4 +163,13 @@ test("two detected hands reserve the stream through mixed or ambiguous poses", (
     "the navigation release debounce keeps ownership after one hand drops",
   );
   assert.equal(shouldReserveLandmarkNavigation(1, false), false);
+});
+
+test("a second hand entering the frame never takes over a grab or carry", () => {
+  assert.equal(
+    shouldReserveLandmarkNavigation(2, false, true),
+    false,
+    "the holding hand keeps the stream",
+  );
+  assert.equal(shouldReserveLandmarkNavigation(2, true, true), false);
 });

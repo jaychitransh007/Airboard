@@ -198,7 +198,11 @@ export type AirboardSemanticActionCapability = {
     | "group"
     | "select"
     | "undo"
-    | "cancel";
+    | "cancel"
+    | "change_type"
+    | "resize"
+    | "label_connection"
+    | "style_connection";
   title: string;
   terms: readonly string[];
 };
@@ -228,6 +232,10 @@ export const AIRBOARD_SEMANTIC_ACTION_CAPABILITIES = [
   { actionType: "select", title: "Select", terms: ["select", "choose"] },
   { actionType: "undo", title: "Undo", terms: ["undo", "go back"] },
   { actionType: "cancel", title: "Cancel", terms: ["cancel", "never mind", "nevermind"] },
+  { actionType: "change_type", title: "Change type", terms: ["turn into", "change to", "make it a", "convert"] },
+  { actionType: "resize", title: "Resize", terms: ["bigger", "smaller", "larger", "enlarge", "shrink"] },
+  { actionType: "label_connection", title: "Label connector", terms: ["label the arrow", "label the connector", "call the arrow"] },
+  { actionType: "style_connection", title: "Connector style", terms: ["dashed", "dotted", "solid line"] },
 ] as const satisfies readonly AirboardSemanticActionCapability[];
 
 export type AirboardSceneAction =
@@ -332,6 +340,76 @@ export const AIRBOARD_SEMANTIC_OPERATION_CAPABILITIES = [
   "create and edit shapes, stickies, text, sections, tables, stamps, media, links, code blocks, and mind maps",
   "style any scene element without replacing unrelated fields",
   "select objects",
+  "change an object's type or catalogue shape",
+  "make objects bigger or smaller",
+  "label an existing connector",
+  "make a connector dashed, dotted, or solid",
+  "lay out objects as a tree or as a hub with spokes (radial)",
   "undo",
   "cancel",
 ] as const;
+
+/**
+ * Everyday architecture words that have no node type of their own, mapped to
+ * the closest catalogue shape so a narrated "cache" or "load balancer" reads
+ * as one on the board instead of a generic box. Each entry also names the
+ * node type that keeps type-based references ("the second service") working.
+ */
+export const AIRBOARD_SEMANTIC_ARCHITECTURE_SHAPES = [
+  { terms: ["cache", "redis", "memcached", "session store"], nodeType: "database", shape: "horizontal-cylinder" },
+  { terms: ["load balancer", "balancer", "lb", "reverse proxy", "proxy", "router"], nodeType: "service", shape: "hexagon" },
+  { terms: ["cdn", "edge", "edge network", "cloud", "internet"], nodeType: "custom", shape: "cloud" },
+  { terms: ["queue", "message queue", "kafka", "event bus", "topic", "stream", "pub sub"], nodeType: "queue", shape: "queue" },
+  { terms: ["browser", "website", "web app", "web page", "frontend", "front end", "ui", "page", "screen"], nodeType: "custom", shape: "frontend" },
+  { terms: ["mobile", "mobile app", "phone", "app"], nodeType: "custom", shape: "mobile" },
+  { terms: ["storage", "bucket", "blob store", "object store", "s3", "file store"], nodeType: "database", shape: "storage" },
+  { terms: ["auth", "auth service", "authentication", "login", "identity", "sso", "oauth"], nodeType: "service", shape: "authentication" },
+  { terms: ["payment", "payments", "billing", "checkout", "stripe"], nodeType: "service", shape: "payment" },
+  { terms: ["email", "mail", "notification", "notifications", "sms"], nodeType: "service", shape: "email" },
+  { terms: ["firewall", "security", "waf", "vault", "secrets"], nodeType: "custom", shape: "security" },
+  { terms: ["server", "host", "vm", "machine", "worker", "workers", "cron", "job", "scheduler"], nodeType: "service", shape: "server" },
+  { terms: ["laptop", "computer", "desktop"], nodeType: "custom", shape: "computer" },
+  { terms: ["terminal", "cli", "console", "shell"], nodeType: "custom", shape: "terminal" },
+  { terms: ["file", "files", "csv", "report"], nodeType: "document", shape: "document" },
+  { terms: ["folder", "directory"], nodeType: "custom", shape: "folder" },
+  { terms: ["archive", "backup", "backups"], nodeType: "database", shape: "archive" },
+  { terms: ["settings", "config", "configuration"], nodeType: "custom", shape: "settings" },
+  { terms: ["chat", "chatbot", "bot", "slack"], nodeType: "custom", shape: "chat" },
+  { terms: ["wallet"], nodeType: "custom", shape: "wallet" },
+  { terms: ["warehouse", "data warehouse", "data lake", "lake", "analytics"], nodeType: "database", shape: "cylinder" },
+] as const satisfies readonly {
+  terms: readonly string[];
+  nodeType: AnnotationNodeType;
+  shape: ShapeKind;
+}[];
+
+/**
+ * Guesses the node type and catalogue shape for a spoken label, for example
+ * "Orders Cache" → database drawn as a horizontal cylinder. Used when Airo
+ * has to create an object a request names but the board lacks. The last
+ * matching word wins, because English puts the kind last ("Redis cache",
+ * "payments service"). Returns custom with no shape when nothing matches.
+ */
+export function inferSemanticNodeForLabel(label: string): {
+  nodeType: AnnotationNodeType;
+  shape: ShapeKind | null;
+} {
+  const words = label
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/gu, " ")
+    .split(/\s+/u)
+    .filter(Boolean);
+  for (let end = words.length; end > 0; end -= 1) {
+    for (let start = Math.max(0, end - 3); start < end; start += 1) {
+      const phrase = words.slice(start, end).join(" ");
+      const node = AIRBOARD_SEMANTIC_NODE_CAPABILITIES.find(({ terms }) =>
+        (terms as readonly string[]).includes(phrase));
+      // A generic word such as "node" or "box" says nothing about the kind.
+      if (node && node.nodeType !== "custom") return { nodeType: node.nodeType, shape: null };
+      const architecture = AIRBOARD_SEMANTIC_ARCHITECTURE_SHAPES.find(({ terms }) =>
+        (terms as readonly string[]).includes(phrase));
+      if (architecture) return { nodeType: architecture.nodeType, shape: architecture.shape };
+    }
+  }
+  return { nodeType: "custom", shape: null };
+}

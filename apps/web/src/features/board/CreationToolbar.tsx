@@ -307,8 +307,10 @@ export function CreationToolbar({
               </div>
               <button
                 type="button"
-                className="creation-more-shapes"
+                className={`creation-more-shapes${gestureHover === "action:more-shapes" ? " gesture-hover" : ""}`}
                 role="menuitem"
+                // The hand can open the full shape library too, not only the mouse.
+                data-dock-id="action:more-shapes"
                 onClick={() => {
                   setShapeLibraryOpen(true);
                   onOpenPanelChange(null);

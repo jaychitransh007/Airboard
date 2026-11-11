@@ -54,6 +54,7 @@ ID before retrying.
 | `TRANSCRIPTION_PROVIDER_UNAVAILABLE` | The transcription provider could not be reached. | Airo retries on its own for up to about a minute; meanwhile use typed commands. |
 | `SEMANTIC_INTENT_UNAVAILABLE` | Natural-language recovery is unavailable. | Use a canonical command; deterministic commands still work. |
 | `SEMANTIC_INTENT_RATE_LIMITED` | The semantic provider is temporarily rate limited. | Wait and retry, or use a shorter canonical command. |
+| `SEMANTIC_INTENT_COOLING_DOWN` | Airo's planner failed several times in a row and is pausing for a few seconds. | Airo retries on its own; say the command again in a moment. Short commands still work meanwhile. |
 | `SEMANTIC_INTENT_TIMEOUT` | The provider did not answer within the bounded time. | Repeat against the current board state or use a canonical command. |
 | `SEMANTIC_INTENT_MODEL_UNAVAILABLE` | The selected model is not currently available. | Choose an allowed model or use deterministic commands. |
 

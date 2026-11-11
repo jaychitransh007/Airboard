@@ -584,3 +584,27 @@ test("object.restyle updates colors with a compensating undo", () => {
   const undone = applyDiagramUndo(restyled.state, { undoEvents: restyled.undoEvents });
   assert.equal(undone.state.strokes.n1.annotation.fillColor, created.state.strokes.n1.annotation.fillColor);
 });
+
+test("retype, connector restyle, and catalogue-shaped creates are undoable", () => {
+  let state = createInitialBoardState("board-1");
+  const created = applyDiagramCommand(
+    state,
+    { type: "node.create", nodeId: "cache", nodeType: "database", shapeKind: "horizontal-cylinder", label: "Cache", center: { x: 100, y: 100 } },
+    context(),
+  );
+  state = created.state;
+  assert.equal(state.strokes.cache.annotation.shapeKind, "horizontal-cylinder");
+  state = createNode(state, "api", { x: 500, y: 100 }, "API").state;
+  state = applyDiagramCommand(state, { type: "nodes.connect", connectorId: "edge", fromId: "api", toId: "cache" }, context()).state;
+
+  const retyped = applyDiagramCommand(state, { type: "object.retype", objectId: "api", nodeType: "decision", shapeKind: null }, context());
+  assert.equal(retyped.state.strokes.api.annotation.nodeType, "decision");
+  assert.equal(retyped.state.strokes.api.annotation.label, "API");
+  assert.equal(applyDiagramUndo(retyped.state, retyped).state.strokes.api.annotation.nodeType, "service");
+
+  const dashed = applyDiagramCommand(state, { type: "connector.restyle", connectorId: "edge", lineStyle: "dashed" }, context());
+  assert.equal(dashed.state.strokes.edge.annotation.lineStyle, "dashed");
+  assert.equal(dashed.state.elements.edge.style.strokeStyle, "dashed");
+  assert.equal(applyDiagramUndo(dashed.state, dashed).state.strokes.edge.annotation.lineStyle, undefined);
+  assert.throws(() => applyDiagramCommand(state, { type: "connector.restyle", connectorId: "api", lineStyle: "dashed" }, context()));
+});

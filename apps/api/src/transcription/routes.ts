@@ -13,7 +13,13 @@ import type {
   RealtimeTranscriptionSession,
   TranscriptionProviderEvent,
   TranscriptionServerMessage,
+  TranscriptionSessionOptions,
 } from "./types";
+import {
+  createVoiceAllowanceReader,
+  nextVoiceAllowanceWarning,
+  VOICE_ALLOWANCE_WARNING_MINUTES,
+} from "./voiceAllowance";
 import type { AuthService } from "../auth";
 import { clientKey, configuredApiTokenAllowed, createCircuitBreaker, originAllowed } from "../security";
 import { createSharedRateLimiter } from "../sharedRateLimit";
@@ -24,16 +30,87 @@ import { organizationPolicy } from "../organizationPolicy";
 const MAX_PCM16_FRAME_BYTES = 256 * 1024;
 const MAX_STARTUP_BUFFER_BYTES = 384 * 1024;
 
-type ActiveTranscription = {
-  token: symbol;
-  session: RealtimeTranscriptionSession;
-  stopReason: "completed" | "aborted" | "provider_closed";
+// One provider stream under the browser's stream ("leg"): the first, a
+// reopen after a silence the provider closed, or a replacement opened just
+// before the current one's time limit.
+type ProviderLeg = {
+  kind: "initial" | "reopen" | "handover";
+  session: RealtimeTranscriptionSession | null;
+  abortController: AbortController;
+  /** The keyterms this leg has; compared by identity with the stream's. */
+  keyterms: string[];
+  /** Added to the leg's own turn numbers, so they keep rising across legs. */
+  turnBase: number;
+  timers: Array<ReturnType<typeof setTimeout>>;
+  /** The provider closed or failed this leg before it became current. */
+  lost: boolean;
+};
+
+type ClientStream = {
+  options: TranscriptionSessionOptions;
+  bytesPerSecond: number;
+  /** transcription.ready has been sent. */
+  ready: boolean;
+  /** Stop or abort requested; the current leg's "stopped" ends the stream. */
+  ending: "completed" | "aborted" | null;
+  /** The leg audio goes to; null while opening, or closed during a silence. */
+  current: ProviderLeg | null;
+  opening: ProviderLeg | null;
+  /** An open replacement waiting for a pause to take over. */
+  standby: ProviderLeg | null;
+  /** The time limit passed while the replacement was opening. */
+  handoverForced: boolean;
+  lastAudioAt: number;
+  lastKeepAliveAt: number;
+  /** Recent audio of the turn in progress, replayed into a replacement leg. */
+  turnAudio: Uint8Array[];
+  turnAudioBytes: number;
+  /** Audio held while no leg is open. */
+  pendingFrames: Uint8Array[];
+  pendingBytes: number;
+  maxTurnIndex: number;
+  /** Seconds of audio paid for, and sent to the provider. */
+  paidSeconds: number;
+  usedSeconds: number;
+  chargeInFlight: boolean;
+  exhausted: boolean;
+  /** Warning thresholds (minutes left) already sent on this stream. */
+  allowanceWarned: Set<number>;
+  tick: ReturnType<typeof setInterval>;
 };
 
 const TRANSCRIPTION_TICKET_TTL_SECONDS = 60;
 // Voice is charged against the person's daily allowance in blocks paid ahead,
-// so a stream costs at most one block more than it used.
+// for the audio actually sent to the provider: the browser holds back
+// silence (realtimeSpeech.ts), so an open board that hears nobody costs
+// nothing. A stream costs at most one block more than it used.
 const VOICE_CHARGE_SECONDS = 15;
+// The next block is bought while this much paid audio is left, so speech is
+// not held up waiting for the database.
+const VOICE_CHARGE_AHEAD_SECONDS = 7.5;
+// While no audio arrives, the provider stream is held open with KeepAlive
+// messages instead of streamed (and billed) silence.
+const KEEP_ALIVE_INTERVAL_MS = 4_000;
+const STREAM_TICK_MS = 250;
+// A replacement leg opens this long before the current one's time limit (at
+// most a fifth of the limit) and takes over at the first pause in the audio,
+// or at the limit with the turn in progress replayed into it.
+const HANDOVER_LEAD_MS = 5_000;
+const HANDOVER_IDLE_MS = 300;
+// A provider close or failure after this long without audio is its own
+// no-audio timeout, not a fault: the leg reopens when speech returns.
+const IDLE_CLOSE_GRACE_MS = 3_000;
+// A pause this long ends a turn, for what a replacement leg replays.
+const TURN_GAP_MS = 1_500;
+const MAX_REPLAY_SECONDS = 8;
+const SILENCE_PRIMER_SECONDS = 0.1;
+// A stream whose provider leg closed during a silence has no leg time limit,
+// so it would never send `transcription.renewing` or reach
+// TRANSCRIPTION_SESSION_LIMIT, the two points where the browser pauses a
+// forgotten tab. After this long without audio (or the leg limit, if
+// shorter) it reaches its limit as a leg would; the browser, having heard
+// nobody, ends the session as "paused", and the stream slots return.
+const DORMANT_STREAM_LIMIT_MS = 20 * 60_000;
 const DAILY_VOICE_LIMIT_MESSAGE =
   "You've used today's Airo voice minutes. Typed commands still work, and voice comes back at midnight UTC.";
 const SERVICE_VOICE_LIMIT_MESSAGE =
@@ -70,6 +147,13 @@ export function registerTranscriptionRoutes(
           "the service's daily voice limit is reached",
         ),
     },
+  );
+  // What is left of today's voice minutes, to warn before the limit.
+  const allowance = createVoiceAllowanceReader(
+    config.dailyUsage ? (auth?.client ?? null) : null,
+    config.dailyUsage,
+    config.serviceDailyUsage,
+    (error) => server.log.warn({ err: error }, "remaining voice minutes could not be read"),
   );
   // Connection attempts per caller address; stream caps bound the rest.
   const connectionLimiter = createSharedRateLimiter({
@@ -148,29 +232,20 @@ export function registerTranscriptionRoutes(
     };
 
     const clientSocket = socket as unknown as WebSocket;
-    let active: ActiveTranscription | null = null;
-    let openingToken: symbol | null = null;
-    let openingAbortController: AbortController | null = null;
-    let startupFrames: Uint8Array[] = [];
-    let startupBytes = 0;
+    // The browser's one voice stream on this socket. Underneath it, provider
+    // streams ("legs") come and go: one is replaced shortly before its time
+    // limit, and one the provider closes during a long silence is reopened
+    // when speech returns. The browser sees one unbroken stream, and the
+    // socket holds one stream slot throughout, so a handover never counts
+    // against the account's or the instance's stream caps.
+    let stream: ClientStream | null = null;
     let closed = false;
     let streamSlotHeld = false;
     let streamOwner: string | null = null;
-    let sessionLimitTimer: ReturnType<typeof setTimeout> | null = null;
-    let voiceChargeTimer: ReturnType<typeof setInterval> | null = null;
     let audioWindowStartedAt = Date.now();
     let audioBytesInWindow = 0;
-    let stopActive: (reason: "completed" | "aborted") => void = () => undefined;
 
     const releaseStreamSlot = () => {
-      if (sessionLimitTimer) {
-        clearTimeout(sessionLimitTimer);
-        sessionLimitTimer = null;
-      }
-      if (voiceChargeTimer) {
-        clearInterval(voiceChargeTimer);
-        voiceChargeTimer = null;
-      }
       if (streamSlotHeld) {
         streamSlotHeld = false;
         concurrentStreams = Math.max(0, concurrentStreams - 1);
@@ -193,46 +268,197 @@ export function registerTranscriptionRoutes(
       concurrentStreams += 1;
       if (streamOwner) streamsByProfile.set(streamOwner, ownerStreams + 1);
       streamSlotHeld = true;
-      sessionLimitTimer = setTimeout(() => {
-        sendError(
-          clientSocket,
-          "TRANSCRIPTION_SESSION_LIMIT",
-          "This voice stream reached its maximum length. Airboard opens a new one automatically.",
-          true,
-        );
-        stopActive("aborted");
-      }, config.transcription.maxSessionMs);
       return null;
     };
 
-    const tokenIsCurrent = (token: symbol) =>
-      openingToken === token || active?.token === token;
+    const clearLegTimers = (leg: ProviderLeg | null) => {
+      if (!leg) return;
+      for (const timer of leg.timers) clearTimeout(timer);
+      leg.timers = [];
+    };
 
-    const relayProviderEvent = (token: symbol, event: TranscriptionProviderEvent) => {
-      if (closed || !tokenIsCurrent(token)) {
+    const abortLeg = (leg: ProviderLeg | null) => {
+      if (!leg) return;
+      clearLegTimers(leg);
+      leg.abortController.abort();
+      leg.session?.abort();
+    };
+
+    // Ends the browser's stream: every leg is dropped (their late events are
+    // ignored, since the stream is no longer current) and the slot returns.
+    const endStream = (s: ClientStream, reason: "completed" | "aborted" | "provider_closed") => {
+      if (stream !== s) return;
+      stream = null;
+      clearInterval(s.tick);
+      for (const leg of [s.current, s.standby, s.opening]) abortLeg(leg);
+      releaseStreamSlot();
+      send(clientSocket, { type: "transcription.stopped", reason });
+    };
+
+    const stopActive = (reason: "completed" | "aborted") => {
+      const s = stream;
+      if (!s) {
+        sendError(clientSocket, "NO_ACTIVE_TRANSCRIPTION", "No transcription stream is active.");
         return;
+      }
+      if (!s.ready || !s.current?.session) {
+        // Still opening, or no provider stream open during a silence.
+        endStream(s, reason);
+        return;
+      }
+      if (s.ending) return;
+      s.ending = reason;
+      abortLeg(s.standby);
+      s.standby = null;
+      abortLeg(s.opening);
+      s.opening = null;
+      const current = s.current;
+      clearLegTimers(current);
+      send(clientSocket, {
+        type: "transcription.provider",
+        provider: config.transcription.provider,
+        status: "stopping",
+      });
+      // The current leg's "stopped" event ends the stream, after a graceful
+      // stop has delivered its last final transcript.
+      if (reason === "completed") current.session!.stop();
+      else current.session!.abort();
+    };
+
+    const streamIsIdle = (s: ClientStream, forMs: number) => Date.now() - s.lastAudioAt >= forMs;
+
+    // A provider stream closed (or failed) after a silence long enough to be
+    // its own no-audio timeout: drop it quietly and reopen on the next speech.
+    const goDormant = (s: ClientStream, leg: ProviderLeg) => {
+      if (s.current !== leg) return;
+      s.current = null;
+      abortLeg(leg);
+      request.log.info("voice provider stream closed during silence; it reopens when speech returns");
+      if (s.standby) {
+        promote(s, s.standby);
+      }
+    };
+
+    const promote = (s: ClientStream, leg: ProviderLeg) => {
+      const previous = s.current;
+      if (s.standby === leg) s.standby = null;
+      leg.turnBase = s.maxTurnIndex + 1;
+      s.current = leg;
+      s.handoverForced = false;
+      s.lastKeepAliveAt = Date.now();
+      scheduleLegLimit(s, leg);
+      // The turn in progress on the old leg is replayed into the new one, and
+      // the old leg is dropped without finishing it, so no word is lost or
+      // heard twice. The replay is ours to pay for: it is not charged again.
+      // Nor is the silence primer below. Both are deliberate exceptions to
+      // "every second sent to the provider is metered": each is bounded (at
+      // most MAX_REPLAY_SECONDS of audio already charged once, or
+      // SILENCE_PRIMER_SECONDS of silence) and happens once per leg, so at
+      // most once per maxSessionMs or per reopen after a silence.
+      const replay = previous ? s.turnAudio : [];
+      if (previous) abortLeg(previous);
+      const frames = [...replay, ...s.pendingFrames];
+      s.pendingFrames = [];
+      s.pendingBytes = 0;
+      // A provider may close a stream that carries no audio soon after it
+      // opens, so one with nothing to hear gets a tenth of a second of silence.
+      if (!frames.length) {
+        frames.push(new Uint8Array(Math.round(s.bytesPerSecond * SILENCE_PRIMER_SECONDS) & ~1));
+      }
+      for (const frame of frames) leg.session!.sendAudio(frame);
+    };
+
+    // The leg is replaced a few seconds before its time limit; if the
+    // replacement cannot open, the stream ends at the limit as it used to and
+    // the browser opens a new one.
+    const scheduleLegLimit = (s: ClientStream, leg: ProviderLeg) => {
+      const limitMs = config.transcription.maxSessionMs;
+      const leadMs = Math.min(HANDOVER_LEAD_MS, Math.floor(limitMs / 5));
+      leg.timers.push(
+        setTimeout(() => {
+          if (stream !== s || s.current !== leg || s.ending || s.opening || s.standby) return;
+          send(clientSocket, { type: "transcription.renewing" });
+          openLeg(s, "handover");
+        }, limitMs - leadMs),
+        setTimeout(() => {
+          if (stream !== s || s.current !== leg || s.ending) return;
+          if (s.standby) {
+            promote(s, s.standby);
+            return;
+          }
+          if (s.opening) {
+            // Switch the moment the replacement is ready.
+            s.handoverForced = true;
+            return;
+          }
+          sessionLimitReached(s);
+        }, limitMs),
+      );
+    };
+
+    const sessionLimitReached = (s: ClientStream) => {
+      if (stream !== s || s.ending) return;
+      sendError(
+        clientSocket,
+        "TRANSCRIPTION_SESSION_LIMIT",
+        "This voice stream reached its maximum length. Airboard opens a new one automatically.",
+        true,
+      );
+      stopActive("aborted");
+    };
+
+    const relayProviderEvent = (s: ClientStream, leg: ProviderLeg, event: TranscriptionProviderEvent) => {
+      if (closed || stream !== s) return;
+      const isCurrent = s.current === leg;
+      // Only the first leg's start-up is the browser's business.
+      const isFirstOpening = s.opening === leg && leg.kind === "initial";
+
+      // A replacement the provider closed or failed before it took over is
+      // dropped, so it is never promoted: the limit then falls back to ending
+      // the stream, and the browser reconnects.
+      const lostBeforeTakeover =
+        !isCurrent &&
+        (s.standby === leg || s.opening === leg) &&
+        ((event.type === "status" && event.status === "stopped") || (event.type === "error" && event.fatal));
+      if (lostBeforeTakeover) {
+        leg.lost = true;
+        if (s.standby === leg) {
+          s.standby = null;
+          request.log.warn("the replacement voice stream closed before it took over");
+          abortLeg(leg);
+          if (s.handoverForced && s.current) sessionLimitReached(s);
+          return;
+        }
+        // Still opening: the open below sees `lost` and treats it as failed.
+        if (leg.kind !== "initial") return;
       }
 
       if (event.type === "status") {
-        send(clientSocket, {
-          type: "transcription.provider",
-          provider: config.transcription.provider,
-          status: event.status,
-          ...(event.requestId ? { requestId: event.requestId } : {}),
-        });
         if (event.status === "stopped") {
-          const reason = active?.token === token ? active.stopReason : "provider_closed";
-          active = null;
-          openingToken = null;
-          startupFrames = [];
-          startupBytes = 0;
-          releaseStreamSlot();
-          send(clientSocket, { type: "transcription.stopped", reason });
+          if (!isCurrent) return;
+          if (s.ending) endStream(s, s.ending);
+          else if (streamIsIdle(s, IDLE_CLOSE_GRACE_MS)) goDormant(s, leg);
+          else endStream(s, "provider_closed");
+          return;
+        }
+        if (isFirstOpening || (isCurrent && leg.kind === "initial")) {
+          send(clientSocket, {
+            type: "transcription.provider",
+            provider: config.transcription.provider,
+            status: event.status,
+            ...(event.requestId ? { requestId: event.requestId } : {}),
+          });
         }
         return;
       }
 
       if (event.type === "error") {
+        if (!isCurrent && !isFirstOpening) return;
+        if (isCurrent && event.fatal && !s.ending && streamIsIdle(s, IDLE_CLOSE_GRACE_MS)) {
+          request.log.info({ code: event.code }, "voice provider stream failed during silence");
+          goDormant(s, leg);
+          return;
+        }
         send(clientSocket, {
           type: "transcription.error",
           code: event.code,
@@ -242,13 +468,179 @@ export function registerTranscriptionRoutes(
         return;
       }
 
+      if (!isCurrent) return;
+      // Turn numbers keep rising across legs, as if one provider stream.
+      const turnIndex = event.turnIndex !== undefined ? event.turnIndex + leg.turnBase : undefined;
+      if (turnIndex !== undefined) s.maxTurnIndex = Math.max(s.maxTurnIndex, turnIndex);
+      if (event.type === "final") {
+        s.turnAudio = [];
+        s.turnAudioBytes = 0;
+      }
       send(clientSocket, {
         type: event.type === "partial" ? "transcription.partial" : "transcription.final",
         transcript: event.transcript,
-        ...(event.turnIndex !== undefined ? { turnIndex: event.turnIndex } : {}),
+        ...(turnIndex !== undefined ? { turnIndex } : {}),
         ...(event.confidence !== undefined ? { confidence: event.confidence } : {}),
         ...(event.providerEvent ? { providerEvent: event.providerEvent } : {}),
       });
+    };
+
+    const openLeg = (s: ClientStream, kind: ProviderLeg["kind"]) => {
+      if (!provider || s.opening) return;
+      const leg: ProviderLeg = {
+        kind,
+        session: null,
+        abortController: new AbortController(),
+        keyterms: s.options.keyterms,
+        turnBase: 0,
+        timers: [],
+        lost: false,
+      };
+      s.opening = leg;
+      const failed = (message: string) => {
+        if (stream !== s || s.opening !== leg) return;
+        s.opening = null;
+        if (s.current) {
+          request.log.warn({ err: message }, "the replacement voice stream could not open");
+          if (s.handoverForced) sessionLimitReached(s);
+          return;
+        }
+        if (s.ready && !s.pendingFrames.length) {
+          // Nothing is waiting to be heard: stay closed until speech returns.
+          request.log.warn({ err: message }, "the voice stream could not reopen");
+          return;
+        }
+        endStreamWithError(s, "TRANSCRIPTION_PROVIDER_UNAVAILABLE", message);
+      };
+      if (providerBreaker.retryAfterMs() !== null) {
+        failed("The transcription provider is unavailable. Try again shortly.");
+        return;
+      }
+      provider
+        .open(
+          { ...s.options, keyterms: [...s.options.keyterms] },
+          (event) => relayProviderEvent(s, leg, event),
+          leg.abortController.signal,
+        )
+        .then(
+          (session) => {
+            providerBreaker.recordSuccess();
+            leg.session = session;
+            if (closed || stream !== s || s.opening !== leg || s.ending) {
+              session.abort();
+              return;
+            }
+            if (leg.lost && leg.kind !== "initial") {
+              session.abort();
+              failed("The voice provider closed the stream as it opened.");
+              return;
+            }
+            s.opening = null;
+            if (leg.keyterms !== s.options.keyterms) {
+              session.updateKeyterms([...s.options.keyterms]);
+            }
+            if (kind === "handover" && s.current) {
+              s.standby = leg;
+              if (s.handoverForced || streamIsIdle(s, HANDOVER_IDLE_MS)) promote(s, leg);
+              return;
+            }
+            promote(s, leg);
+            if (!s.ready) {
+              s.ready = true;
+              send(clientSocket, {
+                type: "transcription.ready",
+                provider: provider.id,
+                model: s.options.model,
+                sampleRate: s.options.sampleRate,
+              });
+            }
+          },
+          (error: unknown) => {
+            if (closed || stream !== s || s.opening !== leg) {
+              // Stopped while opening: the failure says nothing about the provider.
+              providerBreaker.abandon();
+              return;
+            }
+            providerBreaker.recordFailure();
+            failed(error instanceof Error ? error.message : "Could not connect to transcription provider.");
+          },
+        );
+    };
+
+    const endStreamWithError = (s: ClientStream, code: string, message: string) => {
+      if (stream !== s) return;
+      stream = null;
+      clearInterval(s.tick);
+      for (const leg of [s.current, s.standby, s.opening]) abortLeg(leg);
+      releaseStreamSlot();
+      sendError(clientSocket, code, message, true);
+    };
+
+    // Voice is charged for audio actually sent to the provider, in blocks
+    // paid ahead: silence the browser holds back costs nothing.
+    const chargeNextBlock = (s: ClientStream) => {
+      const owner = streamOwner;
+      if (!owner || s.chargeInFlight || s.ending || stream !== s) return;
+      s.chargeInFlight = true;
+      void usage.consume(owner, "voice_seconds", VOICE_CHARGE_SECONDS).then((verdict) => {
+        s.chargeInFlight = false;
+        if (stream !== s) return;
+        const refusal = voiceLimitRefusal(verdict);
+        if (refusal) {
+          s.exhausted = true;
+          sendError(clientSocket, refusal.code, refusal.message, true);
+          stopActive("aborted");
+          return;
+        }
+        s.paidSeconds += VOICE_CHARGE_SECONDS;
+        void warnIfAllowanceLow(s);
+      });
+    };
+
+    // Returns false when the frame must wait for the next paid block.
+    const meterAudio = (s: ClientStream, bytes: number): boolean => {
+      if (!streamOwner) return true;
+      if (s.exhausted) return false;
+      const seconds = bytes / s.bytesPerSecond;
+      if (s.usedSeconds + seconds > s.paidSeconds) {
+        chargeNextBlock(s);
+        return false;
+      }
+      s.usedSeconds += seconds;
+      if (s.paidSeconds - s.usedSeconds < VOICE_CHARGE_AHEAD_SECONDS) chargeNextBlock(s);
+      return true;
+    };
+
+    const warnIfAllowanceLow = async (s: ClientStream) => {
+      const owner = streamOwner;
+      if (!owner || s.allowanceWarned.size >= VOICE_ALLOWANCE_WARNING_MINUTES.length) return;
+      const remaining = await allowance.remaining(owner);
+      if (!remaining || stream !== s) return;
+      const warning = nextVoiceAllowanceWarning(remaining, s.allowanceWarned);
+      if (warning) send(clientSocket, { type: "transcription.allowance_warning", ...warning });
+    };
+
+    const tick = (s: ClientStream) => {
+      if (stream !== s || s.ending) return;
+      const now = Date.now();
+      // A forgotten tab whose provider leg went dormant still reaches a limit.
+      if (
+        s.ready &&
+        !s.current &&
+        !s.opening &&
+        now - s.lastAudioAt >= Math.min(DORMANT_STREAM_LIMIT_MS, config.transcription.maxSessionMs)
+      ) {
+        request.log.info("a voice stream heard nothing for a long time; it ends so the browser can pause");
+        sessionLimitReached(s);
+        return;
+      }
+      // Switch to a ready replacement in a pause, so no turn is re-heard.
+      if (s.standby && now - s.lastAudioAt >= HANDOVER_IDLE_MS) promote(s, s.standby);
+      if (now - Math.max(s.lastAudioAt, s.lastKeepAliveAt) >= KEEP_ALIVE_INTERVAL_MS) {
+        s.lastKeepAliveAt = now;
+        s.current?.session?.keepAlive?.();
+        s.standby?.session?.keepAlive?.();
+      }
     };
 
     const start = async (rawMessage: string) => {
@@ -264,7 +656,8 @@ export function registerTranscriptionRoutes(
       }
 
       if (parsed.value.type === "transcription.configure") {
-        if (!active) {
+        const s = stream;
+        if (!s || !s.ready || s.ending) {
           sendError(
             clientSocket,
             "TRANSCRIPTION_NOT_READY",
@@ -282,7 +675,15 @@ export function registerTranscriptionRoutes(
           return;
         }
         try {
-          active.session.updateKeyterms(resolved.value);
+          // A leg opened later starts with these, and one still opening is
+          // updated when it opens.
+          s.options = { ...s.options, keyterms: resolved.value };
+          for (const leg of [s.current, s.standby]) {
+            if (leg?.session) {
+              leg.session.updateKeyterms(resolved.value);
+              leg.keyterms = s.options.keyterms;
+            }
+          }
           send(clientSocket, {
             type: "transcription.configured",
             keytermCount: resolved.value.length,
@@ -309,7 +710,7 @@ export function registerTranscriptionRoutes(
         return;
       }
 
-      if (openingToken || active) {
+      if (stream) {
         sendError(clientSocket, "TRANSCRIPTION_ALREADY_ACTIVE", "A transcription stream is active.");
         return;
       }
@@ -358,117 +759,47 @@ export function registerTranscriptionRoutes(
         return;
       }
 
-      const token = Symbol("transcription");
-      const abortController = new AbortController();
-      openingToken = token;
-      openingAbortController = abortController;
-      startupFrames = [];
-      startupBytes = 0;
-      // The first block is paid before the provider opens; while the stream
-      // runs, each next block is paid ahead and the stream ends when today's
-      // minutes are used up.
+      const now = Date.now();
+      const s: ClientStream = {
+        options: resolved.value,
+        bytesPerSecond: resolved.value.sampleRate * 2,
+        ready: false,
+        ending: null,
+        current: null,
+        opening: null,
+        standby: null,
+        handoverForced: false,
+        lastAudioAt: now,
+        lastKeepAliveAt: now,
+        turnAudio: [],
+        turnAudioBytes: 0,
+        pendingFrames: [],
+        pendingBytes: 0,
+        maxTurnIndex: -1,
+        paidSeconds: 0,
+        usedSeconds: 0,
+        chargeInFlight: false,
+        exhausted: false,
+        allowanceWarned: new Set(),
+        tick: setInterval(() => tick(s), STREAM_TICK_MS),
+      };
+      stream = s;
+      // The first block is paid before the provider opens, so a used-up
+      // allowance is refused before Deepgram is dialled.
       const owner = streamOwner;
       if (owner) {
+        s.chargeInFlight = true;
         const refusal = voiceLimitRefusal(await usage.consume(owner, "voice_seconds", VOICE_CHARGE_SECONDS));
+        s.chargeInFlight = false;
+        if (stream !== s || closed) return;
         if (refusal) {
-          if (openingToken === token) {
-            openingToken = null;
-            openingAbortController = null;
-            startupFrames = [];
-            startupBytes = 0;
-            releaseStreamSlot();
-            sendError(clientSocket, refusal.code, refusal.message, true);
-          }
+          endStreamWithError(s, refusal.code, refusal.message);
           return;
         }
-        if (openingToken !== token || closed) return;
-        voiceChargeTimer = setInterval(() => {
-          void usage.consume(owner, "voice_seconds", VOICE_CHARGE_SECONDS).then((result) => {
-            const ended = voiceLimitRefusal(result);
-            if (!ended || !voiceChargeTimer) return;
-            sendError(clientSocket, ended.code, ended.message, true);
-            stopActive("aborted");
-          });
-        }, VOICE_CHARGE_SECONDS * 1_000);
+        s.paidSeconds = VOICE_CHARGE_SECONDS;
+        void warnIfAllowanceLow(s);
       }
-      try {
-        const session = await provider.open(
-          resolved.value,
-          (event) => relayProviderEvent(token, event),
-          abortController.signal,
-        );
-        providerBreaker.recordSuccess();
-        if (closed || openingToken !== token) {
-          session.abort();
-          return;
-        }
-
-        active = { token, session, stopReason: "provider_closed" };
-        openingToken = null;
-        if (openingAbortController === abortController) {
-          openingAbortController = null;
-        }
-        for (const frame of startupFrames) {
-          session.sendAudio(frame);
-        }
-        startupFrames = [];
-        startupBytes = 0;
-        send(clientSocket, {
-          type: "transcription.ready",
-          provider: provider.id,
-          model: resolved.value.model,
-          sampleRate: resolved.value.sampleRate,
-        });
-      } catch (error) {
-        if (openingToken !== token || closed) {
-          // Stopped while opening: the failure says nothing about the provider.
-          providerBreaker.abandon();
-          return;
-        }
-        providerBreaker.recordFailure();
-        openingToken = null;
-        if (openingAbortController === abortController) {
-          openingAbortController = null;
-        }
-        startupFrames = [];
-        startupBytes = 0;
-        releaseStreamSlot();
-        sendError(
-          clientSocket,
-          "TRANSCRIPTION_PROVIDER_UNAVAILABLE",
-          error instanceof Error ? error.message : "Could not connect to transcription provider.",
-          true,
-        );
-      }
-    };
-
-    stopActive = (reason: "completed" | "aborted") => {
-      if (openingToken) {
-        openingToken = null;
-        openingAbortController?.abort();
-        openingAbortController = null;
-        startupFrames = [];
-        startupBytes = 0;
-        releaseStreamSlot();
-        send(clientSocket, { type: "transcription.stopped", reason });
-        return;
-      }
-      if (!active) {
-        sendError(clientSocket, "NO_ACTIVE_TRANSCRIPTION", "No transcription stream is active.");
-        return;
-      }
-
-      active.stopReason = reason;
-      send(clientSocket, {
-        type: "transcription.provider",
-        provider: config.transcription.provider,
-        status: "stopping",
-      });
-      if (reason === "completed") {
-        active.session.stop();
-      } else {
-        active.session.abort();
-      }
+      openLeg(s, "initial");
     };
 
     const receiveAudio = (raw: RawData) => {
@@ -509,30 +840,51 @@ export function registerTranscriptionRoutes(
         return;
       }
 
-      if (active) {
-        active.session.sendAudio(frame);
+      const s = stream;
+      if (!s) {
+        sendError(
+          clientSocket,
+          "TRANSCRIPTION_NOT_READY",
+          "Send transcription.start before PCM16 audio.",
+          true,
+        );
         return;
       }
-      if (openingToken) {
-        if (startupBytes + frame.byteLength > MAX_STARTUP_BUFFER_BYTES) {
-          sendError(
-            clientSocket,
-            "STARTUP_AUDIO_OVERFLOW",
-            "Wait for transcription.ready before sending more audio.",
-            true,
-          );
-          return;
-        }
-        startupFrames.push(frame);
-        startupBytes += frame.byteLength;
+      if (s.ending) return;
+      const current = s.current?.session ? s.current : null;
+      if (!current && s.pendingBytes + frame.byteLength > MAX_STARTUP_BUFFER_BYTES) {
+        sendError(
+          clientSocket,
+          "STARTUP_AUDIO_OVERFLOW",
+          "Wait for transcription.ready before sending more audio.",
+          true,
+        );
         return;
       }
-      sendError(
-        clientSocket,
-        "TRANSCRIPTION_NOT_READY",
-        "Send transcription.start before PCM16 audio.",
-        true,
-      );
+      if (!meterAudio(s, frame.byteLength)) return;
+
+      // The audio of the turn in progress, kept for a replacement leg; a
+      // pause in the audio starts a new turn.
+      if (now - s.lastAudioAt >= TURN_GAP_MS) {
+        s.turnAudio = [];
+        s.turnAudioBytes = 0;
+      }
+      s.lastAudioAt = now;
+      s.turnAudio.push(frame);
+      s.turnAudioBytes += frame.byteLength;
+      const maxReplayBytes = s.bytesPerSecond * MAX_REPLAY_SECONDS;
+      while (s.turnAudioBytes > maxReplayBytes && s.turnAudio.length > 1) {
+        s.turnAudioBytes -= s.turnAudio.shift()!.byteLength;
+      }
+
+      if (current) {
+        current.session!.sendAudio(frame);
+        return;
+      }
+      s.pendingFrames.push(frame);
+      s.pendingBytes += frame.byteLength;
+      // Speech after a silence the provider closed: reopen, holding the audio.
+      if (s.ready && !s.opening) openLeg(s, "reopen");
     };
 
     let authorized = false;
@@ -577,12 +929,12 @@ export function registerTranscriptionRoutes(
 
     clientSocket.on("close", () => {
       closed = true;
-      openingToken = null;
-      openingAbortController?.abort();
-      openingAbortController = null;
-      startupFrames = [];
-      active?.session.abort();
-      active = null;
+      const s = stream;
+      stream = null;
+      if (s) {
+        clearInterval(s.tick);
+        for (const leg of [s.current, s.standby, s.opening]) abortLeg(leg);
+      }
       releaseStreamSlot();
     });
   });

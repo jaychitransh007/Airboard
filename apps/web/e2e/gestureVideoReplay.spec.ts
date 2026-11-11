@@ -162,7 +162,7 @@ for (const asset of assets) {
       });
       await page.goto("/?testStandalone=1");
       const onboarding = page.getByRole("button", {
-        name: "Start building",
+        name: "Got it",
       });
       if (await onboarding.isVisible()) await onboarding.click();
       const setup = asset.annotations.browserReplay.setup;

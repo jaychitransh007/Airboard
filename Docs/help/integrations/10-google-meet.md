@@ -46,7 +46,12 @@ screen behind the board** in **•••** before you present. See
 - Your Airboard tab, presented in the call: the diagram, with your camera or
   chosen screen behind it.
 - The board's top bar, tool dock and Airo panel, exactly as they look on your
-  screen.
+  screen. The Airo panel shows only what you say to Airo, never the rest of
+  the conversation.
+- Airo's short notes on the board, such as **Undo** after a change, or a note
+  when it couldn't apply a command. If you share tab audio, people may also
+  hear Airo's quiet sounds; turn them off in the board's settings under
+  **Appearance**.
 
 The diagram appears as a presented tab, not inside your normal Meet camera
 tile. Because the tab already shows you behind the board, you can turn off
@@ -59,8 +64,9 @@ diagram** in **•••**, press `Shift+H`, or snap your thumb and middle finge
 
 Everything keeps working in the Airboard tab while you present:
 
-- **Voice:** say `Airo` with your command, or hold one open palm still for
-  about 0.4 seconds, then speak. Ordinary conversation in the call doesn't
+- **Voice:** say `Airo` with your command, or hold one open palm still and
+  speak. For a few seconds after a command you can carry on without `Airo`.
+  Describe a flow and Airo draws it. Ordinary conversation in the call doesn't
   change the board. See [Airo voice](/help/using-the-board/airo-voice).
 - **Hands:** aim, choose, move and place objects with
   [camera gestures](/help/using-the-board/gestures).

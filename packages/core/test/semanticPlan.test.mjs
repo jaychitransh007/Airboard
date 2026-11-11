@@ -381,3 +381,62 @@ test("the tool schema asks for as many targets as the validator needs (RGB-041)"
   }
   assert.equal(schemaFor("distribute").anyOf[1].minItems, 3);
 });
+
+test("plans hold a two-minute narration and the new edit actions", async () => {
+  const core = await import("../dist/index.js");
+  assert.equal(core.AIRBOARD_SEMANTIC_PLAN_MAX_ACTIONS, 40);
+  assert.equal(core.AIRBOARD_SEMANTIC_PLAN_MAX_DIAGRAM_COMMANDS, 150);
+  const creates = Array.from({ length: 40 }, (_, index) => ({
+    type: "create", nodeType: "process", shape: null, label: `Step ${index + 1}`, handle: `s${index}`, placement: { kind: "auto" },
+  }));
+  assert.equal(parseSemanticPlan(resolved(creates)).ok, true);
+  assert.equal(parseSemanticPlan(resolved([...creates, { ...creates[0], handle: "extra" }])).ok, false);
+
+  const connection = { kind: "connection", from: ref("User"), to: ref("API"), label: null, occurrence: null };
+  const plan = resolved([
+    { type: "create", nodeType: "database", shape: "horizontal-cylinder", label: "Cache", handle: "cache", placement: { kind: "auto" } },
+    { type: "create", nodeType: "service", label: "Legacy plan without a shape", handle: "legacy", placement: { kind: "auto" } },
+    { type: "change_type", targets: [ref("Review")], nodeType: "decision", shape: null },
+    { type: "change_type", targets: [{ kind: "plan_handle", handle: "cache" }], nodeType: "custom", shape: "cloud" },
+    { type: "resize", targets: [ref("API")], change: "bigger" },
+    { type: "label_connection", connection, label: "login" },
+    { type: "style_connection", connection, lineStyle: "dashed" },
+    { type: "layout", targets: [ref("API"), ref("Auth"), ref("Billing")], direction: "radial" },
+    { type: "layout", targets: [{ kind: "current_selection" }], direction: "tree" },
+  ]);
+  const parsed = parseSemanticPlan(plan);
+  assert.equal(parsed.ok, true, JSON.stringify(parsed));
+
+  const bad = [
+    { type: "create", nodeType: "database", shape: "teapot", label: null, handle: "x", placement: { kind: "auto" } },
+    { type: "change_type", targets: [ref("A")], nodeType: "decision" },
+    { type: "resize", targets: [ref("A")], change: "huge" },
+    { type: "label_connection", connection, label: "" },
+    { type: "style_connection", connection, lineStyle: "wavy" },
+    { type: "layout", targets: [ref("A"), ref("B")], direction: "spiral" },
+    { type: "change_type", targets: [{ kind: "plan_handle", handle: "later" }], nodeType: "decision", shape: null },
+  ];
+  for (const action of bad) {
+    assert.equal(parseSemanticPlan(resolved([action])).ok, false, JSON.stringify(action));
+  }
+
+  const actionSchemas = AIRBOARD_SEMANTIC_PLAN_JSON_SCHEMA.$defs.action.anyOf;
+  const createSchema = actionSchemas.find((schema) => schema.properties.type.enum[0] === "create");
+  assert.ok(createSchema.required.includes("shape"), "strict mode needs every property required");
+  assert.ok(createSchema.properties.shape.anyOf[0].enum.includes("cloud"));
+  for (const type of ["change_type", "resize", "label_connection", "style_connection"]) {
+    const schema = actionSchemas.find((candidate) => candidate.properties.type.enum[0] === type);
+    assert.ok(schema, `${type} has a tool schema`);
+    assert.deepEqual([...schema.required].sort(), Object.keys(schema.properties).sort());
+  }
+});
+
+test("a spoken name suggests a node type and catalogue shape", async () => {
+  const { inferSemanticNodeForLabel } = await import("../dist/index.js");
+  assert.deepEqual(inferSemanticNodeForLabel("Orders Cache"), { nodeType: "database", shape: "horizontal-cylinder" });
+  assert.deepEqual(inferSemanticNodeForLabel("Load Balancer"), { nodeType: "service", shape: "hexagon" });
+  assert.deepEqual(inferSemanticNodeForLabel("CDN"), { nodeType: "custom", shape: "cloud" });
+  assert.deepEqual(inferSemanticNodeForLabel("Payments Service"), { nodeType: "service", shape: null });
+  assert.deepEqual(inferSemanticNodeForLabel("User Database"), { nodeType: "database", shape: null });
+  assert.deepEqual(inferSemanticNodeForLabel("Quarterly Plan"), { nodeType: "custom", shape: null });
+});

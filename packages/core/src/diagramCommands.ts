@@ -12,6 +12,9 @@ import {
   refreshAttachedConnectors,
   removeAttachedConnectors,
   renameElement,
+  resizeElement,
+  restyleConnectorElement,
+  retypeElement,
   reverseConnector,
   type SceneElementEvent,
   type SceneEventSink,
@@ -23,6 +26,7 @@ import type {
   AnnotationSource,
   BoardEvent,
   BoardState,
+  ShapeKind,
   Stroke,
   StrokeAnnotation,
   StrokePoint,
@@ -39,6 +43,8 @@ export type CreateNodeCommand = {
   type: "node.create";
   nodeId?: string;
   nodeType: AnnotationNodeType;
+  /** Catalogue shape to draw instead of the node type's own, such as a cloud for a CDN. */
+  shapeKind?: ShapeKind;
   label?: string;
   center?: AnnotationPoint;
   bounds?: AnnotationBounds;
@@ -143,6 +149,22 @@ export type ResizeObjectCommand = {
   bounds: AnnotationBounds;
 };
 
+/** Gives a legacy node another node type or catalogue shape, keeping its box, label and arrows. */
+export type RetypeObjectCommand = {
+  type: "object.retype";
+  objectId: string;
+  nodeType: AnnotationNodeType;
+  /** Null or absent draws the node type's own shape. */
+  shapeKind?: ShapeKind | null;
+};
+
+/** Draws a legacy connector solid, dashed or dotted. */
+export type RestyleConnectorCommand = {
+  type: "connector.restyle";
+  connectorId: string;
+  lineStyle: "solid" | "dashed" | "dotted";
+};
+
 export type RenameObjectCommand = {
   type: "object.rename";
   objectId: string;
@@ -239,7 +261,21 @@ export type SceneGroupCommand = {
   label?: string;
 };
 
+export type SceneResizeCommand = { type: "scene.resize"; elementId: string; bounds: AnnotationBounds };
+/** Gives a v2 shape another catalogue shape. */
+export type SceneRetypeCommand = { type: "scene.retype"; elementId: string; shapeKind: ShapeKind };
+export type SceneRestyleConnectorCommand = {
+  type: "scene.connector.restyle";
+  connectorId: string;
+  lineStyle: "solid" | "dashed" | "dotted";
+};
+
 export type DiagramCommand =
+  | SceneResizeCommand
+  | SceneRetypeCommand
+  | SceneRestyleConnectorCommand
+  | RetypeObjectCommand
+  | RestyleConnectorCommand
   | SceneConnectCommand
   | SceneRenameCommand
   | SceneMoveCommand
@@ -376,12 +412,28 @@ export function planDiagramCommand(
     case "scene.group":
       groupElements(planner.sceneSink(), command);
       break;
+    case "scene.resize":
+      resizeElement(planner.sceneSink(), command.elementId, command.bounds);
+      break;
+    case "scene.retype":
+      retypeElement(planner.sceneSink(), command.elementId, command.shapeKind);
+      break;
+    case "scene.connector.restyle":
+      restyleConnectorElement(planner.sceneSink(), command.connectorId, command.lineStyle);
+      break;
+    case "object.retype":
+      planRetypeObject(planner, command);
+      break;
+    case "connector.restyle":
+      planRestyleConnector(planner, command);
+      break;
   }
   // v2 connectors are drawn from stored end points: keep any attached to a
   // legacy node in step when that node moves.
   if (
     command.type === "objects.move" ||
     command.type === "object.resize" ||
+    command.type === "object.retype" ||
     command.type === "objects.align" ||
     command.type === "objects.layout"
   ) {
@@ -651,6 +703,7 @@ function planCreateNode(planner: CommandPlanner, command: CreateNodeCommand): vo
       command.style?.fillColor ?? (command.nodeType === "note" ? "#fef9c3" : "#f8fafc"),
   };
   if (command.label !== undefined) annotation.label = command.label;
+  if (command.shapeKind !== undefined) annotation.shapeKind = command.shapeKind;
   if (command.style?.opacity !== undefined) annotation.opacity = command.style.opacity;
   planner.createStroke(
     semanticStroke(planner, id, annotation, command.style?.thickness ?? 3),
@@ -898,6 +951,32 @@ function planResizeObject(planner: CommandPlanner, command: ResizeObjectCommand)
     pointsForAnnotation(annotation, planner.timestampMs),
   );
   syncAttachedConnectors(planner, [stroke.id]);
+}
+
+function planRetypeObject(planner: CommandPlanner, command: RetypeObjectCommand): void {
+  const stroke = planner.getStroke(command.objectId);
+  const annotation = cloneAnnotation(stroke.annotation as StrokeAnnotation);
+  if (!annotation.bounds || (annotation.type !== "flow_node" && annotation.type !== "ellipse" && annotation.type !== "rectangle")) {
+    throw new DiagramCommandError(`Diagram object cannot change type: ${command.objectId}`);
+  }
+  annotation.type = command.nodeType === "circle" ? "ellipse" : "flow_node";
+  annotation.nodeType = command.nodeType;
+  if (command.shapeKind) annotation.shapeKind = command.shapeKind;
+  else delete annotation.shapeKind;
+  planner.updateAnnotation(stroke.id, annotation, pointsForAnnotation(annotation, planner.timestampMs));
+  // Arrows meet a node's outline, which a new shape changes.
+  syncAttachedConnectors(planner, [stroke.id]);
+}
+
+function planRestyleConnector(planner: CommandPlanner, command: RestyleConnectorCommand): void {
+  const stroke = planner.getStroke(command.connectorId);
+  const annotation = cloneAnnotation(stroke.annotation as StrokeAnnotation);
+  if (annotation.type !== "connector" && annotation.type !== "arrow") {
+    throw new DiagramCommandError(`Not a connector: ${command.connectorId}`);
+  }
+  if (command.lineStyle === "solid") delete annotation.lineStyle;
+  else annotation.lineStyle = command.lineStyle;
+  planner.updateAnnotation(stroke.id, annotation, pointsForAnnotation(annotation, planner.timestampMs));
 }
 
 function planRenameObject(planner: CommandPlanner, command: RenameObjectCommand): void {

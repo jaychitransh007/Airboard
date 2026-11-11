@@ -70,20 +70,52 @@ test("two open palms moving together pan after the engage debounce", () => {
     { mode: "idle" },
   );
   assert.deepEqual(
-    tracker.update({ hands: [open(100, 100), open(300, 100)], timestampMs: 160 }),
+    tracker.update({ hands: [open(104, 102), open(304, 102)], timestampMs: 300 }),
+    { mode: "idle" },
+    "a pose held for less than half a second does not engage",
+  );
+  assert.equal(tracker.engaged, false);
+  assert.deepEqual(
+    tracker.update({ hands: [open(100, 100), open(300, 100)], timestampMs: 520 }),
     { mode: "idle" },
     "engage frame itself emits no delta",
   );
   const update = tracker.update({
     hands: [open(120, 110), open(320, 110)],
-    timestampMs: 200,
+    timestampMs: 560,
   });
   assert.deepEqual(update, { mode: "pan", dx: 20, dy: 10 });
   assert.equal(tracker.mode, "pan");
 });
 
-test("two closed hands spreading zoom around their midpoint", () => {
+test("DELIBERATE START: hands moving while talking never engage pan or zoom", () => {
   const tracker = new CanvasNavigationTracker();
+  // Two open hands gesturing: the midpoint keeps moving more than the
+  // steadiness tolerance, so the half-second hold never completes.
+  for (let t = 0, x = 100; t <= 3_000; t += 33, x += 6) {
+    tracker.update({ hands: [open(x, 100), open(x + 200, 100)], timestampMs: t });
+    assert.equal(tracker.engaged, false, `engaged at ${t} ms`);
+  }
+});
+
+test("DELIBERATE START: a grab or carry in progress blocks navigation", () => {
+  const tracker = new CanvasNavigationTracker();
+  for (let t = 0; t <= 2_000; t += 33) {
+    assert.deepEqual(
+      tracker.update({
+        hands: [closed(400, 300), closed(500, 300)],
+        timestampMs: t,
+        blocked: true,
+      }),
+      { mode: "idle" },
+    );
+  }
+  assert.equal(tracker.engaged, false);
+  assert.equal(tracker.reserving, false);
+});
+
+test("two closed hands spreading zoom around their midpoint", () => {
+  const tracker = new CanvasNavigationTracker({ engageMs: 150 });
   tracker.update({ hands: [closed(400, 300), closed(500, 300)], timestampMs: 0 });
   assert.equal(
     tracker.reserving,
@@ -120,7 +152,7 @@ test("SEPARATION: one hand — or mixed poses — never navigates", () => {
 });
 
 test("SEPARATION: pan never morphs into zoom — pose switch releases first", () => {
-  const tracker = new CanvasNavigationTracker();
+  const tracker = new CanvasNavigationTracker({ engageMs: 150 });
   tracker.update({ hands: [open(100, 100), open(300, 100)], timestampMs: 0 });
   tracker.update({ hands: [open(100, 100), open(300, 100)], timestampMs: 160 });
   assert.equal(tracker.mode, "pan");
@@ -143,7 +175,7 @@ test("SEPARATION: pan never morphs into zoom — pose switch releases first", ()
 });
 
 test("pose flicker freezes and rebases instead of jumping", () => {
-  const tracker = new CanvasNavigationTracker();
+  const tracker = new CanvasNavigationTracker({ engageMs: 150 });
   tracker.update({ hands: [open(100, 100), open(300, 100)], timestampMs: 0 });
   tracker.update({ hands: [open(100, 100), open(300, 100)], timestampMs: 160 });
   // One dropout frame (hand lost), well inside releaseMs.

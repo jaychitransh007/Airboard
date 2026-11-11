@@ -9,10 +9,10 @@ import { expect, test } from "@playwright/test";
 test("typing a command creates and edits objects instantly", async ({ page }) => {
   await page.goto("/?testStandalone=1");
 
-  // First run shows the onboarding overlay; dismissing it is part of the flow.
-  const onboarding = page.getByRole("button", { name: "Start building" });
+  // First run shows a corner card teaching voice and hands. It doesn't block
+  // the board, and the first change closes it.
+  const onboarding = page.getByRole("complementary", { name: "Build by talking and pointing" });
   await expect(onboarding).toBeVisible();
-  await onboarding.click();
 
   const input = page.getByTestId("intent-command-input");
   await expect(input).toBeVisible();
@@ -23,6 +23,7 @@ test("typing a command creates and edits objects instantly", async ({ page }) =>
   await expect(page.locator(".intent-feedback")).toContainText("Applied:", {
     timeout: 15_000,
   });
+  await expect(onboarding).toBeHidden();
   // Instant-commit feedback remains in the command panel without an
   // obstructive floating action toast.
   await expect(page.getByTestId("action-toast")).toHaveCount(0);
@@ -86,7 +87,7 @@ test("recipient narrative adds both dataset inputs atomically and repairs the ob
   page,
 }) => {
   await page.goto("/?testStandalone=1");
-  await page.getByRole("button", { name: "Start building" }).click();
+  await page.getByRole("button", { name: "Got it" }).click();
   const input = page.getByTestId("intent-command-input");
   const apply = async (command: string) => {
     await input.fill(command);
@@ -297,7 +298,7 @@ test("recipient narrative adds both dataset inputs atomically and repairs the ob
 
 test("section membership round-trips with scene undo and redo", async ({ page }) => {
   await page.goto("/?testStandalone=1");
-  await page.getByRole("button", { name: "Start building" }).click();
+  await page.getByRole("button", { name: "Got it" }).click();
   const input = page.getByTestId("intent-command-input");
   const apply = async (command: string) => {
     await input.fill(command);

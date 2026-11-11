@@ -50,6 +50,13 @@ async function expectInsideViewport(locator: Locator, width: number, height: num
   expect(box!.y + box!.height).toBeLessThanOrEqual(height + 1);
 }
 
+type HybridAction =
+  | { type: "grab_started"; targetId: string }
+  | { type: "drag_moved"; targetId: string }
+  | { type: "grab_ended"; targetId: string }
+  | { type: "grab_cancelled"; targetId: string }
+  | null;
+
 async function emitHybridGesture(
   page: Page,
   input: {
@@ -57,6 +64,9 @@ async function emitHybridGesture(
     y: number;
     pinchState: "open" | "closing" | "closed" | "opening";
     timestampMs: number;
+    focusedTargetId?: string | null;
+    grabbedTargetId?: string | null;
+    action?: HybridAction;
   },
 ) {
   await page.evaluate((frame) => {
@@ -81,13 +91,76 @@ async function emitHybridGesture(
       pinchState: frame.pinchState,
       cursor: { x: frame.x, y: frame.y },
       coarseCursor: { x: frame.x, y: frame.y },
-      focusedTargetId: null,
-      grabbedTargetId: null,
+      focusedTargetId: frame.focusedTargetId ?? null,
+      grabbedTargetId: frame.grabbedTargetId ?? null,
       areaCursorRadiusPx: 28,
       requiresPinchRelease: false,
-      action: null,
+      action: frame.action
+        ? {
+            ...frame.action,
+            cursor: { x: frame.x, y: frame.y },
+            targetAnchor: { x: frame.x, y: frame.y },
+            grabOffset: { x: 0, y: 0 },
+            delta: { x: 0, y: 0 },
+            totalDelta: { x: 0, y: 0 },
+          }
+        : null,
     });
   }, input);
+}
+
+type CanonicalElement = {
+  id: string;
+  kind: string;
+  status: string;
+  zIndex: number;
+  legacyStrokeId?: string;
+  shapeKind?: string;
+  pathKind?: string;
+  transform: { x: number; y: number; width: number; height: number };
+  start?: { binding?: { elementId: string } };
+  end?: { binding?: { elementId: string } };
+};
+
+async function activeSceneElements(page: Page): Promise<CanonicalElement[]> {
+  const elements = await page.evaluate(() => {
+    const state = (
+      window as unknown as {
+        __airboardTestHooks: {
+          getCanonicalBoardState(): { elements: Record<string, unknown> };
+        };
+      }
+    ).__airboardTestHooks.getCanonicalBoardState();
+    return Object.values(state.elements);
+  });
+  return (elements as CanonicalElement[])
+    .filter((element) => element.status === "active" && !element.legacyStrokeId)
+    .sort((a, b) => a.zIndex - b.zIndex);
+}
+
+/** Opens the Shape popover by hand and carries a Square to `drop`. */
+async function carrySquareByHand(
+  page: Page,
+  toolbar: Locator,
+  canvasBox: { x: number; y: number; width: number; height: number },
+  drop: { x: number; y: number },
+  startMs: number,
+) {
+  const local = (box: { x: number; y: number; width: number; height: number }) => ({
+    x: box.x + box.width / 2 - canvasBox.x,
+    y: box.y + box.height / 2 - canvasBox.y,
+  });
+  const triggerBox = await toolbar.getByRole("button", { name: "Shape", exact: true }).boundingBox();
+  await emitHybridGesture(page, { ...local(triggerBox!), pinchState: "open", timestampMs: startMs });
+  const menu = page.getByRole("menu", { name: "Recent shapes and connectors" });
+  await expect(menu).toBeVisible();
+  const squareBox = await menu.getByRole("menuitem", { name: "Square", exact: true }).boundingBox();
+  const squarePoint = local(squareBox!);
+  await emitHybridGesture(page, { ...squarePoint, pinchState: "open", timestampMs: startMs + 100 });
+  await emitHybridGesture(page, { ...squarePoint, pinchState: "closing", timestampMs: startMs + 150 });
+  await emitHybridGesture(page, { ...squarePoint, pinchState: "closed", timestampMs: startMs + 200 });
+  await emitHybridGesture(page, { ...drop, pinchState: "closed", timestampMs: startMs + 300 });
+  await emitHybridGesture(page, { ...drop, pinchState: "open", timestampMs: startMs + 400 });
 }
 
 async function catalogGestureState(page: Page) {
@@ -104,6 +177,8 @@ async function catalogGestureState(page: Page) {
               enteredCanvas: boolean;
               placementActive: boolean;
               ghostCenter: { x: number; y: number } | null;
+              activeCreationTool: string;
+              selectedElementIds: string[];
             };
           };
         }
@@ -510,11 +585,18 @@ test("air hover and one close-drag-release pinch carry a recent shape onto the b
   expect(placed).not.toBeNull();
   expect(Math.abs((placed?.x ?? Infinity) - dropPoint.x)).toBeLessThan(16);
   expect(Math.abs((placed?.y ?? Infinity) - dropPoint.y)).toBeLessThan(16);
+  // A hand placement opens no typing box: the new shape is selected so the
+  // presenter can name it by voice, and the Square stays armed.
+  await expect(page.getByTestId("scene-text-editor")).toHaveCount(0);
+  const [placedSquare] = await activeSceneElements(page);
   expect(await catalogGestureState(page)).toMatchObject({
-    activeTool: "select",
+    activeTool: "box",
+    activeCreationTool: "shape:basic-square",
+    selectedElementIds: [placedSquare!.id],
     interactionMode: null,
     placementActive: false,
   });
+  await expect(page.getByTestId("hand-cue")).toContainText("placed");
   const canonical = await page.evaluate(() => {
     const state = (
       window as unknown as {
@@ -535,6 +617,278 @@ test("air hover and one close-drag-release pinch carry a recent shape onto the b
     };
   });
   expect(canonical).toEqual({ shapes: ["square"], legacyStrokeCount: 0 });
+});
+
+test("a hand-placed shape keeps the tool armed, can be grabbed again, and the dock disarms it", async ({
+  page,
+}) => {
+  const toolbar = await openStableStandalone(page);
+  const canvasBox = (await page.locator("canvas.board-canvas").boundingBox())!;
+  const first = { x: canvasBox.width * 0.3, y: canvasBox.height * 0.3 };
+  await carrySquareByHand(page, toolbar, canvasBox, first, 1_000);
+  await expect.poll(async () => (await activeSceneElements(page)).length).toBe(1);
+
+  // The next closed hand on empty board places another Square, no dock trip.
+  const second = { x: canvasBox.width * 0.62, y: canvasBox.height * 0.3 };
+  await emitHybridGesture(page, { ...second, pinchState: "open", timestampMs: 2_000 });
+  await emitHybridGesture(page, { ...second, pinchState: "closed", timestampMs: 2_100 });
+  await emitHybridGesture(page, { ...second, pinchState: "open", timestampMs: 2_200 });
+  await expect.poll(async () => (await activeSceneElements(page)).length).toBe(2);
+  await expect(page.getByTestId("scene-text-editor")).toHaveCount(0);
+  const squares = await activeSceneElements(page);
+  expect(squares.map((element) => element.shapeKind)).toEqual(["square", "square"]);
+
+  // Closing over an existing shape grabs and moves it, even with the tool armed.
+  const firstSquare = squares[0]!;
+  const before = firstSquare.transform;
+  await emitHybridGesture(page, {
+    ...first,
+    pinchState: "open",
+    focusedTargetId: firstSquare.id,
+    timestampMs: 3_000,
+  });
+  await emitHybridGesture(page, {
+    ...first,
+    pinchState: "closed",
+    focusedTargetId: firstSquare.id,
+    grabbedTargetId: firstSquare.id,
+    action: { type: "grab_started", targetId: firstSquare.id },
+    timestampMs: 3_100,
+  });
+  const moved = { x: first.x, y: first.y + 120 };
+  await emitHybridGesture(page, {
+    ...moved,
+    pinchState: "closed",
+    grabbedTargetId: firstSquare.id,
+    action: { type: "drag_moved", targetId: firstSquare.id },
+    timestampMs: 3_200,
+  });
+  await emitHybridGesture(page, {
+    ...moved,
+    pinchState: "open",
+    action: { type: "grab_ended", targetId: firstSquare.id },
+    timestampMs: 3_300,
+  });
+  const afterMove = (await activeSceneElements(page)).find((element) => element.id === firstSquare.id)!;
+  expect(afterMove.transform.y - before.y).toBeGreaterThan(100);
+  expect(Math.abs(afterMove.transform.x - before.x)).toBeLessThan(2);
+  expect((await activeSceneElements(page)).length).toBe(2);
+
+  // Undo puts the moved shape back, like a mouse drag.
+  await page.evaluate(() =>
+    (
+      window as unknown as { __airboardTestHooks: { undoLastActionForEval(): unknown } }
+    ).__airboardTestHooks.undoLastActionForEval(),
+  );
+  await expect
+    .poll(async () =>
+      Math.round(
+        (await activeSceneElements(page)).find((element) => element.id === firstSquare.id)!.transform.y,
+      ),
+    )
+    .toBe(Math.round(before.y));
+
+  // Reaching for the dock puts the armed Square away.
+  const triggerBox = (await toolbar.getByRole("button", { name: "Shape", exact: true }).boundingBox())!;
+  await emitHybridGesture(page, {
+    x: triggerBox.x + triggerBox.width / 2 - canvasBox.x,
+    y: triggerBox.y + triggerBox.height / 2 - canvasBox.y,
+    pinchState: "open",
+    timestampMs: 4_000,
+  });
+  await expect.poll(async () => (await catalogGestureState(page)).activeTool).toBe("select");
+});
+
+test("a hand grab lost after a hand placement also puts the armed tool away", async ({ page }) => {
+  const toolbar = await openStableStandalone(page);
+  const canvasBox = (await page.locator("canvas.board-canvas").boundingBox())!;
+  const first = { x: canvasBox.width * 0.3, y: canvasBox.height * 0.3 };
+  await carrySquareByHand(page, toolbar, canvasBox, first, 1_000);
+  await expect.poll(async () => (await activeSceneElements(page)).length).toBe(1);
+  const square = (await activeSceneElements(page))[0]!;
+
+  // Grab the placed square, then lose the hand mid-grab.
+  await emitHybridGesture(page, { ...first, pinchState: "open", focusedTargetId: square.id, timestampMs: 2_000 });
+  await emitHybridGesture(page, {
+    ...first,
+    pinchState: "closed",
+    focusedTargetId: square.id,
+    grabbedTargetId: square.id,
+    action: { type: "grab_started", targetId: square.id },
+    timestampMs: 2_100,
+  });
+  await emitHybridGesture(page, {
+    ...first,
+    pinchState: "open",
+    action: { type: "grab_cancelled", targetId: square.id },
+    timestampMs: 2_200,
+  });
+  await expect.poll(async () => (await catalogGestureState(page)).activeCreationTool).toBe("move");
+
+  // A later closed hand on empty board places nothing.
+  const empty = { x: canvasBox.width * 0.62, y: canvasBox.height * 0.6 };
+  await emitHybridGesture(page, { ...empty, pinchState: "open", timestampMs: 3_000 });
+  await emitHybridGesture(page, { ...empty, pinchState: "closed", timestampMs: 3_100 });
+  await emitHybridGesture(page, { ...empty, pinchState: "open", timestampMs: 3_200 });
+  expect((await activeSceneElements(page)).length).toBe(1);
+});
+
+test("an open palm held over a shape opens the voice gate; over the dock it waits, then opens without lowering", async ({
+  page,
+}) => {
+  const toolbar = await openStableStandalone(page);
+  const canvasBox = (await page.locator("canvas.board-canvas").boundingBox())!;
+  const spot = { x: canvasBox.width * 0.3, y: canvasBox.height * 0.3 };
+  await carrySquareByHand(page, toolbar, canvasBox, spot, 1_000);
+  await expect.poll(async () => (await activeSceneElements(page)).length).toBe(1);
+  const square = (await activeSceneElements(page))[0]!;
+  const palm = (timestampMs: number) =>
+    page.evaluate(
+      (timestampMs) =>
+        (
+          window as unknown as {
+            __airboardTestHooks: {
+              emitPalmVoiceGestureFrame(frame: unknown): "activate" | "release" | null;
+            };
+          }
+        ).__airboardTestHooks.emitPalmVoiceGestureFrame({
+          score: 0.94,
+          point: { x: 0.48, y: 0.42 },
+          timestampMs,
+          suppressed: false,
+        }),
+      timestampMs,
+    );
+
+  // Hovering the shape ("make this red" while pointing at it) still talks.
+  await emitHybridGesture(page, { ...spot, pinchState: "open", focusedTargetId: square.id, timestampMs: 2_000 });
+  expect(await palm(10_000)).toBeNull();
+  expect(await palm(10_450)).toBe("activate");
+  await expect(page.getByTestId("voice-gate-pill")).toHaveCount(1);
+  for (const t of [10_500, 10_800, 11_000, 11_300]) await page.evaluate(
+    (timestampMs) =>
+      (
+        window as unknown as {
+          __airboardTestHooks: { emitPalmVoiceGestureFrame(frame: unknown): unknown };
+        }
+      ).__airboardTestHooks.emitPalmVoiceGestureFrame({ score: 0, point: null, timestampMs, suppressed: false }),
+    t,
+  );
+  await expect(page.getByTestId("voice-gate-pill")).toHaveCount(0);
+
+  // Aiming at a dock tile is pointing, not talking...
+  const triggerBox = (await toolbar.getByRole("button", { name: "Shape", exact: true }).boundingBox())!;
+  const dock = {
+    x: triggerBox.x + triggerBox.width / 2 - canvasBox.x,
+    y: triggerBox.y + triggerBox.height / 2 - canvasBox.y,
+  };
+  await emitHybridGesture(page, { ...dock, pinchState: "open", timestampMs: 20_000 });
+  expect(await palm(20_000)).toBeNull();
+  expect(await palm(20_600)).toBeNull();
+  await expect(page.getByTestId("voice-gate-pill")).toHaveCount(0);
+  // ...and once the hand leaves the dock the held palm opens the gate.
+  await emitHybridGesture(page, { x: canvasBox.width * 0.6, y: canvasBox.height * 0.6, pinchState: "open", timestampMs: 21_000 });
+  expect(await palm(21_000)).toBeNull();
+  expect(await palm(21_450)).toBe("activate");
+});
+
+test("a closed hand over empty board says there is nothing to grab", async ({ page }) => {
+  await openStableStandalone(page);
+  const canvasBox = (await page.locator("canvas.board-canvas").boundingBox())!;
+  const spot = { x: canvasBox.width * 0.5, y: canvasBox.height * 0.5 };
+  await emitHybridGesture(page, { ...spot, pinchState: "open", timestampMs: 1_000 });
+  await emitHybridGesture(page, { ...spot, pinchState: "closed", timestampMs: 1_100 });
+  await expect(page.getByTestId("hand-cue")).toContainText("Nothing to grab here");
+});
+
+test("a connector carried from the dock joins the shapes it is released between, then drags A to B", async ({
+  page,
+}) => {
+  const toolbar = await openStableStandalone(page);
+  const canvasBox = (await page.locator("canvas.board-canvas").boundingBox())!;
+  const left = { x: canvasBox.width * 0.25, y: canvasBox.height * 0.3 };
+  const right = { x: canvasBox.width * 0.6, y: canvasBox.height * 0.3 };
+  await carrySquareByHand(page, toolbar, canvasBox, left, 1_000);
+  await emitHybridGesture(page, { ...right, pinchState: "open", timestampMs: 2_000 });
+  await emitHybridGesture(page, { ...right, pinchState: "closed", timestampMs: 2_100 });
+  await emitHybridGesture(page, { ...right, pinchState: "open", timestampMs: 2_200 });
+  await expect.poll(async () => (await activeSceneElements(page)).length).toBe(2);
+  const [leftSquare, rightSquare] = await activeSceneElements(page);
+
+  const local = (box: { x: number; y: number; width: number; height: number }) => ({
+    x: box.x + box.width / 2 - canvasBox.x,
+    y: box.y + box.height / 2 - canvasBox.y,
+  });
+  const triggerBox = (await toolbar.getByRole("button", { name: "Connector", exact: true }).boundingBox())!;
+  await emitHybridGesture(page, { ...local(triggerBox), pinchState: "open", timestampMs: 3_000 });
+  const menu = page.getByRole("menu", { name: "Connector types" });
+  await expect(menu).toBeVisible();
+  const curvedPoint = local(
+    (await menu.getByRole("menuitem", { name: "Curved connector", exact: true }).boundingBox())!,
+  );
+  await emitHybridGesture(page, { ...curvedPoint, pinchState: "open", timestampMs: 3_100 });
+  await emitHybridGesture(page, { ...curvedPoint, pinchState: "closing", timestampMs: 3_150 });
+  await emitHybridGesture(page, { ...curvedPoint, pinchState: "closed", timestampMs: 3_200 });
+  const between = { x: (left.x + right.x) / 2, y: left.y + 4 };
+  await emitHybridGesture(page, { ...between, pinchState: "closed", timestampMs: 3_300 });
+  await emitHybridGesture(page, { ...between, pinchState: "open", timestampMs: 3_400 });
+  const connectors = async () =>
+    (await activeSceneElements(page)).filter((element) => element.kind === "connector");
+  await expect.poll(async () => (await connectors()).length).toBe(1);
+  const [dropped] = await connectors();
+  expect(dropped!.start?.binding?.elementId).toBe(leftSquare!.id);
+  expect(dropped!.end?.binding?.elementId).toBe(rightSquare!.id);
+
+  // The connector stays armed: close on the right square, open on the left.
+  await emitHybridGesture(page, { ...right, pinchState: "open", timestampMs: 4_000 });
+  await emitHybridGesture(page, {
+    ...right,
+    pinchState: "closed",
+    focusedTargetId: rightSquare!.id,
+    grabbedTargetId: rightSquare!.id,
+    action: { type: "grab_started", targetId: rightSquare!.id },
+    timestampMs: 4_100,
+  });
+  await emitHybridGesture(page, { ...left, pinchState: "closed", timestampMs: 4_200 });
+  await emitHybridGesture(page, { ...left, pinchState: "open", timestampMs: 4_300 });
+  await expect.poll(async () => (await connectors()).length).toBe(2);
+  const dragged = (await connectors())[1]!;
+  expect(dragged.start?.binding?.elementId).toBe(rightSquare!.id);
+  expect(dragged.end?.binding?.elementId).toBe(leftSquare!.id);
+  const rightAfter = (await activeSceneElements(page)).find((element) => element.id === rightSquare!.id)!;
+  expect(rightAfter.transform).toEqual(rightSquare!.transform);
+});
+
+test("resting the open hand on a second shape adds it to the selection", async ({ page }) => {
+  const toolbar = await openStableStandalone(page);
+  const canvasBox = (await page.locator("canvas.board-canvas").boundingBox())!;
+  const a = { x: canvasBox.width * 0.3, y: canvasBox.height * 0.3 };
+  const b = { x: canvasBox.width * 0.6, y: canvasBox.height * 0.3 };
+  await carrySquareByHand(page, toolbar, canvasBox, a, 1_000);
+  await emitHybridGesture(page, { ...b, pinchState: "open", timestampMs: 2_000 });
+  await emitHybridGesture(page, { ...b, pinchState: "closed", timestampMs: 2_100 });
+  await emitHybridGesture(page, { ...b, pinchState: "open", timestampMs: 2_200 });
+  await expect.poll(async () => (await activeSceneElements(page)).length).toBe(2);
+  const [first, second] = await activeSceneElements(page);
+  expect((await catalogGestureState(page)).selectedElementIds).toEqual([second!.id]);
+
+  for (let t = 3_000; t <= 4_100; t += 100) {
+    await emitHybridGesture(page, { ...a, pinchState: "open", focusedTargetId: first!.id, timestampMs: t });
+  }
+  await expect
+    .poll(async () => [...(await catalogGestureState(page)).selectedElementIds].sort())
+    .toEqual([first!.id, second!.id].sort());
+  const pointing = await page.evaluate(() =>
+    (
+      window as unknown as {
+        __airboardTestHooks: {
+          getHandPointingSnapshot(): { targetIds: string[]; boardPoint: unknown };
+        };
+      }
+    ).__airboardTestHooks.getHandPointingSnapshot(),
+  );
+  expect(pointing.targetIds.at(-1)).toBe(first!.id);
+  expect(pointing.boardPoint).not.toBeNull();
 });
 
 test("air pinch carry places a v2-only curved connector canonically", async ({ page }) => {

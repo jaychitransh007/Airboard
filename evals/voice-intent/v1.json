@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0",
-  "semanticPromptVersion": "2.13",
+  "semanticPromptVersion": "2.14",
   "description": "Airboard semantic voice-intent regression corpus for production plan contract 1.1 and semantic prompt 2.8. Every case is an independently replayable finalized voice turn.",
   "cases": [
     {
@@ -55,7 +55,8 @@
     {
       "id": "rename-circle-by-name",
       "description": "Renames an unselected object by its visible name.",
-      "transcript": "Airo, change the name of circle to user",
+      "transcript": "change the name of circle to user",
+      "addressedBy": "wake",
       "parserIssue": "grounding_failed",
       "context": {
         "selectionCount": 0,
@@ -98,7 +99,8 @@
     {
       "id": "decision-yes-no-branch",
       "description": "Produces one typed branch instead of treating all trailing words as one target.",
-      "transcript": "Airo connect the decision to user one and user two with yes and no",
+      "transcript": "connect the decision to user one and user two with yes and no",
+      "addressedBy": "wake",
       "parserIssue": "compound_command",
       "context": {
         "selectionCount": 0,
@@ -158,8 +160,9 @@
     },
     {
       "id": "truncated-decision-branch",
-      "description": "A cut-off branch must ask for the missing label and must not guess or mutate.",
-      "transcript": "Airo connect the decision to user one and user two with yes and",
+      "description": "A cut-off second branch label after 'yes' takes the conventional 'no' instead of a question (gap 6).",
+      "transcript": "connect the decision to user one and user two with yes and",
+      "addressedBy": "wake",
       "parserIssue": "compound_command",
       "context": {
         "selectionCount": 0,
@@ -196,11 +199,9 @@
         "pointerAvailable": true
       },
       "expected": {
-        "status": "clarification",
-        "issueCode": "missing_label",
-        "actionTypeCounts": {},
-        "missingSlotsIncludes": ["branch_label"],
-        "finalState": { "nodeCountDelta": 0, "edgeCountDelta": 0 }
+        "status": "resolved",
+        "actionTypeCounts": { "branch": 1 },
+        "finalState": { "nodeCountDelta": 0, "edgeCountDelta": 2 }
       }
     },
     {
@@ -272,7 +273,8 @@
     {
       "id": "repair-q-to-queue",
       "description": "Uses creation context and the project glossary to repair q to queue.",
-      "transcript": "Airo add a q",
+      "transcript": "add a q",
+      "addressedBy": "wake",
       "parserIssue": "missing_node_type",
       "context": {
         "selectionCount": 0,
@@ -320,7 +322,8 @@
     {
       "id": "multi-node-api-narrative",
       "description": "Turns one conversational narrative into a connected three-node plan.",
-      "transcript": "Airo create a diagram where a user, uh, makes an API request and the API updates a database",
+      "transcript": "create a diagram where a user, uh, makes an API request and the API updates a database",
+      "addressedBy": "wake",
       "parserIssue": "compound_command",
       "context": {
         "selectionCount": 0,
@@ -502,7 +505,8 @@
     {
       "id": "reverse-existing-connector",
       "description": "Exercises the contract 1.1 reverse_connection action against one uniquely grounded edge.",
-      "transcript": "Airo reverse the requests connector from User to API",
+      "transcript": "reverse the requests connector from User to API",
+      "addressedBy": "wake",
       "parserIssue": "unknown_command",
       "context": {
         "selectionCount": 0,
@@ -562,7 +566,8 @@
     {
       "id": "delete-existing-connector",
       "description": "Exercises the contract 1.1 delete_connection action against one uniquely grounded edge.",
-      "transcript": "Airo remove the requests connection from User to API",
+      "transcript": "remove the requests connection from User to API",
+      "addressedBy": "wake",
       "parserIssue": "unknown_command",
       "context": {
         "selectionCount": 0,
@@ -612,9 +617,10 @@
       }
     },
     {
-      "id": "clarify-ambiguous-delete",
-      "description": "Requires clarification before a destructive action can target one of two plausible services.",
-      "transcript": "Airo delete the service",
+      "id": "best-guess-ambiguous-delete",
+      "description": "Applies a best guess when 'the service' fits two services: one is deleted at once and undo is the safety net (gap 6).",
+      "transcript": "delete the service",
+      "addressedBy": "wake",
       "parserIssue": "ambiguous_object_reference",
       "context": {
         "selectionCount": 0,
@@ -640,24 +646,16 @@
         "pointerAvailable": false
       },
       "expected": {
-        "status": "clarification",
-        "issueCode": "ambiguous_reference",
-        "actionTypeCounts": {},
-        "missingSlotsIncludes": ["object_reference"],
-        "finalState": {
-          "nodeCountDelta": 0,
-          "edgeCountDelta": 0,
-          "requiredNodes": [
-            { "label": "Payments Service", "nodeType": "service", "ordinal": 1 },
-            { "label": "Orders Service", "nodeType": "service", "ordinal": 2 }
-          ]
-        }
+        "status": "resolved",
+        "actionTypeCounts": { "delete": 1 },
+        "finalState": { "nodeCountDelta": -1, "edgeCountDelta": 0 }
       }
     },
     {
       "id": "unsupported-operation",
       "description": "Distinguishes an explicit but out-of-schema board operation from an ambiguous supported command.",
-      "transcript": "Airo animate the database so it pulses",
+      "transcript": "animate the database so it pulses",
+      "addressedBy": "wake",
       "parserIssue": "unknown_command",
       "context": {
         "selectionCount": 0,
@@ -691,7 +689,8 @@
     {
       "id": "unsupported-non-board-speech",
       "description": "Rejects activated speech that is not a diagram operation.",
-      "transcript": "Airo what time does the meeting start",
+      "transcript": "what time does the meeting start",
+      "addressedBy": "wake",
       "parserIssue": "unknown_command",
       "context": {
         "selectionCount": 0,
@@ -710,8 +709,9 @@
     },
     {
       "id": "unsupported-count-plan-bound",
-      "description": "Routes deterministic unsupported_count into semantic policy and rejects a request larger than the 12-action plan bound.",
-      "transcript": "Airo add 21 circles",
+      "description": "Routes deterministic unsupported_count into semantic policy and rejects a request larger than the 40-action plan bound.",
+      "transcript": "add 50 circles",
+      "addressedBy": "wake",
       "parserIssue": "unsupported_count",
       "context": {
         "selectionCount": 0,
@@ -731,7 +731,8 @@
     {
       "id": "lengthy-checkout-narrative-475",
       "description": "Exercises a near-limit natural narrative with five actors, four ordered relationships, and explicit connector labels.",
-      "transcript": "Airo, while we review checkout, capture the whole story: a shopper sends an order to Checkout API, Checkout API publishes it to Orders Queue, Orders Worker consumes it, and Orders Worker writes the result to Orders Database. Please create Shopper, Checkout API, Orders Queue, Orders Worker, and Orders Database, then connect those relationships in that order using labels submits, publishes, consumes, and writes, so the board records actors and flow clearly for this design.",
+      "transcript": "while we review checkout, capture the whole story: a shopper sends an order to Checkout API, Checkout API publishes it to Orders Queue, Orders Worker consumes it, and Orders Worker writes the result to Orders Database. Please create Shopper, Checkout API, Orders Queue, Orders Worker, and Orders Database, then connect those relationships in that order using labels submits, publishes, consumes, and writes, so the board records actors and flow clearly for this design.",
+      "addressedBy": "wake",
       "parserIssue": "compound_command",
       "context": {
         "selectionCount": 0,
@@ -791,7 +792,8 @@
     {
       "id": "acoustic-repair-api-queue",
       "description": "Repairs spelled-out API and a self-corrected cue-to-queue phrase while preserving the requested relationship.",
-      "transcript": "Airo, uh, make an A P eye—sorry, API—then connect it to the orders cue, I mean Orders Queue, with publishes",
+      "transcript": "uh, make an A P eye—sorry, API—then connect it to the orders cue, I mean Orders Queue, with publishes",
+      "addressedBy": "wake",
       "parserIssue": "compound_command",
       "context": {
         "selectionCount": 0,
@@ -834,89 +836,184 @@
       }
     },
     {
-      "id": "clarify-dense-duplicate-cache-delete",
-      "description": "Prevents a destructive guess when a dense board contains two objects with the same visible label.",
-      "transcript": "Airo remove Cache",
+      "id": "best-guess-dense-duplicate-cache-delete",
+      "description": "On a dense board with two objects labelled Cache, removes one at once instead of asking which (gap 6).",
+      "transcript": "remove Cache",
+      "addressedBy": "wake",
       "parserIssue": "ambiguous_object_reference",
       "context": {
         "selectionCount": 0,
         "selected": [],
         "objects": [
-          { "label": "Customer", "nodeType": "user", "ordinal": 1, "position": { "x": 100, "y": 140 }, "size": { "width": 160, "height": 92 } },
-          { "label": "Web App", "nodeType": "service", "ordinal": 1, "position": { "x": 320, "y": 140 }, "size": { "width": 180, "height": 92 } },
-          { "label": "Gateway", "nodeType": "api", "ordinal": 1, "position": { "x": 540, "y": 140 }, "size": { "width": 180, "height": 92 } },
-          { "label": "Cache", "nodeType": "service", "ordinal": 2, "position": { "x": 760, "y": 140 }, "size": { "width": 180, "height": 92 } },
-          { "label": "Orders API", "nodeType": "api", "ordinal": 2, "position": { "x": 980, "y": 140 }, "size": { "width": 180, "height": 92 } },
-          { "label": "Audit Log", "nodeType": "document", "ordinal": 1, "position": { "x": 100, "y": 420 }, "size": { "width": 170, "height": 110 } },
-          { "label": "Worker", "nodeType": "service", "ordinal": 3, "position": { "x": 320, "y": 420 }, "size": { "width": 180, "height": 92 } },
-          { "label": "Cache", "nodeType": "database", "ordinal": 1, "position": { "x": 540, "y": 420 }, "size": { "width": 200, "height": 110 } },
-          { "label": "Orders Queue", "nodeType": "queue", "ordinal": 1, "position": { "x": 760, "y": 420 }, "size": { "width": 190, "height": 96 } },
-          { "label": "Orders DB", "nodeType": "database", "ordinal": 2, "position": { "x": 980, "y": 420 }, "size": { "width": 200, "height": 110 } }
+          {
+            "label": "Customer",
+            "nodeType": "user",
+            "ordinal": 1,
+            "position": { "x": 100, "y": 140 },
+            "size": { "width": 160, "height": 92 }
+          },
+          {
+            "label": "Web App",
+            "nodeType": "service",
+            "ordinal": 1,
+            "position": { "x": 320, "y": 140 },
+            "size": { "width": 180, "height": 92 }
+          },
+          {
+            "label": "Gateway",
+            "nodeType": "api",
+            "ordinal": 1,
+            "position": { "x": 540, "y": 140 },
+            "size": { "width": 180, "height": 92 }
+          },
+          {
+            "label": "Cache",
+            "nodeType": "service",
+            "ordinal": 2,
+            "position": { "x": 760, "y": 140 },
+            "size": { "width": 180, "height": 92 }
+          },
+          {
+            "label": "Orders API",
+            "nodeType": "api",
+            "ordinal": 2,
+            "position": { "x": 980, "y": 140 },
+            "size": { "width": 180, "height": 92 }
+          },
+          {
+            "label": "Audit Log",
+            "nodeType": "document",
+            "ordinal": 1,
+            "position": { "x": 100, "y": 420 },
+            "size": { "width": 170, "height": 110 }
+          },
+          {
+            "label": "Worker",
+            "nodeType": "service",
+            "ordinal": 3,
+            "position": { "x": 320, "y": 420 },
+            "size": { "width": 180, "height": 92 }
+          },
+          {
+            "label": "Cache",
+            "nodeType": "database",
+            "ordinal": 1,
+            "position": { "x": 540, "y": 420 },
+            "size": { "width": 200, "height": 110 }
+          },
+          {
+            "label": "Orders Queue",
+            "nodeType": "queue",
+            "ordinal": 1,
+            "position": { "x": 760, "y": 420 },
+            "size": { "width": 190, "height": 96 }
+          },
+          {
+            "label": "Orders DB",
+            "nodeType": "database",
+            "ordinal": 2,
+            "position": { "x": 980, "y": 420 },
+            "size": { "width": 200, "height": 110 }
+          }
         ],
         "edges": [
-          { "from": { "label": "Customer", "nodeType": "user", "ordinal": 1 }, "to": { "label": "Web App", "nodeType": "service", "ordinal": 1 }, "label": "uses", "occurrence": 1 },
-          { "from": { "label": "Web App", "nodeType": "service", "ordinal": 1 }, "to": { "label": "Gateway", "nodeType": "api", "ordinal": 1 }, "label": "calls", "occurrence": 1 },
-          { "from": { "label": "Gateway", "nodeType": "api", "ordinal": 1 }, "to": { "label": "Cache", "nodeType": "service", "ordinal": 2 }, "label": "reads", "occurrence": 1 },
-          { "from": { "label": "Orders API", "nodeType": "api", "ordinal": 2 }, "to": { "label": "Cache", "nodeType": "database", "ordinal": 1 }, "label": "reads", "occurrence": 1 },
-          { "from": { "label": "Orders API", "nodeType": "api", "ordinal": 2 }, "to": { "label": "Orders DB", "nodeType": "database", "ordinal": 2 }, "label": "writes", "occurrence": 1 }
+          {
+            "from": { "label": "Customer", "nodeType": "user", "ordinal": 1 },
+            "to": { "label": "Web App", "nodeType": "service", "ordinal": 1 },
+            "label": "uses",
+            "occurrence": 1
+          },
+          {
+            "from": { "label": "Web App", "nodeType": "service", "ordinal": 1 },
+            "to": { "label": "Gateway", "nodeType": "api", "ordinal": 1 },
+            "label": "calls",
+            "occurrence": 1
+          },
+          {
+            "from": { "label": "Gateway", "nodeType": "api", "ordinal": 1 },
+            "to": { "label": "Cache", "nodeType": "service", "ordinal": 2 },
+            "label": "reads",
+            "occurrence": 1
+          },
+          {
+            "from": { "label": "Orders API", "nodeType": "api", "ordinal": 2 },
+            "to": { "label": "Cache", "nodeType": "database", "ordinal": 1 },
+            "label": "reads",
+            "occurrence": 1
+          },
+          {
+            "from": { "label": "Orders API", "nodeType": "api", "ordinal": 2 },
+            "to": {
+              "label": "Orders DB",
+              "nodeType": "database",
+              "ordinal": 2
+            },
+            "label": "writes",
+            "occurrence": 1
+          }
         ],
         "projectGlossary": [],
         "pointerAvailable": false
       },
       "expected": {
-        "status": "clarification",
-        "issueCode": "ambiguous_reference",
-        "actionTypeCounts": {},
-        "missingSlotsIncludes": ["object_reference"],
-        "finalState": {
-          "nodeCountDelta": 0,
-          "edgeCountDelta": 0,
-          "requiredNodes": [
-            { "label": "Cache", "nodeType": "service", "ordinal": 2 },
-            { "label": "Cache", "nodeType": "database", "ordinal": 1 }
-          ]
-        }
+        "status": "resolved",
+        "actionTypeCounts": { "delete": 1 },
+        "finalState": { "nodeCountDelta": -1, "edgeCountDelta": -1 }
       }
     },
     {
-      "id": "clarify-parallel-connector-delete",
-      "description": "Requires the connector occurrence before deleting one of two identically labelled parallel edges.",
-      "transcript": "Airo delete the requests connector from User to API",
+      "id": "best-guess-parallel-connector-delete",
+      "description": "With two identically labelled parallel connectors, deletes one (Airboard picks the newest) instead of asking for the occurrence (gap 6).",
+      "transcript": "delete the requests connector from User to API",
+      "addressedBy": "wake",
       "parserIssue": "grounding_failed",
       "context": {
         "selectionCount": 0,
         "selected": [],
         "objects": [
-          { "label": "User", "nodeType": "user", "ordinal": 1, "position": { "x": 220, "y": 300 }, "size": { "width": 160, "height": 92 } },
-          { "label": "API", "nodeType": "api", "ordinal": 1, "position": { "x": 620, "y": 300 }, "size": { "width": 180, "height": 92 } }
+          {
+            "label": "User",
+            "nodeType": "user",
+            "ordinal": 1,
+            "position": { "x": 220, "y": 300 },
+            "size": { "width": 160, "height": 92 }
+          },
+          {
+            "label": "API",
+            "nodeType": "api",
+            "ordinal": 1,
+            "position": { "x": 620, "y": 300 },
+            "size": { "width": 180, "height": 92 }
+          }
         ],
         "edges": [
-          { "from": { "label": "User", "nodeType": "user", "ordinal": 1 }, "to": { "label": "API", "nodeType": "api", "ordinal": 1 }, "label": "requests", "occurrence": 1 },
-          { "from": { "label": "User", "nodeType": "user", "ordinal": 1 }, "to": { "label": "API", "nodeType": "api", "ordinal": 1 }, "label": "requests", "occurrence": 2 }
+          {
+            "from": { "label": "User", "nodeType": "user", "ordinal": 1 },
+            "to": { "label": "API", "nodeType": "api", "ordinal": 1 },
+            "label": "requests",
+            "occurrence": 1
+          },
+          {
+            "from": { "label": "User", "nodeType": "user", "ordinal": 1 },
+            "to": { "label": "API", "nodeType": "api", "ordinal": 1 },
+            "label": "requests",
+            "occurrence": 2
+          }
         ],
         "projectGlossary": [],
         "pointerAvailable": false
       },
       "expected": {
-        "status": "clarification",
-        "issueCode": "ambiguous_reference",
-        "actionTypeCounts": {},
-        "missingSlotsIncludes": ["object_reference"],
+        "status": "resolved",
+        "actionTypeCounts": { "delete_connection": 1 },
         "finalState": {
           "nodeCountDelta": 0,
-          "edgeCountDelta": 0,
+          "edgeCountDelta": -1,
           "requiredEdges": [
             {
               "from": { "label": "User", "nodeType": "user", "ordinal": 1 },
               "to": { "label": "API", "nodeType": "api", "ordinal": 1 },
-              "label": "requests",
-              "occurrence": 1
-            },
-            {
-              "from": { "label": "User", "nodeType": "user", "ordinal": 1 },
-              "to": { "label": "API", "nodeType": "api", "ordinal": 1 },
-              "label": "requests",
-              "occurrence": 2
+              "label": "requests"
             }
           ]
         }
@@ -925,7 +1022,8 @@
     {
       "id": "delete-second-parallel-connector",
       "description": "Grounds an explicit destructive request to the second matching parallel connector.",
-      "transcript": "Airo delete the second requests connector from User to API",
+      "transcript": "delete the second requests connector from User to API",
+      "addressedBy": "wake",
       "parserIssue": "grounding_failed",
       "context": {
         "selectionCount": 0,
@@ -977,7 +1075,8 @@
     {
       "id": "explicit-unique-destructive-delete",
       "description": "Allows an explicit destructive request when the visible target is unique.",
-      "transcript": "Airo delete Legacy Billing Service",
+      "transcript": "delete Legacy Billing Service",
+      "addressedBy": "wake",
       "parserIssue": "unknown_command",
       "context": {
         "selectionCount": 0,
@@ -1036,7 +1135,8 @@
     {
       "id": "unsupported-export-workflow",
       "description": "Rejects a multi-step export, email, and scheduling workflow outside Airboard's typed action catalog.",
-      "transcript": "Airo export this board to PowerPoint, email it to the team, and schedule the presentation for tomorrow",
+      "transcript": "export this board to PowerPoint, email it to the team, and schedule the presentation for tomorrow",
+      "addressedBy": "wake",
       "parserIssue": "unknown_command",
       "context": {
         "selectionCount": 0,
@@ -1064,7 +1164,8 @@
     {
       "id": "duplicate-current-selection-right",
       "description": "Duplicates the current selection with a structurally explicit relative placement.",
-      "transcript": "Airo make a copy of the selected Orders API a little to the right",
+      "transcript": "make a copy of the selected Orders API a little to the right",
+      "addressedBy": "wake",
       "parserIssue": "grounding_failed",
       "context": {
         "selectionCount": 1,
@@ -1116,7 +1217,8 @@
     {
       "id": "move-current-selection-to-pointer",
       "description": "Moves the selected object to the live pointer and verifies final geometry with tolerance.",
-      "transcript": "Airo move the selected database under my cursor",
+      "transcript": "move the selected database under my cursor",
+      "addressedBy": "wake",
       "parserIssue": "grounding_failed",
       "context": {
         "selectionCount": 1,
@@ -1167,7 +1269,8 @@
     {
       "id": "align-current-selection-left",
       "description": "Aligns three selected nodes to the left edge and verifies resulting centers.",
-      "transcript": "Airo align these selected services to the left",
+      "transcript": "align these selected services to the left",
+      "addressedBy": "wake",
       "parserIssue": "unknown_command",
       "context": {
         "selectionCount": 3,
@@ -1210,7 +1313,8 @@
     {
       "id": "distribute-current-selection-horizontal",
       "description": "Distributes three selected nodes evenly on the horizontal axis.",
-      "transcript": "Airo space the selected services evenly from left to right",
+      "transcript": "space the selected services evenly from left to right",
+      "addressedBy": "wake",
       "parserIssue": "unknown_command",
       "context": {
         "selectionCount": 3,
@@ -1253,7 +1357,8 @@
     {
       "id": "layout-current-selection-grid",
       "description": "Lays out four selected services into a deterministic grid.",
-      "transcript": "Airo organize the selected services as a grid",
+      "transcript": "organize the selected services as a grid",
+      "addressedBy": "wake",
       "parserIssue": "unknown_command",
       "context": {
         "selectionCount": 4,
@@ -1299,7 +1404,8 @@
     {
       "id": "group-current-selection",
       "description": "Groups the current selection under a visible, grounded label.",
-      "transcript": "Airo group the selected services as Checkout Services",
+      "transcript": "group the selected services as Checkout Services",
+      "addressedBy": "wake",
       "parserIssue": "unknown_command",
       "context": {
         "selectionCount": 2,
@@ -1336,7 +1442,8 @@
     {
       "id": "select-second-service-by-ordinal",
       "description": "Selects a uniquely grounded type ordinal without mutating the graph.",
-      "transcript": "Airo select the second service",
+      "transcript": "select the second service",
+      "addressedBy": "wake",
       "parserIssue": "grounding_failed",
       "context": {
         "selectionCount": 0,
@@ -1632,7 +1739,8 @@
     {
       "id": "undo-last-board-change",
       "description": "Maps a concise request to the supported immediate Undo action.",
-      "transcript": "Airo undo the last board change",
+      "transcript": "undo the last board change",
+      "addressedBy": "wake",
       "parserIssue": "unknown_command",
       "context": {
         "selectionCount": 0,
@@ -1695,7 +1803,8 @@
     {
       "id": "stale-destructive-target-rejected",
       "description": "Rejects a destructive target absent from the current board snapshot.",
-      "transcript": "Airo delete Payments API",
+      "transcript": "delete Payments API",
+      "addressedBy": "wake",
       "parserIssue": "grounding_failed",
       "context": {
         "selectionCount": 0,
@@ -1724,7 +1833,8 @@
     {
       "id": "two-shapes-side-by-side",
       "description": "Two shapes side by side is a layout, never a two-object distribute that the validator would refuse and so lose the whole plan (RGB-041).",
-      "transcript": "Airo put the user and the API side by side",
+      "transcript": "put the user and the API side by side",
+      "addressedBy": "wake",
       "parserIssue": "unknown_command",
       "context": {
         "selectionCount": 1,
@@ -1748,6 +1858,368 @@
             { "label": "API", "y": 105, "positionTolerance": 1 }
           ]
         }
+      }
+    },
+    {
+      "id": "addressed-narration-auth-flow",
+      "description": "Palm-addressed narration on an empty board is drawn, not treated as discussion (gap 3): three participants, two stated relationships, no wake word.",
+      "transcript": "users sign in through the auth service, which checks the user database",
+      "addressedBy": "palm",
+      "parserIssue": "unknown_command",
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [],
+        "edges": [],
+        "projectGlossary": [],
+        "pointerAvailable": false
+      },
+      "expected": {
+        "status": "resolved",
+        "actionTypeCounts": { "create": 3, "connect": 2 },
+        "createdNodeTypes": ["user", "service", "database"],
+        "finalState": {
+          "nodeCountDelta": 3,
+          "edgeCountDelta": 2,
+          "requiredNodes": [
+            { "nodeType": "user" },
+            { "nodeType": "service" },
+            { "nodeType": "database" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "addressed-narration-without-wake-word",
+      "description": "The same kind of narration said after the wake word was stripped still builds the flow (gap 3).",
+      "transcript": "so the browser calls the API gateway and the gateway reads from the orders database",
+      "addressedBy": "wake",
+      "parserIssue": "unknown_command",
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [],
+        "edges": [],
+        "projectGlossary": [],
+        "pointerAvailable": false
+      },
+      "expected": {
+        "status": "resolved",
+        "actionTypeCounts": { "create": 3, "connect": 2 },
+        "finalState": { "nodeCountDelta": 3, "edgeCountDelta": 2 }
+      }
+    },
+    {
+      "id": "connect-to-missing-cache",
+      "description": "A connect naming a shape that isn't on the board creates it, then connects (gap 6).",
+      "transcript": "connect the user to the cache",
+      "addressedBy": "wake",
+      "parserIssue": "grounding_failed",
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [
+          {
+            "label": "User",
+            "nodeType": "user",
+            "ordinal": 1,
+            "position": { "x": 180, "y": 280 },
+            "size": { "width": 160, "height": 92 }
+          },
+          {
+            "label": "API",
+            "nodeType": "api",
+            "ordinal": 1,
+            "position": { "x": 500, "y": 280 },
+            "size": { "width": 160, "height": 92 }
+          }
+        ],
+        "edges": [
+          {
+            "from": { "label": "User", "nodeType": "user", "ordinal": 1 },
+            "to": { "label": "API", "nodeType": "api", "ordinal": 1 },
+            "label": "requests",
+            "occurrence": 1
+          }
+        ],
+        "projectGlossary": [],
+        "pointerAvailable": false
+      },
+      "expected": {
+        "status": "resolved",
+        "actionTypeCounts": { "create": 1, "connect": 1 },
+        "finalState": { "nodeCountDelta": 1, "edgeCountDelta": 1 }
+      }
+    },
+    {
+      "id": "rename-cut-off-label",
+      "description": "With the new name cut off there is nothing sensible to apply, so this is the one kind of request that still asks.",
+      "transcript": "rename the API to",
+      "addressedBy": "wake",
+      "parserIssue": "missing_label",
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [
+          {
+            "label": "User",
+            "nodeType": "user",
+            "ordinal": 1,
+            "position": { "x": 180, "y": 280 },
+            "size": { "width": 160, "height": 92 }
+          },
+          {
+            "label": "API",
+            "nodeType": "api",
+            "ordinal": 1,
+            "position": { "x": 500, "y": 280 },
+            "size": { "width": 160, "height": 92 }
+          }
+        ],
+        "edges": [],
+        "projectGlossary": [],
+        "pointerAvailable": false
+      },
+      "expected": {
+        "status": "clarification",
+        "issueCode": "missing_label",
+        "actionTypeCounts": {},
+        "missingSlotsIncludes": ["label"],
+        "finalState": { "nodeCountDelta": 0, "edgeCountDelta": 0 }
+      }
+    },
+    {
+      "id": "resize-api-bigger",
+      "description": "Makes a named object bigger (gap 10).",
+      "transcript": "make the API bigger",
+      "addressedBy": "wake",
+      "parserIssue": "unknown_command",
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [
+          {
+            "label": "User",
+            "nodeType": "user",
+            "ordinal": 1,
+            "position": { "x": 180, "y": 280 },
+            "size": { "width": 160, "height": 92 }
+          },
+          {
+            "label": "API",
+            "nodeType": "api",
+            "ordinal": 1,
+            "position": { "x": 500, "y": 280 },
+            "size": { "width": 160, "height": 92 }
+          }
+        ],
+        "edges": [],
+        "projectGlossary": [],
+        "pointerAvailable": false
+      },
+      "expected": {
+        "status": "resolved",
+        "actionTypeCounts": { "resize": 1 },
+        "finalState": { "nodeCountDelta": 0, "edgeCountDelta": 0 }
+      }
+    },
+    {
+      "id": "change-step-into-decision",
+      "description": "Turns a named step into a decision, keeping its label (gap 10).",
+      "transcript": "turn the review step into a decision",
+      "addressedBy": "palm",
+      "parserIssue": "unknown_command",
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [
+          {
+            "label": "Submit",
+            "nodeType": "process",
+            "ordinal": 1,
+            "position": { "x": 180, "y": 280 },
+            "size": { "width": 160, "height": 92 }
+          },
+          {
+            "label": "Review Step",
+            "nodeType": "process",
+            "ordinal": 2,
+            "position": { "x": 500, "y": 280 },
+            "size": { "width": 160, "height": 92 }
+          }
+        ],
+        "edges": [],
+        "projectGlossary": [],
+        "pointerAvailable": false
+      },
+      "expected": {
+        "status": "resolved",
+        "actionTypeCounts": { "change_type": 1 },
+        "finalState": {
+          "nodeCountDelta": 0,
+          "edgeCountDelta": 0,
+          "requiredNodes": [
+            { "label": "Review Step", "nodeType": "decision" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "label-existing-arrow",
+      "description": "Labels an existing connector by naming its ends (gap 10).",
+      "transcript": "label the arrow from user to API login",
+      "addressedBy": "wake",
+      "parserIssue": "unknown_command",
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [
+          {
+            "label": "User",
+            "nodeType": "user",
+            "ordinal": 1,
+            "position": { "x": 180, "y": 280 },
+            "size": { "width": 160, "height": 92 }
+          },
+          {
+            "label": "API",
+            "nodeType": "api",
+            "ordinal": 1,
+            "position": { "x": 500, "y": 280 },
+            "size": { "width": 160, "height": 92 }
+          }
+        ],
+        "edges": [
+          {
+            "from": { "label": "User", "nodeType": "user", "ordinal": 1 },
+            "to": { "label": "API", "nodeType": "api", "ordinal": 1 },
+            "occurrence": 1
+          }
+        ],
+        "projectGlossary": [],
+        "pointerAvailable": false
+      },
+      "expected": {
+        "status": "resolved",
+        "actionTypeCounts": { "label_connection": 1 },
+        "finalState": {
+          "nodeCountDelta": 0,
+          "edgeCountDelta": 0,
+          "requiredEdges": [
+            {
+              "from": { "label": "User", "nodeType": "user", "ordinal": 1 },
+              "to": { "label": "API", "nodeType": "api", "ordinal": 1 },
+              "label": "login"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "dash-existing-arrow",
+      "description": "Makes an existing connector dashed (gap 10).",
+      "transcript": "make the arrow from the API to the database dashed",
+      "addressedBy": "follow_up",
+      "parserIssue": "unknown_command",
+      "context": {
+        "selectionCount": 0,
+        "selected": [],
+        "objects": [
+          {
+            "label": "User",
+            "nodeType": "user",
+            "ordinal": 1,
+            "position": { "x": 180, "y": 280 },
+            "size": { "width": 160, "height": 92 }
+          },
+          {
+            "label": "API",
+            "nodeType": "api",
+            "ordinal": 1,
+            "position": { "x": 500, "y": 280 },
+            "size": { "width": 160, "height": 92 }
+          },
+          {
+            "label": "Database",
+            "nodeType": "database",
+            "ordinal": 1,
+            "position": { "x": 820, "y": 280 },
+            "size": { "width": 160, "height": 92 }
+          }
+        ],
+        "edges": [
+          {
+            "from": { "label": "API", "nodeType": "api", "ordinal": 1 },
+            "to": { "label": "Database", "nodeType": "database", "ordinal": 1 },
+            "label": "writes",
+            "occurrence": 1
+          }
+        ],
+        "projectGlossary": [],
+        "pointerAvailable": false
+      },
+      "expected": {
+        "status": "resolved",
+        "actionTypeCounts": { "style_connection": 1 },
+        "finalState": { "nodeCountDelta": 0, "edgeCountDelta": 0 }
+      }
+    },
+    {
+      "id": "hub-and-spoke-layout",
+      "description": "Lays the selected services out as a hub with the API in the middle (gap 10).",
+      "transcript": "lay these out as a hub with the API in the middle",
+      "addressedBy": "palm",
+      "parserIssue": "missing_layout_direction",
+      "context": {
+        "selectionCount": 4,
+        "selected": [
+          { "label": "API", "nodeType": "api", "ordinal": 1 },
+          { "label": "Auth", "nodeType": "service", "ordinal": 1 },
+          { "label": "Billing", "nodeType": "service", "ordinal": 2 },
+          { "label": "Search", "nodeType": "service", "ordinal": 3 }
+        ],
+        "objects": [
+          {
+            "label": "API",
+            "nodeType": "api",
+            "ordinal": 1,
+            "selected": true,
+            "position": { "x": 500, "y": 280 },
+            "size": { "width": 160, "height": 92 }
+          },
+          {
+            "label": "Auth",
+            "nodeType": "service",
+            "ordinal": 1,
+            "selected": true,
+            "position": { "x": 200, "y": 120 },
+            "size": { "width": 160, "height": 92 }
+          },
+          {
+            "label": "Billing",
+            "nodeType": "service",
+            "ordinal": 2,
+            "selected": true,
+            "position": { "x": 800, "y": 120 },
+            "size": { "width": 160, "height": 92 }
+          },
+          {
+            "label": "Search",
+            "nodeType": "service",
+            "ordinal": 3,
+            "selected": true,
+            "position": { "x": 500, "y": 520 },
+            "size": { "width": 160, "height": 92 }
+          }
+        ],
+        "edges": [],
+        "projectGlossary": [],
+        "pointerAvailable": false
+      },
+      "expected": {
+        "status": "resolved",
+        "actionTypeCounts": { "layout": 1 },
+        "finalState": { "nodeCountDelta": 0, "edgeCountDelta": 0 }
       }
     }
   ]

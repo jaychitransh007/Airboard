@@ -312,7 +312,7 @@ test("Data/Dataset repair reaches the exact final graph and remains one-step und
   assert.deepEqual(destructive.eventDelta, []);
 });
 
-test("ambiguous references fail closed before any board event escapes", () => {
+test("an ambiguous name applies the best guess instead of refusing (gap 6)", () => {
   const context = {
     ...emptyContext,
     objects: [
@@ -354,10 +354,11 @@ test("ambiguous references fail closed before any board event escapes", () => {
     context,
   );
 
-  assert.equal(result.status, "grounding_failed");
-  assert.equal(result.mutationApplied, false);
-  assert.deepEqual(result.eventDelta, []);
-  assert.match(result.groundingError, /matches 2 objects/u);
+  // Nothing selected and no creation order between them, so the first API in
+  // reading order is renamed; undo covers a wrong pick.
+  assert.equal(result.status, "applied");
+  assert.equal(result.mutationApplied, true);
+  assert.equal(result.groundingError, null);
 });
 
 test("parallel connector occurrence is retained in deleted-edge effects", () => {

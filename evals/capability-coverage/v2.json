@@ -749,6 +749,54 @@
         "negative"
       ],
       "rationale": "The undelegated side panel fails over instead of exposing invalid capture."
+    },
+    {
+      "evidenceId": "test:packages/core/test/semanticPlan.test.mjs#plans hold a two-minute narration and the new edit actions",
+      "capabilities": [
+        "action:change_type",
+        "action:resize",
+        "action:label_connection",
+        "action:style_connection"
+      ],
+      "facets": [
+        "positive",
+        "negative"
+      ],
+      "rationale": "The strict production plan contract accepts each new edit action with its documented fields and rejects unknown shapes, resize changes, line styles, empty labels, missing fields and forward plan handles."
+    },
+    {
+      "evidenceId": "test:apps/web/test/semanticPlanGrounding.test.mjs#change type works on Airo's nodes and on toolbar shapes",
+      "capabilities": [
+        "action:change_type"
+      ],
+      "facets": [
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "The production grounder resolves visible labels on a legacy node and a v2 shape, emits object.retype and scene.retype, and the reducer reaches the new node type and shape with the label kept."
+    },
+    {
+      "evidenceId": "test:apps/web/test/semanticPlanGrounding.test.mjs#resize makes legacy and toolbar shapes bigger around their centers",
+      "capabilities": [
+        "action:resize"
+      ],
+      "facets": [
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "The production grounder emits object.resize and scene.resize for named objects and the reducer reaches larger, center-preserving bounds."
+    },
+    {
+      "evidenceId": "test:apps/web/test/semanticPlanGrounding.test.mjs#connectors can be labelled and dashed by naming their ends",
+      "capabilities": [
+        "action:label_connection",
+        "action:style_connection"
+      ],
+      "facets": [
+        "grounding",
+        "final_state"
+      ],
+      "rationale": "The production grounder resolves a connector by its endpoints, labels it and changes its line style, and the reducer reaches the labelled, dashed (and then solid) legacy connector and its v2 mirror."
     }
   ],
   "physicalMedia": {

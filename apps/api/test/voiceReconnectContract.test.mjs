@@ -27,15 +27,18 @@ const { createRealtimeSpeechSession } = await import("../../web/src/features/boa
 
 const origin = "https://airboard.test";
 
-test("the board's voice survives the stream time limit and a server restart against the real API", { timeout: 10_000 }, async (t) => {
+test("the board's voice survives the stream time limit, silence and a server restart against the real API", { timeout: 10_000 }, async (t) => {
   let audioFrames = 0;
+  let opens = 0;
   const provider = {
     id: "fake",
     async open(_options, onEvent) {
+      opens += 1;
       const stopped = () => onEvent({ type: "status", status: "stopped" });
       return {
-        sendAudio() {
-          audioFrames += 1;
+        sendAudio(frame) {
+          // Count speech, not the silence primer a new provider stream gets.
+          if (frame.some((byte) => byte !== 0)) audioFrames += 1;
         },
         updateKeyterms() {},
         stop: stopped,
@@ -88,7 +91,7 @@ test("the board's voice survives the stream time limit and a server restart agai
     {
       createWebSocket: (url) => new WebSocket(url, { headers: { origin } }),
       startPcmInput: async ({ onChunk }) => {
-        pushPcm = () => onChunk(new Float32Array(1_280), 16_000);
+        pushPcm = (level = 0.1) => onChunk(new Float32Array(1_280).fill(level), 16_000);
         return { stop() {} };
       },
     },
@@ -99,11 +102,20 @@ test("the board's voice survives the stream time limit and a server restart agai
   await ready;
   assert.equal(session.isListening(), true);
 
-  // The 300 ms stream limit ends the stream; the client rolls over at once.
-  const rolledOver = waitFor("reconnected");
-  await rolledOver;
-  assert.ok(events.some(([name, cause]) => name === "reconnecting" && cause === "rollover"));
+  // Silence is not streamed at all.
+  for (let frame = 0; frame < 10; frame += 1) pushPcm(0);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(audioFrames, 0);
+
+  // The 300 ms stream limit: the API replaces the provider stream behind the
+  // same socket, and the browser never notices.
+  while (opens < 2) await new Promise((resolve) => setTimeout(resolve, 20));
   config.transcription.maxSessionMs = 60_000;
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(events.some(([name]) => name === "reconnecting"), false);
+  pushPcm();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.ok(audioFrames >= 1);
 
   // A deploy: the API closes every socket with 1012, as on SIGTERM.
   const restarted = waitFor("reconnected");

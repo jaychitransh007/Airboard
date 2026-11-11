@@ -9,7 +9,10 @@
 
 import {
   AIRBOARD_SEMANTIC_NODE_CAPABILITIES,
+  AIRBOARD_SEMANTIC_PLAN_MAX_DIAGRAM_COMMANDS,
+  canonicalShapeKind,
   connectorEndpointMatchesBinding,
+  inferSemanticNodeForLabel,
   connectorGeometryMatchesBindings,
   isSceneOnlyElement,
   nodeVisualDefaultSize,
@@ -23,13 +26,16 @@ import {
   type SemanticConnectionReference,
   type SemanticObjectReference,
   type SemanticPlacement,
+  type SemanticLayoutDirection,
   type SemanticPlanAction,
+  type ShapeKind,
   type StrokeAnnotation,
 } from "@airboard/core";
 import { findAnnotationObjectAtPoint } from "@airboard/drawing-engine";
 import { normalizeSpokenNumberAliases } from "./desiredGraphCorrection.ts";
 import type { IntentCanvasOperation } from "./intentCanvasParser.ts";
 import type { SemanticIntentContext } from "./semanticIntent.ts";
+import { computeSemanticAutoLayout } from "./semanticAutoLayout.ts";
 import {
   sceneNodeAtPoint,
   semanticBoardNodes,
@@ -100,43 +106,96 @@ export type SemanticIntentResolutionContext = IntentResolutionContext & {
    * hand position and per-node viewport clamping cannot collapse a graph.
    */
   autoCreateCenters?: ReadonlyMap<string, AnnotationPoint>;
+  /**
+   * The selection when the person spoke, before a rebase dropped what has
+   * since gone from the board. When it held anything, "this" never falls
+   * back to the newest shape: the step is skipped instead. Defaults to
+   * selectionIds.
+   */
+  requestSelectionIds?: readonly string[];
 };
+
+/**
+ * How grounding filled a gap instead of refusing. Airo applies its best guess
+ * and undo is the safety net, so these are reported, never asked about.
+ * - data_dataset_alias: "historical data" matched "Historical Dataset".
+ * - created_missing_object: a named shape wasn't on the board, so it was added.
+ * - best_guess_reference: a name fitted several objects, or only part of one.
+ */
+export type SemanticGroundingRepairKind =
+  | "data_dataset_alias"
+  | "created_missing_object"
+  | "best_guess_reference";
+
+export type SemanticGroundingErrorCode =
+  | "grounding_missing_label"
+  | "grounding_ambiguous_label"
+  | "grounding_invalid_occurrence";
 
 type SemanticActionResolution =
   | {
       commands: DiagramCommand[];
       selectionAfter?: string[];
       handleAssignments?: Record<string, string[]>;
-      repairKinds?: Array<"data_dataset_alias">;
+      repairKinds?: SemanticGroundingRepairKind[];
     }
   | {
       error: string;
-      errorCode?:
-        | "grounding_missing_label"
-        | "grounding_ambiguous_label"
-        | "grounding_invalid_occurrence";
+      errorCode?: SemanticGroundingErrorCode;
       candidateCount?: number;
     };
+
+type ReferenceResolution =
+  | { ids: string[]; repairKind?: SemanticGroundingRepairKind }
+  | { error: string; errorCode?: SemanticGroundingErrorCode; candidateCount?: number };
+type SingleReferenceResolution =
+  | { id: string; repairKind?: SemanticGroundingRepairKind }
+  | { error: string; errorCode?: SemanticGroundingErrorCode; candidateCount?: number };
 
 export function resolveSemanticPlanAction(
   action: SemanticPlanAction,
   context: SemanticIntentResolutionContext,
   planHandles: ReadonlyMap<string, string[]>,
 ): SemanticActionResolution {
-  const resolveOne = (reference: SemanticObjectReference) =>
-    resolveSingleSemanticReference(reference, context, planHandles);
-  const resolveMany = (references: SemanticObjectReference[]) =>
-    resolveSemanticTargets(references, context, planHandles);
+  // Guesses made while matching names are reported with the step, so the
+  // app can say what it picked ("Deleted Auth Service").
+  const guessed = new Set<SemanticGroundingRepairKind>();
+  const resolution = resolveSemanticPlanActionSteps(action, context, planHandles, guessed);
+  if ("error" in resolution || guessed.size === 0) return resolution;
+  return { ...resolution, repairKinds: [...new Set([...(resolution.repairKinds ?? []), ...guessed])] };
+}
+
+function resolveSemanticPlanActionSteps(
+  action: SemanticPlanAction,
+  context: SemanticIntentResolutionContext,
+  planHandles: ReadonlyMap<string, string[]>,
+  guessed: Set<SemanticGroundingRepairKind>,
+): SemanticActionResolution {
+  const resolveOne = (reference: SemanticObjectReference) => {
+    const resolved = resolveSingleSemanticReference(reference, context, planHandles);
+    if (!("error" in resolved) && resolved.repairKind) guessed.add(resolved.repairKind);
+    return resolved;
+  };
+  const resolveMany = (references: SemanticObjectReference[]) => {
+    const resolved = resolveSemanticTargets(references, context, planHandles);
+    if (!("error" in resolved) && resolved.repairKind) guessed.add(resolved.repairKind);
+    return resolved;
+  };
 
   switch (action.type) {
     case "create": {
-      const center = resolveSemanticCreateCenter(
+      const requested = resolveSemanticCreateCenter(
         action.placement,
         action.nodeType,
         context,
         planHandles,
         context.autoCreateCenters?.get(action.handle),
       );
+      // A placement that can't be met (no live pointer, an anchor that isn't
+      // there) still gets the shape drawn, in the next free spot in view.
+      const center = "error" in requested
+        ? resolveSemanticCreateCenter({ kind: "auto" }, action.nodeType, context, planHandles)
+        : requested;
       if ("error" in center) {
         return center;
       }
@@ -147,6 +206,7 @@ export function resolveSemanticPlanAction(
             type: "node.create",
             nodeId,
             nodeType: action.nodeType,
+            ...(action.shape ? { shapeKind: action.shape } : {}),
             label: action.label ?? defaultNodeLabel(action.nodeType),
             center: center.point,
             source: "voice",
@@ -158,26 +218,28 @@ export function resolveSemanticPlanAction(
       };
     }
     case "connect": {
-      const from = resolveSingleSemanticConnectReference(
+      const endpoints = resolveConnectEndpointsCreatingMissing(
         action.from,
-        context,
-        planHandles,
-      );
-      if ("error" in from) return from;
-      const to = resolveSingleSemanticConnectReference(
         action.to,
         context,
         planHandles,
       );
-      if ("error" in to) return to;
-      if (from.id === to.id) {
-        return { error: "The source and target resolve to the same object." };
+      if ("error" in endpoints) return endpoints;
+      if (endpoints.created.length > 0) {
+        // The new shapes aren't on the board yet, so there is nothing to
+        // reuse: create them and draw the arrow in one step.
+        const connect = endpoints.sceneEndpoint
+          ? sceneConnectCommand(endpoints.fromId, endpoints.toId, action.label)
+          : semanticConnectCommand(endpoints.fromId, endpoints.toId, action.label, context.strokeColor);
+        return {
+          commands: [...endpoints.created, connect],
+          selectionAfter: [endpoints.fromId, endpoints.toId],
+          repairKinds: endpoints.repairKinds,
+        };
       }
-      const repairKinds = [...new Set(
-        [from.repairKind, to.repairKind].filter(
-          (value): value is "data_dataset_alias" => value !== undefined,
-        ),
-      )];
+      const from = { id: endpoints.fromId };
+      const to = { id: endpoints.toId };
+      const repairKinds = endpoints.repairKinds;
       const existing = findDirectedSemanticConnections(
         context.boardState,
         from.id,
@@ -366,9 +428,23 @@ export function resolveSemanticPlanAction(
       if ("error" in from) return from;
       const commands: DiagramCommand[] = [];
       const targetIds: string[] = [];
-      for (const branch of action.branches) {
-        const to = resolveOne(branch.to);
+      const repairKinds = new Set<SemanticGroundingRepairKind>();
+      for (const [branchIndex, branch] of action.branches.entries()) {
+        let to: SingleReferenceResolution = resolveOne(branch.to);
+        if ("error" in to && branch.to.kind === "visible_label" && to.errorCode === "grounding_missing_label") {
+          // A named outcome that isn't drawn yet is added below the decision.
+          const created = createMissingNodeCommand(branch.to.label, besideCenter(
+            context.boardState,
+            from.id,
+            "below",
+            (branchIndex - (action.branches.length - 1) / 2) * 200,
+          ), context);
+          commands.push(created.command);
+          to = { id: created.id };
+          repairKinds.add("created_missing_object");
+        }
         if ("error" in to) return to;
+        if (to.repairKind) repairKinds.add(to.repairKind);
         if (to.id === from.id) {
           return { error: "A decision branch cannot point back to its source object." };
         }
@@ -382,7 +458,11 @@ export function resolveSemanticPlanAction(
       if (new Set(targetIds).size !== targetIds.length) {
         return { error: "Each decision branch must target a distinct object." };
       }
-      return { commands, selectionAfter: [from.id, ...targetIds] };
+      return {
+        commands,
+        selectionAfter: [from.id, ...targetIds],
+        ...(repairKinds.size > 0 ? { repairKinds: [...repairKinds] } : {}),
+      };
     }
     case "rename": {
       const target = resolveOne(action.target);
@@ -398,8 +478,17 @@ export function resolveSemanticPlanAction(
           };
     }
     case "delete": {
-      const targets = resolveMany(action.targets);
-      if ("error" in targets) return targets;
+      // "Delete this" with a connector selected deletes the connector.
+      const selectedConnectors = action.targets.some((target) => target.kind === "current_selection")
+        ? selectedConnectorIds(context)
+        : [];
+      const otherTargets = selectedConnectors.length > 0
+        ? action.targets.filter((target) => target.kind !== "current_selection")
+        : action.targets;
+      const selectedNodes = selectedConnectors.length > 0 ? selectedNodeIds(context) : [];
+      const resolvedOthers = otherTargets.length > 0 ? resolveMany(otherTargets) : { ids: [] as string[] };
+      if ("error" in resolvedOthers) return resolvedOthers;
+      const targets = { ids: [...new Set([...selectedNodes, ...selectedConnectors, ...resolvedOthers.ids])] };
       const { legacy, scene } = splitByWorld(context.boardState, targets.ids);
       return {
         commands: [
@@ -506,7 +595,12 @@ export function resolveSemanticPlanAction(
       if ("error" in targets) return targets;
       if (targets.ids.length < 2) return { error: "Layout requires at least two objects." };
       return {
-        commands: createLayoutCommands(context.boardState, targets.ids, action.direction),
+        commands:
+          action.direction === "tree"
+            ? createTreeLayoutCommands(context.boardState, targets.ids)
+            : action.direction === "radial"
+              ? createRadialLayoutCommands(context.boardState, targets.ids)
+              : createLayoutCommands(context.boardState, targets.ids, action.direction),
         selectionAfter: targets.ids,
       };
     }
@@ -558,10 +652,207 @@ export function resolveSemanticPlanAction(
             : current.filter((id) => !targets.ids.includes(id));
       return { commands: [], selectionAfter: next };
     }
+    case "change_type": {
+      const targets = resolveMany(action.targets);
+      if ("error" in targets) return targets;
+      const commands = targets.ids.flatMap((id): DiagramCommand[] => {
+        if (!isSceneOnlyElement(context.boardState, id)) {
+          return [{ type: "object.retype", objectId: id, nodeType: action.nodeType, shapeKind: action.shape }];
+        }
+        // Only v2 shapes have a shape to change; a sticky or text stays as it is.
+        return context.boardState.elements[id]?.kind === "shape"
+          ? [{ type: "scene.retype", elementId: id, shapeKind: action.shape ?? shapeKindForNodeType(action.nodeType) }]
+          : [];
+      });
+      return commands.length > 0
+        ? { commands, selectionAfter: targets.ids }
+        : { error: "Only shapes can change type." };
+    }
+    case "resize": {
+      const targets = resolveMany(action.targets);
+      if ("error" in targets) return targets;
+      const direction = action.change === "bigger" ? "grow" : "shrink";
+      const commands = targets.ids.flatMap((id): DiagramCommand[] => {
+        const bounds = semanticObjectBounds(context.boardState, id);
+        if (!bounds) return [];
+        const resized = resizeBoundsAroundCenter(bounds, "both", direction);
+        return isSceneOnlyElement(context.boardState, id)
+          ? [{ type: "scene.resize", elementId: id, bounds: resized }]
+          : [{ type: "object.resize", objectId: id, bounds: resized }];
+      });
+      return commands.length > 0
+        ? { commands, selectionAfter: targets.ids }
+        : { error: "Those objects can't be resized." };
+    }
+    case "label_connection": {
+      // "The arrow between Database and API" may point either way.
+      const connection = resolveSemanticConnectionReference(action.connection, context, planHandles, {
+        eitherDirection: true,
+      });
+      if ("error" in connection) {
+        // "Label the arrow from User to API as login" with no arrow there
+        // either way: the person wants a labelled arrow, so draw one.
+        return connection.missingConnector
+          ? resolveSemanticPlanAction(
+              { type: "connect", from: action.connection.from, to: action.connection.to, label: action.label },
+              context,
+              planHandles,
+            )
+          : connection;
+      }
+      return {
+        commands: [
+          connection.scene
+            ? { type: "scene.rename", elementId: connection.id, label: action.label }
+            : { type: "object.rename", objectId: connection.id, label: action.label },
+        ],
+        selectionAfter: [connection.fromId, connection.toId],
+      };
+    }
+    case "style_connection": {
+      const connection = resolveSemanticConnectionReference(action.connection, context, planHandles);
+      if ("error" in connection) return connection;
+      return {
+        commands: [
+          connection.scene
+            ? { type: "scene.connector.restyle", connectorId: connection.id, lineStyle: action.lineStyle }
+            : { type: "connector.restyle", connectorId: connection.id, lineStyle: action.lineStyle },
+        ],
+        selectionAfter: [connection.fromId, connection.toId],
+      };
+    }
     case "undo":
     case "cancel":
       return { error: "Undo and cancel are handled immediately." };
   }
+}
+
+/** The shape a v2 element takes for a node type, matching how legacy nodes are mirrored. */
+function shapeKindForNodeType(nodeType: AnnotationNodeType): ShapeKind {
+  switch (nodeType) {
+    case "decision": return "diamond";
+    case "io": return "right-parallelogram";
+    case "circle": return "ellipse";
+    case "note":
+    case "custom": return "rounded-rectangle";
+    default: return nodeType;
+  }
+}
+
+/**
+ * Grounds both ends of a connect step. A name that matches nothing on the
+ * board is a shape the person expects to exist ("connect the user to the
+ * cache" with no cache yet), so it is created beside the other end instead
+ * of refusing the whole request.
+ */
+function resolveConnectEndpointsCreatingMissing(
+  fromReference: SemanticObjectReference,
+  toReference: SemanticObjectReference,
+  context: SemanticIntentResolutionContext,
+  planHandles: ReadonlyMap<string, string[]>,
+):
+  | {
+      fromId: string;
+      toId: string;
+      created: DiagramCommand[];
+      sceneEndpoint: boolean;
+      repairKinds: SemanticGroundingRepairKind[];
+    }
+  | Extract<SemanticActionResolution, { error: string }> {
+  const from = resolveSingleSemanticConnectReference(fromReference, context, planHandles);
+  const to = resolveSingleSemanticConnectReference(toReference, context, planHandles);
+  const missing = (reference: SemanticObjectReference, resolved: SingleReferenceResolution) =>
+    "error" in resolved && reference.kind === "visible_label" && resolved.errorCode === "grounding_missing_label";
+  const created: DiagramCommand[] = [];
+  const repairKinds = new Set<SemanticGroundingRepairKind>();
+  let fromId: string;
+  let toId: string;
+  if ("error" in from) {
+    if (!missing(fromReference, from)) return from;
+    if ("error" in to && !missing(toReference, to)) return to;
+    const center = "error" in to
+      ? autoCreateCenter(context, planHandles)
+      : besideCenter(context.boardState, to.id, "left");
+    const node = createMissingNodeCommand((fromReference as { label: string }).label, center, context);
+    created.push(node.command);
+    fromId = node.id;
+  } else {
+    fromId = from.id;
+    if (from.repairKind) repairKinds.add(from.repairKind);
+  }
+  if ("error" in to) {
+    if (!missing(toReference, to)) return to;
+    const fromCenter = "error" in from
+      ? (created[0] as Extract<DiagramCommand, { type: "node.create" }>).center!
+      : null;
+    const center = fromCenter
+      ? { x: fromCenter.x + 270, y: fromCenter.y }
+      : besideCenter(context.boardState, fromId, "right");
+    const node = createMissingNodeCommand((toReference as { label: string }).label, center, context);
+    created.push(node.command);
+    toId = node.id;
+  } else {
+    toId = to.id;
+    if (to.repairKind) repairKinds.add(to.repairKind);
+  }
+  if (fromId === toId) {
+    return { error: "The source and target resolve to the same object." };
+  }
+  if (created.length > 0) repairKinds.add("created_missing_object");
+  return {
+    fromId,
+    toId,
+    created,
+    sceneEndpoint: isSceneOnlyElement(context.boardState, fromId) || isSceneOnlyElement(context.boardState, toId),
+    repairKinds: [...repairKinds],
+  };
+}
+
+/** A node.create for a spoken name, typed and shaped from the name ("Orders Cache" → cache shape). */
+function createMissingNodeCommand(
+  label: string,
+  center: AnnotationPoint,
+  context: SemanticIntentResolutionContext,
+): { id: string; command: DiagramCommand } {
+  const id = crypto.randomUUID();
+  const inferred = inferSemanticNodeForLabel(label);
+  return {
+    id,
+    command: {
+      type: "node.create",
+      nodeId: id,
+      nodeType: inferred.nodeType,
+      ...(inferred.shape ? { shapeKind: inferred.shape } : {}),
+      label: titleCase(label.trim()),
+      center,
+      source: "voice",
+      style: { strokeColor: context.strokeColor },
+    },
+  };
+}
+
+function autoCreateCenter(
+  context: SemanticIntentResolutionContext,
+  planHandles: ReadonlyMap<string, string[]>,
+): AnnotationPoint {
+  const center = resolveSemanticCreateCenter({ kind: "auto" }, "custom", context, planHandles);
+  return "error" in center
+    ? { x: (context.viewOrigin?.x ?? 0) + context.canvasWidth / 2, y: (context.viewOrigin?.y ?? 0) + context.canvasHeight / 2 }
+    : center.point;
+}
+
+/** A free-standing spot beside an object, for a shape created to join it. */
+function besideCenter(
+  state: BoardState,
+  anchorId: string,
+  direction: "left" | "right" | "below",
+  sideways = 0,
+): AnnotationPoint {
+  const bounds = semanticObjectBounds(state, anchorId) ?? { x: 0, y: 0, width: 0, height: 0 };
+  const center = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+  if (direction === "below") return { x: center.x + sideways, y: center.y + bounds.height / 2 + 140 };
+  const offset = bounds.width / 2 + 200;
+  return { x: center.x + (direction === "left" ? -offset : offset), y: center.y };
 }
 
 function semanticConnectCommand(
@@ -632,6 +923,8 @@ type DirectedSemanticConnection = {
   id: string;
   label: string | null;
   geometryAttached: boolean;
+  /** When it was drawn, for picking the newest of several parallel lines. */
+  createdAtMs: number;
   /** A v2 connector, changed through scene commands. */
   scene?: boolean;
 };
@@ -667,12 +960,14 @@ function findDirectedSemanticConnections(
         id: stroke.id,
         label: annotation.label?.trim() || null,
         geometryAttached,
+        createdAtMs: nodeCreatedAtMs(state, stroke.id),
       }];
     })
     .concat(sceneConnectorsBetween(state, fromId, toId).map((connector) => ({
       id: connector.id,
       label: richTextToPlainText(connector.label).trim() || null,
       geometryAttached: true,
+      createdAtMs: nodeCreatedAtMs(state, connector.id),
       scene: true,
     })))
     .sort((left, right) => left.id.localeCompare(right.id));
@@ -682,7 +977,7 @@ function resolveSemanticConnectionEndpoints(
   reference: SemanticConnectionReference,
   context: SemanticIntentResolutionContext,
   planHandles: ReadonlyMap<string, string[]>,
-): { fromId: string; toId: string } | { error: string } {
+): { fromId: string; toId: string } | { error: string; errorCode?: SemanticGroundingErrorCode } {
   const from = resolveSingleSemanticReference(reference.from, context, planHandles);
   if ("error" in from) return from;
   const to = resolveSingleSemanticReference(reference.to, context, planHandles);
@@ -693,19 +988,18 @@ function resolveSemanticConnectionEndpoints(
   return { fromId: from.id, toId: to.id };
 }
 
+/**
+ * Narrows the connectors between two objects to the one meant. With several
+ * equally good matches and no occurrence, the newest is the best guess: it is
+ * usually the one just drawn and talked about. Undo puts back a wrong pick.
+ */
 function selectSemanticConnections(
   connections: DirectedSemanticConnection[],
   reference: SemanticConnectionReference,
 ):
   | { connections: DirectedSemanticConnection[] }
   | { error: string } {
-  const matching = reference.label
-    ? connections.filter(
-        (connection) =>
-          normalizeObjectLookup(connection.label ?? "") ===
-          normalizeObjectLookup(reference.label ?? ""),
-      )
-    : connections;
+  const matching = reference.label ? connectionsMatchingLabel(connections, reference.label) : connections;
   if (reference.occurrence !== null) {
     const connection = matching[reference.occurrence - 1];
     return connection
@@ -715,90 +1009,130 @@ function selectSemanticConnections(
         };
   }
   if (matching.length > 1) {
-    return {
-      error:
-        "More than one connector matches those endpoints. Specify its label or occurrence.",
-    };
+    const newest = matching.reduce((best, connection) =>
+      connection.createdAtMs > best.createdAtMs ? connection : best);
+    return { connections: [newest] };
   }
   return { connections: matching };
+}
+
+/**
+ * The connectors a spoken label means. An exact match wins; otherwise a near
+ * match (a slip of one or two letters, "log in" for "login", or one label's
+ * words all inside the other's) is taken as misheard. With no near match, the
+ * only connector between the endpoints is meant when it has no label at all.
+ * A connector with a clearly different label is never picked: "delete the
+ * login arrow" must not delete the "logout" one.
+ */
+function connectionsMatchingLabel(
+  connections: DirectedSemanticConnection[],
+  spoken: string,
+): DirectedSemanticConnection[] {
+  const lookup = normalizeObjectLookup(spoken);
+  const exact = connections.filter((connection) => normalizeObjectLookup(connection.label ?? "") === lookup);
+  if (exact.length > 0) return exact;
+  const near = connections.filter((connection) => connection.label !== null && connectorLabelsNearMatch(spoken, connection.label));
+  if (near.length > 0) return near;
+  return connections.length === 1 && connections[0]!.label === null ? connections : [];
+}
+
+export function connectorLabelsNearMatch(spoken: string, visible: string): boolean {
+  const left = normalizeObjectLookup(spoken);
+  const right = normalizeObjectLookup(visible);
+  if (!left || !right) return false;
+  const leftCompact = left.replace(/\s+/gu, "");
+  const rightCompact = right.replace(/\s+/gu, "");
+  if (leftCompact === rightCompact) return true;
+  const longest = Math.max(leftCompact.length, rightCompact.length);
+  // Short labels ("yes", "no", "ok") need an exact match: one letter is a different word.
+  if (longest >= 5 && editDistance(leftCompact, rightCompact) <= Math.floor(longest / 5)) return true;
+  const leftWords = labelWords(left);
+  const rightWords = labelWords(right);
+  const [shorter, longer] = leftWords.length <= rightWords.length ? [leftWords, rightWords] : [rightWords, leftWords];
+  if (shorter.length === 0) return false;
+  const longerSet = new Set(longer);
+  return shorter.every((word) => longerSet.has(word));
+}
+
+function editDistance(left: string, right: string): number {
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= left.length; i += 1) {
+    const current = [i];
+    for (let j = 1; j <= right.length; j += 1) {
+      current[j] = Math.min(
+        previous[j]! + 1,
+        current[j - 1]! + 1,
+        previous[j - 1]! + (left[i - 1] === right[j - 1] ? 0 : 1),
+      );
+    }
+    previous = current;
+  }
+  return previous[right.length]!;
 }
 
 function resolveSemanticConnectionReference(
   reference: SemanticConnectionReference,
   context: SemanticIntentResolutionContext,
   planHandles: ReadonlyMap<string, string[]>,
-): { id: string; fromId: string; toId: string; scene?: boolean } | { error: string } {
+  options: { eitherDirection?: boolean } = {},
+):
+  | { id: string; fromId: string; toId: string; scene?: boolean }
+  | { error: string; errorCode?: SemanticGroundingErrorCode; missingConnector?: true } {
   const endpoints = resolveSemanticConnectionEndpoints(reference, context, planHandles);
   if ("error" in endpoints) return endpoints;
-  const selected = selectSemanticConnections(
-    findDirectedSemanticConnections(
-      context.boardState,
-      endpoints.fromId,
-      endpoints.toId,
-    ),
-    reference,
-  );
+  const forward = findDirectedSemanticConnections(context.boardState, endpoints.fromId, endpoints.toId);
+  const selected = selectSemanticConnections(forward, reference);
   if ("error" in selected) return selected;
   const connection = selected.connections[0];
-  return connection
-    ? { id: connection.id, ...endpoints, ...(connection.scene ? { scene: true } : {}) }
-    : { error: "No connector matches the stated direction, label, and occurrence." };
+  if (connection) {
+    return { id: connection.id, ...endpoints, ...(connection.scene ? { scene: true } : {}) };
+  }
+  let anyBetween = forward.length > 0;
+  if (options.eitherDirection) {
+    const backward = findDirectedSemanticConnections(context.boardState, endpoints.toId, endpoints.fromId);
+    anyBetween ||= backward.length > 0;
+    const reversed = selectSemanticConnections(backward, reference);
+    const match = "error" in reversed ? undefined : reversed.connections[0];
+    if (match) {
+      return {
+        id: match.id,
+        fromId: endpoints.toId,
+        toId: endpoints.fromId,
+        ...(match.scene ? { scene: true } : {}),
+      };
+    }
+  }
+  return anyBetween
+    ? { error: "No connector between those objects has that label." }
+    : { error: "No connector matches the stated direction, label, and occurrence.", missingConnector: true };
 }
 
 function resolveSingleSemanticReference(
   reference: SemanticObjectReference,
   context: SemanticIntentResolutionContext,
   planHandles: ReadonlyMap<string, string[]>,
-): { id: string } | { error: string } {
+): SingleReferenceResolution {
   const resolved = resolveSemanticReference(reference, context, planHandles);
   if ("error" in resolved) return resolved;
   if (resolved.ids.length !== 1) {
     return { error: `That reference resolves to ${resolved.ids.length} objects; name one object or give its ordinal.` };
   }
-  return { id: resolved.ids[0]! };
+  return { id: resolved.ids[0]!, ...(resolved.repairKind ? { repairKind: resolved.repairKind } : {}) };
 }
 
 /**
  * Additive connections may recover the narrow STT morphology
- * data/dataset/datasets after exact grounding fails. Destructive and
- * identity-changing actions keep using exact visible labels.
+ * data/dataset/datasets after exact and partial-name grounding fail.
+ * Destructive and identity-changing actions don't use this alias.
  */
 function resolveSingleSemanticConnectReference(
   reference: SemanticObjectReference,
   context: SemanticIntentResolutionContext,
   planHandles: ReadonlyMap<string, string[]>,
-):
-  | { id: string; repairKind?: "data_dataset_alias" }
-  | {
-      error: string;
-      errorCode?:
-        | "grounding_missing_label"
-        | "grounding_ambiguous_label"
-        | "grounding_invalid_occurrence";
-      candidateCount?: number;
-    } {
+): SingleReferenceResolution {
   const exact = resolveSingleSemanticReference(reference, context, planHandles);
-  if (!("error" in exact) || reference.kind !== "visible_label") {
+  if (!("error" in exact) || reference.kind !== "visible_label" || exact.errorCode !== "grounding_missing_label") {
     return exact;
-  }
-  const exactMatches = spatialSemanticNodes(context.boardState).filter(
-    (entry) =>
-      normalizeObjectLookup(entry.label) ===
-      normalizeObjectLookup(reference.label),
-  );
-  if (exactMatches.length > 0) {
-    if (reference.occurrence !== null) {
-      return {
-        error: exact.error,
-        errorCode: "grounding_invalid_occurrence",
-        candidateCount: exactMatches.length,
-      };
-    }
-    return {
-      error: exact.error,
-      errorCode: "grounding_ambiguous_label",
-      candidateCount: exactMatches.length,
-    };
   }
   if (reference.occurrence !== null && reference.occurrence !== 1) {
     return {
@@ -809,18 +1143,11 @@ function resolveSingleSemanticConnectReference(
   const matches = spatialSemanticNodes(context.boardState).filter((entry) =>
     dataDatasetEquivalentReference(reference.label, entry.label),
   );
-  if (matches.length === 1) {
-    return { id: matches[0]!.id, repairKind: "data_dataset_alias" };
-  }
-  if (matches.length > 1) {
-    return {
-      error: `“${reference.label}” could refer to ${matches.length} objects; use the exact visible label or specify its occurrence.`,
-      errorCode: "grounding_ambiguous_label",
-      candidateCount: matches.length,
-    };
+  if (matches.length > 0) {
+    return { id: bestGuessNode(matches, context).id, repairKind: "data_dataset_alias" };
   }
   return {
-    error: `I couldn’t match “${reference.label}” to an object on the current board. Use its exact visible label or select it and try again.`,
+    error: `I couldn’t match “${reference.label}” to an object on the current board.`,
     errorCode: "grounding_missing_label",
     candidateCount: 0,
   };
@@ -863,28 +1190,44 @@ function resolveSemanticTargets(
   references: SemanticObjectReference[],
   context: SemanticIntentResolutionContext,
   planHandles: ReadonlyMap<string, string[]>,
-): { ids: string[] } | { error: string } {
+): ReferenceResolution {
   const ids: string[] = [];
+  let repairKind: SemanticGroundingRepairKind | undefined;
   for (const reference of references) {
-    const resolved = resolveSemanticReference(reference, context, planHandles);
+    const resolved = resolveSemanticReference(reference, context, planHandles, { many: true });
     if ("error" in resolved) return resolved;
     ids.push(...resolved.ids);
+    repairKind ??= resolved.repairKind;
   }
   const unique = [...new Set(ids)];
-  return unique.length > 0 ? { ids: unique } : { error: "No board objects matched that reference." };
+  return unique.length > 0
+    ? { ids: unique, ...(repairKind ? { repairKind } : {}) }
+    : { error: "No board objects matched that reference." };
 }
 
 function resolveSemanticReference(
   reference: SemanticObjectReference,
   context: SemanticIntentResolutionContext,
   planHandles: ReadonlyMap<string, string[]>,
-): { ids: string[] } | { error: string } {
-  const nodeIds = new Set(semanticBoardNodes(context.boardState).map(({ id }) => id));
+  options: { many?: boolean } = {},
+): ReferenceResolution {
+  const nodes = semanticBoardNodes(context.boardState);
+  const nodeIds = new Set(nodes.map(({ id }) => id));
   const isNode = (id: string | null | undefined): id is string => Boolean(id && nodeIds.has(id));
   switch (reference.kind) {
     case "current_selection": {
       const ids = context.selectionIds.filter(isNode);
-      return ids.length > 0 ? { ids } : { error: "There is no current object selection." };
+      if (ids.length > 0) return { ids };
+      // Something was selected, but not a shape this step can change (a
+      // connector, say), or it has gone since the person spoke: never guess.
+      if (context.selectionIds.length > 0 || (context.requestSelectionIds?.length ?? 0) > 0) {
+        return { error: "What was selected isn't a shape Airo can change that way, or it's no longer on the board." };
+      }
+      // "it" or "this" with nothing selected means the shape just made.
+      const newest = newestNode(nodes, context.boardState);
+      return newest
+        ? { ids: [newest.id], repairKind: "best_guess_reference" }
+        : { error: "There is no current object selection." };
     }
     case "pointer": {
       if (isNode(context.hoverStrokeId)) return { ids: [context.hoverStrokeId] };
@@ -906,24 +1249,34 @@ function resolveSemanticReference(
     }
     case "visible_label": {
       const lookup = normalizeObjectLookup(reference.label);
-      const matches = spatialSemanticNodes(context.boardState).filter(
-        (entry) => normalizeObjectLookup(entry.label) === lookup,
-      );
-      if (matches.length === 0) {
-        return { error: `I couldn’t find the visible label “${reference.label}”.` };
+      const exact = nodes.filter((entry) => normalizeObjectLookup(entry.label) === lookup);
+      const candidates = exact.length > 0 ? exact : looseLabelCandidates(nodes, reference.label);
+      if (candidates.length === 0) {
+        return {
+          error: `I couldn’t find the visible label “${reference.label}”.`,
+          errorCode: "grounding_missing_label",
+          candidateCount: 0,
+        };
       }
       if (reference.occurrence !== null) {
-        const match = matches[reference.occurrence - 1];
+        const match = candidates[reference.occurrence - 1];
         return match
-          ? { ids: [match.id] }
-          : { error: `There is no occurrence ${reference.occurrence} of “${reference.label}”.` };
+          ? { ids: [match.id], ...(exact.length > 0 ? {} : { repairKind: "best_guess_reference" as const }) }
+          : {
+              error: `There is no occurrence ${reference.occurrence} of “${reference.label}”.`,
+              errorCode: "grounding_invalid_occurrence",
+              candidateCount: candidates.length,
+            };
       }
-      return matches.length === 1
-        ? { ids: [matches[0]!.id] }
-        : { error: `“${reference.label}” matches ${matches.length} objects; specify its occurrence.` };
+      if (candidates.length === 1 && exact.length === 1) return { ids: [candidates[0]!.id] };
+      // "Delete the services" means every service, where a step takes several.
+      if (options.many && exact.length === 0 && candidates.length > 1 && spokenAsPlural(reference.label, candidates)) {
+        return { ids: candidates.map(({ id }) => id), repairKind: "best_guess_reference" };
+      }
+      return { ids: [bestGuessNode(candidates, context).id], repairKind: "best_guess_reference" };
     }
     case "type_ordinal": {
-      const matches = spatialSemanticNodes(context.boardState).filter(
+      const matches = nodes.filter(
         (entry) => entry.nodeType === reference.nodeType,
       );
       const match = matches[reference.ordinal - 1];
@@ -933,6 +1286,119 @@ function resolveSemanticReference(
     }
   }
 }
+
+/**
+ * The name's last word is a plural that none of the matching labels spells
+ * out ("services" against "Payments Service"), so it means them all. A name
+ * that is itself plural on the board ("Orders" against "Orders Service")
+ * still means one.
+ */
+function spokenAsPlural(label: string, candidates: SemanticBoardNode[]): boolean {
+  const words = normalizeObjectLookup(label).split(" ").filter((word) => word && !LOOSE_LABEL_FILLER.has(word));
+  const last = words[words.length - 1];
+  if (!last || last.length <= 3 || !last.endsWith("s") || last.endsWith("ss")) return false;
+  return candidates.every((candidate) => !normalizeObjectLookup(candidate.label).split(" ").includes(last));
+}
+
+/** Selected shapes Airo can name, as current_selection means them. */
+function selectedNodeIds(context: SemanticIntentResolutionContext): string[] {
+  const nodeIds = new Set(semanticBoardNodes(context.boardState).map(({ id }) => id));
+  return context.selectionIds.filter((id) => nodeIds.has(id));
+}
+
+/** Selected connectors still on the board, legacy or v2. */
+function selectedConnectorIds(context: SemanticIntentResolutionContext): string[] {
+  const state = context.boardState;
+  return context.selectionIds.filter((id) => {
+    const stroke = state.strokes[id];
+    if (stroke) {
+      return stroke.status === "committed" &&
+        (stroke.annotation?.type === "connector" || stroke.annotation?.type === "arrow");
+    }
+    return isSceneOnlyElement(state, id) && state.elements[id]?.kind === "connector";
+  });
+}
+
+const LOOSE_LABEL_FILLER = new Set(["the", "a", "an", "one", "my", "our", "that", "this"]);
+
+function labelWords(value: string): string[] {
+  return normalizeObjectLookup(value)
+    .split(" ")
+    .filter((word) => word && !LOOSE_LABEL_FILLER.has(word))
+    .map((word) => (word.length > 3 && word.endsWith("s") && !word.endsWith("ss") ? word.slice(0, -1) : word));
+}
+
+/**
+ * Objects a name fits without matching it exactly: every spoken word is in
+ * the label ("the service" → "Payments Service"), or the name is the
+ * object's type ("the database" → a database labelled Orders). Never a
+ * looser guess than that, so a stray word can't pick an unrelated shape.
+ */
+function looseLabelCandidates(nodes: SemanticBoardNode[], label: string): SemanticBoardNode[] {
+  const spoken = labelWords(label);
+  if (spoken.length === 0) return [];
+  const contained = nodes.filter((node) => {
+    const words = new Set(labelWords(node.label));
+    return spoken.every((word) => words.has(word));
+  });
+  if (contained.length > 0) return contained;
+  const phrase = normalizeObjectLookup(label).replace(/^(?:the|a|an)\s+/u, "");
+  const shapeKind = canonicalShapeKind(phrase);
+  return nodes.filter((node) => {
+    const capability = AIRBOARD_SEMANTIC_NODE_CAPABILITIES.find(({ nodeType }) => nodeType === node.nodeType);
+    if (capability && capability.nodeType !== "custom" && (capability.terms as readonly string[]).includes(phrase)) return true;
+    return node.world === "scene" && shapeKind !== null && node.nodeType === shapeKind;
+  });
+}
+
+function nodeCreatedAtMs(state: BoardState, id: string): number {
+  const raw = state.strokes[id]?.createdAt ?? state.elements[id]?.createdAt;
+  const parsed = raw ? Date.parse(raw) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
+}
+
+function newestNode(nodes: SemanticBoardNode[], state: BoardState): SemanticBoardNode | null {
+  let newest: SemanticBoardNode | null = null;
+  let newestAt = Number.NEGATIVE_INFINITY;
+  for (const node of nodes) {
+    const at = nodeCreatedAtMs(state, node.id);
+    // Ties keep the later object in reading order, the one drawn last in a flow.
+    if (newest === null || at >= newestAt) {
+      newest = node;
+      newestAt = at;
+    }
+  }
+  return newest;
+}
+
+/**
+ * Picks one of several objects a name fits: the selected one, else the most
+ * recently created, else the one nearest the pointer, else the first in
+ * reading order. Airo applies this guess straight away; undo covers a miss.
+ */
+function bestGuessNode(
+  candidates: SemanticBoardNode[],
+  context: SemanticIntentResolutionContext,
+): SemanticBoardNode {
+  if (candidates.length === 1) return candidates[0]!;
+  const primary = candidates.find(({ id }) => id === context.primarySelectionId);
+  if (primary) return primary;
+  const selected = candidates.find(({ id }) => context.selectionIds.includes(id));
+  if (selected) return selected;
+  const times = candidates.map(({ id }) => nodeCreatedAtMs(context.boardState, id));
+  const newestAt = Math.max(...times);
+  const newest = Number.isFinite(newestAt)
+    ? candidates.filter((_, index) => times[index] === newestAt)
+    : candidates;
+  if (newest.length === 1) return newest[0]!;
+  if (context.pointerAvailable) {
+    const distance = ({ bounds }: SemanticBoardNode) =>
+      Math.hypot(bounds.x + bounds.width / 2 - context.pointer.x, bounds.y + bounds.height / 2 - context.pointer.y);
+    return newest.reduce((best, node) => (distance(node) < distance(best) ? node : best));
+  }
+  return newest[0]!;
+}
+
 
 type SpatialSemanticNode = SemanticBoardNode;
 
@@ -1145,6 +1611,213 @@ function semanticSelectionBounds(
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 
+/** One plan step that was left out while the rest of the plan was applied. */
+export type SkippedSemanticAction = {
+  /** Position of the step in plan.actions. */
+  index: number;
+  actionType: SemanticPlanAction["type"];
+  /** Plain-language reason, safe to show or speak. */
+  reason: string;
+  errorCode:
+    | SemanticGroundingErrorCode
+    | "grounding_failed"
+    | "depends_on_skipped_step"
+    | "command_limit"
+    | "command_failed";
+};
+
+export type SemanticPlanGroundingInput = {
+  actions: readonly SemanticPlanAction[];
+  /**
+   * The request-time snapshot. selectionIds and primarySelectionId are what
+   * current_selection means for every step, even after earlier steps change
+   * the selection. autoCreateCenters is computed here when absent.
+   */
+  context: SemanticIntentResolutionContext;
+  /** Applies one command to the preview, usually applyDiagramCommand with the board's command context. */
+  applyCommand: (
+    state: BoardState,
+    command: DiagramCommand,
+  ) => { state: BoardState; affectedStrokeIds: readonly string[] };
+  /** Defaults to AIRBOARD_SEMANTIC_PLAN_MAX_DIAGRAM_COMMANDS. */
+  maxCommands?: number;
+};
+
+export type SemanticPlanGrounding =
+  | {
+      status: "grounded";
+      /** Every command to apply, in order, as one undoable change. */
+      commands: DiagramCommand[];
+      /** The board after the commands, for the preview. */
+      previewState: BoardState;
+      affectedStrokeIds: string[];
+      /** The selection the board should show afterwards. */
+      selectionIds: string[];
+      primarySelectionId: string | null;
+      appliedActionCount: number;
+      /** Steps left out; empty when the whole plan applied. */
+      skipped: SkippedSemanticAction[];
+      repairs: Array<{
+        index: number;
+        actionType: SemanticPlanAction["type"];
+        repairKinds: SemanticGroundingRepairKind[];
+      }>;
+    }
+  | {
+      status: "rejected";
+      /** Plain-language reason, safe to show or speak. */
+      reason: string;
+      skipped: SkippedSemanticAction[];
+    };
+
+/**
+ * Grounds a whole semantic plan against the board, step by step on a
+ * preview. A step that can't be grounded, or whose commands fail, is left out
+ * and reported in `skipped` while the other steps still apply: one misheard
+ * name in a six-step diagram shouldn't throw away the five good steps. The
+ * plan is rejected only when nothing can apply, or when a left-out step
+ * creates a shape that later steps build on (they would land on nothing).
+ * Steps past the command limit are skipped rather than failing the plan.
+ */
+export function groundSemanticPlan(input: SemanticPlanGroundingInput): SemanticPlanGrounding {
+  const { actions, applyCommand } = input;
+  const maxCommands = input.maxCommands ?? AIRBOARD_SEMANTIC_PLAN_MAX_DIAGRAM_COMMANDS;
+  if (actions.some((action) => action.type === "undo" || action.type === "cancel")) {
+    return { status: "rejected", reason: "Undo and cancel are handled immediately.", skipped: [] };
+  }
+  const baseState = input.context.boardState;
+  const autoCreateCenters = input.context.autoCreateCenters ?? computeSemanticAutoLayout({
+    actions,
+    boardState: baseState,
+    canvasWidth: input.context.canvasWidth,
+    canvasHeight: input.context.canvasHeight,
+    ...(input.context.viewOrigin ? { viewOrigin: input.context.viewOrigin } : {}),
+  });
+  // Which later steps build on the shape or group each step creates.
+  const handleUsers = new Map<string, number[]>();
+  actions.forEach((action, index) => {
+    for (const handle of planHandlesReferencedBy(action)) {
+      handleUsers.set(handle, [...(handleUsers.get(handle) ?? []), index]);
+    }
+  });
+
+  let previewState = baseState;
+  const planHandles = new Map<string, string[]>();
+  const missingHandles = new Set<string>();
+  const commands: DiagramCommand[] = [];
+  const affected: string[] = [];
+  const skipped: SkippedSemanticAction[] = [];
+  const repairs: Extract<SemanticPlanGrounding, { status: "grounded" }>["repairs"] = [];
+  let selectionIds = input.context.selectionIds.filter(
+    (id) => previewState.strokes[id]?.status === "committed" || isSceneOnlyElement(previewState, id),
+  );
+  let appliedActionCount = 0;
+
+  for (const [index, action] of actions.entries()) {
+    const skip = (reason: string, errorCode: SkippedSemanticAction["errorCode"]): SemanticPlanGrounding | null => {
+      skipped.push({ index, actionType: action.type, reason, errorCode });
+      const handle = action.type === "create" || action.type === "group" ? action.handle : null;
+      if (handle && (handleUsers.get(handle) ?? []).some((user) => user > index)) {
+        return {
+          status: "rejected",
+          reason: `A step that later steps depend on couldn't be applied: ${reason}`,
+          skipped,
+        };
+      }
+      if (handle) missingHandles.add(handle);
+      return null;
+    };
+    if (planHandlesReferencedBy(action).some((handle) => missingHandles.has(handle))) {
+      const rejected = skip("It builds on a step that was left out.", "depends_on_skipped_step");
+      if (rejected) return rejected;
+      continue;
+    }
+    const resolved = resolveSemanticPlanAction(
+      action,
+      { ...input.context, boardState: previewState, autoCreateCenters },
+      planHandles,
+    );
+    if ("error" in resolved) {
+      const rejected = skip(resolved.error, resolved.errorCode ?? "grounding_failed");
+      if (rejected) return rejected;
+      continue;
+    }
+    if (commands.length + resolved.commands.length > maxCommands) {
+      const rejected = skip("The request is too large to apply in one go.", "command_limit");
+      if (rejected) return rejected;
+      continue;
+    }
+    // Apply the step's commands together, so a failing command leaves no half step behind.
+    let stepState = previewState;
+    const stepAffected: string[] = [];
+    try {
+      for (const command of resolved.commands) {
+        const result = applyCommand(stepState, command);
+        stepState = result.state;
+        stepAffected.push(...result.affectedStrokeIds);
+      }
+    } catch (caught) {
+      const rejected = skip(
+        caught instanceof Error && caught.message ? caught.message : "That change couldn't be made.",
+        "command_failed",
+      );
+      if (rejected) return rejected;
+      continue;
+    }
+    previewState = stepState;
+    commands.push(...resolved.commands);
+    affected.push(...stepAffected);
+    appliedActionCount += 1;
+    for (const [handle, ids] of Object.entries(resolved.handleAssignments ?? {})) {
+      planHandles.set(handle, ids);
+    }
+    if (resolved.repairKinds?.length) {
+      repairs.push({ index, actionType: action.type, repairKinds: resolved.repairKinds });
+    }
+    if (resolved.selectionAfter) {
+      selectionIds = resolved.selectionAfter.filter(
+        (id) => previewState.strokes[id]?.status === "committed" || isSceneOnlyElement(previewState, id),
+      );
+    }
+  }
+
+  if (appliedActionCount === 0) {
+    return {
+      status: "rejected",
+      reason: skipped[0]?.reason ?? "Nothing in that request could be applied.",
+      skipped,
+    };
+  }
+  return {
+    status: "grounded",
+    commands,
+    previewState,
+    affectedStrokeIds: [...new Set(affected)],
+    selectionIds,
+    primarySelectionId: selectionIds[selectionIds.length - 1] ?? null,
+    appliedActionCount,
+    skipped,
+    repairs,
+  };
+}
+
+function planHandlesReferencedBy(action: SemanticPlanAction): string[] {
+  const handles: string[] = [];
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+    } else if (value && typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      if (record.kind === "plan_handle" && typeof record.handle === "string") handles.push(record.handle);
+      else Object.values(record).forEach(visit);
+    }
+  };
+  // A create or group step's own handle is a declaration, not a reference.
+  const { type: _type, ...fields } = action as Record<string, unknown>;
+  visit(fields.handle !== undefined ? { ...fields, handle: undefined } : fields);
+  return [...new Set(handles)];
+}
+
 export function describeSemanticPlan(actions: SemanticPlanAction[]): string {
   if (actions.length > 1) {
     const graphChanges = actions.flatMap((action): string[] => {
@@ -1201,6 +1874,14 @@ export function describeSemanticPlan(actions: SemanticPlanAction[]): string {
       return "Group the referenced diagram objects.";
     case "select":
       return "Update the diagram selection.";
+    case "change_type":
+      return `Change the referenced objects to ${action.shape ? action.shape.replaceAll("-", " ") : action.nodeType}.`;
+    case "resize":
+      return `Make the referenced objects ${action.change}.`;
+    case "label_connection":
+      return `Label ${describeSemanticReference(action.connection.from)} → ${describeSemanticReference(action.connection.to)} “${action.label}”.`;
+    case "style_connection":
+      return `Make ${describeSemanticReference(action.connection.from)} → ${describeSemanticReference(action.connection.to)} ${action.lineStyle}.`;
     case "undo":
       return "Undo the last board action.";
     case "cancel":
@@ -2114,7 +2795,7 @@ function resolveDeicticIds(input: {
 function createLayoutCommands(
   state: BoardState,
   selectionIds: string[],
-  direction: Extract<IntentCanvasOperation, { kind: "layout_selection" }>["direction"],
+  direction: Exclude<SemanticLayoutDirection, "tree" | "radial">,
 ): DiagramCommand[] {
   const entries = selectionIds.flatMap((strokeId) => {
     const bounds = semanticObjectBounds(state, strokeId);
@@ -2149,6 +2830,143 @@ function createLayoutCommands(
       },
     });
   });
+}
+
+/** Connectors among a set of objects, legacy or v2, as from → to pairs. */
+function semanticEdgesAmong(state: BoardState, ids: readonly string[]): Array<{ from: string; to: string }> {
+  const members = new Set(ids);
+  const edges: Array<{ from: string; to: string }> = [];
+  for (const stroke of Object.values(state.strokes)) {
+    const annotation = stroke.annotation;
+    if (
+      stroke.status === "committed" &&
+      (annotation?.type === "connector" || annotation?.type === "arrow") &&
+      annotation.snappedStartStrokeId && members.has(annotation.snappedStartStrokeId) &&
+      annotation.snappedEndStrokeId && members.has(annotation.snappedEndStrokeId)
+    ) {
+      edges.push({ from: annotation.snappedStartStrokeId, to: annotation.snappedEndStrokeId });
+    }
+  }
+  for (const element of Object.values(state.elements)) {
+    if (
+      element.kind === "connector" &&
+      element.status === "active" &&
+      !element.legacyStrokeId &&
+      element.start.binding && members.has(element.start.binding.elementId) &&
+      element.end.binding && members.has(element.end.binding.elementId)
+    ) {
+      edges.push({ from: element.start.binding.elementId, to: element.end.binding.elementId });
+    }
+  }
+  return edges;
+}
+
+/** Moves each object so its center lands on a point, through its own world's command. */
+function moveCentersCommands(
+  state: BoardState,
+  centers: ReadonlyMap<string, AnnotationPoint>,
+): DiagramCommand[] {
+  return [...centers].flatMap(([id, center]) => {
+    const bounds = semanticObjectBounds(state, id);
+    if (!bounds) return [];
+    const to = { x: center.x - bounds.width / 2, y: center.y - bounds.height / 2 };
+    if (Math.abs(to.x - bounds.x) < 0.5 && Math.abs(to.y - bounds.y) < 0.5) return [];
+    return splitMoveByWorld(state, { type: "objects.move", objectIds: [id], to });
+  });
+}
+
+/**
+ * Lays objects out as a top-down tree that follows their arrows: objects no
+ * arrow points into are the roots, and each level sits one row lower than its
+ * parents. Objects the arrows don't reach start trees of their own. The tree
+ * is centered where the objects were, so it doesn't jump across the board.
+ */
+function createTreeLayoutCommands(state: BoardState, ids: string[]): DiagramCommand[] {
+  const bounds = ids.flatMap((id) => {
+    const value = semanticObjectBounds(state, id);
+    return value ? [{ id, bounds: value }] : [];
+  });
+  if (bounds.length === 0) return [];
+  const known = new Set(bounds.map(({ id }) => id));
+  const readingOrder = semanticBoardNodes(state).map(({ id }) => id).filter((id) => known.has(id));
+  for (const { id } of bounds) if (!readingOrder.includes(id)) readingOrder.push(id);
+  const edges = semanticEdgesAmong(state, readingOrder);
+  const children = new Map(readingOrder.map((id) => [id, [] as string[]]));
+  const hasParent = new Set<string>();
+  for (const { from, to } of edges) {
+    if (from === to || children.get(from)!.includes(to)) continue;
+    children.get(from)!.push(to);
+    hasParent.add(to);
+  }
+  const depth = new Map<string, number>();
+  const levels: string[][] = [];
+  const visit = (roots: string[]) => {
+    let frontier = roots.filter((id) => !depth.has(id));
+    for (const id of frontier) depth.set(id, 0);
+    let level = 0;
+    while (frontier.length > 0) {
+      levels[level] = [...(levels[level] ?? []), ...frontier];
+      const next: string[] = [];
+      for (const id of frontier) {
+        for (const child of children.get(id) ?? []) {
+          if (depth.has(child)) continue;
+          depth.set(child, level + 1);
+          next.push(child);
+        }
+      }
+      frontier = next;
+      level += 1;
+    }
+  };
+  visit(readingOrder.filter((id) => !hasParent.has(id)));
+  // A cycle has no root: start from the first object left in reading order.
+  for (const id of readingOrder) if (!depth.has(id)) visit([id]);
+
+  const maxWidth = Math.max(...bounds.map(({ bounds: value }) => value.width));
+  const maxHeight = Math.max(...bounds.map(({ bounds: value }) => value.height));
+  const group = semanticSelectionBounds(state, readingOrder)!;
+  const centerX = group.x + group.width / 2;
+  const columnStep = maxWidth + 56;
+  const rowStep = maxHeight + 96;
+  const centers = new Map<string, AnnotationPoint>();
+  levels.forEach((level, row) => {
+    level.forEach((id, column) => {
+      centers.set(id, {
+        x: centerX + (column - (level.length - 1) / 2) * columnStep,
+        y: group.y + maxHeight / 2 + row * rowStep,
+      });
+    });
+  });
+  return moveCentersCommands(state, centers);
+}
+
+/**
+ * Hub-and-spoke: the first object stays where it is as the hub and the rest
+ * go round it in a circle, starting at the top and going clockwise. The ring
+ * grows with the number of spokes so neighbours don't overlap.
+ */
+function createRadialLayoutCommands(state: BoardState, ids: string[]): DiagramCommand[] {
+  const [hubId, ...spokes] = ids.filter((id) => semanticObjectBounds(state, id));
+  if (!hubId || spokes.length === 0) return [];
+  const hub = semanticObjectBounds(state, hubId)!;
+  const hubCenter = { x: hub.x + hub.width / 2, y: hub.y + hub.height / 2 };
+  const spokeSize = Math.max(...spokes.map((id) => {
+    const value = semanticObjectBounds(state, id)!;
+    return Math.max(value.width, value.height);
+  }));
+  const radius = Math.max(
+    Math.max(hub.width, hub.height) / 2 + spokeSize / 2 + 96,
+    (spokes.length * (spokeSize + 40)) / (2 * Math.PI),
+  );
+  const centers = new Map<string, AnnotationPoint>();
+  spokes.forEach((id, index) => {
+    const angle = -Math.PI / 2 + (index * 2 * Math.PI) / spokes.length;
+    centers.set(id, {
+      x: hubCenter.x + Math.cos(angle) * radius,
+      y: hubCenter.y + Math.sin(angle) * radius,
+    });
+  });
+  return moveCentersCommands(state, centers);
 }
 
 function defaultNodeLabel(nodeType: NonNullable<StrokeAnnotation["nodeType"]>): string {

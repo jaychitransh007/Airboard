@@ -28,6 +28,33 @@ import { createDailyUsage } from "../dailyUsage";
 const DETERMINISTIC_SEMANTIC_PROVIDER = "airboard-deterministic";
 const EXISTING_BOARD_FAN_IN_MODEL = "existing-board-fan-in-v1";
 
+/** How long a spoken turn, once charged, is not charged again. */
+const CHARGED_TURN_WINDOW_MS = 5 * 60_000;
+const CHARGED_TURN_MAX_KEYS = 10_000;
+
+/** Keys seen in the last `windowMs`, oldest dropped first past `maxKeys`. */
+export function createRecentKeys(windowMs: number, maxKeys: number, now: () => number = Date.now) {
+  const seenAt = new Map<string, number>();
+  const prune = () => {
+    const cutoff = now() - windowMs;
+    for (const [key, at] of seenAt) {
+      if (at > cutoff && seenAt.size <= maxKeys) break;
+      seenAt.delete(key);
+    }
+  };
+  return {
+    has(key: string): boolean {
+      prune();
+      return seenAt.has(key);
+    },
+    remember(key: string): void {
+      seenAt.delete(key);
+      seenAt.set(key, now());
+      prune();
+    },
+  };
+}
+
 export function registerSemanticIntentRoutes(
   server: FastifyInstance,
   config: ApiConfig,
@@ -55,6 +82,8 @@ export function registerSemanticIntentRoutes(
         server.log.warn({ limit: config.serviceDailyUsage?.airoCommands }, "the service's daily Airo limit is reached"),
     },
   );
+
+  const chargedTurns = createRecentKeys(CHARGED_TURN_WINDOW_MS, CHARGED_TURN_MAX_KEYS);
 
   server.get("/intent/config", async () => publicSemanticIntentConfig(config.semanticIntent));
 
@@ -175,10 +204,16 @@ export function registerSemanticIntentRoutes(
     }
     // During a provider outage, answer at once; the app falls back to its
     // built-in command grammar.
+    // The cool-down is temporary, so it has its own code: the app says
+    // "back in a few seconds", not "not configured".
     const breakerWaitMs = breaker.retryAfterMs();
     if (breakerWaitMs !== null) {
       reply.header("Retry-After", Math.max(1, Math.ceil(breakerWaitMs / 1_000)));
-      return reply.code(503).send({ error: "SEMANTIC_INTENT_UNAVAILABLE", retryAfterMs: breakerWaitMs });
+      return reply.code(503).send({
+        error: "SEMANTIC_INTENT_COOLING_DOWN",
+        message: "Airo's planner is pausing after repeated failures and will be back shortly.",
+        retryAfterMs: breakerWaitMs,
+      });
     }
 
     // Claim a provider slot before charging, so a request refused as busy
@@ -191,7 +226,18 @@ export function registerSemanticIntentRoutes(
     // A person's daily allowance and the service's daily total hold across
     // instances, so neither one account nor many can run up the model bill.
     // Built-in commands never reach here.
-    const allowance = context ? await usage.consume(context.profileId, "airo_commands", 1) : "allowed";
+    // The app retries a command at most once, and only when the planner
+    // certainly did not run it; even so, the same spoken turn is charged at
+    // most once in a short window.
+    const chargeKey = context ? `${context.profileId}:${parsed.value.voiceTurnId}` : null;
+    const alreadyCharged = chargeKey !== null && chargedTurns.has(chargeKey);
+    const allowance =
+      context && !alreadyCharged
+        ? await usage.consume(context.profileId, "airo_commands", 1)
+        : "allowed";
+    if (chargeKey !== null && !alreadyCharged && allowance === "allowed") {
+      chargedTurns.remember(chargeKey);
+    }
     if (allowance !== "allowed") {
       activeRequests = Math.max(0, activeRequests - 1);
       return reply.code(429).send(
@@ -208,7 +254,10 @@ export function registerSemanticIntentRoutes(
     }
 
     const abortController = new AbortController();
-    const timeout = setTimeout(() => abortController.abort(), config.semanticIntent.timeoutMs);
+    const timeout = setTimeout(
+      () => abortController.abort(),
+      semanticIntentTimeoutForTranscript(config.semanticIntent.timeoutMs, parsed.value.transcript.length),
+    );
     try {
       const resolution = await provider.resolve(parsed.value, model, abortController.signal);
       breaker.recordSuccess();
@@ -288,9 +337,23 @@ export function registerSemanticIntentRoutes(
   });
 }
 
+/**
+ * The model writes a longer plan for a longer narration, so the wait grows
+ * with the transcript: the configured budget for a short command, plus 9 ms a
+ * character past 240, up to 20 s (or the configured budget if that is
+ * larger). The browser waits one second longer than this for the same text.
+ */
+export function semanticIntentTimeoutForTranscript(baseTimeoutMs: number, transcriptLength: number): number {
+  return Math.min(
+    Math.max(baseTimeoutMs, 20_000),
+    baseTimeoutMs + Math.max(0, transcriptLength - 240) * 9,
+  );
+}
+
 function semanticRequestLog(request: SemanticIntentRequest, model: string): Record<string, unknown> {
   return {
     voiceTurnId: request.voiceTurnId,
+    addressedBy: request.addressedBy ?? null,
     semanticModel: model,
     semanticPlanContractVersion: AIRBOARD_SEMANTIC_PLAN_CONTRACT_VERSION,
     semanticPromptVersion: AIRBOARD_SEMANTIC_INTENT_PROMPT_VERSION,

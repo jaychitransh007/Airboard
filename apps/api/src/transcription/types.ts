@@ -43,6 +43,11 @@ export type TranscriptionProviderEventHandler = (event: TranscriptionProviderEve
 export interface RealtimeTranscriptionSession {
   sendAudio(pcm16Frame: Uint8Array): void;
   updateKeyterms(keyterms: string[]): void;
+  /**
+   * Holds the provider stream open while no audio is sent (the browser stops
+   * sending during silence), so silence is neither streamed nor billed.
+   */
+  keepAlive?(): void;
   stop(): void;
   abort(): void;
 }
@@ -126,4 +131,23 @@ export type TranscriptionServerMessage =
   | {
       type: "transcription.stopped";
       reason: "completed" | "aborted" | "provider_closed";
+    }
+  | {
+      /**
+       * The provider stream nears its time limit and a replacement is being
+       * opened behind it. Audio keeps flowing and the switch loses nothing;
+       * a client may use this moment to pause a long-quiet session instead.
+       */
+      type: "transcription.renewing";
+    }
+  | {
+      /**
+       * Today's voice minutes are running low: sent once as the remainder
+       * falls to 15 minutes and once at 5 minutes. "service" means the
+       * pilot-wide total, not the person's own allowance, is the nearer limit.
+       */
+      type: "transcription.allowance_warning";
+      remainingMinutes: number;
+      scope: "personal" | "service";
+      message: string;
     };

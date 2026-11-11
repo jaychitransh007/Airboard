@@ -25,7 +25,9 @@ registerHooks({
 
 const {
   fetchSemanticIntentConfig,
+  loadSemanticIntentConfigWithRetry,
   resolveSemanticIntent,
+  semanticIntentTimeoutMs,
   semanticIntentIssueMessage,
   SemanticIntentClientError,
   shouldUseSemanticIntentFallback,
@@ -417,5 +419,189 @@ test("aborts a slow request with a precise timeout error", async () => {
     ),
     (error) =>
       error instanceof SemanticIntentClientError && error.code === "SEMANTIC_INTENT_TIMEOUT",
+  );
+});
+
+const PLAN_PAYLOAD = {
+  plan: CREATE_DECISION_PLAN,
+  provider: "openai",
+  model: "gpt-5.6-terra",
+  metadata: METADATA,
+};
+
+function failure(status, payload, headers = {}) {
+  return {
+    ok: false,
+    status,
+    headers: new Headers(headers),
+    async json() {
+      return payload;
+    },
+  };
+}
+
+const baseOptions = {
+  apiBaseUrl: "http://localhost:4000",
+  voiceTurnId: "voice-turn-retry",
+  transcript: "users sign in through the auth service",
+  parserIssue: "unknown_command",
+  context: CONTEXT,
+};
+
+test("sends how the sentence was addressed to Airo", async () => {
+  let body;
+  await resolveSemanticIntent({ ...baseOptions, addressedBy: "palm" }, async (_url, init) => {
+    body = JSON.parse(init.body);
+    return jsonResponse(PLAN_PAYLOAD);
+  });
+  assert.equal(body.addressedBy, "palm");
+  await resolveSemanticIntent(baseOptions, async (_url, init) => {
+    body = JSON.parse(init.body);
+    return jsonResponse(PLAN_PAYLOAD);
+  });
+  assert.equal("addressedBy" in body, false);
+});
+
+test("retries once after a failure the planner never ran", async () => {
+  const temporary = [
+    failure(429, { error: "SEMANTIC_INTENT_RATE_LIMITED", retryAfterMs: 1_500 }),
+    failure(429, { error: "RATE_LIMITED", retryAfterMs: 1_000 }),
+    failure(503, { error: "SEMANTIC_INTENT_COOLING_DOWN", retryAfterMs: 2_000 }),
+    // The edge answered for the API (no Airboard error code).
+    failure(502, null),
+    failure(504, null),
+    "network",
+  ];
+  for (const first of temporary) {
+    const waits = [];
+    let calls = 0;
+    const result = await resolveSemanticIntent(
+      { ...baseOptions, sleep: async (ms) => { waits.push(ms); } },
+      async () => {
+        calls += 1;
+        if (calls === 1) {
+          if (first === "network") throw new TypeError("fetch failed");
+          return first;
+        }
+        return jsonResponse(PLAN_PAYLOAD);
+      },
+    );
+    assert.equal(result.outcome, "plan");
+    assert.equal(calls, 2);
+    assert.equal(waits.length, 1);
+  }
+});
+
+test("does not retry lasting failures or long waits, and retries only once", async () => {
+  const lasting = [
+    failure(429, { error: "DAILY_AIRO_LIMIT" }),
+    failure(402, { error: "ACTIVE_ENTITLEMENT_REQUIRED" }),
+    failure(503, { error: "SEMANTIC_INTENT_UNAVAILABLE" }),
+    failure(503, { error: "SEMANTIC_INTENT_QUOTA_EXHAUSTED" }),
+    failure(503, { error: "SEMANTIC_INTENT_COOLING_DOWN", retryAfterMs: 25_000 }),
+    failure(429, { error: "RATE_LIMITED" }),
+    failure(400, { error: "INVALID_CONTEXT" }),
+    // The server may already have charged and paid for these.
+    failure(502, { error: "SEMANTIC_INTENT_INVALID_PROVIDER_OUTPUT" }),
+    failure(502, { error: "SEMANTIC_INTENT_PROVIDER_FAILED" }),
+    failure(502, { error: "SEMANTIC_INTENT_PROVIDER_UNAVAILABLE" }),
+  ];
+  for (const response of lasting) {
+    let calls = 0;
+    await assert.rejects(
+      resolveSemanticIntent({ ...baseOptions, sleep: async () => {} }, async () => {
+        calls += 1;
+        return response;
+      }),
+      SemanticIntentClientError,
+    );
+    assert.equal(calls, 1, `no retry for ${response.status}`);
+  }
+  let calls = 0;
+  await assert.rejects(
+    resolveSemanticIntent({ ...baseOptions, sleep: async () => {} }, async () => {
+      calls += 1;
+      return failure(504, { error: "SEMANTIC_INTENT_TIMEOUT" });
+    }),
+    (error) => error.code === "SEMANTIC_INTENT_TIMEOUT" && error.temporary === true,
+  );
+  assert.equal(calls, 1, "a timeout is not retried: the server may still be planning");
+  calls = 0;
+  await assert.rejects(
+    resolveSemanticIntent({ ...baseOptions, timeoutMs: 5, sleep: async () => {} }, async (_url, init) => {
+      calls += 1;
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+      });
+    }),
+    (error) => error.code === "SEMANTIC_INTENT_TIMEOUT",
+  );
+  assert.equal(calls, 1, "the browser's own timeout is not retried");
+  calls = 0;
+  await assert.rejects(
+    resolveSemanticIntent({ ...baseOptions, sleep: async () => {} }, async () => {
+      calls += 1;
+      throw new TypeError("fetch failed");
+    }),
+    (error) => error.code === "SEMANTIC_INTENT_NETWORK_ERROR",
+  );
+  assert.equal(calls, 2, "retries only once");
+});
+
+test("a cool-down reads as temporary, not as unconfigured", async () => {
+  await assert.rejects(
+    resolveSemanticIntent({ ...baseOptions, maxAttempts: 1 }, async () =>
+      failure(503, { error: "SEMANTIC_INTENT_COOLING_DOWN", retryAfterMs: 20_000 }, { "retry-after": "20" })),
+    (error) => {
+      assert.equal(error.temporary, true);
+      assert.equal(error.retryAfterMs, 20_000);
+      assert.doesNotMatch(error.message, /not configured/i);
+      return true;
+    },
+  );
+});
+
+test("long narrations get a longer browser wait than short commands", () => {
+  assert.equal(semanticIntentTimeoutMs(40), 6_000);
+  assert.equal(semanticIntentTimeoutMs(1_000), 6_000 + 760 * 9);
+  assert.equal(semanticIntentTimeoutMs(2_000), 21_000);
+});
+
+test("planner settings load retries with backoff until they arrive", async () => {
+  const waits = [];
+  const failures = [];
+  let calls = 0;
+  const config = await loadSemanticIntentConfigWithRetry({
+    apiBaseUrl: "http://localhost:4000",
+    delaysMs: [10, 20],
+    sleep: async (ms) => { waits.push(ms); },
+    onAttemptFailed: (_error, attempt) => failures.push(attempt),
+    fetchImpl: async () => {
+      calls += 1;
+      if (calls < 4) throw new TypeError("fetch failed");
+      return jsonResponse({ available: true, provider: "openai", defaultModel: "m", allowedModels: ["m"] });
+    },
+  });
+  assert.equal(config.available, true);
+  assert.deepEqual(waits, [10, 20, 20], "the last delay repeats");
+  assert.deepEqual(failures, [1, 2, 3]);
+
+  const controller = new AbortController();
+  const pending = loadSemanticIntentConfigWithRetry({
+    apiBaseUrl: "http://localhost:4000",
+    signal: controller.signal,
+    sleep: async () => { controller.abort(new Error("board closed")); },
+    fetchImpl: async () => { throw new TypeError("fetch failed"); },
+  });
+  await assert.rejects(pending, /board closed/);
+
+  await assert.rejects(
+    loadSemanticIntentConfigWithRetry({
+      apiBaseUrl: "http://localhost:4000",
+      maxAttempts: 2,
+      sleep: async () => {},
+      fetchImpl: async () => ({ ok: false, status: 500, async json() { return {}; } }),
+    }),
+    /500/,
   );
 });

@@ -299,8 +299,23 @@ test("uses one required strict Responses function tool and captures provider met
   assert.equal("text" in payload, false);
   assert.match(payload.instructions, /condition block/i);
   assert.match(payload.instructions, /branch action/i);
-  assert.match(payload.instructions, /low-risk, reversible details/i);
-  assert.match(payload.instructions, /return clarification instead of guessing/i);
+  assert.match(payload.instructions, /reversible details, never a reason to ask/i);
+  // Gap 6: a best guess, never "which one?" (undo is the safety net).
+  assert.match(payload.instructions, /best guess over questions/i);
+  assert.match(payload.instructions, /never ask which one/i);
+  assert.match(payload.instructions, /create Cache, then connect User to Cache/i);
+  assert.doesNotMatch(payload.instructions, /return clarification instead of guessing/i);
+  // Gap 3: addressed narration is drawn, not treated as discussion.
+  assert.match(payload.instructions, /When addressedBy is present/);
+  assert.match(payload.instructions, /users sign in through the auth service/i);
+  // Gap 10: the full catalogue and the new edit actions.
+  assert.match(payload.instructions, /horizontal-cylinder/);
+  assert.match(payload.instructions, /load balancer.*shape hexagon/i);
+  assert.match(payload.instructions, /change_type/);
+  assert.match(payload.instructions, /style_connection/);
+  assert.match(payload.instructions, /direction radial/);
+  assert.match(payload.instructions, /40 actions or fewer/);
+  assert.equal(payload.max_output_tokens, 6_000);
   assert.match(payload.instructions, /issueCode unsupported_operation/i);
   assert.match(payload.instructions, /no missingSlots/i);
   assert.doesNotMatch(payload.instructions, /never ask a clarification question/i);
@@ -323,7 +338,8 @@ test("uses one required strict Responses function tool and captures provider met
   assert.match(payload.instructions, /Golden Dataset to Planner/i);
   assert.match(payload.instructions, /create no Schema Data node/i);
   const modelInput = JSON.parse(payload.input);
-  assert.equal(AIRBOARD_SEMANTIC_INTENT_PROMPT_VERSION, "2.13");
+  assert.equal(AIRBOARD_SEMANTIC_INTENT_PROMPT_VERSION, "2.14");
+  assert.equal("addressedBy" in modelInput, false, "unaddressed speech says nothing about addressing");
   assert.equal(
     modelInput.semanticPlanContractVersion,
     AIRBOARD_SEMANTIC_PLAN_CONTRACT_VERSION,
@@ -574,3 +590,56 @@ function response(payload, headers = {}, status = 200) {
     headers: { "content-type": "application/json", ...headers },
   });
 }
+
+test("tells the planner how addressed speech reached Airo", async () => {
+  let capturedInit;
+  const fetchMock = async (_url, init) => {
+    capturedInit = init;
+    return response({
+      status: "completed",
+      output: [
+        {
+          type: "function_call",
+          name: AIRBOARD_SEMANTIC_PLAN_TOOL_NAME,
+          call_id: "call_1",
+          arguments: JSON.stringify(resolvedPlan),
+        },
+      ],
+    });
+  };
+  const provider = new OpenAiResponsesSemanticIntentProvider(runtimeConfig, fetchMock);
+  await provider.resolve(
+    {
+      voiceTurnId: "voice-turn-addressed",
+      transcript: "users sign in through the auth service, which checks the user database",
+      parserIssue: "unknown_command",
+      context: boardContext,
+      addressedBy: "palm",
+    },
+    "gpt-5.6-terra",
+  );
+  const modelInput = JSON.parse(JSON.parse(capturedInit.body).input);
+  assert.equal(modelInput.addressedBy, "palm");
+});
+
+test("accepts addressedBy, rejects unknown values, and allows two-minute transcripts", () => {
+  const config = { allowedModels: ["gpt-5.6-terra"], defaultModel: "gpt-5.6-terra", maxTranscriptCharacters: 2_000 };
+  const body = (extra) => ({
+    voiceTurnId: "voice-turn-1234",
+    transcript: "users sign in through the auth service",
+    parserIssue: "unknown_command",
+    context: boardContext,
+    ...extra,
+  });
+  for (const addressedBy of ["wake", "palm", "hold", "typed", "follow_up"]) {
+    const parsed = parseSemanticIntentRequest(body({ addressedBy }), config);
+    assert.equal(parsed.ok, true);
+    assert.equal(parsed.value.addressedBy, addressedBy);
+  }
+  assert.equal("addressedBy" in parseSemanticIntentRequest(body({}), config).value, false);
+  const invalid = parseSemanticIntentRequest(body({ addressedBy: "shout" }), config);
+  assert.equal(invalid.ok, false);
+  assert.equal(invalid.error.code, "INVALID_ADDRESSED_BY");
+  const long = parseSemanticIntentRequest(body({ transcript: "a".repeat(1_990) }), config);
+  assert.equal(long.ok, true);
+});

@@ -181,3 +181,35 @@ test("grouping v2 shapes draws a section around them, as the toolbar does", () =
   // A legacy node's place is set by its stroke, so a section can't own it.
   assert.throws(() => applyDiagramCommand(state, { type: "scene.group", memberIds: ["api", "db"] }, context));
 });
+
+test("v2 shapes resize and change shape, and v2 connectors change line style, all undoably", async () => {
+  const core = await import("../dist/index.js");
+  const board = "scene-edit";
+  const ctx = { boardSessionId: board, actorParticipantId: "p", userId: "u" };
+  let state = core.createInitialBoardState(board);
+  for (const [id, x] of [["a", 0], ["b", 400]]) {
+    state = core.applyBoardEvent(state, {
+      ...core.createEventEnvelope({ boardSessionId: board, actorParticipantId: "p" }),
+      type: "element.created",
+      element: core.createBoardSceneElement({
+        id, boardId: board, kind: "shape", shapeKind: "square",
+        transform: { x, y: 0, width: 100, height: 60, rotation: 0 },
+        content: core.createRichTextDocument(id, `${id}:content`),
+      }),
+    });
+  }
+  state = core.applyDiagramCommand(state, { type: "scene.connect", connectorId: "line", fromId: "a", toId: "b" }, ctx).state;
+
+  const resized = core.applyDiagramCommand(state, { type: "scene.resize", elementId: "a", bounds: { x: -10, y: -6, width: 120, height: 72 } }, ctx);
+  assert.equal(resized.state.elements.a.transform.width, 120);
+  assert.notDeepEqual(resized.state.elements.line.start.point, state.elements.line.start.point, "the connector follows");
+  assert.equal(core.applyDiagramUndo(resized.state, resized).state.elements.a.transform.width, 100);
+
+  const reshaped = core.applyDiagramCommand(state, { type: "scene.retype", elementId: "a", shapeKind: "diamond" }, ctx);
+  assert.equal(reshaped.state.elements.a.shapeKind, "diamond");
+  assert.equal(core.applyDiagramUndo(reshaped.state, reshaped).state.elements.a.shapeKind, "square");
+
+  const dotted = core.applyDiagramCommand(state, { type: "scene.connector.restyle", connectorId: "line", lineStyle: "dotted" }, ctx);
+  assert.equal(dotted.state.elements.line.style.strokeStyle, "dotted");
+  assert.equal(core.applyDiagramUndo(dotted.state, dotted).state.elements.line.style.strokeStyle, "solid");
+});

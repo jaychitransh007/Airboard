@@ -100,6 +100,8 @@ export type StrokeAnnotation = {
    * onto one another.
    */
   routeOffset?: number;
+  /** Connector line pattern; absent means solid. */
+  lineStyle?: "dashed" | "dotted";
   fillColor?: string;
   strokeColor?: string;
   opacity?: number;

@@ -15,7 +15,7 @@ test.use({
 
 async function openBoard(page: Page) {
   await page.goto("/?testStandalone=1");
-  const onboarding = page.getByRole("button", { name: "Start building" });
+  const onboarding = page.getByRole("button", { name: "Got it" });
   await expect(onboarding).toBeVisible();
   await onboarding.click();
   await page.waitForFunction(() => "__airboardTestHooks" in window);

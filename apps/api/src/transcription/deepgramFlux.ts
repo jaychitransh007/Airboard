@@ -182,6 +182,13 @@ class DeepgramFluxSession implements RealtimeTranscriptionSession {
     this.socket.send(JSON.stringify({ type: "Configure", keyterms }));
   }
 
+  keepAlive(): void {
+    if (this.stopping || this.socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    this.socket.send(JSON.stringify({ type: "KeepAlive" }));
+  }
+
   stop(): void {
     if (this.stopping) {
       return;

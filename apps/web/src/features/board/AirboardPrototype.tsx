@@ -16,6 +16,7 @@ import {
   createRichTextDocument,
   createStroke,
   invertBoardElementPatches,
+  isCompoundBoardCommand,
   parseBoardSceneIntent,
   richTextToPlainText,
   shapeCatalogEntry,
@@ -25,6 +26,8 @@ import {
   type BoardEvent,
   type BoardSceneElement,
   type BoardSceneIntent,
+  type SceneIntentPronoun,
+  type SceneIntentTarget,
   type BoardState,
   type SceneIntentPlacementDirection,
   type CodeLanguage,
@@ -55,7 +58,7 @@ import {
   resolveSemanticPlanAction,
 } from "./intentPipeline";
 import { computeSemanticAutoLayout } from "./semanticAutoLayout";
-import { commitCommandTurn } from "./commandTurnCoordinator";
+import { commitCommandTurn, diagramRedoEvents } from "./commandTurnCoordinator";
 import { strokeInputSourceForPointer } from "./inputCapabilities";
 import { parseDesiredGraphCorrection } from "./desiredGraphCorrection";
 import { resolveExistingBoardFanIn } from "./existingBoardFanIn";
@@ -153,7 +156,11 @@ import {
   resolveCreationShortcut,
   type CreationToolId,
 } from "./creationToolCatalog";
-import { centeredTransform, createSceneElementForTool } from "./sceneCreation.ts";
+import {
+  centeredTransform,
+  createSceneElementForTool,
+  type SceneCreationOptions,
+} from "./sceneCreation.ts";
 import {
   linkPreviewFields,
   loadBoardAssetObjectUrl,
@@ -162,7 +169,7 @@ import {
 } from "./boardContentClient.ts";
 import { validateBoardTitle } from "./boardLifecycle";
 import { HoldToEditTracker } from "./holdToEditTracker";
-import { selectLandmarkManipulationSignal } from "./landmarkManipulationInput";
+import { LooseGrabHold, selectLandmarkManipulationSignal } from "./landmarkManipulationInput";
 import {
   collectLandmarkNavigationHands,
   shouldReserveLandmarkNavigation,
@@ -180,10 +187,12 @@ import {
   type PalmVoiceGestureFrame,
 } from "./palmVoiceGestureTracker";
 import {
+  VoiceCommandCoalescer,
   VoiceCommandRouter,
   type VoiceGateMode,
   type VoiceRouteDecision,
 } from "./voiceCommandRouter";
+import { airoSoundsEnabled, playAiroCue, setAiroSoundsEnabled } from "./airoCues";
 import {
   createRealtimeSpeechSession,
   fetchRealtimeTranscriptionConfig,
@@ -208,6 +217,7 @@ import {
   type SemanticIntentConfig,
   type SemanticIntentContext,
   type SemanticIntentPendingClarification,
+  type SemanticIntentAddressedBy,
   type SemanticIntentParserIssue,
 } from "./semanticIntent";
 import {
@@ -273,7 +283,27 @@ import {
   type GestureAnnotationResult,
   type ObjectDockTool,
 } from "./gestureAnnotationMode";
-import { buildGestureMoveTargets, resolveResizeHandleForInput } from "./gestureObjectManipulation";
+import {
+  buildGestureMoveTargets,
+  gestureTargetWorld,
+  resolveHandConnectorEnds,
+  resolveResizeHandleForInput,
+} from "./gestureObjectManipulation";
+import {
+  HandDwellSelectTracker,
+  HandPointingRecorder,
+  resolveHandPointing,
+  type HandPointingSnapshot,
+} from "./handPointing";
+import {
+  CAMERA_RECOVERY_MAX_ATTEMPTS,
+  CAMERA_RECOVERY_STABLE_MS,
+  cameraRecoveryDelayMs,
+  cameraRecoveryMessage,
+  shouldRetryCameraStart,
+  type CameraRecoveryReason,
+} from "./cameraRecovery";
+import { sceneNodeLabel } from "./semanticBoardObjects";
 import {
   parseIntentCanvasCommand,
   type IntentCanvasOperation,
@@ -392,6 +422,8 @@ type VoiceCommandTraceContext = {
   model?: string | undefined;
   confidence?: number | undefined;
   turnIndex?: number | undefined;
+  /** Pointing captured when the command was routed, not when it runs. */
+  reference?: VoiceReference | undefined;
 };
 
 type SpeechEngine = "loading" | "realtime" | "browser-fallback" | "unavailable";
@@ -418,6 +450,8 @@ type UndoAction =
   | {
       type: "diagram";
       undoEvents: BoardEvent[];
+      /** The forward events, kept so an undone Airo change can be redone. */
+      redoEvents?: BoardEvent[];
       selectionBefore: string[];
       originatingInteractionId?: string;
     }
@@ -455,6 +489,8 @@ type SceneMoveSnapshot = {
   element: BoardSceneElement;
   relatedElements: BoardSceneElement[];
   boundConnectors: Extract<BoardSceneElement, { kind: "connector" }>[];
+  /** Where the latest preview put the pointer. */
+  lastPoint?: AnnotationPoint;
 };
 
 type PendingIntent = {
@@ -475,7 +511,19 @@ type PendingIntent = {
 
 type SemanticExecutionSnapshot = {
   boardState: BoardState;
+  /** What "current_selection" means in the plan: the request-time selection. */
   selectionIds: string[];
+  /**
+   * The selection the commit is checked against. It is the live selection when
+   * a turn was rebased because the selection changed during planning, so the
+   * rebased turn is not rejected as stale for that very change.
+   */
+  baseSelectionIds?: string[];
+  /**
+   * The selection when the person spoke, kept through a rebase: when it held
+   * anything, "this" never falls back to guessing the newest shape.
+   */
+  requestSelectionIds?: string[];
   primarySelectionId: string | null;
   hoverStrokeId: string | null;
   pointer: { x: number; y: number } | null;
@@ -490,7 +538,11 @@ type PendingSemanticClarification = {
   request: SemanticIntentPendingClarification;
   boardState: BoardState;
   selectionIds: string[];
+  askedAt: number;
 };
+
+/** How long Airo's question waits for an answer, whatever else happens on the board. */
+const CLARIFICATION_ANSWER_MS = 30_000;
 
 
 type ObjectInteraction =
@@ -578,13 +630,70 @@ const CAMERA_PROMPT_HINT =
  */
 const VOICE_QUIET_PAUSE_MS = 20 * 60_000;
 
+type SpeechPointing = { at: number; point: { x: number; y: number } | null; targetId: string | null };
+
+/** What the hand pointed at for one voice command: at speech start, then now. */
+type VoiceReference = {
+  point: { x: number; y: number } | null;
+  /** The shape under the hand when speech began: what "it" and "this" mean. */
+  startTargetId: string | null;
+  /** Up to two shapes pointed at during the command, in order. */
+  pointedIds: string[];
+};
+
+/** Words that mean "what I'm pointing at". */
+const DEICTIC_REFERENCE_PATTERN = /\b(?:this|that|it|these|those|them)\b/i;
+
+/** The planner accepts up to this much dialogue for a clarification answer. */
+const MAX_CLARIFICATION_TRANSCRIPT_CHARS = 2_000;
+
+/** Pointing older than this when speech starts is ignored. */
+const SPEECH_POINTING_MAX_AGE_MS = 4_000;
+
+type VoiceDecisionMetadata = {
+  engine: VoiceCommandTraceContext["engine"];
+  /**
+   * What the hand pointed at for this decision, captured when it was routed.
+   * The coalescer may hold the command and an earlier planner call may delay
+   * it; by then the next sentence's pointing has replaced the shared refs.
+   */
+  reference?: VoiceReference | undefined;
+  voiceTurnId?: string | undefined;
+  provider?: string | undefined;
+  model?: string | undefined;
+  confidence?: number | undefined;
+  turnIndex?: number | undefined;
+};
+
+/** Trace label for how a command reached Airo. */
+function voiceTraceChannel(decision: VoiceRouteDecision | undefined): string {
+  if (!decision) return "none";
+  if (decision.channel === "gated-ptt") return "ptt";
+  if (decision.channel === "gated-scoped") return "scoped";
+  return decision.channel;
+}
+
+/** Backoff for retrying a settings load: 2 s, 4 s, 8 s … capped at a minute. */
+function configRetryDelayMs(attempt: number): number {
+  return Math.min(60_000, 1_000 * 2 ** Math.min(attempt, 6));
+}
+
 /** The live socket dropped after connecting and is trying again on its own. */
 function liveLinkDropped(status: string): boolean {
   return status === "reconnecting" || status === "closed" || status === "error";
 }
 const CATALOG_DROP_EXIT_PX = 12;
+/** Synthetic pointer id for v2 scene moves driven by the camera hand. */
+const HAND_SCENE_POINTER_ID = -7;
+/** How long a hand cue (why a carry ended, nothing to grab) stays by the hand. */
+const HAND_CUE_MS = 2_600;
 const CATALOG_DROP_MIN_TRAVEL_PX = 24;
 const UNDO_TOAST_VISIBLE_MS = 6_000;
+/** Board changes one spoken request may make (a narrated flow of ~25 steps). */
+const MAX_PLAN_BOARD_CHANGES = 150;
+const AIRO_NOTICE_VISIBLE_MS = 6_000;
+/** Matches the router's answer window: after it, a reply needs "Airo" again. */
+const AIRO_QUESTION_VISIBLE_MS = 12_000;
 
 type DockGestureOutcome =
   | {
@@ -602,6 +711,17 @@ type DockGestureOutcome =
         bottom: number;
       };
     };
+
+/**
+ * The name of a board target id for the scoped voice pill: a legacy stroke's
+ * label, or a v2 scene element's text (or its kind when blank).
+ */
+function boardTargetLabel(state: BoardState, targetId: string): string {
+  const strokeLabel = state.strokes[targetId]?.annotation?.label?.trim();
+  if (strokeLabel) return strokeLabel;
+  const element = state.elements[targetId];
+  return element?.status === "active" ? sceneNodeLabel(element) : "";
+}
 
 function placementToolFromDockTarget(targetId: string): ObjectDockTool | null {
   if (!targetId.startsWith("tool:")) {
@@ -986,6 +1106,24 @@ export function AirboardPrototype({
     voiceRouterRef.current = new VoiceCommandRouter();
   }
   const voiceRouter = voiceRouterRef.current;
+  const runVoiceDecisionRef = useRef<
+    ((decision: VoiceRouteDecision, metadata: VoiceDecisionMetadata) => void) | null
+  >(null);
+  const heldVoiceMetaRef = useRef<VoiceDecisionMetadata | null>(null);
+  const incomingVoiceMetaRef = useRef<VoiceDecisionMetadata | null>(null);
+  const voiceCoalescerRef = useRef<VoiceCommandCoalescer | null>(null);
+  if (voiceCoalescerRef.current === null) {
+    voiceCoalescerRef.current = new VoiceCommandCoalescer({
+      onFlush: (decision) => {
+        const metadata = heldVoiceMetaRef.current ?? incomingVoiceMetaRef.current ?? {
+          engine: "realtime",
+        };
+        heldVoiceMetaRef.current = null;
+        runVoiceDecisionRef.current?.(decision, metadata);
+      },
+    });
+  }
+  const voiceCoalescer = voiceCoalescerRef.current;
   const palmVoiceGestureTrackerRef = useRef<PalmVoiceGestureTracker | null>(null);
   if (palmVoiceGestureTrackerRef.current === null) {
     palmVoiceGestureTrackerRef.current = new PalmVoiceGestureTracker();
@@ -1053,10 +1191,34 @@ export function AirboardPrototype({
     straight: boolean;
   } | null>(null);
   const sceneMoveRef = useRef<SceneMoveSnapshot | null>(null);
+  /**
+   * A v2 element the closed hand still holds after a voice edit committed its
+   * grab (see settleHandSceneMove); the next hand movement picks it up again.
+   */
+  const handSceneMoveResumeRef = useRef<string | null>(null);
   const touchpadPointsRef = useRef<StrokePoint[]>([]);
   const lastTouchpadPointRef = useRef<StrokePoint | null>(null);
   const gesturePathRef = useRef<StrokePoint[]>([]);
   const lastGesturePointerRef = useRef<{ x: number; y: number } | null>(null);
+  const lastGesturePointerAtRef = useRef(0);
+  /**
+   * Where the hand or mouse pointed when the person started speaking, so
+   * "here", "this" and "that" mean what they pointed at, not the selection
+   * or the middle of the view.
+   */
+  const speechStartPointingRef = useRef<SpeechPointing | null>(null);
+  /** The pointing a running voice command resolves "here/this/that" against. */
+  const voiceReferenceRef = useRef<VoiceReference | null>(null);
+  /**
+   * How the running voice command reached Airo, for the planner. `addressedBy`
+   * is undefined for follow-ups and answers (no wake word), so the planner
+   * keeps its room-talk filter for them.
+   */
+  const voiceAddressedByRef = useRef<{ addressedBy: SemanticIntentAddressedBy | undefined } | null>(null);
+  const currentPointingRef = useRef<(() => SpeechPointing | null) | null>(null);
+  const undoRedoRef = useRef<{ undo: (count: number) => void; redo: (count: number) => void } | null>(null);
+  const executeSceneIntentRef = useRef<((intent: BoardSceneIntent) => SceneIntentExecutionResult) | null>(null);
+  const frameBoardBoundsRef = useRef<((bounds: { x: number; y: number; width: number; height: number }) => void) | null>(null);
   const activeEraseAffectedStrokeIdsRef = useRef<Set<string>>(new Set());
   const undoStackRef = useRef<UndoAction[]>([]);
   const sceneRedoStackRef = useRef<UndoAction[]>([]);
@@ -1065,6 +1227,47 @@ export function AirboardPrototype({
   const cameraGrabActiveRef = useRef(false);
   const cameraPlacementActiveRef = useRef(false);
   const cameraPlacementArmedToolRef = useRef<ObjectDockTool | null>(null);
+  /**
+   * What the hand points at, for voice deixis ("here", "this", "that"). The
+   * snapshot object is replaced, never mutated, on every manipulation frame,
+   * so a voice turn can keep the one it read when speech started and resolve
+   * it later with `resolveHandPointing` (./handPointing). `targetIds` holds
+   * legacy stroke ids and v2 scene element ids alike.
+   */
+  const handPointingRecorderRef = useRef(new HandPointingRecorder());
+  const handPointingSnapshotRef = useRef<HandPointingSnapshot>(
+    handPointingRecorderRef.current.snapshot,
+  );
+  const handDwellSelectTrackerRef = useRef(new HandDwellSelectTracker());
+  const looseGrabHoldRef = useRef(new LooseGrabHold());
+  /** The holding hand's last normalized point, so a second hand can't take a grab over. */
+  const handSignalAnchorRef = useRef<{ x: number; y: number } | null>(null);
+  /**
+   * The dock tile the hand is aiming at: an open palm there aims, it doesn't
+   * talk. A palm over a shape still opens the voice gate ("make this red"
+   * while pointing at it); grabs, carries and hold-to-edit suppress it.
+   */
+  const handAimTargetRef = useRef<string | null>(null);
+  /** Last canvas-local screen point of the hand cursor, for cues by the hand. */
+  const handScreenPointRef = useRef<{ x: number; y: number } | null>(null);
+  /** The dock tool a hand placement left armed for the next placement. */
+  const handRearmedToolRef = useRef<CreationToolId | ObjectDockTool | null>(null);
+  const [handCue, setHandCue] = useState<{
+    id: number;
+    text: string;
+    x: number;
+    y: number;
+    tone: "info" | "warning";
+  } | null>(null);
+  const handCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cameraRecoveryRef = useRef<{
+    attempt: number;
+    timer: ReturnType<typeof setTimeout> | null;
+    stableTimer: ReturnType<typeof setTimeout> | null;
+    pending: boolean;
+  }>({ attempt: 0, timer: null, stableTimer: null, pending: false });
+  const startCameraRef = useRef<(() => Promise<void>) | null>(null);
+  const recoverCameraRef = useRef<((reason: CameraRecoveryReason) => void) | null>(null);
   const shortcutsActiveRef = useRef(false);
   const temporaryEraserActiveRef = useRef(false);
   const straightLineActiveRef = useRef(false);
@@ -1129,6 +1332,9 @@ export function AirboardPrototype({
   const [commandFeedback, setCommandFeedback] = useState(
     "Speak or type a diagram command. Pointing supplies “here”, “this”, and “that”.",
   );
+  // Read after a render by the voice queue, to repeat the reason on the board.
+  const commandFeedbackRef = useRef(commandFeedback);
+  commandFeedbackRef.current = commandFeedback;
   const [pendingIntent, setPendingIntent] = useState<PendingIntent | null>(null);
   const [voiceGate, setVoiceGate] = useState<VoiceGateUi | null>(null);
   const [boardSyncStatus, setBoardSyncStatus] = useState("off");
@@ -1452,12 +1658,45 @@ export function AirboardPrototype({
     }, UNDO_TOAST_VISIBLE_MS);
     return () => window.clearTimeout(timer);
   }, [undoToast]);
+  // Voice failures and questions show on the board itself, so a presenter
+  // facing the audience (or with the panel hidden) still sees them.
+  const [airoSounds, setAiroSounds] = useState(true);
+  useEffect(() => setAiroSounds(airoSoundsEnabled()), []);
+  const [airoNotice, setAiroNotice] = useState<
+    { id: number; tone: "warning" | "question"; detail: string } | null
+  >(null);
+  const airoNoticeSequenceRef = useRef(0);
+  const showAiroNotice = useCallback(
+    (notice: { tone: "warning" | "question"; detail: string }) => {
+      airoNoticeSequenceRef.current += 1;
+      setAiroNotice({ id: airoNoticeSequenceRef.current, ...notice });
+    },
+    [],
+  );
+  useEffect(() => {
+    if (!airoNotice) return;
+    const timer = window.setTimeout(() => {
+      setAiroNotice((current) => (current?.id === airoNotice.id ? null : current));
+    }, airoNotice.tone === "question" ? AIRO_QUESTION_VISIBLE_MS : AIRO_NOTICE_VISIBLE_MS);
+    return () => window.clearTimeout(timer);
+  }, [airoNotice]);
+  const finishOnboarding = useCallback(() => {
+    setOnboardingVisible(false);
+    try {
+      window.localStorage.setItem("airboard.onboarding.v1", "done");
+    } catch {
+      // Best-effort persistence only.
+    }
+  }, []);
   const appendCopilotActivity = useCallback(
     (entry: Omit<CopilotActivityEntry, "id">) => {
       copilotActivitySequenceRef.current += 1;
       const nextEntry = { ...entry, id: copilotActivitySequenceRef.current };
       if (entry.undoable) {
+        // The first change made by any means ends the first-run card.
+        finishOnboarding();
         setUndoToast({ id: nextEntry.id, detail: entry.detail });
+        setAiroNotice(null);
       }
       setCopilotActivity((current) => {
         const previous = current[current.length - 1];
@@ -1471,7 +1710,7 @@ export function AirboardPrototype({
         return [...current, nextEntry].slice(-8);
       });
     },
-    [],
+    [finishOnboarding],
   );
   useEffect(() => {
     speechRecognitionStatusRef.current = speechRecognitionStatus;
@@ -1840,6 +2079,7 @@ export function AirboardPrototype({
   const applyResyncedBoard = useCallback(
     (state: BoardState) => {
       boardRef.current = state;
+      sceneRedoStackRef.current = [];
       undoStackRef.current = [];
       setSelectedAnnotationId(null);
       setSelectedAnnotationIds([]);
@@ -2194,6 +2434,8 @@ export function AirboardPrototype({
         avoidOverlap?: SceneIntentPlacementDirection;
         /** Open the on-canvas text editor; commands leave focus in the Airo field. */
         edit?: boolean;
+        /** Attached ends for a connector placed between shapes. */
+        connector?: NonNullable<SceneCreationOptions["connector"]>;
       } = {},
     ) => {
       const { avoidOverlap, edit = true, ...creationOptions } = options;
@@ -2790,6 +3032,7 @@ export function AirboardPrototype({
   const previewSceneMove = useCallback((pointerId: number, point: AnnotationPoint) => {
     const movement = sceneMoveRef.current;
     if (!movement || movement.pointerId !== pointerId) return false;
+    movement.lastPoint = point;
     const dx = point.x - movement.start.x;
     const dy = point.y - movement.start.y;
     const previewElements = buildSceneMovePreview(
@@ -2858,6 +3101,34 @@ export function AirboardPrototype({
     return true;
   }, [patchSceneElements]);
 
+  /**
+   * A voice edit (hold-to-edit "rename to …", "delete") while the hand holds a
+   * v2 element: the grab's snapshot would write the pre-edit element back on
+   * the next frame and on release. Commit the move so far first, so the edit
+   * applies to the moved element and undo steps back edit, then move. The
+   * hand, still closed, picks the element up again on its next movement.
+   */
+  const settleHandSceneMove = useCallback(() => {
+    const movement = sceneMoveRef.current;
+    if (!movement || movement.pointerId !== HAND_SCENE_POINTER_ID) return;
+    commitSceneMove(HAND_SCENE_POINTER_ID, movement.lastPoint ?? movement.start);
+    handSceneMoveResumeRef.current = movement.elementId;
+  }, [commitSceneMove]);
+
+  /** Puts a hand-moved v2 element back where the grab began (hand lost). */
+  const cancelSceneMove = useCallback((pointerId: number) => {
+    const movement = sceneMoveRef.current;
+    if (!movement || movement.pointerId !== pointerId) return false;
+    sceneMoveRef.current = null;
+    const restoredElements = { ...boardRef.current.elements };
+    for (const original of [movement.element, ...movement.relatedElements, ...movement.boundConnectors]) {
+      restoredElements[original.id] = original;
+    }
+    boardRef.current = { ...boardRef.current, elements: restoredElements };
+    render();
+    return true;
+  }, [render]);
+
   const executeSceneIntent = useCallback(
     (intent: BoardSceneIntent): SceneIntentExecutionResult => {
       if (intent.type === "invalid") {
@@ -2879,15 +3150,81 @@ export function AirboardPrototype({
           ? unobscuredCanvasCenter(rect, panel ?? null)
           : { x: 480, y: 320 },
       );
-      const targetIds = (target: Extract<BoardSceneIntent, { type: "rename" | "delete" | "move" | "resize" | "style" | "group" | "layout" }>["target"]) =>
-        resolveSceneIntentTargetIds(boardRef.current, target, selectedElementIdsRef.current);
+      const reference = voiceReferenceRef.current;
+      // A shape Airo drew (a legacy stroke) also has a hidden scene copy under
+      // the same id; editing that copy changes nothing visible. When "this"
+      // or a name lands on one, resolve to nothing so the command is rejected
+      // here and the legacy grammar or the planner handles it.
+      const targetIds = (target: SceneIntentTarget) => {
+        const ids = resolveSceneIntentTargetIds(boardRef.current, target, selectedElementIdsRef.current, reference);
+        return ids.some((id) => isLegacyStrokeSceneCopy(boardRef.current, id)) ? [] : ids;
+      };
+      // "here": where the hand pointed while speaking; typed commands and
+      // speech with no recent pointing land in the middle of the view.
+      const pointerPoint = reference?.point ?? center;
+
+      if (intent.type === "undo" || intent.type === "redo") {
+        const step = undoRedoRef.current;
+        if (!step) return "unrecognized";
+        if (intent.type === "undo") step.undo(intent.count);
+        else step.redo(intent.count);
+        return "applied";
+      }
+      if (intent.type === "correct") {
+        // "No, I meant …": take back the last change, then do what was meant.
+        // Only a change redo can put back is taken back here, so a correction
+        // that turns out not to apply leaves the board exactly as it was and
+        // the later stages (the legacy correction grammar, the planner) read
+        // the sentence against that board. Anything else goes to them as is.
+        const last = undoStackRef.current.at(-1);
+        if (!last || !undoEntryCanBeRedone(last)) return "rejected";
+        const definition = intent.shapeKind
+          ? ALL_SHAPES.find(({ kind }) => kind === intent.shapeKind)
+          : undefined;
+        if (!intent.intent && !definition) return "rejected";
+        const replaced = resolveContextualSceneTarget(boardRef.current, "it", [], null)[0];
+        const replacedElement = replaced ? boardRef.current.elements[replaced] : undefined;
+        const redoDepth = sceneRedoStackRef.current.length;
+        undoRedoRef.current?.undo(1);
+        let corrected: SceneIntentExecutionResult;
+        if (intent.intent) {
+          corrected = executeSceneIntentRef.current?.(intent.intent) ?? "unrecognized";
+        } else {
+          const created = createSceneElementAtPoint(
+            `shape:${definition!.id}`,
+            replacedElement ? elementCenter(replacedElement) : center,
+            { avoidOverlap: "right", edit: false, label: uniqueGeneratedSceneLabel(boardRef.current, definition!.label) },
+          );
+          corrected = created ? "applied" : "rejected";
+        }
+        if (corrected === "rejected" || corrected === "unrecognized") {
+          // Put the undone change back before anything else reads the sentence.
+          if (sceneRedoStackRef.current.length > redoDepth) undoRedoRef.current?.redo(1);
+          return "rejected";
+        }
+        return corrected;
+      }
+      if (intent.type === "zoom_to_fit") {
+        const placed = Object.values(boardRef.current.elements).filter(
+          (element) => element.status === "active" && element.visible && element.kind !== "connector",
+        );
+        if (placed.length === 0) {
+          setCommandFeedback("The board is empty, so there's nothing to fit.");
+          return "applied";
+        }
+        frameBoardBoundsRef.current?.(sceneElementUnionBounds(placed, 0));
+        return "applied";
+      }
+      if (intent.type === "focus") {
+        const ids = targetIds(intent.target);
+        const elements = ids.flatMap((id) => boardRef.current.elements[id] ? [boardRef.current.elements[id]!] : []);
+        if (elements.length === 0) return "rejected";
+        frameBoardBoundsRef.current?.(sceneElementUnionBounds(elements, 120));
+        return "applied";
+      }
 
       if (intent.type === "create_connected") {
-        const targetMatches = resolveSceneIntentTargetIds(
-          boardRef.current,
-          intent.to,
-          selectedElementIdsRef.current,
-        );
+        const targetMatches = targetIds(intent.to);
         if (targetMatches.length !== 1) {
           setCommandFeedback(
             targetMatches.length === 0
@@ -2946,29 +3283,33 @@ export function AirboardPrototype({
 
       if (intent.type === "create") {
         const placement = intent.placement;
-        const placementAnchorIds = !placement
+        const relative = placement && "direction" in placement ? placement : null;
+        const placementAnchorIds = !relative
           ? []
-          : placement.target === "selection"
+          : relative.target === "selection"
             ? [...selectedElementIdsRef.current].reverse()
-            : resolveSceneIntentTargetIds(
-              boardRef.current,
-              { kind: "visible_label", label: placement.label },
-              selectedElementIdsRef.current,
+            : targetIds(
+              relative.target === "contextual"
+                ? { kind: "contextual", pronoun: relative.pronoun }
+                : { kind: "visible_label", label: relative.label },
             );
         const placementAnchor = placementAnchorIds
           .map((id) => boardRef.current.elements[id])
           .find((element): element is BoardSceneElement => Boolean(element?.status === "active"));
-        if (placement && !placementAnchor) {
+        if (relative && !placementAnchor) {
+          // Possibly a shape Airo drew: the planner sees those.
           setCommandFeedback(
-            placement.target === "selection"
-              ? "Select an element before using relative placement."
-              : `I couldn't find “${placement.label}” on the board, so nothing was added.`,
+            relative.target === "visible_label"
+              ? `I couldn't find “${relative.label}” on the board, so nothing was added.`
+              : "Point at, or select, the shape to place it next to.",
           );
           return "rejected";
         }
-        const placementCenter = placementAnchor && placement
-          ? sceneIntentPlacementPoint(placementAnchor, placement.direction)
-          : center;
+        const placementCenter = placementAnchor && relative
+          ? sceneIntentPlacementPoint(placementAnchor, relative.direction)
+          : placement?.target === "pointer"
+            ? pointerPoint
+            : center;
         if (intent.kind === "media") {
           setCommandFeedback("Choose an image, GIF, or video to add.");
           requestMediaAtPoint(placementCenter);
@@ -3027,7 +3368,7 @@ export function AirboardPrototype({
           ? uniqueGeneratedSceneLabel(boardRef.current, intent.label)
           : intent.label;
         const created = createSceneElementAtPoint(tool, placementCenter, {
-          avoidOverlap: placement?.direction ?? "right",
+          avoidOverlap: relative?.direction ?? "right",
           edit: false,
           ...(label ? { label } : {}),
           ...(intent.table ? { table: intent.table } : {}),
@@ -3037,16 +3378,15 @@ export function AirboardPrototype({
       }
 
       if (intent.type === "connect") {
-        const fromIds = resolveSceneIntentTargetIds(
-          boardRef.current,
-          intent.from,
-          selectedElementIdsRef.current,
-        );
-        const toIds = resolveSceneIntentTargetIds(
-          boardRef.current,
-          intent.to,
-          selectedElementIdsRef.current,
-        );
+        const fromIds = targetIds(intent.from);
+        let toIds = targetIds(intent.to);
+        if (intent.from.kind === "contextual" && intent.to.kind === "contextual") {
+          // "connect this to that": two things pointed at, else two selected.
+          const pointed = (reference?.pointedIds ?? []).filter((id) => boardRef.current.elements[id]?.status === "active");
+          const pair = pointed.length >= 2 ? pointed : selectedElementIdsRef.current;
+          toIds = pair.filter((id) => id !== fromIds[0]).slice(-1);
+          if (toIds.some((id) => isLegacyStrokeSceneCopy(boardRef.current, id))) toIds = [];
+        }
         if (
           (intent.from.kind === "visible_label" && fromIds.length !== 1) ||
           (intent.to.kind === "visible_label" && toIds.length !== 1)
@@ -3056,14 +3396,14 @@ export function AirboardPrototype({
         }
         const fromId = fromIds[0];
         const sameSelection =
-          intent.from.kind === "selection" && intent.to.kind === "selection";
+          intent.from.kind !== "visible_label" && intent.to.kind !== "visible_label";
         const toId = sameSelection
           ? toIds.find((id) => id !== fromId)
           : toIds.find((id) => id !== fromId) ?? toIds.at(-1);
         const from = fromId ? boardRef.current.elements[fromId] : null;
         const to = toId ? boardRef.current.elements[toId] : null;
         if (!from || !to || from.id === to.id) {
-          setCommandFeedback("Select two different elements to connect.");
+          setCommandFeedback("Point at, name, or select two different shapes to connect.");
           return "rejected";
         }
         const fromCenter = elementCenter(from);
@@ -3101,8 +3441,63 @@ export function AirboardPrototype({
         return "rejected";
       }
       if (intent.target.kind === "visible_label" && ids.length > 1) {
-        setCommandFeedback("More than one visible element matches that name; select one first.");
+        // A name shared by several shapes: let the planner pick its best guess.
+        setCommandFeedback("More than one visible element matches that name.");
         return "rejected";
+      }
+      if (intent.type === "move_to") {
+        const elements = ids.flatMap((id) => {
+          const element = boardRef.current.elements[id];
+          return element && !sceneElementLockedForMutation(boardRef.current, element) ? [element] : [];
+        });
+        const destination = intent.destination;
+        let to: { x: number; y: number } | null = null;
+        if (destination.target === "pointer") {
+          to = reference?.point ?? null;
+        } else {
+          const anchorId = targetIds(
+            destination.target === "selection"
+              ? { kind: "selection" }
+              : destination.target === "contextual"
+                ? { kind: "contextual", pronoun: destination.pronoun }
+                : { kind: "visible_label", label: destination.label },
+          ).find((id) => !ids.includes(id));
+          const anchor = anchorId ? boardRef.current.elements[anchorId] : undefined;
+          to = anchor ? sceneIntentPlacementPoint(anchor, destination.direction) : null;
+        }
+        const moving = elements[0];
+        if (!moving || !to) {
+          setCommandFeedback("I couldn't tell where to move it. Point at the spot, or name a shape.");
+          return "rejected";
+        }
+        const from = elementCenter(moving);
+        patchSceneElements(buildUniformSceneMoveChanges(boardRef.current, elements, to.x - from.x, to.y - from.y));
+        return "applied";
+      }
+      if (intent.type === "change_shape") {
+        const changes = ids.flatMap((id) => {
+          const element = boardRef.current.elements[id];
+          return element?.kind === "shape" && !sceneElementLockedForMutation(boardRef.current, element)
+            ? [{ elementId: id, patches: [{ op: "field.set" as const, path: ["shapeKind"] as ["shapeKind"], value: intent.shapeKind }] }]
+            : [];
+        });
+        if (changes.length === 0) {
+          setCommandFeedback("Only shapes can change type.");
+          return "rejected";
+        }
+        patchSceneElements(changes);
+        return "applied";
+      }
+      if (intent.type === "reorder") {
+        const all = Object.values(boardRef.current.elements).filter((element) => element.status === "active");
+        const edge = intent.position === "front"
+          ? Math.max(...all.map(({ zIndex }) => zIndex)) + 1
+          : Math.min(...all.map(({ zIndex }) => zIndex)) - ids.length;
+        patchSceneElements(ids.map((id, index) => ({
+          elementId: id,
+          patches: [{ op: "field.set" as const, path: ["zIndex"], value: edge + index }],
+        })));
+        return "applied";
       }
       if (intent.type === "delete") {
         const deleted = deleteSceneElementsAsBatch(ids);
@@ -3254,7 +3649,7 @@ export function AirboardPrototype({
       if (resolution.status === "unrecognized") return null;
       if (resolution.status === "already_satisfied") {
         pendingSemanticClarificationRef.current = null;
-        setIntentCommandText("");
+        if (!voiceTurnId) setIntentCommandText("");
         setSpeechRecognitionStatus("command-recognized");
         setCommandFeedback("The requested connections are already present.");
         appendCopilotActivity({
@@ -3307,7 +3702,7 @@ export function AirboardPrototype({
       });
       if (drafts.length !== resolution.plan.actions.length || drafts.length === 0) return null;
       pendingSemanticClarificationRef.current = null;
-      setIntentCommandText("");
+      if (!voiceTurnId) setIntentCommandText("");
       setSpeechRecognitionStatus("command-recognized");
       commitSceneElementsAsBatch(drafts, { select: false });
       setCommandFeedback(`Applied: Connect ${drafts.length} relationship${drafts.length === 1 ? "" : "s"}.`);
@@ -3948,6 +4343,7 @@ export function AirboardPrototype({
         if (result.handle.role !== "owner") onGuestEditingChangeRef.current?.(result.handle.allowParticipantDrawing);
         if (result.outcome === "joined") {
           boardRef.current = result.initialState;
+          sceneRedoStackRef.current = [];
           undoStackRef.current = [];
           setSelectedAnnotationId(null);
           setSelectedAnnotationIds([]);
@@ -4414,6 +4810,8 @@ export function AirboardPrototype({
         type: "stroke",
         strokeId: stroke.id,
       });
+      // A new change ends any redo chain, Airo's diagram redo included.
+      sceneRedoStackRef.current = [];
       setLastGestureIntent({
         intent: annotationResult.intent,
         confidence: annotationResult.confidence,
@@ -4472,6 +4870,7 @@ export function AirboardPrototype({
         type: "erase",
         strokeIds,
       });
+      sceneRedoStackRef.current = [];
     }
     activeEraseAffectedStrokeIdsRef.current = new Set();
   }, []);
@@ -4484,6 +4883,8 @@ export function AirboardPrototype({
         preferSelected?: boolean;
         forcedStrokeId?: string;
         forcedHandle?: AnnotationResizeHandle;
+        /** Grab and move only, even while a placement tool or the eraser is armed. */
+        moveOnly?: boolean;
         placementTool?: ObjectDockTool;
         creationTool?: CreationToolId;
         catalogCarry?: {
@@ -4498,15 +4899,16 @@ export function AirboardPrototype({
       } = {},
     ) => {
       lastGesturePointerRef.current = point;
+      lastGesturePointerAtRef.current = Date.now();
       objectInteractionInitialStateRef.current = null;
       const inputSource = options.inputSource ?? "pointer";
 
-      const creationTool = options.creationTool ?? (
+      const creationTool = options.moveOnly ? null : options.creationTool ?? (
         !options.placementTool && isScenePlacementTool(activeCreationToolRef.current)
           ? activeCreationToolRef.current
           : null
       );
-      const placementTool = options.placementTool ?? (
+      const placementTool = options.moveOnly ? "select" : options.placementTool ?? (
         creationTool ? scenePlacementPreviewTool(creationTool) : activeObjectTool
       );
       if (isPlacementTool(placementTool)) {
@@ -4532,7 +4934,7 @@ export function AirboardPrototype({
         return;
       }
 
-      if (activeObjectTool === "eraser") {
+      if (activeObjectTool === "eraser" && !options.moveOnly) {
         const eraserPoint = makePoint(point.x, point.y);
         eraserPoint.inputSource = inputSource;
         pointerErasingRef.current = true;
@@ -4620,6 +5022,7 @@ export function AirboardPrototype({
       } = {},
     ) => {
       lastGesturePointerRef.current = point;
+      lastGesturePointerAtRef.current = Date.now();
       const inputSource = options.inputSource ?? "pointer";
 
       if (pointerErasingRef.current) {
@@ -4701,7 +5104,10 @@ export function AirboardPrototype({
   );
 
   const endObjectInteraction = useCallback(
-    (point: AnnotationPoint) => {
+    (
+      point: AnnotationPoint,
+      options: { inputSource?: CursorState["inputSource"] } = {},
+    ) => {
       if (pointerErasingRef.current) {
         commitActiveEraseInteraction();
         pointerErasingRef.current = false;
@@ -4709,10 +5115,26 @@ export function AirboardPrototype({
         return;
       }
 
+      // A hand placement never opens the typing box: the new shape is
+      // selected so the presenter can name it by voice ("Airo, call it …").
+      // A connector attaches its ends to the shapes under the hand.
+      const byHand = options.inputSource === "air_gesture";
+      const placeSceneElement = (
+        tool: CreationToolId,
+        connectorInput: { mode: "drag" | "drop"; from: AnnotationPoint },
+      ) => {
+        const connector = tool.startsWith("connector:")
+          ? resolveHandConnectorEnds(boardRef.current, { ...connectorInput, to: point })
+          : undefined;
+        createSceneElementAtPoint(tool, point, {
+          edit: !byHand,
+          ...(connector ? { connector } : {}),
+        });
+      };
       const interaction = objectInteractionRef.current;
       if (interaction?.mode === "placing") {
         if (interaction.creationTool) {
-          createSceneElementAtPoint(interaction.creationTool, point);
+          placeSceneElement(interaction.creationTool, { mode: "drag", from: interaction.start });
           setGhostAnnotation(null);
           setGhostAnnotations([]);
         } else {
@@ -4720,7 +5142,7 @@ export function AirboardPrototype({
         }
       } else if (interaction?.mode === "catalog_carrying") {
         if (interaction.creationTool) {
-          createSceneElementAtPoint(interaction.creationTool, point);
+          placeSceneElement(interaction.creationTool, { mode: "drop", from: point });
           setGhostAnnotation(null);
           setGhostAnnotations([]);
         } else {
@@ -4737,6 +5159,7 @@ export function AirboardPrototype({
             undoEvents,
             selectionBefore: selectedAnnotationIds,
           });
+          sceneRedoStackRef.current = [];
         }
       }
 
@@ -4768,6 +5191,16 @@ export function AirboardPrototype({
     }
     objectInteractionRef.current = null;
     objectInteractionInitialStateRef.current = null;
+    // A hand grab of a v2 element puts it back too.
+    cancelSceneMove(HAND_SCENE_POINTER_ID);
+    handSceneMoveResumeRef.current = null;
+    // A placement tool kept armed after the last hand placement is put away
+    // with the interaction, so later closed hands don't keep placing it.
+    const rearmedCreationTool =
+      handRearmedToolRef.current !== null && isScenePlacementTool(activeCreationToolRef.current)
+        ? activeCreationToolRef.current
+        : null;
+    handRearmedToolRef.current = null;
     cameraPlacementActiveRef.current = false;
     cameraPlacementArmedToolRef.current = null;
     cameraGrabActiveRef.current = false;
@@ -4777,12 +5210,12 @@ export function AirboardPrototype({
     setGhostAnnotations([]);
     setAlignmentGuides([]);
     setActiveObjectTool("select");
-    if (cancelledCreationTool) {
+    if (cancelledCreationTool || rearmedCreationTool) {
       setActiveCreationTool("move");
       activeCreationToolRef.current = "move";
     }
     setLastGestureIntent({ intent: "cancel", confidence: 0 });
-  }, [render, updateStats]);
+  }, [cancelSceneMove, render, updateStats]);
 
   const saveAnnotationLabel = useCallback(() => {
     if (!selectedAnnotationId) {
@@ -4981,6 +5414,8 @@ export function AirboardPrototype({
         applyPendingIntentRef.current = null;
         setPendingIntent(null);
         voiceRouter.reset();
+        voiceCoalescer.cancel();
+        heldVoiceMetaRef.current = null;
         setVoiceGate(null);
         palmVoiceGestureTrackerRef.current!.reset();
         hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
@@ -5008,6 +5443,7 @@ export function AirboardPrototype({
       cancelObjectInteraction,
       commitStroke,
       headlessMeetOverlay,
+      voiceCoalescer,
       voiceRouter,
     ],
   );
@@ -5054,6 +5490,126 @@ export function AirboardPrototype({
     [reportGestureStage, setDiagramVisibility, voiceRouter],
   );
 
+  /**
+   * A short cue drawn beside the hand: why a carry ended, or that a closed
+   * hand found nothing to grab. Shown on the board, not in a hidden panel.
+   */
+  const showHandCue = useCallback(
+    (text: string, tone: "info" | "warning" = "info") => {
+      const at = handScreenPointRef.current;
+      if (handCueTimerRef.current !== null) clearTimeout(handCueTimerRef.current);
+      setHandCue((current) => ({
+        id: (current?.id ?? 0) + 1,
+        text,
+        tone,
+        x: at?.x ?? 0,
+        y: at?.y ?? 0,
+      }));
+      handCueTimerRef.current = setTimeout(() => {
+        handCueTimerRef.current = null;
+        setHandCue(null);
+      }, HAND_CUE_MS);
+    },
+    [],
+  );
+
+  useEffect(
+    () => () => {
+      if (handCueTimerRef.current !== null) clearTimeout(handCueTimerRef.current);
+    },
+    [],
+  );
+
+  /**
+   * After a hand placement the dock tool stays armed: the next closed hand on
+   * empty board places another of the same shape. The hand leaving for the
+   * dock (or picking another tile) disarms it.
+   */
+  const rearmHandPlacementTool = useCallback(
+    (tool: { creationTool?: CreationToolId; placementTool: ObjectDockTool }) => {
+      cameraPlacementArmedToolRef.current = null;
+      if (tool.creationTool && isScenePlacementTool(tool.creationTool)) {
+        handRearmedToolRef.current = tool.creationTool;
+        activeCreationToolRef.current = tool.creationTool;
+        setActiveCreationTool(tool.creationTool);
+        setActiveObjectTool(scenePlacementPreviewTool(tool.creationTool));
+        return;
+      }
+      if (isPlacementTool(tool.placementTool)) {
+        handRearmedToolRef.current = tool.placementTool;
+        setActiveObjectTool(tool.placementTool);
+      }
+    },
+    [],
+  );
+
+  const disarmHandPlacementTool = useCallback(() => {
+    if (handRearmedToolRef.current === null) return;
+    handRearmedToolRef.current = null;
+    cameraPlacementArmedToolRef.current = null;
+    if (isScenePlacementTool(activeCreationToolRef.current)) {
+      activeCreationToolRef.current = "move";
+      setActiveCreationTool("move");
+    }
+    setActiveObjectTool("select");
+    setGhostAnnotation(null);
+    setGhostAnnotations([]);
+  }, []);
+
+  /** Ends a hand grab of a v2 element; false when no hand scene move is active. */
+  const finishHandSceneMove = useCallback(
+    (point: AnnotationPoint, outcome: "commit" | "cancel") => {
+      const resumed = handSceneMoveResumeRef.current !== null;
+      handSceneMoveResumeRef.current = null;
+      const finished = outcome === "commit"
+        ? commitSceneMove(HAND_SCENE_POINTER_ID, point)
+        : cancelSceneMove(HAND_SCENE_POINTER_ID);
+      // A grab a voice edit already committed has nothing left to finish.
+      return finished || resumed;
+    },
+    [cancelSceneMove, commitSceneMove],
+  );
+
+  /** The hand eraser removes v2 elements under it, through the mouse's delete path. */
+  const eraseSceneElementsUnderHand = useCallback(
+    (point: AnnotationPoint, targetId?: string | null) => {
+      const ids = new Set<string>();
+      if (targetId && gestureTargetWorld(boardRef.current, targetId) === "scene") ids.add(targetId);
+      const hit = findSceneElementAtPoint(boardRef.current, point);
+      if (hit && gestureTargetWorld(boardRef.current, hit.id) === "scene") ids.add(hit.id);
+      for (const id of ids) {
+        deleteSceneElement(id);
+        handPointingRecorderRef.current.forget(id);
+      }
+      return ids.size > 0;
+    },
+    [deleteSceneElement],
+  );
+
+  /**
+   * Hand multi-select: with a selection already made, resting the open hand
+   * still on another shape adds it. Selections stay in one shape world.
+   */
+  const addHandTargetToSelection = useCallback(
+    (targetId: string) => {
+      const world = gestureTargetWorld(boardRef.current, targetId);
+      if (world === "scene" && selectedElementIdsRef.current.length > 0) {
+        if (selectedElementIdsRef.current.includes(targetId)) return false;
+        selectSceneElements([...selectedElementIdsRef.current, targetId], targetId);
+        setHoverElementId(targetId);
+        return true;
+      }
+      if (world === "stroke" && selectedAnnotationIdsRef.current.length > 0) {
+        if (selectedAnnotationIdsRef.current.includes(targetId)) return false;
+        toggleAnnotationObject(targetId);
+        setHoverStrokeId(targetId);
+        return true;
+      }
+      return false;
+    },
+    [selectSceneElements, toggleAnnotationObject],
+  );
+
   const handleGesture = useCallback(
     (result: GestureResult | null, hybridOutput?: HybridGestureControllerOutput) => {
       const previousGestureResult = lastFrameGestureResultRef.current;
@@ -5074,7 +5630,7 @@ export function AirboardPrototype({
           cameraPlacementActiveRef.current = false;
           cameraGrabActiveRef.current = false;
         } else if (cameraGrabActiveRef.current && lastPoint) {
-          endObjectInteraction(lastPoint);
+          if (!finishHandSceneMove(lastPoint, "commit")) endObjectInteraction(lastPoint);
           cameraGrabActiveRef.current = false;
         }
         setObjectGestureState("hover");
@@ -5120,6 +5676,17 @@ export function AirboardPrototype({
           const pinchClosed = hybridOutput.pinchState === "closed";
           const pinchJustClosed = pinchClosed && !hybridPinchClosedRef.current;
           hybridPinchClosedRef.current = pinchClosed;
+          if (screenPoint) handScreenPointRef.current = screenPoint;
+          // Record what the hand points at for voice "here / this / that".
+          const pointedTargetId =
+            hybridOutput.grabbedTargetId ?? hybridOutput.focusedTargetId ?? null;
+          handPointingSnapshotRef.current = handPointingRecorderRef.current.observe({
+            now: Date.now(),
+            boardPoint: point,
+            targetId: pointedTargetId,
+            // A lost hand leaves a frozen cursor behind: it must go stale.
+            tracked: hybridOutput.trackingState === "tracked" && point !== null,
+          });
 
           // The catalog owns the stream only while no board/carry interaction
           // is active. Hover reveals a category; a confirmed close edge on a
@@ -5138,7 +5705,11 @@ export function AirboardPrototype({
             !pointerErasingRef.current
               ? handleDockGesture(screenPoint, hybridOutput.pinchState)
             : null;
+          handAimTargetRef.current = dockOutcome?.targetId ?? null;
           if (dockOutcome) {
+            // The hand left the board for the dock: a placement tool kept armed
+            // after the last hand placement is put away (a tile pick re-arms).
+            if (dockOutcome.type === "hover") disarmHandPlacementTool();
             const activatedCreationTool =
               dockOutcome.type === "activated" ? dockOutcome.creationTool : undefined;
             const sceneCreationTool =
@@ -5157,6 +5728,7 @@ export function AirboardPrototype({
               dockOutcome.type === "activated"
             ) {
               cameraPlacementArmedToolRef.current = null;
+              handRearmedToolRef.current = null;
               cameraPlacementActiveRef.current = true;
               cameraGrabActiveRef.current = true;
               hybridPinchClosedRef.current = true;
@@ -5193,9 +5765,14 @@ export function AirboardPrototype({
             if (interaction?.mode === "moving" || interaction?.mode === "resizing") {
               updateAnnotationObject(interaction.strokeId, interaction.initialAnnotation);
             }
+            const wasCarrying = cameraGrabActiveRef.current || cameraPlacementActiveRef.current;
+            finishHandSceneMove(point ?? lastGesturePointerRef.current ?? { x: 0, y: 0 }, "cancel");
             cameraGrabActiveRef.current = false;
             cancelObjectInteraction();
             setObjectGestureState("hover");
+            if (wasCarrying) {
+              showHandCue("Hand lost — the shape went back where it was.", "warning");
+            }
             reportGestureStage(
               "cancellation",
               { reason: "grab_cancelled" },
@@ -5210,7 +5787,9 @@ export function AirboardPrototype({
                 cancelObjectInteraction();
                 cameraPlacementActiveRef.current = false;
                 cameraGrabActiveRef.current = false;
+                showHandCue("Hand lost — placement cancelled.", "warning");
               }
+              handAimTargetRef.current = null;
               setHoverStrokeId(null);
               setObjectGestureState("hover");
             }
@@ -5225,6 +5804,7 @@ export function AirboardPrototype({
           }
 
           lastGesturePointerRef.current = point;
+          lastGesturePointerAtRef.current = Date.now();
           moveCursorPoint({
             point,
             mode: action && action.type !== "grab_ended" ? "writing" : "marker_hover",
@@ -5291,10 +5871,26 @@ export function AirboardPrototype({
                 setCommandFeedback(
                   `${placementLabel} returned to the catalog. Drag it onto the diagram before releasing.`,
                 );
+                showHandCue(`${placementLabel} went back — open your hand over the board to place it.`, "warning");
               } else {
-                endObjectInteraction(point);
+                const loosened = looseGrabHoldRef.current.bridging;
+                endObjectInteraction(point, { inputSource: "air_gesture" });
+                rearmHandPlacementTool({
+                  ...(placementInteraction?.creationTool
+                    ? { creationTool: placementInteraction.creationTool }
+                    : {}),
+                  placementTool,
+                });
+                const isConnector = Boolean(
+                  placementInteraction?.creationTool?.startsWith("connector:"),
+                );
                 setCommandFeedback(
-                  `${placementLabel} placed. Close your hand over it to move it again.`,
+                  isConnector
+                    ? `${placementLabel} placed. Close your hand on a shape and open it on another to connect them, or reach for the dock to stop.`
+                    : `${placementLabel} placed and selected — say “Airo, call it …” to name it. Close your hand on empty board for another, or over a shape to move it.`,
+                );
+                showHandCue(
+                  loosened ? `Hand loosened — ${placementLabel} placed here.` : `${placementLabel} placed.`,
                 );
               }
               cameraPlacementActiveRef.current = false;
@@ -5315,7 +5911,15 @@ export function AirboardPrototype({
             armedCreationTool
               ? scenePlacementPreviewTool(armedCreationTool)
               : armedPlacementTool ?? (isPlacementTool(activeObjectTool) ? activeObjectTool : null);
-          if (placementTool && pinchClosed && (pinchJustClosed || Boolean(armedPlacementTool))) {
+          const armedConnector = Boolean(armedCreationTool?.startsWith("connector:"));
+          const closingOnShape =
+            action?.type === "grab_started" || Boolean(hybridOutput.grabbedTargetId);
+          if (
+            placementTool &&
+            pinchClosed &&
+            (pinchJustClosed || Boolean(armedPlacementTool)) &&
+            (armedConnector || !closingOnShape)
+          ) {
             cameraPlacementArmedToolRef.current = null;
             cameraPlacementActiveRef.current = true;
             cameraGrabActiveRef.current = true;
@@ -5333,11 +5937,13 @@ export function AirboardPrototype({
 
           if (action?.type === "grab_started") {
             cameraGrabActiveRef.current = true;
+            handDwellSelectTrackerRef.current.reset();
             if (activeObjectTool === "eraser") {
               beginObjectInteraction(point, {
                 inputSource: "air_gesture",
                 forcedStrokeId: action.targetId,
               });
+              eraseSceneElementsUnderHand(point, action.targetId);
               setObjectGestureState("erase");
               setCommandFeedback(
                 "Erase locked — sweep the closed hand across targets, then reopen to finish.",
@@ -5349,13 +5955,29 @@ export function AirboardPrototype({
               );
               return;
             }
-            selectAnnotationObject(action.targetId);
-            setHoverStrokeId(action.targetId);
+            if (gestureTargetWorld(boardRef.current, action.targetId) === "scene") {
+              // v2 elements move through the same scene move commands as the
+              // mouse, so the move syncs and undoes like a mouse drag.
+              const element = boardRef.current.elements[action.targetId]!;
+              if (!beginSceneMove(HAND_SCENE_POINTER_ID, element, point, "air_gesture")) {
+                cameraGrabActiveRef.current = false;
+                hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
+                hybridPinchClosedRef.current = true;
+                showHandCue("This shape is locked.", "warning");
+                setObjectGestureState("hover");
+                return;
+              }
+              setHoverElementId(element.id);
+            } else {
+              selectAnnotationObject(action.targetId);
+              setHoverStrokeId(action.targetId);
+              beginObjectInteraction(point, {
+                inputSource: "air_gesture",
+                forcedStrokeId: action.targetId,
+                moveOnly: true,
+              });
+            }
             setObjectGestureState("grab");
-            beginObjectInteraction(point, {
-              inputSource: "air_gesture",
-              forcedStrokeId: action.targetId,
-            });
             setCommandFeedback("Move locked — keep your hand closed, then reopen to drop.");
             reportGestureStage(
               "action",
@@ -5368,15 +5990,32 @@ export function AirboardPrototype({
           if (action?.type === "drag_moved") {
             cameraGrabActiveRef.current = true;
             setObjectGestureState(pointerErasingRef.current ? "erase" : "grab");
+            if (previewSceneMove(HAND_SCENE_POINTER_ID, point)) return;
+            const resumeId = handSceneMoveResumeRef.current;
+            if (resumeId) {
+              // A voice edit committed the grab; the hand is still closed, so
+              // carry the shape on from where it is now, edit included.
+              handSceneMoveResumeRef.current = null;
+              const live = boardRef.current.elements[resumeId];
+              if (live?.status === "active" && beginSceneMove(HAND_SCENE_POINTER_ID, live, point, "air_gesture")) {
+                previewSceneMove(HAND_SCENE_POINTER_ID, point);
+              }
+              return;
+            }
+            if (pointerErasingRef.current) eraseSceneElementsUnderHand(point);
             moveObjectInteraction(point, { inputSource: "air_gesture" });
             return;
           }
 
           if (action?.type === "grab_ended") {
             const erased = pointerErasingRef.current;
-            endObjectInteraction(point);
+            const loosened = looseGrabHoldRef.current.bridging;
+            if (!finishHandSceneMove(point, "commit")) {
+              endObjectInteraction(point, { inputSource: "air_gesture" });
+            }
             cameraGrabActiveRef.current = false;
             setObjectGestureState("hover");
+            if (loosened && !erased) showHandCue("Hand loosened — dropped here.");
             setCommandFeedback(
               erased
                 ? "Erase complete. Select another tool before closing over an object."
@@ -5390,12 +6029,30 @@ export function AirboardPrototype({
             return;
           }
 
-          setHoverStrokeId(hybridOutput.focusedTargetId);
-          setObjectGestureState(
-            hybridOutput.pinchState === "closed" && !hybridOutput.focusedTargetId
-              ? "no target"
-              : "hover",
-          );
+          const focusedWorld = gestureTargetWorld(boardRef.current, hybridOutput.focusedTargetId);
+          setHoverStrokeId(focusedWorld === "stroke" ? hybridOutput.focusedTargetId : null);
+          setHoverElementId(focusedWorld === "scene" ? hybridOutput.focusedTargetId : null);
+          const dwellTargetId = handDwellSelectTrackerRef.current.update({
+            now: hybridOutput.timestampMs,
+            targetId: hybridOutput.pinchState === "open" ? hybridOutput.focusedTargetId : null,
+            screenPoint,
+            eligible:
+              !cameraGrabActiveRef.current &&
+              (selectedElementIdsRef.current.length > 0 ||
+                selectedAnnotationIdsRef.current.length > 0),
+          });
+          if (dwellTargetId && addHandTargetToSelection(dwellTargetId)) {
+            showHandCue("Added to the selection.");
+            setCommandFeedback(
+              "Added to the selection. Rest your open hand on another shape to add more.",
+            );
+          }
+          const nothingToGrab =
+            hybridOutput.pinchState === "closed" && !hybridOutput.focusedTargetId;
+          if (nothingToGrab && pinchJustClosed) {
+            showHandCue("Nothing to grab here — close your hand over a shape.", "warning");
+          }
+          setObjectGestureState(nothingToGrab ? "no target" : "hover");
           return;
         }
 
@@ -5406,11 +6063,12 @@ export function AirboardPrototype({
             cameraPlacementActiveRef.current = false;
             cameraGrabActiveRef.current = false;
             setCommandFeedback("Catalog placement cancelled.");
+            showHandCue("Placement cancelled.", "warning");
             setObjectGestureState("hover");
             return;
           }
           if (cameraGrabActiveRef.current && lastPoint) {
-            endObjectInteraction(lastPoint);
+            if (!finishHandSceneMove(lastPoint, "commit")) endObjectInteraction(lastPoint);
             cameraGrabActiveRef.current = false;
             setObjectGestureState("hover");
           }
@@ -5429,6 +6087,7 @@ export function AirboardPrototype({
           y: result.cursorPoint.y,
         });
         lastGesturePointerRef.current = point;
+        lastGesturePointerAtRef.current = Date.now();
 
         const markerHeld = isObjectGestureHeld(result);
         const markerGrabStart = isObjectGestureGrabStart(result);
@@ -5564,13 +6223,18 @@ export function AirboardPrototype({
     },
     [
       activeObjectTool,
+      addHandTargetToSelection,
       appendStrokePoint,
       beginObjectInteraction,
+      beginSceneMove,
       cancelCatalogClose,
       cancelObjectInteraction,
       commitStroke,
+      disarmHandPlacementTool,
       endObjectInteraction,
       eraseAt,
+      eraseSceneElementsUnderHand,
+      finishHandSceneMove,
       handleDockGesture,
       inputMode,
       inputPaused,
@@ -5579,9 +6243,12 @@ export function AirboardPrototype({
       moveCursor,
       moveCursorPoint,
       moveObjectInteraction,
+      previewSceneMove,
+      rearmHandPlacementTool,
       reportGestureStage,
       scheduleCatalogClose,
       selectAnnotationObject,
+      showHandCue,
       startStroke,
       toBoardPoint,
       updateAnnotationObject,
@@ -5613,6 +6280,7 @@ export function AirboardPrototype({
         type: "stroke",
         strokeId,
       });
+      sceneRedoStackRef.current = [];
     }
 
     pointerStrokeIdRef.current = null;
@@ -5628,6 +6296,7 @@ export function AirboardPrototype({
         type: "erase",
         strokeIds,
       });
+      sceneRedoStackRef.current = [];
     }
     activeEraseAffectedStrokeIdsRef.current = new Set();
   }, []);
@@ -5786,6 +6455,14 @@ export function AirboardPrototype({
         const restoredSelection = action.selectionBefore.filter(
           (strokeId) => boardRef.current.strokes[strokeId]?.status === "committed",
         );
+        if (action.redoEvents?.length) {
+          sceneRedoStackRef.current.push({
+            type: "diagram",
+            undoEvents: action.redoEvents,
+            redoEvents: action.undoEvents,
+            selectionBefore: restoredSelection,
+          });
+        }
         refreshRealtimeSpeechKeyterms(boardRef.current, restoredSelection);
         setSelectedAnnotationIds(restoredSelection);
         setSelectedAnnotationId(restoredSelection[restoredSelection.length - 1] ?? null);
@@ -5834,6 +6511,31 @@ export function AirboardPrototype({
 
   const redoLastSceneAction = useCallback(() => {
     const action = sceneRedoStackRef.current.pop();
+    if (action?.type === "diagram") {
+      // Re-apply an undone Airo change with fresh event ids, so peers replay it.
+      // Elements the turn created are still there, marked deleted by the undo:
+      // bring them back rather than replaying their creation (a no-op).
+      const result = applyDiagramUndo(
+        boardRef.current,
+        { undoEvents: diagramRedoEvents(boardRef.current, action.undoEvents) },
+        diagramCommandContext(boardSessionIdRef.current),
+      );
+      boardRef.current = result.state;
+      appendBoundedBoardEvents(boardEventLogRef.current, result.events);
+      schedulePersistentSnapshot(result.state);
+      if (result.events.length > 0) boardSyncRef.current?.publish(result.events);
+      undoStackRef.current.push({
+        type: "diagram",
+        undoEvents: action.redoEvents ?? [],
+        redoEvents: action.undoEvents,
+        selectionBefore: action.selectionBefore,
+      });
+      refreshRealtimeSpeechKeyterms(boardRef.current, action.selectionBefore);
+      setCommandFeedback("Redid the last diagram command.");
+      render();
+      updateStats();
+      return;
+    }
     if (!action || !action.type.startsWith("scene_")) {
       setCommandFeedback("There is nothing to redo yet.");
       return;
@@ -5914,7 +6616,7 @@ export function AirboardPrototype({
       selectSceneElements(action.entries.map(({ elementId }) => elementId));
     }
     setCommandFeedback("Redid the last scene change.");
-  }, [applyLocalEvent, applySceneElementLifecycle, selectSceneElements]);
+  }, [applyLocalEvent, applySceneElementLifecycle, refreshRealtimeSpeechKeyterms, render, schedulePersistentSnapshot, selectSceneElements, updateStats]);
 
   const cancelPendingIntent = useCallback((message = "Cancelled the pending command.") => {
     semanticIntentRequestIdRef.current += 1;
@@ -6044,7 +6746,7 @@ export function AirboardPrototype({
           setSelectedAnnotationIds(workingSelectionIds);
           setSelectedAnnotationId(workingPrimarySelectionId);
           setCommandFeedback("That line is already attached to those objects.");
-          setIntentCommandText("");
+          if (!voiceTurnId) setIntentCommandText("");
           if (voiceTurnId) {
             reportVoiceTrace(voiceTurnId, "feedback", {
               category: "no-op",
@@ -6173,7 +6875,7 @@ export function AirboardPrototype({
             reportVoiceTrace(voiceTurnId, "turn_completed", { outcome: "cancelled" });
           }
         }
-        setIntentCommandText("");
+        if (!voiceTurnId) setIntentCommandText("");
         return "applied";
       }
 
@@ -6223,6 +6925,7 @@ export function AirboardPrototype({
       const planHandles = new Map<string, string[]>();
       let commands: DiagramCommand[] = [];
       let affectedStrokeIds: string[] = [];
+      const skippedSteps: string[] = [];
 
       try {
         for (const action of plan.actions) {
@@ -6237,6 +6940,9 @@ export function AirboardPrototype({
               viewOrigin,
               autoCreateCenters,
               selectionIds: referenceSelectionIds,
+              ...(executionSnapshot?.requestSelectionIds
+                ? { requestSelectionIds: executionSnapshot.requestSelectionIds }
+                : {}),
               primarySelectionId: referencePrimarySelectionId,
               hoverStrokeId: workingHoverStrokeId,
               strokeColor,
@@ -6260,8 +6966,11 @@ export function AirboardPrototype({
                 issueCode: resolved.errorCode ?? "grounding_failed",
               });
             }
-            cancelPendingIntent(`Plan could not be grounded: ${resolved.error}`);
-            return "rejected";
+            // One misheard name shouldn't throw away the rest of a narrated
+            // diagram: skip this step (and any that build on it, which fail
+            // the same way) and apply what could be matched.
+            skippedSteps.push(resolved.error);
+            continue;
           }
           if (voiceTurnId && resolved.repairKinds?.length) {
             reportVoiceTrace(voiceTurnId, "grounding", {
@@ -6271,7 +6980,7 @@ export function AirboardPrototype({
               repairKinds: resolved.repairKinds,
             });
           }
-          if (commands.length + resolved.commands.length > 40) {
+          if (commands.length + resolved.commands.length > MAX_PLAN_BOARD_CHANGES) {
             cancelPendingIntent("That plan expands to too many board changes. Split it into two requests.");
             return "rejected";
           }
@@ -6302,6 +7011,10 @@ export function AirboardPrototype({
             selectionCount: workingSelectionIds.length,
           });
         }
+        if (skippedSteps.length === plan.actions.length) {
+          cancelPendingIntent(`Plan could not be grounded: ${skippedSteps[0]}`);
+          return "rejected";
+        }
         if (commands.length === 0) {
           setSelectedAnnotationIds(workingSelectionIds);
           setSelectedAnnotationId(workingPrimarySelectionId);
@@ -6313,7 +7026,7 @@ export function AirboardPrototype({
               ? "Applied the requested selection."
               : "The requested board state is already satisfied.",
           );
-          setIntentCommandText("");
+          if (!voiceTurnId) setIntentCommandText("");
           if (voiceTurnId) {
             if (selectionOnly) {
               reportVoiceTrace(voiceTurnId, "action_applied", {
@@ -6352,7 +7065,9 @@ export function AirboardPrototype({
             },
           ];
         });
-        const message = describeSemanticPlan(plan.actions);
+        const message = skippedSteps.length > 0
+          ? `${describeSemanticPlan(plan.actions)} (skipped ${skippedSteps.length} of ${plan.actions.length} steps: ${skippedSteps[0]})`
+          : describeSemanticPlan(plan.actions);
         const pending: PendingIntent = {
           parsed: null,
           parsedSteps: [],
@@ -6361,7 +7076,7 @@ export function AirboardPrototype({
           requestText,
           message,
           baseState,
-          baseSelectionIds: [...initialSelectionIds],
+          baseSelectionIds: [...(executionSnapshot?.baseSelectionIds ?? initialSelectionIds)],
           requiresExplicitConfirmation: false,
           commands,
           selectionAfter: workingSelectionIds,
@@ -6416,7 +7131,7 @@ export function AirboardPrototype({
       const visibilityIntent = parseDiagramVisibilityIntent(text);
       if (visibilityIntent) {
         setDiagramVisibility(visibilityIntent === "show", "voice");
-        setIntentCommandText("");
+        if (!voiceTurnId) setIntentCommandText("");
         if (voiceTurnId) {
           reportVoiceTrace(voiceTurnId, "turn_completed", {
             outcome: visibilityIntent === "show" ? "diagram_shown" : "diagram_hidden",
@@ -6485,12 +7200,12 @@ export function AirboardPrototype({
           reportVoiceTrace(voiceTurnId, "action_undone", { source: "voice" });
           reportVoiceTrace(voiceTurnId, "turn_completed", { outcome: "undone" });
         }
-        setIntentCommandText("");
+        if (!voiceTurnId) setIntentCommandText("");
         return "applied";
       }
       if (parsed.command.kind === "cancel") {
         cancelPendingIntent();
-        setIntentCommandText("");
+        if (!voiceTurnId) setIntentCommandText("");
         return "applied";
       }
 
@@ -6513,6 +7228,27 @@ export function AirboardPrototype({
     };
   }, [prepareIntentCommand]);
 
+  useEffect(() => {
+    executeSceneIntentRef.current = executeSceneIntent;
+  }, [executeSceneIntent]);
+  useEffect(() => {
+    undoRedoRef.current = {
+      undo: (count) => {
+        for (let index = 0; index < count; index += 1) undoLastAction("semantic");
+      },
+      redo: (count) => {
+        for (let index = 0; index < count; index += 1) redoLastSceneAction();
+      },
+    };
+  }, [redoLastSceneAction, undoLastAction]);
+  useEffect(() => {
+    frameBoardBoundsRef.current = (bounds) => {
+      const limits = currentViewportLimits();
+      const rightInset = copilotRightInset(copilotOpen, limits.canvasWidth);
+      applyViewport(fitViewportToBounds(bounds, limits, { rightInset }));
+    };
+  }, [applyViewport, copilotOpen, currentViewportLimits]);
+
   const prepareIntentCommandWithSemantic = useCallback(
     async (text: string, voiceTurnId?: string): Promise<IntentPreparationOutcome> => {
       const instruction = text.trim();
@@ -6533,29 +7269,26 @@ export function AirboardPrototype({
       const sceneExecution = sceneIntent
         ? executeSceneIntent(sceneIntent)
         : "unrecognized";
-      if (sceneIntent && sceneExecution !== "unrecognized") {
+      // A short command the fast rules couldn't apply (usually a name they
+      // can't find among toolbar shapes, such as one Airo drew) goes on to
+      // the next stages and the AI planner, which see every shape.
+      if (sceneIntent && sceneExecution !== "unrecognized" && sceneExecution !== "rejected") {
         pendingSemanticClarificationRef.current = null;
-        setIntentCommandText("");
-        setSpeechRecognitionStatus(
-          sceneExecution === "rejected" ? "command-rejected" : "command-recognized",
-        );
+        if (!voiceTurnId) setIntentCommandText("");
+        setSpeechRecognitionStatus("command-recognized");
         if (sceneExecution === "applied" && sceneIntent.type !== "invalid") {
           setCommandFeedback(`Applied: ${sceneIntentFeedback(sceneIntent)}.`);
           appendCopilotActivity({
             source: voiceTurnId ? "Voice" : "Airo",
             title: "Board updated",
-            undoable: true,
+            // Undo, redo and view changes aren't themselves offered for undo.
+            undoable: !["undo", "redo", "zoom_to_fit", "focus"].includes(sceneIntent.type),
             detail: instruction,
             tone: "success",
           });
         }
         return {
-          result:
-            sceneExecution === "applied"
-              ? "applied"
-              : sceneExecution === "rejected"
-                ? "rejected"
-                : "no-op",
+          result: sceneExecution === "applied" ? "applied" : "no-op",
           preparedText: instruction,
           source: "deterministic",
           stepCount: sceneExecution === "applied" ? 1 : 0,
@@ -6564,7 +7297,7 @@ export function AirboardPrototype({
       const desiredGraphCorrection = parseDesiredGraphCorrection(instruction);
       if (desiredGraphCorrection) {
         pendingSemanticClarificationRef.current = null;
-        setIntentCommandText(instruction);
+        if (!voiceTurnId) setIntentCommandText(instruction);
         if (voiceTurnId) {
           reportAttributedVoiceFollowUp("correction", voiceTurnId);
           reportVoiceTrace(voiceTurnId, "parser_outcome", {
@@ -6595,7 +7328,7 @@ export function AirboardPrototype({
       );
       if (deterministicFanIn.status === "already_satisfied") {
         pendingSemanticClarificationRef.current = null;
-        setIntentCommandText(instruction);
+        if (!voiceTurnId) setIntentCommandText(instruction);
         setSpeechRecognitionStatus("command-recognized");
         setCommandFeedback("The requested connections are already present.");
         appendCopilotActivity({
@@ -6632,7 +7365,7 @@ export function AirboardPrototype({
       }
       if (deterministicFanIn.status === "resolved") {
         pendingSemanticClarificationRef.current = null;
-        setIntentCommandText(instruction);
+        if (!voiceTurnId) setIntentCommandText(instruction);
         if (voiceTurnId) {
           reportVoiceTrace(voiceTurnId, "parser_outcome", {
             status: "parsed",
@@ -6652,7 +7385,25 @@ export function AirboardPrototype({
           stepCount: deterministicFanIn.plan.actions.length,
         };
       }
-      const directResult = prepareIntentCommand(instruction, voiceTurnId);
+      // Compound sentences skip the older phrase grammar, which would
+      // misread them, and go straight to the AI planner when it's on.
+      // So do pointing words the fast rules read but couldn't resolve: the
+      // older grammar takes "make it a queue" as a new queue labelled "it a".
+      const pointingWords =
+        sceneIntent !== null &&
+        sceneExecution === "rejected" &&
+        /\b(?:it|this|that|them|these|those|here|there)\b/i.test(instruction);
+      // Only creating a shape is what the older grammar gets wrong in a
+      // compound sentence ("and a cache" as a label); its other compound
+      // forms, such as repairing a disconnected line, it reads reliably.
+      const olderParse = parseIntentCanvasCommand(instruction, { activationPolicy: "externally_activated" });
+      const compound =
+        (pointingWords ||
+          (isCompoundBoardCommand(instruction) &&
+            olderParse.status === "parsed" &&
+            olderParse.command.kind === "create_node")) &&
+        Boolean(semanticIntentConfigRef.current?.available);
+      const directResult = compound ? "rejected" : prepareIntentCommand(instruction, voiceTurnId);
       if (directResult !== "rejected") {
         pendingSemanticClarificationRef.current = null;
         return {
@@ -6666,8 +7417,9 @@ export function AirboardPrototype({
       const deterministic = parseIntentCanvasCommand(instruction, {
         activationPolicy: "externally_activated",
       });
-      const deterministicGroundingFailed = deterministic.status === "parsed";
+      const deterministicGroundingFailed = !compound && deterministic.status === "parsed";
       const terminalConnectionGroundingFailure =
+        !compound &&
         deterministic.status === "parsed" &&
         !allowsSemanticFallbackAfterGroundingFailure(deterministic.command);
       if (terminalConnectionGroundingFailure) {
@@ -6682,7 +7434,7 @@ export function AirboardPrototype({
           stepCount: 0,
         };
       }
-      if (!deterministicGroundingFailed && !shouldUseSemanticIntentFallback(deterministic)) {
+      if (!compound && !deterministicGroundingFailed && !shouldUseSemanticIntentFallback(deterministic)) {
         return {
           result: "rejected",
           preparedText: instruction,
@@ -6691,7 +7443,9 @@ export function AirboardPrototype({
         };
       }
       const parserIssue = (
-        deterministic.status === "parsed" ? "grounding_failed" : deterministic.issue.code
+        compound
+          ? "compound_command"
+          : deterministic.status === "parsed" ? "grounding_failed" : deterministic.issue.code
       ) as SemanticIntentParserIssue;
 
       const semanticConfig = semanticIntentConfigRef.current;
@@ -6705,20 +7459,23 @@ export function AirboardPrototype({
       }
 
       const requestBoardState = boardRef.current;
-      const requestSelectionIds = currentSemanticSelectionIds();
+      const requestLiveSelectionIds = currentSemanticSelectionIds();
+      // "this"/"that" said while pointing at shapes Airo drew: the scene rules
+      // can't edit those, so the planner gets them as the selection it reads
+      // "this" from. The commit still checks the live selection.
+      const pointedLegacyIds = DEICTIC_REFERENCE_PATTERN.test(instruction)
+        ? pointedLegacyStrokeIds(requestBoardState, voiceReferenceRef.current)
+        : [];
+      const requestSelectionIds =
+        pointedLegacyIds.length > 0 ? pointedLegacyIds : requestLiveSelectionIds;
       const pendingClarificationRecord =
         pendingSemanticClarificationRef.current;
+      // A question stays open while the person answers, even if a hand or a
+      // collaborator changes the board meanwhile; the planner gets the current
+      // board with the question.
       const pendingClarificationIsCurrent =
         pendingClarificationRecord !== null &&
-        !boardContentChanged(
-          pendingClarificationRecord.boardState,
-          requestBoardState,
-        ) &&
-        pendingClarificationRecord.selectionIds.length ===
-          requestSelectionIds.length &&
-        pendingClarificationRecord.selectionIds.every(
-          (strokeId, index) => strokeId === requestSelectionIds[index],
-        );
+        Date.now() - pendingClarificationRecord.askedAt <= CLARIFICATION_ANSWER_MS;
       const pendingClarification = pendingClarificationIsCurrent
         ? pendingClarificationRecord.request
         : undefined;
@@ -6728,15 +7485,19 @@ export function AirboardPrototype({
       ) {
         pendingSemanticClarificationRef.current = null;
       }
-      const requestPointer = lastGesturePointerRef.current
-        ? { ...lastGesturePointerRef.current }
-        : null;
+      const requestPointer = voiceReferenceRef.current
+        ? voiceReferenceRef.current.point
+        : lastGesturePointerRef.current
+          ? { ...lastGesturePointerRef.current }
+          : null;
       const requestCanvasRect = canvasRef.current?.getBoundingClientRect();
       const executionSnapshot: SemanticExecutionSnapshot = {
         boardState: requestBoardState,
         selectionIds: requestSelectionIds,
+        baseSelectionIds: requestLiveSelectionIds,
+        requestSelectionIds: [...requestSelectionIds],
         primarySelectionId: requestSelectionIds[requestSelectionIds.length - 1] ?? null,
-        hoverStrokeId,
+        hoverStrokeId: pointedLegacyIds.at(-1) ?? hoverStrokeId,
         pointer: requestPointer,
         canvasWidth: (requestCanvasRect?.width ?? 900) / boardViewportRef.current.scale,
         canvasHeight: (requestCanvasRect?.height ?? 600) / boardViewportRef.current.scale,
@@ -6775,6 +7536,15 @@ export function AirboardPrototype({
           ),
           ...(pendingClarification ? { pendingClarification } : {}),
           ...(semanticModel ? { model: semanticModel } : {}),
+          // Speech meant for Airo is a board request: a narrated flow is drawn.
+          ...(() => {
+            const addressedBy = !voiceTurnId
+              ? "typed"
+              : voiceAddressedByRef.current
+                ? voiceAddressedByRef.current.addressedBy
+                : "wake";
+            return addressedBy ? { addressedBy } : {};
+          })(),
         });
         if (semanticIntentRequestIdRef.current !== requestId) {
           return {
@@ -6790,30 +7560,35 @@ export function AirboardPrototype({
         );
         const currentSelectionIds = currentSemanticSelectionIds();
         const selectionChangedDuringPlanning =
-          currentSelectionIds.length !== requestSelectionIds.length ||
-          currentSelectionIds.some((strokeId, index) => strokeId !== requestSelectionIds[index]);
+          currentSelectionIds.length !== requestLiveSelectionIds.length ||
+          currentSelectionIds.some((strokeId, index) => strokeId !== requestLiveSelectionIds[index]);
         if (boardChangedDuringPlanning || selectionChangedDuringPlanning) {
-          pendingSemanticClarificationRef.current = null;
-          setSpeechRecognitionStatus("command-rejected");
-          setCommandFeedback("The board changed while Airo was planning. Please repeat the command for the current board.");
+          // Someone edited, or a hand changed the selection, while Airo was
+          // planning. Apply the plan to the board as it is now, still aimed at
+          // what was selected when the person spoke; steps whose shapes are
+          // gone are skipped rather than the whole command being dropped.
+          const stillThere = requestSelectionIds.filter(
+            (id) => boardRef.current.strokes[id]?.status === "committed" || isSceneOnlyElement(boardRef.current, id),
+          );
+          executionSnapshot.boardState = boardRef.current;
+          executionSnapshot.selectionIds = stillThere;
+          executionSnapshot.primarySelectionId = stillThere[stillThere.length - 1] ?? null;
+          // The commit compares against the selection as it is now; plan
+          // targets still resolve against `stillThere`.
+          executionSnapshot.baseSelectionIds = currentSelectionIds;
+          executionSnapshot.requestSelectionIds = [...requestSelectionIds];
           if (voiceTurnId) {
-            reportVoiceTrace(voiceTurnId, "action_failed", {
-              phase: "stale_semantic_context",
+            reportVoiceTrace(voiceTurnId, "grounding", {
+              status: "rebased",
+              source: "semantic",
               boardChangedDuringPlanning,
               selectionChangedDuringPlanning,
             });
-            reportVoiceTrace(voiceTurnId, "turn_completed", { outcome: "stale_context" });
           }
-          return {
-            result: "rejected",
-            preparedText: instruction,
-            source: "semantic",
-            stepCount: 0,
-          };
         }
         if (resolution.outcome === "already_satisfied") {
           pendingSemanticClarificationRef.current = null;
-          setIntentCommandText(instruction);
+          if (!voiceTurnId) setIntentCommandText(instruction);
           setSpeechRecognitionStatus("command-recognized");
           setCommandFeedback("The requested connections are already present.");
           appendCopilotActivity({
@@ -6888,7 +7663,7 @@ export function AirboardPrototype({
                     previousTranscript: pendingClarification
                       ? `${pendingClarification.previousTranscript} Follow-up: ${instruction}`.slice(
                           0,
-                          500,
+                          MAX_CLARIFICATION_TRANSCRIPT_CHARS,
                         )
                       : instruction,
                     question: plan.clarificationQuestion,
@@ -6896,6 +7671,7 @@ export function AirboardPrototype({
                   },
                   boardState: requestBoardState,
                   selectionIds: requestSelectionIds,
+                  askedAt: Date.now(),
                 }
               : null;
           setCommandFeedback(
@@ -6927,7 +7703,7 @@ export function AirboardPrototype({
             usage: resolution.metadata.usage,
           });
         }
-        setIntentCommandText(instruction);
+        if (!voiceTurnId) setIntentCommandText(instruction);
         const semanticResult = prepareSemanticActionPlan(
           plan,
           instruction,
@@ -7086,9 +7862,11 @@ export function AirboardPrototype({
 
       const committedAtMs = Date.now();
       if (undoEvents.length > 0) {
+        sceneRedoStackRef.current = [];
         undoStackRef.current.push({
           type: "diagram",
           undoEvents,
+          redoEvents: forwardEvents,
           selectionBefore: [...pending.baseSelectionIds],
           ...(pending.voiceTurnId
             ? { originatingInteractionId: pending.voiceTurnId }
@@ -7182,8 +7960,40 @@ export function AirboardPrototype({
     };
   }, [applyPendingIntent]);
 
+  /**
+   * "here", "this" and "that": what was pointed at when speech began, the
+   * shapes the hand visited while speaking ("this", then "that"), and what is
+   * pointed at now. Read once, when the command is routed.
+   */
+  const captureVoiceReference = useCallback((): VoiceReference => {
+    const started = speechStartPointingRef.current;
+    speechStartPointingRef.current = null;
+    const now = currentPointingRef.current?.() ?? null;
+    const visited = resolveHandPointing(handPointingSnapshotRef.current, {
+      now: Date.now(),
+      count: 2,
+    }).targetIds;
+    return {
+      point: started?.point ?? now?.point ?? null,
+      startTargetId: started?.targetId ?? null,
+      pointedIds: [
+        ...new Set([started?.targetId, ...visited, now?.targetId].filter((id): id is string => Boolean(id))),
+      ].slice(-2),
+    };
+  }, []);
+
   const queueVoiceCommand = useCallback((command: string, traceContext?: VoiceCommandTraceContext) => {
     const voiceTurnId = traceContext?.voiceTurnId;
+    // Captured now, never when the queued command runs.
+    const reference = traceContext?.reference ?? captureVoiceReference();
+    const addressedBy: SemanticIntentAddressedBy | undefined =
+      traceContext?.wakePhrase === "push-to-talk"
+        ? "palm"
+        : traceContext?.wakePhrase === "hold-to-edit"
+          ? "hold"
+          : traceContext?.wakePhrase === "follow-up" || traceContext?.wakePhrase === "answer"
+            ? undefined
+            : "wake";
     const intentKey = createInteractionIntentKey(command);
     if (traceContext) {
       reportVoiceTrace(traceContext.voiceTurnId, "capture_metadata", {
@@ -7220,24 +8030,35 @@ export function AirboardPrototype({
           tone: "neutral",
         });
         voiceCorrectionPendingRef.current = null;
-        setIntentCommandText(instruction);
+        // What Airo heard is shown as status, never put in the typing box:
+        // a voice command is not a draft waiting for Send.
+        setSpeechHeardText(instruction);
         setSpeechRecognitionStatus("interpreting");
-        setCommandFeedback(
-          `Understanding “${truncateSpeechTranscript(instruction)}” and applying it automatically…`,
-        );
+        setCommandFeedback(`Working on “${truncateSpeechTranscript(instruction)}”…`);
+        playAiroCue("heard");
         appendCopilotActivity({
           source: "Airo",
           title: "Understanding command",
           detail: instruction,
           tone: "active",
         });
-        const outcome =
-          (await prepareIntentCommandWithSemanticRef.current?.(instruction, voiceTurnId)) ?? {
-            result: "rejected" as const,
-            preparedText: instruction,
-            source: "deterministic" as const,
-            stepCount: 0,
-          };
+        voiceAddressedByRef.current = { addressedBy };
+        voiceReferenceRef.current = reference;
+        // A voice edit while the hand holds a v2 element applies after the grab.
+        settleHandSceneMove();
+        let outcome: IntentPreparationOutcome;
+        try {
+          outcome =
+            (await prepareIntentCommandWithSemanticRef.current?.(instruction, voiceTurnId)) ?? {
+              result: "rejected" as const,
+              preparedText: instruction,
+              source: "deterministic" as const,
+              stepCount: 0,
+            };
+        } finally {
+          voiceReferenceRef.current = null;
+          voiceAddressedByRef.current = null;
+        }
         // Commands commit instantly inside the preparer — there is no pending
         // plan to confirm and no "did you mean?" prompt. Airo applies its best
         // interpretation automatically; a turn that produced nothing to apply
@@ -7263,15 +8084,37 @@ export function AirboardPrototype({
           });
           reportVoiceTrace(voiceTurnId, "turn_completed", { outcome: "rejected" });
         }
+        // Let the preparer's own status line render, then read it back.
+        await nextAnimationFrame();
         if (outcome.result === "rejected") {
+          const question = pendingSemanticClarificationRef.current?.request.question;
+          if (question) {
+            // Airo needs one detail: the next sentence answers it, no "Airo" needed.
+            voiceRouter.openAnswerWindow?.();
+            showAiroNotice({ tone: "question", detail: question });
+            playAiroCue("question");
+          } else {
+            const reason = commandFeedbackRef.current;
+            showAiroNotice({
+              tone: "warning",
+              detail: reason && !reason.startsWith("Working on")
+                ? `${reason} Say it again in other words.`
+                : "Didn't get that. Say it again in other words.",
+            });
+            playAiroCue("failed");
+          }
           appendCopilotActivity({
             source: "Airo",
-            title: "Could not apply",
-            detail: "Edit the transcript below or repeat the command.",
+            title: question ? "Question" : "Could not apply",
+            detail: question ?? "Say the command again, in other words if you can.",
             tone: "warning",
           });
+        } else {
+          playAiroCue("applied");
         }
-        await nextAnimationFrame();
+        // The follow-up window counts from the visible result, and only a
+        // command that worked opens it.
+        if (outcome.result !== "rejected") voiceRouter.noteCommandSettled();
       })
       .catch(() => {
         if (voiceTurnId) {
@@ -7292,15 +8135,17 @@ export function AirboardPrototype({
           reportVoiceTrace(voiceTurnId, "turn_completed", { outcome: "rejected" });
         }
         setSpeechRecognitionStatus("command-rejected");
-        setCommandFeedback("Airo could not apply that command. Try the typed command field.");
+        setCommandFeedback("Something went wrong applying that. Say it again.");
+        showAiroNotice({ tone: "warning", detail: "Something went wrong applying that. Say it again." });
+        playAiroCue("failed");
         appendCopilotActivity({
           source: "Airo",
           title: "Automatic command failed",
-          detail: "The transcript is still available to edit and send.",
+          detail: "Say the command again.",
           tone: "warning",
         });
       });
-  }, [appendCopilotActivity, reportAttributedVoiceFollowUp, reportVoiceTrace]);
+  }, [appendCopilotActivity, captureVoiceReference, reportAttributedVoiceFollowUp, reportVoiceTrace, settleHandSceneMove, showAiroNotice, voiceRouter]);
 
   /** Mirrors the router's gate state into the pill UI. */
   const syncVoiceGateUi = useCallback(() => {
@@ -7316,15 +8161,30 @@ export function AirboardPrototype({
       return;
     }
     const strokeId = snapshot.strokeId ?? "";
-    const label =
-      (strokeId && boardRef.current.strokes[strokeId]?.annotation?.label?.trim()) ||
-      "this object";
+    const label = (strokeId && boardTargetLabel(boardRef.current, strokeId)) || "this object";
     setVoiceGate({ mode: "scoped", strokeId, label });
   }, [voiceRouter]);
+
+  /**
+   * The panel is on the presented tab, so it only ever shows speech meant for
+   * Airo: a gate is open, the wake word was said, or a follow-up is expected.
+   * Everything else in the room stays off screen.
+   */
+  const showHeardSpeech = useCallback(
+    (transcript: string) => {
+      const addressed =
+        voiceRouter.snapshot !== null ||
+        voiceRouter.expectsFollowUp?.() === true ||
+        classifyBrowserWakeTranscript(transcript).wakeDetected;
+      setSpeechHeardText(addressed ? transcript : "");
+    },
+    [voiceRouter],
+  );
 
   const openVoiceGate = useCallback(
     (gate: { mode: VoiceGateMode; strokeId?: string }) => {
       voiceRouter.openGate(gate);
+      voiceCoalescer.setGateOpen(true);
       syncVoiceGateUi();
       const micArmed = Boolean(speechSessionRef.current);
       // Only the tab in use wakes: a second visible window sees the same palm.
@@ -7346,9 +8206,7 @@ export function AirboardPrototype({
         return;
       }
       const label =
-        (gate.strokeId &&
-          boardRef.current.strokes[gate.strokeId]?.annotation?.label?.trim()) ||
-        "this object";
+        (gate.strokeId && boardTargetLabel(boardRef.current, gate.strokeId)) || "this object";
       setCommandFeedback(
         micArmed
           ? `Editing “${label}”: say “rename to …”, “delete”, “duplicate”, or “connect to …”.`
@@ -7357,20 +8215,28 @@ export function AirboardPrototype({
             : `Holding “${label}”. Turn Airo on once to enable voice edits.`,
       );
     },
-    [syncVoiceGateUi, voiceRouter],
+    [syncVoiceGateUi, voiceCoalescer, voiceRouter],
   );
 
   const closeVoiceGate = useCallback(
     (mode: VoiceGateMode) => {
       voiceRouter.closeGate(mode);
+      // Dropping the palm sends what was said, after a short trailing grace.
+      voiceCoalescer.setGateOpen(false);
       syncVoiceGateUi();
     },
-    [syncVoiceGateUi, voiceRouter],
+    [syncVoiceGateUi, voiceCoalescer, voiceRouter],
   );
 
   const processPalmVoiceGestureFrame = useCallback(
     (frame: PalmVoiceGestureFrame): PalmVoiceGestureEvent => {
-      const event = palmVoiceGestureTrackerRef.current!.update(frame);
+      // An open palm aimed at a dock tile is pointing, not talking. With
+      // `aiming` the tracker never latches there, so the hold starts again
+      // as soon as the hand leaves the dock, without lowering it.
+      const event = palmVoiceGestureTrackerRef.current!.update({
+        ...frame,
+        aiming: frame.aiming === true || handAimTargetRef.current !== null,
+      });
       reportGestureStage(
         "candidate_scores",
         {
@@ -7408,18 +8274,8 @@ export function AirboardPrototype({
     [closeVoiceGate, openVoiceGate, reportGestureStage],
   );
 
-  const dispatchVoiceDecision = useCallback(
-    (
-      decision: VoiceRouteDecision,
-      metadata: {
-        engine: VoiceCommandTraceContext["engine"];
-        voiceTurnId?: string | undefined;
-        provider?: string | undefined;
-        model?: string | undefined;
-        confidence?: number | undefined;
-        turnIndex?: number | undefined;
-      },
-    ) => {
+  const runVoiceDecision = useCallback(
+    (decision: VoiceRouteDecision, metadata: VoiceDecisionMetadata) => {
       queueVoiceCommand(decision.command, {
         voiceTurnId: metadata.voiceTurnId ?? crypto.randomUUID(),
         transcript: decision.transcript,
@@ -7429,9 +8285,35 @@ export function AirboardPrototype({
         model: metadata.model,
         confidence: metadata.confidence,
         turnIndex: metadata.turnIndex,
+        reference: metadata.reference,
       });
     },
     [queueVoiceCommand],
+  );
+  runVoiceDecisionRef.current = runVoiceDecision;
+
+  /**
+   * Every routed command passes through the coalescer, which holds it for a
+   * moment so a thinking pause doesn't cut it ("Airo, add a database…
+   * called Orders" is one command). It keeps each command's trace metadata.
+   */
+  const dispatchVoiceDecision = useCallback(
+    (decision: VoiceRouteDecision, metadata: VoiceDecisionMetadata) => {
+      const withReference: VoiceDecisionMetadata = {
+        ...metadata,
+        reference: metadata.reference ?? captureVoiceReference(),
+      };
+      // Nothing held means no metadata either (a cancel may have dropped the
+      // held command), so a stale record never labels this one.
+      if (!voiceCoalescer.pending) heldVoiceMetaRef.current = null;
+      incomingVoiceMetaRef.current = withReference;
+      voiceCoalescer.push(decision);
+      incomingVoiceMetaRef.current = null;
+      if (voiceCoalescer.pending && !heldVoiceMetaRef.current) {
+        heldVoiceMetaRef.current = withReference;
+      }
+    },
+    [captureVoiceReference, voiceCoalescer],
   );
 
   /**
@@ -7464,28 +8346,27 @@ export function AirboardPrototype({
       });
       const { decisions, wakeDetected } = voiceRouter.handleFinalTranscript(transcript);
       syncVoiceGateUi();
+      // One sentence, one pointing record, shared by every command in it.
+      const reference = decisions.length > 0 ? captureVoiceReference() : undefined;
       for (const decision of decisions) {
-        dispatchVoiceDecision(decision, { ...metadata, voiceTurnId });
+        dispatchVoiceDecision(decision, { ...metadata, voiceTurnId, reference });
       }
+      // Speech after a pause that finishes the held command ("called Orders").
+      const continued = decisions.length === 0 && voiceCoalescer.offerContinuation(transcript);
       reportVoiceTrace(voiceTurnId, "routing", {
-        routed: decisions.length > 0,
+        routed: decisions.length > 0 || continued,
         wakeDetected,
         decisionCount: decisions.length,
-        channel:
-          decisions[0]?.wakePhrase === "push-to-talk"
-            ? "ptt"
-            : decisions[0]?.wakePhrase === "hold-to-edit"
-              ? "scoped"
-              : decisions.length > 0
-                ? "wake"
-                : "none",
+        channel: continued ? "continuation" : voiceTraceChannel(decisions[0]),
       });
-      return { routed: decisions.length > 0, wakeDetected, voiceTurnId };
+      return { routed: decisions.length > 0 || continued, wakeDetected, voiceTurnId };
     },
     [
+      captureVoiceReference,
       dispatchVoiceDecision,
       reportVoiceTrace,
       syncVoiceGateUi,
+      voiceCoalescer,
       voiceRouter,
     ],
   );
@@ -7548,7 +8429,6 @@ export function AirboardPrototype({
     const target = window as unknown as { __airboardTestHooks?: unknown };
     target.__airboardTestHooks = {
       emitFinalTranscript: (transcript: string) => {
-        setSpeechHeardText(transcript);
         return routeFinalTranscript(transcript, { engine: "realtime" });
       },
       emitTranscriptionProviderEvent: (event: {
@@ -7562,7 +8442,6 @@ export function AirboardPrototype({
         if (event.type !== "transcription.final" || !event.transcript?.trim()) {
           return { routed: false, wakeDetected: false };
         }
-        setSpeechHeardText(event.transcript);
         return routeFinalTranscript(event.transcript, {
           engine: "realtime",
           provider: event.provider,
@@ -7596,6 +8475,8 @@ export function AirboardPrototype({
       getDiagramVisible: () => diagramVisibleRef.current,
       resetVoiceRouting: () => {
         voiceRouter.reset();
+        voiceCoalescer.cancel();
+        heldVoiceMetaRef.current = null;
         setVoiceGate(null);
       },
       getViewport: () => ({ ...boardViewportRef.current }),
@@ -7661,8 +8542,12 @@ export function AirboardPrototype({
                 y: ghostBounds.y + ghostBounds.height / 2,
               }
             : null,
+          activeCreationTool: activeCreationToolRef.current,
+          selectedElementIds: [...selectedElementIdsRef.current],
+          selectedAnnotationIds: [...selectedAnnotationIdsRef.current],
         };
       },
+      getHandPointingSnapshot: () => structuredClone(handPointingSnapshotRef.current),
       setViewport: (viewport: BoardViewport) => {
         boardViewportRef.current = clampViewport(viewport, currentViewportLimits());
         setViewportScale(Math.round(boardViewportRef.current.scale * 100) / 100);
@@ -7703,6 +8588,7 @@ export function AirboardPrototype({
     };
   }, [
     activeObjectTool,
+    voiceCoalescer,
     currentViewportLimits,
     ghostAnnotation,
     handleGesture,
@@ -7777,6 +8663,27 @@ export function AirboardPrototype({
     setCommandFeedback((current) => (current.startsWith("Applied:") ? current : text));
   }, []);
 
+  /** The hand's (or mouse's) recent pointing, with the shape under it. */
+  const currentPointing = useCallback((): SpeechPointing | null => {
+    // The hand first: its recorder knows which shape it is over.
+    const hand = resolveHandPointing(handPointingSnapshotRef.current, {
+      now: Date.now(),
+      maxAgeMs: SPEECH_POINTING_MAX_AGE_MS,
+    });
+    if (hand.here) {
+      return { at: Date.now(), point: hand.here, targetId: hand.targetIds.at(-1) ?? null };
+    }
+    const point = lastGesturePointerRef.current;
+    if (!point || Date.now() - lastGesturePointerAtRef.current > SPEECH_POINTING_MAX_AGE_MS) return null;
+    const target = findSceneElementAtPoint(boardRef.current, point);
+    return { at: Date.now(), point: { ...point }, targetId: target?.id ?? null };
+  }, []);
+  currentPointingRef.current = currentPointing;
+  /** Called on the first sound of a new utterance. */
+  const captureSpeechStartPointing = useCallback(() => {
+    speechStartPointingRef.current = currentPointing();
+  }, [currentPointing]);
+
   const startVoiceCommand = useCallback(() => {
     if (!voiceCaptureAvailable) {
       setSpeechRecognitionStatus("idle");
@@ -7795,6 +8702,8 @@ export function AirboardPrototype({
       activeSession.stop();
       markVoiceDropped(false);
       voiceRouter.reset();
+      voiceCoalescer.cancel();
+      heldVoiceMetaRef.current = null;
       setVoiceGate(null);
       setSpeechArmed(false);
       setSpeechListening(false);
@@ -7826,10 +8735,10 @@ export function AirboardPrototype({
         turnIndex?: number | undefined;
       },
     ) => {
-      setSpeechHeardText(transcript);
       if (commandWasRouted) {
         return;
       }
+      showHeardSpeech(transcript);
       const classification = classifyBrowserWakeTranscript(transcript);
       if (classification.commands.length > 0) {
         return;
@@ -7873,10 +8782,9 @@ export function AirboardPrototype({
         });
       }
       if (!classification.wakeDetected) {
-        setSpeechRecognitionStatus("wake-missing");
-        setCommandFeedback(
-          `Mic heard “${truncateSpeechTranscript(transcript)}”, but it wasn't addressed to the board. Hold an open palm for voice, or say “Airo, add a user.”`,
-        );
+        // Room talk: nothing to show or say. It isn't echoed to the presented
+        // tab, and it doesn't replace Airo's last result or question.
+        setSpeechRecognitionStatus("waiting");
       } else if (classification.commands.length === 0) {
         setSpeechRecognitionStatus("wake-detected");
         setCommandFeedback("Airo heard the wake word. Say the diagram command now.");
@@ -7952,8 +8860,14 @@ export function AirboardPrototype({
               showVoiceStartFeedback("Airo is listening. Say “Airo, add a user.”");
             }
           },
+          onAllowanceWarning: (warning) => {
+            // Voice keeps working; this only says the day's minutes are low.
+            setCommandFeedback(warning.message);
+            showAiroNotice({ tone: "warning", detail: warning.message });
+          },
           onInterim: (transcript) => {
             if (!voiceCaptureInteractionIdRef.current) {
+              captureSpeechStartPointing();
               const voiceTurnId = crypto.randomUUID();
               voiceCaptureInteractionIdRef.current = voiceTurnId;
               reportVoiceTrace(voiceTurnId, "capture_started", {
@@ -7967,7 +8881,8 @@ export function AirboardPrototype({
               });
             }
             voiceRouter.noteSpeechActivity();
-            setSpeechHeardText(transcript);
+            voiceCoalescer.noteSpeechActivity();
+            showHeardSpeech(transcript);
             setSpeechRecognitionStatus("hearing");
           },
           onFinal: (transcript, event) => {
@@ -8047,6 +8962,8 @@ export function AirboardPrototype({
               });
             }
             voiceRouter.reset();
+            voiceCoalescer.cancel();
+            heldVoiceMetaRef.current = null;
             setVoiceGate(null);
             speechSessionRef.current = null;
             setSpeechListening(false);
@@ -8160,9 +9077,10 @@ export function AirboardPrototype({
       },
       onListening: (listening) => setSpeechListening(listening),
       onHeard: ({ transcript, isFinal }) => {
-        setSpeechHeardText(transcript);
+        showHeardSpeech(transcript);
         if (!isFinal) {
           if (!voiceCaptureInteractionIdRef.current) {
+            captureSpeechStartPointing();
             const voiceTurnId = crypto.randomUUID();
             voiceCaptureInteractionIdRef.current = voiceTurnId;
             reportVoiceTrace(voiceTurnId, "capture_started", {
@@ -8173,6 +9091,7 @@ export function AirboardPrototype({
             });
           }
           voiceRouter.noteSpeechActivity();
+          voiceCoalescer.noteSpeechActivity();
           setSpeechRecognitionStatus("hearing");
           return;
         }
@@ -8200,9 +9119,11 @@ export function AirboardPrototype({
             routed: true,
             wakeDetected: false,
             decisionCount: 1,
-            channel:
-              gated.wakePhrase === "hold-to-edit" ? "scoped" : "ptt",
+            channel: voiceTraceChannel(gated),
           });
+          return;
+        }
+        if (voiceCoalescer.offerContinuation(transcript)) {
           return;
         }
         reportFinalTranscript(transcript, false, {
@@ -8249,6 +9170,8 @@ export function AirboardPrototype({
       },
       onEnd: (reason) => {
         voiceRouter.reset();
+        voiceCoalescer.cancel();
+        heldVoiceMetaRef.current = null;
         setVoiceGate(null);
         setSpeechListening(false);
         setSpeechArmed(false);
@@ -8290,6 +9213,10 @@ export function AirboardPrototype({
     }
   }, [
     showVoiceStartFeedback,
+    showHeardSpeech,
+    captureSpeechStartPointing,
+    showAiroNotice,
+    voiceCoalescer,
     cancelHeadlessVoiceRetry,
     dispatchVoiceDecision,
     effectiveAccessToken,
@@ -8460,8 +9387,7 @@ export function AirboardPrototype({
         },
         onEnded: () => {
           meetBridgeSessionRef.current = null;
-          stopCamera();
-          setCameraError("The Meet camera bridge stopped. Click Enable hands to restart.");
+          recoverCameraRef.current?.("bridge_ended");
         },
       });
       meetBridgeSessionRef.current = session;
@@ -8520,6 +9446,13 @@ export function AirboardPrototype({
       }
 
       cameraStreamRef.current = stream;
+      // Unplugged, taken by another app, or revoked by the OS: the track
+      // ends on its own (stopping it ourselves never fires "ended").
+      for (const track of stream.getVideoTracks()) {
+        track.addEventListener("ended", () => {
+          if (cameraStreamRef.current === stream) recoverCameraRef.current?.("track_ended");
+        });
+      }
       video.srcObject = stream;
       await video.play();
       setCameraStatus("tracker_loading");
@@ -8559,13 +9492,111 @@ export function AirboardPrototype({
       if (standaloneEditor) {
         void refreshStandaloneMediaPermissions();
       }
+      if (cameraRecoveryRef.current.attempt > 0 && shouldRetryCameraStart(error)) {
+        // A restart attempt failed (the camera is still busy or unplugged):
+        // keep backing off instead of leaving hands off until a reload.
+        const retry = recoverCameraRef.current;
+        window.setTimeout(() => retry?.("start_failed"), 0);
+      } else if (cameraRecoveryRef.current.attempt > 0) {
+        cameraRecoveryRef.current.attempt = 0;
+      }
     } finally {
       cameraStartInProgressRef.current = false;
       if (!trackerSettled) {
         void trackerLoad?.then((tracker) => tracker.close(), () => undefined);
       }
     }
-  }, [appendCopilotActivity, cameraBlockedMessage, cameraCaptureAvailable, cameraStatus, confidenceThreshold, embeddedMediaCapture, enforceCameraCanvas, isMeetSurface, meetMediaBridge, refreshStandaloneMediaPermissions, standaloneEditor, stopCamera]);
+  }, [appendCopilotActivity, cameraBlockedMessage, cameraCaptureAvailable, cameraStatus, confidenceThreshold, embeddedMediaCapture, enforceCameraCanvas, isMeetSurface, meetMediaBridge, refreshStandaloneMediaPermissions, standaloneEditor]);
+
+  startCameraRef.current = startCamera;
+
+  const cancelCameraRecovery = useCallback(() => {
+    const recovery = cameraRecoveryRef.current;
+    if (recovery.timer !== null) clearTimeout(recovery.timer);
+    if (recovery.stableTimer !== null) clearTimeout(recovery.stableTimer);
+    cameraRecoveryRef.current = { attempt: 0, timer: null, stableTimer: null, pending: false };
+  }, []);
+
+  /**
+   * Camera and hand-tracker auto-recovery (gap 12). A tracker error, an ended
+   * camera track, or a stopped Meet bridge restarts both on their own with
+   * backoff, no click needed. The palm voice gate comes back with the tracker
+   * because every frame again flows through the same coordinator.
+   */
+  const recoverCamera = useCallback(
+    (reason: CameraRecoveryReason) => {
+      const recovery = cameraRecoveryRef.current;
+      if (recovery.timer !== null) return;
+      if (recovery.stableTimer !== null) {
+        clearTimeout(recovery.stableTimer);
+        recovery.stableTimer = null;
+      }
+      if (reason !== "start_failed") stopCamera();
+      if (recovery.attempt >= CAMERA_RECOVERY_MAX_ATTEMPTS) {
+        cameraRecoveryRef.current = { attempt: 0, timer: null, stableTimer: null, pending: false };
+        setCameraStatus("tracker_error");
+        setCameraError(
+          standaloneEditorRef.current
+            ? "Hands couldn't restart on their own. Come back to this tab or reload the board to try again."
+            : "Hands couldn't restart on their own. Click Enable hands to try again.",
+        );
+        return;
+      }
+      const delayMs = cameraRecoveryDelayMs(recovery.attempt);
+      recovery.attempt += 1;
+      recovery.pending = true;
+      setCameraStatus("tracker_error");
+      setCameraError(cameraRecoveryMessage(reason, delayMs));
+      reportGestureTrace({
+        interactionId: gestureInteractionIdRef.current ?? "camera-recovery",
+        frameAtMs: performance.now(),
+        stage: "cancellation",
+        data: { reason: `camera_recovery_${reason}`, attempt: recovery.attempt },
+      });
+      recovery.timer = setTimeout(() => {
+        recovery.timer = null;
+        recovery.pending = false;
+        void startCameraRef.current?.();
+      }, delayMs);
+    },
+    [reportGestureTrace, stopCamera],
+  );
+  recoverCameraRef.current = recoverCamera;
+
+  useEffect(() => {
+    // A camera that keeps running after a restart resets the backoff.
+    if (cameraStatus !== "active" || cameraRecoveryRef.current.attempt === 0) return;
+    const recovery = cameraRecoveryRef.current;
+    recovery.stableTimer = setTimeout(() => {
+      recovery.stableTimer = null;
+      recovery.attempt = 0;
+    }, CAMERA_RECOVERY_STABLE_MS);
+    setCameraError(null);
+    return () => {
+      if (recovery.stableTimer !== null) {
+        clearTimeout(recovery.stableTimer);
+        recovery.stableTimer = null;
+      }
+    };
+  }, [cameraStatus]);
+
+  useEffect(() => {
+    // A camera plugged back in shortens the wait: retry now.
+    const devices = typeof navigator === "undefined" ? undefined : navigator.mediaDevices;
+    if (!devices?.addEventListener) return;
+    const retryNow = () => {
+      const recovery = cameraRecoveryRef.current;
+      if (!recovery.pending || recovery.timer === null) return;
+      clearTimeout(recovery.timer);
+      recovery.timer = null;
+      recovery.pending = false;
+      void startCameraRef.current?.();
+    };
+    devices.addEventListener("devicechange", retryNow);
+    return () => devices.removeEventListener("devicechange", retryNow);
+  }, []);
+
+  useEffect(() => () => cancelCameraRecovery(), [cancelCameraRecovery]);
 
   useEffect(() => {
     if (
@@ -8603,8 +9634,6 @@ export function AirboardPrototype({
   // switch to turn them on. Only an input the person blocked in the browser,
   // turned off in Settings → Preferences, or their workspace admin turned off,
   // stays off; a board opened in a background tab waits until it is shown.
-  const startCameraRef = useRef(startCamera);
-  startCameraRef.current = startCamera;
   const cameraStatusRef = useRef(cameraStatus);
   cameraStatusRef.current = cameraStatus;
   const [boardTabVisible, setBoardTabVisible] = useState(true);
@@ -8654,7 +9683,7 @@ export function AirboardPrototype({
       if (askedAny && !(plan.ask.audio && access.audio) && !(plan.ask.video && access.video)) {
         setAiroAskDeclined(true);
       }
-      if (plan.camera && access.video) void startCameraRef.current();
+      if (plan.camera && access.video) void startCameraRef.current?.();
       if (plan.voice && access.audio && !speechSessionRef.current) {
         // Another board tab took voice while this one was starting: wake it
         // when this tab is used again.
@@ -8732,7 +9761,7 @@ export function AirboardPrototype({
       wakeVoice();
       const camera = cameraStatusRef.current;
       if (airoCameraWantedRef.current && (camera === "error" || camera === "tracker_error")) {
-        void startCameraRef.current();
+        void startCameraRef.current?.();
       }
     };
     const onInteract = () => {
@@ -8881,6 +9910,7 @@ export function AirboardPrototype({
     // rebuilds the board. Prior history is dropped because those events no longer
     // apply to the cleared board, but the clear itself can be reverted.
     if (clearedStrokeIds.length > 0) {
+      sceneRedoStackRef.current = [];
       undoStackRef.current = [
         {
           type: "diagram",
@@ -8901,6 +9931,7 @@ export function AirboardPrototype({
         "Board cleared. Press Undo or Cmd/Ctrl+Z to restore it.",
       );
     } else {
+      sceneRedoStackRef.current = [];
       undoStackRef.current = [];
       setCommandFeedback("Board cleared. Describe the next diagram you want to create.");
     }
@@ -9040,7 +10071,11 @@ export function AirboardPrototype({
       return false;
     };
 
-    void fetchRealtimeTranscriptionConfig(AIRBOARD_API_URL)
+    // A failed load is retried on its own (2 s, 4 s … up to a minute), so a
+    // blip while the board opens doesn't leave voice off until a reload.
+    let retryTimer: number | undefined;
+    let attempt = 0;
+    const loadConfig = (): void => { void fetchRealtimeTranscriptionConfig(AIRBOARD_API_URL)
       .then((config) => {
         if (cancelled) {
           return;
@@ -9094,11 +10129,16 @@ export function AirboardPrototype({
           shouldRetryHeadlessMeetSpeechConfig(error)
         ) {
           scheduleHeadlessSpeechConfigRetry();
+        } else if (!headlessMeetOverlay) {
+          attempt += 1;
+          retryTimer = window.setTimeout(loadConfig, configRetryDelayMs(attempt));
         }
-      });
+      }); };
+    loadConfig();
 
     return () => {
       cancelled = true;
+      window.clearTimeout(retryTimer);
     };
   }, [
     cancelHeadlessSpeechConfigRetry,
@@ -9109,7 +10149,11 @@ export function AirboardPrototype({
 
   useEffect(() => {
     let cancelled = false;
-    void fetchSemanticIntentConfig(AIRBOARD_API_URL)
+    // Without these settings every command the fast rules miss is refused,
+    // so a failed load keeps retrying in the background.
+    let retryTimer: number | undefined;
+    let attempt = 0;
+    const loadConfig = (): void => { void fetchSemanticIntentConfig(AIRBOARD_API_URL)
       .then((config) => {
         if (cancelled) {
           return;
@@ -9130,9 +10174,13 @@ export function AirboardPrototype({
         }
         semanticIntentConfigRef.current = null;
         setSemanticIntentConfig(null);
-      });
+        attempt += 1;
+        retryTimer = window.setTimeout(loadConfig, configRetryDelayMs(attempt));
+      }); };
+    loadConfig();
     return () => {
       cancelled = true;
+      window.clearTimeout(retryTimer);
     };
   }, [speechConfigRevision]);
 
@@ -9272,7 +10320,8 @@ export function AirboardPrototype({
           cameraPlacementActiveRef.current ||
           activeStrokeIdRef.current !== null ||
           pointerStrokeIdRef.current !== null ||
-          pointerErasingRef.current,
+          pointerErasingRef.current ||
+          sceneMoveRef.current?.pointerId === HAND_SCENE_POINTER_ID,
       });
     },
     [inputPaused, processPalmVoiceGestureFrame, voiceRouter],
@@ -9371,12 +10420,24 @@ export function AirboardPrototype({
             };
           }
 
+          // A grab or carry in progress keeps the stream: a loosened fist
+          // holds for about a second, and with a second hand in frame the
+          // hand nearest the grab keeps it.
+          const holding =
+            cameraGrabActiveRef.current || cameraPlacementActiveRef.current;
+          const rawSignal = selectLandmarkManipulationSignal(
+            hands,
+            pipelineResult?.hand,
+            mapping,
+            { holding, anchor: handSignalAnchorRef.current },
+          );
+          const signal = looseGrabHoldRef.current.apply(rawSignal, {
+            holding,
+            timestampMs: frame.timestampMs,
+          });
+          handSignalAnchorRef.current = signal?.point ?? handSignalAnchorRef.current;
           return {
-            signal: selectLandmarkManipulationSignal(
-              hands,
-              pipelineResult?.hand,
-              mapping,
-            ),
+            signal,
             navTracker: canvasNavTrackerRef.current!,
           };
         },
@@ -9411,13 +10472,19 @@ export function AirboardPrototype({
                 hands,
                 mapping,
               );
+              // Two-hand pan/zoom never starts during a one-hand grab or
+              // carry, and a second hand entering the frame can't cancel it.
+              const holding =
+                cameraGrabActiveRef.current || cameraPlacementActiveRef.current;
               const navUpdate = navTracker.update({
                 hands: navigationHands,
                 timestampMs,
+                blocked: holding,
               });
               const reserving = shouldReserveLandmarkNavigation(
                 hands.length,
                 navTracker.reserving,
+                holding && !navTracker.engaged,
               );
               const actionEvidence =
                 gestureActionEvidenceTrackerRef.current!.observeNavigation({
@@ -9627,7 +10694,14 @@ export function AirboardPrototype({
 
       const interaction = objectInteractionRef.current;
       const snapshot = voiceRouter.snapshot;
-      const movingStrokeId = interaction?.mode === "moving" ? interaction.strokeId : null;
+      // The scoped gate's `strokeId` is a board target id: a legacy stroke id
+      // or, for a v2 element the hand is holding, the scene element id.
+      const handSceneMove =
+        sceneMoveRef.current?.pointerId === HAND_SCENE_POINTER_ID ? sceneMoveRef.current : null;
+      const movingStrokeId =
+        interaction?.mode === "moving"
+          ? interaction.strokeId
+          : handSceneMove?.elementId ?? handSceneMoveResumeRef.current;
       const event = holdToEditTrackerRef.current!.update({
         interaction: movingStrokeId
           ? { strokeId: movingStrokeId, point: lastGesturePointerRef.current }
@@ -9710,13 +10784,7 @@ export function AirboardPrototype({
             },
             error,
           );
-          stopCamera();
-          setCameraStatus("tracker_error");
-          setCameraError(
-            standaloneEditorRef.current
-              ? "Hand tracking stopped after an inference error. Come back to this tab or reload the board to retry."
-              : "Hand tracking stopped after an inference error. Click Enable hands to retry.",
-          );
+          recoverCameraRef.current?.("tracker_error");
           return;
         }
         const inferenceMs = performance.now() - inferenceStartedAt;
@@ -11764,6 +12832,17 @@ export function AirboardPrototype({
               />
             </>
           ) : null}
+          {airoNotice && !broadcastSafe ? (
+            <div
+              className={`airo-notice ${airoNotice.tone}`}
+              role="status"
+              aria-live="polite"
+              data-testid="airo-notice"
+            >
+              <span aria-hidden="true">{airoNotice.tone === "question" ? "?" : "!"}</span>
+              <span className="airo-notice-detail">{airoNotice.detail}</span>
+            </div>
+          ) : null}
           {undoToast && !broadcastSafe ? (
             <div className="undo-toast" role="status" aria-live="polite" data-testid="undo-toast">
               <span className="undo-toast-detail">{undoToast.detail}</span>
@@ -11809,53 +12888,46 @@ export function AirboardPrototype({
                   : "Move locked — move, then reopen"}
             </div>
           ) : null}
+          {inputMode === "gesture" && handCue && !broadcastSafe ? (
+            <div
+              key={handCue.id}
+              className={`hand-cue ${handCue.tone}`}
+              role="status"
+              aria-live="polite"
+              data-testid="hand-cue"
+              style={{ left: handCue.x, top: handCue.y }}
+            >
+              {handCue.text}
+            </div>
+          ) : null}
           {cameraCaptureAvailable &&
           onboardingVisible &&
           !desktopOverlay &&
           inputMode === "gesture" ? (
-            <div className="onboarding-overlay" role="dialog" aria-label="Make your first diagram">
+            // A corner card, not a dialog: the board stays usable behind it,
+            // and it closes by itself after the first change.
+            <aside className="onboarding-overlay" aria-label="Build by talking and pointing">
               <div className="onboarding-card">
-                <h2>Make your first diagram</h2>
-                <p>Type these into the Airo box on the right, pressing Enter after each:</p>
+                <h2>Build by talking and pointing</h2>
                 <ol className="onboarding-commands">
-                  <li><code>add a user</code></li>
-                  <li><code>add an API next to the user</code></li>
-                  <li><code>connect user to API</code></li>
+                  <li>Say <code>Airo, add a user</code>, or hold an open palm still and speak.</li>
+                  <li>
+                    Describe a flow: <code>Airo, users sign in through the auth service, which checks the user database</code>.
+                  </li>
+                  <li>Close your hand over a shape to move it; open it to drop.</li>
+                  <li>Changes apply at once. Say <code>Airo, undo</code> to take one back.</li>
                 </ol>
-                <p>
-                  Prefer the mouse? Pick a shape from the toolbar below, click the board, and
-                  type to name it. Double-click anything to change its text.
-                </p>
                 <p className="onboarding-aside">
-                  <strong>Airo</strong> listens and watches for your hands as soon as the board
-                  opens: hold an open palm still and speak, or close your hand over a shape to
-                  move it.{" "}
+                  This card closes after your first change.{" "}
                   <a href="/help/using-the-board/gestures" target="_blank" rel="noreferrer">
                     All camera gestures
                   </a>
-                  . Everything applies instantly; undo with Cmd/Ctrl+Z or “Airo, undo”.
                 </p>
-                <button
-                  type="button"
-                  className="primary"
-                  autoFocus
-                  onClick={() => {
-                    setOnboardingVisible(false);
-                    try {
-                      window.localStorage.setItem("airboard.onboarding.v1", "done");
-                    } catch {
-                      // Best-effort persistence only.
-                    }
-                    // The command box lives in the Airo panel, which starts
-                    // closed on phones; open it before focusing.
-                    setCopilotVisibility(true);
-                    window.requestAnimationFrame(() => intentCommandInputRef.current?.focus());
-                  }}
-                >
-                  Start building
+                <button type="button" className="secondary" onClick={finishOnboarding}>
+                  Got it
                 </button>
               </div>
-            </div>
+            </aside>
           ) : null}
           <canvas
             ref={canvasRef}
@@ -12271,6 +13343,18 @@ export function AirboardPrototype({
                 Lightboard (neon) theme
                 {cameraCanvasLocked ? " · required while camera overlay is on" : ""}
               </span>
+            </label>
+            <label className="check-row" htmlFor="airo-sounds">
+              <input
+                id="airo-sounds"
+                type="checkbox"
+                checked={airoSounds}
+                onChange={(event) => {
+                  setAiroSoundsEnabled(event.target.checked);
+                  setAiroSounds(event.target.checked);
+                }}
+              />
+              <span>Quiet sounds when Airo applies, misses, or asks</span>
             </label>
             {surface === "meet-main-stage" && cameraOverlay ? (
               <>
@@ -13489,13 +14573,43 @@ function tableCellIdAtPoint(
   )?.id ?? null;
 }
 
+/** Whether undoing this entry leaves a redo entry that puts it back exactly. */
+function undoEntryCanBeRedone(action: UndoAction): boolean {
+  if (action.type === "diagram") return Boolean(action.redoEvents?.length);
+  return action.type.startsWith("scene_");
+}
+
+/** The hidden scene copy the reducer keeps of a legacy (Airo-drawn) stroke. */
+function isLegacyStrokeSceneCopy(state: BoardState, id: string): boolean {
+  return Boolean(state.elements[id]?.legacyStrokeId);
+}
+
+/**
+ * Legacy strokes the voice reference points at, for the planner: the scene
+ * rules can't edit those, so the planner gets them as what "this" means.
+ */
+function pointedLegacyStrokeIds(
+  state: BoardState,
+  reference: VoiceReference | null,
+): string[] {
+  if (!reference) return [];
+  const ids = [reference.startTargetId, ...reference.pointedIds].filter(
+    (id): id is string => Boolean(id) && state.strokes[id!]?.status === "committed",
+  );
+  return [...new Set(ids)];
+}
+
 function resolveSceneIntentTargetIds(
   state: BoardState,
-  target: { kind: "selection" } | { kind: "visible_label"; label: string },
+  target: SceneIntentTarget,
   selectionIds: readonly string[],
+  reference: VoiceReference | null = null,
 ): string[] {
   if (target.kind === "selection") {
     return selectionIds.filter((id) => state.elements[id]?.status === "active");
+  }
+  if (target.kind === "contextual") {
+    return resolveContextualSceneTarget(state, target.pronoun, selectionIds, reference);
   }
   const requested = normalizeSceneReference(target.label);
   const matches = Object.values(state.elements)
@@ -13514,6 +14628,44 @@ function resolveSceneIntentTargetIds(
     ? matches.filter((element) => normalizeSceneReference(sceneElementPlainLabel(element)) === requested)
     : [];
   return (labelled.length > 0 ? labelled : matches).map(({ id }) => id);
+}
+
+/**
+ * "it", "this", "that", "them": what the hand pointed at while speaking, else
+ * the selection, else the shape made or changed most recently. Best guess,
+ * never a question; undo is the safety net.
+ */
+function resolveContextualSceneTarget(
+  state: BoardState,
+  pronoun: SceneIntentPronoun,
+  selectionIds: readonly string[],
+  reference: VoiceReference | null,
+): string[] {
+  const active = (id: string) => state.elements[id]?.status === "active";
+  const pointed = (reference?.pointedIds ?? []).filter(active);
+  const selected = selectionIds.filter(active);
+  const plural = pronoun === "them" || pronoun === "these" || pronoun === "those";
+  if (plural) {
+    if (pointed.length > 1) return pointed;
+    return selected;
+  }
+  if (pointed.length > 0) {
+    // "that" is the latest thing pointed at; "this" and "it" what was under
+    // the hand as speech began, else the latest.
+    const start = reference?.startTargetId && active(reference.startTargetId) ? reference.startTargetId : null;
+    return [pronoun === "that" ? pointed[pointed.length - 1]! : start ?? pointed[pointed.length - 1]!];
+  }
+  if (selected.length > 0) return [selected[selected.length - 1]!];
+  const recent = Object.values(state.elements)
+    .filter((element) =>
+      element.status === "active" &&
+      element.visible &&
+      element.kind !== "connector" &&
+      element.kind !== "section" &&
+      !element.legacyStrokeId,
+    )
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+  return recent ? [recent.id] : [];
 }
 
 function sceneElementVisibleForIntent(
@@ -13768,6 +14920,14 @@ function sceneIntentFeedback(intent: Exclude<BoardSceneIntent, { type: "invalid"
     case "select_all": return "Select every object";
     case "group": return "Create section around selection";
     case "layout": return "Lay out board elements";
+    case "move_to": return "Move board element";
+    case "change_shape": return "Change shape type";
+    case "reorder": return intent.position === "front" ? "Bring to front" : "Send to back";
+    case "undo": return intent.count > 1 ? `Undo ${intent.count} changes` : "Undo";
+    case "redo": return intent.count > 1 ? `Redo ${intent.count} changes` : "Redo";
+    case "correct": return "Correct the last change";
+    case "zoom_to_fit": return "Zoom to fit";
+    case "focus": return "Focus";
   }
 }
 

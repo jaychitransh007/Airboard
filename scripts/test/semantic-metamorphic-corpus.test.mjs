@@ -56,8 +56,8 @@ test("metamorphic expansion is deterministic and exceeds 600 stable scenarios", 
   });
 
   assert.deepEqual(first, second);
-  assert.equal(source.semanticPromptVersion, "2.13");
-  assert.equal(first.metamorphic.semanticPromptVersion, "2.13");
+  assert.equal(source.semanticPromptVersion, "2.14");
+  assert.equal(first.metamorphic.semanticPromptVersion, "2.14");
   assert.ok(first.cases.length >= SEMANTIC_METAMORPHIC_MIN_SCENARIOS);
   const nonPendingCases = source.cases.filter(
     ({ pendingClarification }) => pendingClarification === undefined,
@@ -111,8 +111,10 @@ test("source corpus covers long narratives and high-risk semantic boundaries", a
     "existing-board-fan-in-already-satisfied",
     "lengthy-checkout-narrative-475",
     "acoustic-repair-api-queue",
-    "clarify-dense-duplicate-cache-delete",
-    "clarify-parallel-connector-delete",
+    "best-guess-dense-duplicate-cache-delete",
+    "best-guess-parallel-connector-delete",
+    "addressed-narration-auth-flow",
+    "connect-to-missing-cache",
     "delete-second-parallel-connector",
     "explicit-unique-destructive-delete",
     "prompt-injection-is-data",
@@ -234,24 +236,31 @@ test("source corpus covers long narratives and high-risk semantic boundaries", a
     ],
   });
 
-  const dense = sourceById.get("clarify-dense-duplicate-cache-delete");
+  const dense = sourceById.get("best-guess-dense-duplicate-cache-delete");
   assert.ok(dense.context.objects.length >= 10);
   assert.equal(
     dense.context.objects.filter(({ label }) => label === "Cache").length,
     2,
   );
-  assert.equal(dense.expected.status, "clarification");
+  // Gap 6: a best guess is applied at once; undo is the safety net.
+  assert.equal(dense.expected.status, "resolved");
 
-  const parallel = sourceById.get("clarify-parallel-connector-delete");
+  const parallel = sourceById.get("best-guess-parallel-connector-delete");
   assert.deepEqual(
     parallel.context.edges.map(({ occurrence }) => occurrence),
     [1, 2],
   );
-  assert.equal(parallel.expected.status, "clarification");
-  assert.deepEqual(
-    parallel.expected.finalState.requiredEdges.map(({ occurrence }) => occurrence),
-    [1, 2],
-  );
+  assert.equal(parallel.expected.status, "resolved");
+  assert.equal(parallel.expected.finalState.edgeCountDelta, -1);
+
+  // Gap 3: production strips the wake word, so most seeds carry addressedBy
+  // instead of "Airo", and narration addressed by palm is drawn.
+  const addressed = source.cases.filter(({ addressedBy }) => addressedBy !== undefined);
+  assert.ok(addressed.length >= 30);
+  assert.ok(addressed.every(({ transcript }) => !/^airo\b/iu.test(transcript)));
+  const narration = sourceById.get("addressed-narration-auth-flow");
+  assert.equal(narration.addressedBy, "palm");
+  assert.deepEqual(narration.expected.actionTypeCounts, { create: 3, connect: 2 });
   assert.deepEqual(
     sourceById.get("delete-second-parallel-connector").expected
       .actionTypeCounts,
@@ -284,6 +293,7 @@ test("independent semantic seeds cover every action, reference, risk, status, an
     "align",
     "branch",
     "cancel",
+    "change_type",
     "connect",
     "create",
     "delete",
@@ -291,11 +301,14 @@ test("independent semantic seeds cover every action, reference, risk, status, an
     "distribute",
     "duplicate",
     "group",
+    "label_connection",
     "layout",
     "move",
     "rename",
+    "resize",
     "reverse_connection",
     "select",
+    "style_connection",
     "undo",
   ]);
   assert.deepEqual(coverage.referenceTypes, [

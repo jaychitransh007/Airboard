@@ -1841,7 +1841,7 @@ function drawAnnotationStroke(
     annotation.end
   ) {
     const routePoints = getConnectorRoutePoints(annotation);
-    drawArrowRoute(context, routePoints);
+    drawArrowRoute(context, routePoints, annotation.lineStyle);
     const label = annotation.label;
     if (label) {
       const midpoint = getRouteMidpoint(routePoints) ?? {
@@ -2248,6 +2248,7 @@ function drawDiamondShape(
 function drawArrowRoute(
   context: CanvasRenderingContext2D,
   points: readonly { x: number; y: number }[],
+  lineStyle?: "dashed" | "dotted",
 ): void {
   const start = points[0];
   const end = points[points.length - 1];
@@ -2255,12 +2256,17 @@ function drawArrowRoute(
     return;
   }
 
+  // Only the line is dashed; a dashed arrowhead reads as a broken one.
+  context.setLineDash(
+    lineStyle === "dashed" ? [10, 7] : lineStyle === "dotted" ? [2, 6] : [],
+  );
   context.beginPath();
   context.moveTo(start.x, start.y);
   for (const point of points.slice(1)) {
     context.lineTo(point.x, point.y);
   }
   context.stroke();
+  context.setLineDash([]);
 
   // Orient the arrowhead from the last point that is actually distinct from the
   // end. A straight two-point route uses the start; a route whose endpoints
