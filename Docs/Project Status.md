@@ -8,8 +8,8 @@
 
 | Part | Where | Notes |
 | --- | --- | --- |
-| Web | Cloud Run `airboard-pilot-web`, revision `launch-f5e326e` | `https://airboard-pilot-web-634900453473.asia-south1.run.app`; one instance, kept warm |
-| API | Cloud Run `airboard-pilot-api`, revision `launch-f5e326e` | Up to 3 instances, one kept warm, each taking up to 250 connections and 50 live voice streams; live boards and per-minute limits are shared across instances. Each person gets 500 Airo model commands and 240 voice minutes a day (since RGB-049, minutes count only while someone speaks), and everyone together at most 5,000 and 3,000 a day (RGB-044) |
+| Web | Cloud Run `airboard-pilot-web`, revision `launch-ff68085` | `https://airboard-pilot-web-634900453473.asia-south1.run.app`; one instance, kept warm |
+| API | Cloud Run `airboard-pilot-api`, revision `launch-ff68085` | Up to 3 instances, one kept warm, each taking up to 250 connections and 50 live voice streams; live boards and per-minute limits are shared across instances. Each person gets 500 Airo model commands and 240 voice minutes a day (since RGB-049, minutes count only while someone speaks), and everyone together at most 5,000 and 3,000 a day (RGB-044) |
 | Database and sign-in | Supabase `ujotgzjpkocuhtfrvbzu` (ap-south-1, Mumbai) | Every migration in `supabase/migrations` applied, the last `20261112120000` (drops the nine tables nothing uses: extension installations, board history, SSO/SCIM, and four first-schema leftovers) |
 | Google sign-in | Google Auth Platform in the pilot Google Cloud project | Consent screen "Airboard", published to every Google account; client "Airboard sign-in (Supabase)" |
 | Lifecycle jobs | Cloud Scheduler `airboard-lifecycle-hourly` | Failed runs are logged; no alerts (the support inbox carries customer mail only) |
@@ -22,8 +22,9 @@
 
 ## Roll back to
 
-- **Web:** live `launch-f5e326e`; roll back to `launch-3a5c7ab`, the web first.
-- **API:** live `launch-f5e326e`; roll back to `launch-3a5c7ab` after the web (older APIs reject the new connector field the new web saves). The floor stays `launch-9d5bd39`.
+- **Web:** live `launch-ff68085`; roll back to `launch-f5e326e`, the web first. That works while the API accepts scene version 2 (until step C below).
+- **API:** live `launch-ff68085`; roll back to `launch-f5e326e` only after the web is back on `launch-f5e326e` (older APIs refuse the scene-version-3 web with "outdated"). The floor stays `launch-9d5bd39`.
+- **Pending step C (from 13 Nov 15:00 UTC):** a one-line API release that accepts only scene version 3, so tabs still on `launch-f5e326e` reload. After it, a web rollback below `launch-ff68085` first needs the API back on `launch-ff68085`. The `strokes: {}` shim in join/resume/`/state` can go 7 days after step C.
 - **Rollback floor:** no API revision older than `launch-9d5bd39`. Migration `20261112120000` dropped tables older APIs use (their board saves return 500). Restoring dropped data needs the 12 Nov 02:36 UTC Supabase backup.
 - **Images:** Artifact Registry keeps `live` and the 10 newest per image, and deletes any other image older than 3 days.
 
@@ -31,6 +32,7 @@
 
 Newest first; the [change log](Release%20Readiness%20Backlog.md#change-log) has every deploy with its evidence and rollback target.
 
+- `launch-ff68085` (both, 12 Nov): shape-merge phase 3, the old shape model deleted (about 9,800 lines). Scene version 3; the API accepts 2 and 3, refuses new old-format writes and converts any stored ones. Drag-from-catalogue preview shows the exact shape. API promoted first.
 - Data change (12 Nov, no deploy): the 5 production boards holding old-format shapes (26 shapes) were converted to the newer shapes with `scripts/convert-legacy-boards.mjs`; no board holds old-format shapes now. Backups and a restore script are kept off the repo.
 - `launch-f5e326e` (both, 12 Nov): Airo draws only the newer shapes, with bold arrows and labels clear of shapes; board file split begun (10,310 lines); stylesheet tidied.
 - `launch-3a5c7ab` (both, 12 Nov): refactoring steps 1–3; operator token header-only, CI trimmed, test safety net. No user-facing change.
