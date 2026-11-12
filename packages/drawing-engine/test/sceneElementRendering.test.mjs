@@ -7,6 +7,7 @@ import {
   drawSceneElement,
   drawSceneElementOverlay,
   orderSceneElementsForRender,
+  renderBoard,
   sceneElementsForRender,
 } from "../src/renderer.ts";
 import {
@@ -45,7 +46,7 @@ test("every scene kind has a generalized hover and selection overlay", () => {
       content: createRichTextDocument("Shape"),
     }),
   ];
-  for (const mode of ["hover", "selected", "multi-selected"]) {
+  for (const mode of ["hover", "selected", "multi-selected", "ghost"]) {
     for (const element of elements) {
       const context = recordingContext();
       drawSceneElementOverlay(context, element, mode);
@@ -57,28 +58,73 @@ test("every scene kind has a generalized hover and selection overlay", () => {
   }
 });
 
-test("scene ordering respects z-index, status, visibility, and legacy mirror suppression", () => {
-  const sourceStroke = legacyStroke("legacy");
-  const legacyMirror = scene("sticky", "legacy-mirror", {
-    zIndex: -5,
-    legacyStrokeId: sourceStroke.id,
-  });
-  const hydratedMirror = scene("text", "hydrated-mirror", {
-    zIndex: 4,
-    legacyStrokeId: "missing-stroke",
-  });
+test("scene ordering respects z-index, status, and visibility", () => {
+  const top = scene("text", "top", { zIndex: 4 });
   const visible = scene("stamp", "visible", { zIndex: 2 });
   const hidden = scene("code_block", "hidden", { zIndex: 1, visible: false });
   const deleted = scene("mind_map_node", "deleted", { zIndex: 3, status: "deleted" });
-  const state = boardState(
-    { [legacyMirror.id]: legacyMirror, [hydratedMirror.id]: hydratedMirror, [visible.id]: visible, [hidden.id]: hidden, [deleted.id]: deleted },
-    { [sourceStroke.id]: sourceStroke },
-  );
+  const state = boardState({ [top.id]: top, [visible.id]: visible, [hidden.id]: hidden, [deleted.id]: deleted });
 
-  assert.deepEqual(orderSceneElementsForRender([hydratedMirror, visible]).map(({ id }) => id), ["visible", "hydrated-mirror"]);
-  assert.deepEqual(sceneElementsForRender(state).map(({ id }) => id), ["visible", "hydrated-mirror"]);
-  assert.deepEqual(sceneElementsForRender(state, true).map(({ id }) => id), ["visible", "deleted", "hydrated-mirror"]);
-  assert.equal(findSceneElementAtPoint(state, { x: 20, y: 20 })?.id, "hydrated-mirror");
+  assert.deepEqual(orderSceneElementsForRender([top, visible]).map(({ id }) => id), ["visible", "top"]);
+  assert.deepEqual(sceneElementsForRender(state).map(({ id }) => id), ["visible", "top"]);
+  assert.deepEqual(sceneElementsForRender(state, true).map(({ id }) => id), ["visible", "deleted", "top"]);
+  assert.equal(findSceneElementAtPoint(state, { x: 20, y: 20 })?.id, "top");
+});
+
+test("a ghost element paints translucently with a dashed outline and never joins the board", () => {
+  const ghost = scene("shape", "ghost", {
+    shapeKind: "square",
+    content: createRichTextDocument("Preview"),
+  });
+  const state = boardState({});
+  const context = recordingContext();
+  const alphas = [];
+  const dashes = [];
+  const tracked = new Proxy(context, {
+    get(target, property) {
+      if (property === "setLineDash") {
+        return (dash) => {
+          dashes.push([...dash]);
+          return target.setLineDash(dash);
+        };
+      }
+      if (property === "fill" || property === "stroke") {
+        return (...args) => {
+          alphas.push(target.globalAlpha);
+          return target[property](...args);
+        };
+      }
+      return target[property];
+    },
+    set(target, property, value) {
+      target[property] = value;
+      return true;
+    },
+  });
+  const canvas = {
+    width: 0,
+    height: 0,
+    getBoundingClientRect: () => ({ width: 400, height: 300 }),
+    getContext: () => tracked,
+  };
+  const previousWindow = globalThis.window;
+  globalThis.window = { devicePixelRatio: 1 };
+  try {
+    renderBoard(canvas, state, { background: "transparent" });
+    assert.equal(context.calls.some(([method]) => method === "fill" || method === "stroke"), false, "empty board paints nothing");
+
+    context.calls.length = 0;
+    alphas.length = 0;
+    dashes.length = 0;
+    renderBoard(canvas, state, { background: "transparent", ghostElement: ghost });
+  } finally {
+    globalThis.window = previousWindow;
+  }
+
+  assert.ok(alphas.includes(0.42), "the ghost body is drawn at 0.42 alpha");
+  assert.ok(context.calls.some(([method, text]) => method === "fillText" && text === "Preview"));
+  assert.ok(dashes.some((dash) => dash.length > 0), "the ghost outline is dashed");
+  assert.deepEqual(state.elements, {}, "the ghost is not added to the board");
 });
 
 test("collapsed and hidden sections suppress nested members in rendering and hit testing", () => {
@@ -234,32 +280,16 @@ function rich(text) {
   };
 }
 
-function boardState(elements, strokes = {}) {
+function boardState(elements) {
   return {
     boardId: "board",
-    sceneVersion: 2,
+    sceneVersion: 3,
     elements,
-    strokes,
     activeStrokes: {},
     eraseActions: {},
     participants: {},
     cursors: {},
     lastSequence: 0,
-  };
-}
-
-function legacyStroke(id) {
-  return {
-    id,
-    boardId: "board",
-    userId: "user",
-    tool: "marker",
-    color: "#111827",
-    thickness: 3,
-    points: [{ x: 0, y: 0, t: 0 }, { x: 20, y: 20, t: 1 }],
-    createdAt: now,
-    updatedAt: now,
-    status: "committed",
   };
 }
 
@@ -279,7 +309,7 @@ function recordingContext() {
   const methods = new Set([
     "save", "restore", "translate", "rotate", "setLineDash", "beginPath", "moveTo", "lineTo",
     "quadraticCurveTo", "bezierCurveTo", "closePath", "rect", "ellipse", "arc", "fill", "stroke",
-    "fillText", "fillRect", "clip", "drawImage",
+    "fillText", "fillRect", "clip", "drawImage", "clearRect", "setTransform", "transform",
   ]);
   return new Proxy(state, {
     get(target, property) {

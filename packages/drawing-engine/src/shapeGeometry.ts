@@ -303,35 +303,6 @@ export function catalogShapeContainsPoint(
   }
 }
 
-export function catalogShapeIntersectsCircle(
-  kind: CatalogShapeKind,
-  transform: CatalogShapeTransform,
-  center: AnnotationPoint,
-  radius: number,
-): boolean {
-  const safeRadius = Math.max(0, radius);
-  if (catalogShapeContainsPoint(kind, transform, center, 0)) return true;
-  if (safeRadius === 0) return false;
-
-  // Sampling the circumference handles concave shapes (star/plus/chevron)
-  // and rotated shapes without maintaining a second set of edge equations.
-  const sampleCount = 48;
-  for (let index = 0; index < sampleCount; index += 1) {
-    const angle = (index / sampleCount) * Math.PI * 2;
-    if (
-      catalogShapeContainsPoint(kind, transform, {
-        x: center.x + Math.cos(angle) * safeRadius,
-        y: center.y + Math.sin(angle) * safeRadius,
-      })
-    ) {
-      return true;
-    }
-  }
-
-  const shapeCenter = boundsCenter(normalizedBounds(transform));
-  return Math.hypot(shapeCenter.x - center.x, shapeCenter.y - center.y) <= safeRadius;
-}
-
 function drawShapeBody(
   context: CanvasRenderingContext2D,
   kind: CatalogShapeKind,

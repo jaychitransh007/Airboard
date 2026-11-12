@@ -37,8 +37,8 @@ function withSceneShape(state, id, label, x) {
   });
 }
 
-/** A legacy node, as Airo makes them; mirrored into an element of the same id. */
-function withLegacyNode(state, id, x) {
+/** A diagram node, as Airo and the typed grammar make them. */
+function withNode(state, id, x) {
   return applyDiagramCommand(state, {
     type: "node.create",
     nodeId: id,
@@ -52,13 +52,12 @@ function withLegacyNode(state, id, x) {
 function board() {
   let state = createInitialBoardState("board-1");
   state = withSceneShape(state, "api", "API", 100);
-  state = withLegacyNode(state, "db", 500);
+  state = withNode(state, "db", 500);
   return state;
 }
 
-test("a connector joins a v2 shape and a legacy node, and undo removes it", () => {
+test("a connector joins a toolbar shape and a diagram node, and undo removes it", () => {
   const state = board();
-  assert.equal(state.elements.db?.legacyStrokeId, "db", "the legacy node is mirrored under its own id");
   const result = applyDiagramCommand(state, { type: "scene.connect", connectorId: "c1", fromId: "api", toId: "db", label: "reads" }, context);
   const connector = result.state.elements.c1;
   assert.equal(connector.kind, "connector");
@@ -93,7 +92,7 @@ test("renaming, moving and deleting a v2 shape undo cleanly, and its connectors 
   assert.equal(restored.elements.c1.status, "active");
 });
 
-test("moving or deleting a legacy node keeps v2 connectors attached to it in step", () => {
+test("moving or deleting a diagram node keeps connectors attached to it in step", () => {
   const connected = applyDiagramCommand(board(), { type: "scene.connect", connectorId: "c1", fromId: "api", toId: "db" }, context).state;
   const before = connected.elements.c1.end.point;
 
@@ -125,7 +124,7 @@ test("scene commands refuse objects that aren't there", () => {
   assert.throws(() => applyDiagramCommand(board(), { type: "scene.rename", elementId: "missing", label: "x" }, context));
 });
 
-test("align, distribute and layout arrange v2 shapes and legacy nodes together, and undo cleanly", () => {
+test("align, distribute and layout arrange toolbar shapes and diagram nodes together, and undo cleanly", () => {
   let state = board();
   state = withSceneShape(state, "web", "Web", 300);
   state = applyDiagramCommand(state, { type: "scene.move", elementIds: ["web"], delta: { x: 0, y: 90 } }, context).state;
@@ -134,16 +133,15 @@ test("align, distribute and layout arrange v2 shapes and legacy nodes together, 
   // The first object is the anchor; the others line up with its top.
   const aligned = applyDiagramCommand(state, { type: "objects.align", objectIds: ["api", "web", "db"], alignment: "top" }, context);
   assert.equal(aligned.state.elements.web.transform.y, 100);
-  assert.equal(aligned.state.strokes.db.annotation.bounds.y, 100);
-  assert.notDeepEqual(aligned.state.elements.c1.start.point, state.elements.c1.start.point, "the connector follows");
+  assert.equal(aligned.state.elements.db.transform.y, 100);
   const unaligned = applyDiagramUndo(aligned.state, aligned).state;
   assert.equal(unaligned.elements.web.transform.y, 190);
-  assert.deepEqual(unaligned.elements.c1.start.point, state.elements.c1.start.point);
+  assert.equal(unaligned.elements.db.transform.y, state.elements.db.transform.y);
 
   const spread = applyDiagramCommand(aligned.state, { type: "objects.align", objectIds: ["api", "web", "db"], alignment: "distribute-x" }, context).state;
   const lefts = ["api", "web"].map((id) => spread.elements[id].transform.x);
   const gapOne = lefts[1] - (lefts[0] + 120);
-  const gapTwo = spread.strokes.db.annotation.bounds.x - (lefts[1] + 120);
+  const gapTwo = spread.elements.db.transform.x - (lefts[1] + 120);
   assert.ok(Math.abs(gapOne - gapTwo) < 0.001, `even gaps: ${gapOne} and ${gapTwo}`);
 
   const laidOut = applyDiagramCommand(state, { type: "objects.layout", objectIds: ["web", "api"], direction: "vertical", gap: 40 }, context).state;
@@ -178,8 +176,12 @@ test("grouping v2 shapes draws a section around them, as the toolbar does", () =
   const undone = applyDiagramUndo(result.state, result).state;
   assert.equal(undone.elements.s1.status, "deleted");
   assert.equal(undone.elements.api.sectionId, undefined);
-  // A legacy node's place is set by its stroke, so a section can't own it.
-  assert.throws(() => applyDiagramCommand(state, { type: "scene.group", memberIds: ["api", "db"] }, context));
+  // A diagram node groups like any shape; an object that isn't there is refused.
+  assert.deepEqual(
+    applyDiagramCommand(state, { type: "scene.group", sectionId: "s2", memberIds: ["api", "db"] }, context).state.elements.s2.memberIds,
+    ["api", "db"],
+  );
+  assert.throws(() => applyDiagramCommand(state, { type: "scene.group", memberIds: ["api", "missing"] }, context), /Not a v2 board object: missing/);
 });
 
 test("v2 shapes resize and change shape, and v2 connectors change line style, all undoably", async () => {

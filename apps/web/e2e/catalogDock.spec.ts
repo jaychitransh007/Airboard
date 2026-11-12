@@ -1,4 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import type { HybridGestureControllerOutput } from "@airboard/gesture-engine";
+import { waitForTestHooks, type AirboardTestWindow } from "./support/testHooks";
 
 test.beforeEach(async ({ context }) => {
   await context.addInitScript(() => {
@@ -13,20 +15,14 @@ async function openStableStandalone(page: Page) {
   await page.goto("/?testStandalone=1");
   const toolbar = page.getByRole("toolbar", { name: "Board creation tools" });
   await expect(toolbar).toBeVisible();
-  await page.waitForFunction(() => "__airboardTestHooks" in window);
+  await waitForTestHooks(page);
   await expect
     .poll(
       () =>
         page.evaluate(
           () =>
             Boolean(
-              (
-                window as unknown as {
-                  __airboardTestHooks: {
-                    getBoardSummary(): { boardSessionId: string | null };
-                  };
-                }
-              ).__airboardTestHooks.getBoardSummary().boardSessionId,
+              (window as unknown as AirboardTestWindow).__airboardTestHooks.getBoardSummary().boardSessionId,
             ),
         ),
       { timeout: 30_000 },
@@ -70,13 +66,7 @@ async function emitHybridGesture(
   },
 ) {
   await page.evaluate((frame) => {
-    const hooks = (
-      window as unknown as {
-        __airboardTestHooks: {
-          emitHybridGestureOutput(output: unknown): void;
-        };
-      }
-    ).__airboardTestHooks;
+    const hooks = (window as unknown as AirboardTestWindow).__airboardTestHooks;
     hooks.emitHybridGestureOutput({
       timestampMs: frame.timestampMs,
       state:
@@ -95,7 +85,8 @@ async function emitHybridGesture(
       grabbedTargetId: frame.grabbedTargetId ?? null,
       areaCursorRadiusPx: 28,
       requiresPinchRelease: false,
-      action: frame.action
+      // One superset object stands in for whichever action variant `type` names.
+      action: (frame.action
         ? {
             ...frame.action,
             cursor: { x: frame.x, y: frame.y },
@@ -104,7 +95,7 @@ async function emitHybridGesture(
             delta: { x: 0, y: 0 },
             totalDelta: { x: 0, y: 0 },
           }
-        : null,
+        : null) as HybridGestureControllerOutput["action"],
     });
   }, input);
 }
@@ -114,7 +105,6 @@ type CanonicalElement = {
   kind: string;
   status: string;
   zIndex: number;
-  legacyStrokeId?: string;
   shapeKind?: string;
   pathKind?: string;
   transform: { x: number; y: number; width: number; height: number };
@@ -124,17 +114,11 @@ type CanonicalElement = {
 
 async function activeSceneElements(page: Page): Promise<CanonicalElement[]> {
   const elements = await page.evaluate(() => {
-    const state = (
-      window as unknown as {
-        __airboardTestHooks: {
-          getCanonicalBoardState(): { elements: Record<string, unknown> };
-        };
-      }
-    ).__airboardTestHooks.getCanonicalBoardState();
+    const state = (window as unknown as AirboardTestWindow).__airboardTestHooks.getCanonicalBoardState();
     return Object.values(state.elements);
   });
   return (elements as CanonicalElement[])
-    .filter((element) => element.status === "active" && !element.legacyStrokeId)
+    .filter((element) => element.status === "active")
     .sort((a, b) => a.zIndex - b.zIndex);
 }
 
@@ -166,39 +150,14 @@ async function carrySquareByHand(
 async function catalogGestureState(page: Page) {
   return page.evaluate(
     () =>
-      (
-        window as unknown as {
-          __airboardTestHooks: {
-            getCatalogGestureState(): {
-              openCatalogId: string | null;
-              activeTool: string;
-              interactionMode: string | null;
-              carriedTool: string | null;
-              enteredCanvas: boolean;
-              placementActive: boolean;
-              ghostCenter: { x: number; y: number } | null;
-              activeCreationTool: string;
-              selectedElementIds: string[];
-            };
-          };
-        }
-      ).__airboardTestHooks.getCatalogGestureState(),
+      (window as unknown as AirboardTestWindow).__airboardTestHooks.getCatalogGestureState(),
   );
 }
 
 async function boardObjectSummary(page: Page) {
   return page.evaluate(
     () =>
-      (
-        window as unknown as {
-          __airboardTestHooks: {
-            getBoardSummary(): {
-              objectCount: number;
-              positions: ({ x: number; y: number } | null)[];
-            };
-          };
-        }
-      ).__airboardTestHooks.getBoardSummary(),
+      (window as unknown as AirboardTestWindow).__airboardTestHooks.getBoardSummary(),
   );
 }
 
@@ -598,25 +557,16 @@ test("air hover and one close-drag-release pinch carry a recent shape onto the b
   });
   await expect(page.getByTestId("hand-cue")).toContainText("placed");
   const canonical = await page.evaluate(() => {
-    const state = (
-      window as unknown as {
-        __airboardTestHooks: {
-          getCanonicalBoardState(): {
-            elements: Record<string, { kind: string; status: string; legacyStrokeId?: string; shapeKind?: string }>;
-            strokes: Record<string, { status: string }>;
-          };
-        };
-      }
-    ).__airboardTestHooks.getCanonicalBoardState();
+    const state = (window as unknown as AirboardTestWindow).__airboardTestHooks.getCanonicalBoardState();
     return {
       shapes: Object.values(state.elements)
-        .filter((element) => element.status === "active" && !element.legacyStrokeId && element.kind === "shape")
-        .map((element) => element.shapeKind),
-      legacyStrokeCount: Object.values(state.strokes)
-        .filter((stroke) => stroke.status === "committed").length,
+        .flatMap((element) =>
+          element.status === "active" && element.kind === "shape" ? [element.shapeKind] : [],
+        ),
+      hasStrokesKey: "strokes" in state,
     };
   });
-  expect(canonical).toEqual({ shapes: ["square"], legacyStrokeCount: 0 });
+  expect(canonical).toEqual({ shapes: ["square"], hasStrokesKey: false });
 });
 
 test("a hand-placed shape keeps the tool armed, can be grabbed again, and the dock disarms it", async ({
@@ -676,9 +626,7 @@ test("a hand-placed shape keeps the tool armed, can be grabbed again, and the do
 
   // Undo puts the moved shape back, like a mouse drag.
   await page.evaluate(() =>
-    (
-      window as unknown as { __airboardTestHooks: { undoLastActionForEval(): unknown } }
-    ).__airboardTestHooks.undoLastActionForEval(),
+    (window as unknown as AirboardTestWindow).__airboardTestHooks.undoLastActionForEval(),
   );
   await expect
     .poll(async () =>
@@ -745,13 +693,7 @@ test("an open palm held over a shape opens the voice gate; over the dock it wait
   const palm = (timestampMs: number) =>
     page.evaluate(
       (timestampMs) =>
-        (
-          window as unknown as {
-            __airboardTestHooks: {
-              emitPalmVoiceGestureFrame(frame: unknown): "activate" | "release" | null;
-            };
-          }
-        ).__airboardTestHooks.emitPalmVoiceGestureFrame({
+        (window as unknown as AirboardTestWindow).__airboardTestHooks.emitPalmVoiceGestureFrame({
           score: 0.94,
           point: { x: 0.48, y: 0.42 },
           timestampMs,
@@ -767,11 +709,7 @@ test("an open palm held over a shape opens the voice gate; over the dock it wait
   await expect(page.getByTestId("voice-gate-pill")).toHaveCount(1);
   for (const t of [10_500, 10_800, 11_000, 11_300]) await page.evaluate(
     (timestampMs) =>
-      (
-        window as unknown as {
-          __airboardTestHooks: { emitPalmVoiceGestureFrame(frame: unknown): unknown };
-        }
-      ).__airboardTestHooks.emitPalmVoiceGestureFrame({ score: 0, point: null, timestampMs, suppressed: false }),
+      (window as unknown as AirboardTestWindow).__airboardTestHooks.emitPalmVoiceGestureFrame({ score: 0, point: null, timestampMs, suppressed: false }),
     t,
   );
   await expect(page.getByTestId("voice-gate-pill")).toHaveCount(0);
@@ -879,13 +817,7 @@ test("resting the open hand on a second shape adds it to the selection", async (
     .poll(async () => [...(await catalogGestureState(page)).selectedElementIds].sort())
     .toEqual([first!.id, second!.id].sort());
   const pointing = await page.evaluate(() =>
-    (
-      window as unknown as {
-        __airboardTestHooks: {
-          getHandPointingSnapshot(): { targetIds: string[]; boardPoint: unknown };
-        };
-      }
-    ).__airboardTestHooks.getHandPointingSnapshot(),
+    (window as unknown as AirboardTestWindow).__airboardTestHooks.getHandPointingSnapshot(),
   );
   expect(pointing.targetIds.at(-1)).toBe(first!.id);
   expect(pointing.boardPoint).not.toBeNull();
@@ -930,25 +862,16 @@ test("air pinch carry places a v2-only curved connector canonically", async ({ p
   await emitHybridGesture(page, { ...dropPoint, pinchState: "open", timestampMs: 2_400 });
   await expect.poll(async () => (await boardObjectSummary(page)).objectCount).toBe(1);
   const canonical = await page.evaluate(() => {
-    const state = (
-      window as unknown as {
-        __airboardTestHooks: {
-          getCanonicalBoardState(): {
-            elements: Record<string, { kind: string; status: string; legacyStrokeId?: string; pathKind?: string }>;
-            strokes: Record<string, { status: string }>;
-          };
-        };
-      }
-    ).__airboardTestHooks.getCanonicalBoardState();
+    const state = (window as unknown as AirboardTestWindow).__airboardTestHooks.getCanonicalBoardState();
     return {
       connectors: Object.values(state.elements)
-        .filter((element) => element.status === "active" && !element.legacyStrokeId && element.kind === "connector")
-        .map((element) => element.pathKind),
-      legacyStrokeCount: Object.values(state.strokes)
-        .filter((stroke) => stroke.status === "committed").length,
+        .flatMap((element) =>
+          element.status === "active" && element.kind === "connector" ? [element.pathKind] : [],
+        ),
+      hasStrokesKey: "strokes" in state,
     };
   });
-  expect(canonical).toEqual({ connectors: ["curved"], legacyStrokeCount: 0 });
+  expect(canonical).toEqual({ connectors: ["curved"], hasStrokesKey: false });
 });
 
 test("pointer drag-and-drop places a shape from the new Shape popover", async ({ page }) => {
@@ -976,23 +899,14 @@ test("pointer drag-and-drop places a shape from the new Shape popover", async ({
   expect(Math.abs((placed?.x ?? Infinity) - targetPosition.x)).toBeLessThan(16);
   expect(Math.abs((placed?.y ?? Infinity) - targetPosition.y)).toBeLessThan(16);
   const canonical = await page.evaluate(() => {
-    const state = (
-      window as unknown as {
-        __airboardTestHooks: {
-          getCanonicalBoardState(): {
-            elements: Record<string, { kind: string; status: string; legacyStrokeId?: string; shapeKind?: string }>;
-            strokes: Record<string, { status: string }>;
-          };
-        };
-      }
-    ).__airboardTestHooks.getCanonicalBoardState();
+    const state = (window as unknown as AirboardTestWindow).__airboardTestHooks.getCanonicalBoardState();
     return {
       shapes: Object.values(state.elements)
-        .filter((element) => element.status === "active" && !element.legacyStrokeId && element.kind === "shape")
-        .map((element) => element.shapeKind),
-      legacyStrokeCount: Object.values(state.strokes)
-        .filter((stroke) => stroke.status === "committed").length,
+        .flatMap((element) =>
+          element.status === "active" && element.kind === "shape" ? [element.shapeKind] : [],
+        ),
+      hasStrokesKey: "strokes" in state,
     };
   });
-  expect(canonical).toEqual({ shapes: ["square"], legacyStrokeCount: 0 });
+  expect(canonical).toEqual({ shapes: ["square"], hasStrokesKey: false });
 });

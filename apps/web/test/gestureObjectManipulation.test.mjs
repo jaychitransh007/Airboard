@@ -6,30 +6,19 @@ import { HybridGestureController } from "@airboard/gesture-engine";
 
 import {
   buildGestureMoveTargets,
-  gestureTargetWorld,
+  isHandTargetableSceneElement,
   resolveHandConnectorEnds,
-  resolveResizeHandleForInput,
 } from "../src/features/board/gestureObjectManipulation.ts";
 
 function selectedNodeBoard() {
   const board = createInitialBoardState("gesture-board");
-  board.strokes.node = {
+  board.elements.node = createBoardSceneElement({
     id: "node",
     boardId: board.boardId,
-    userId: "user",
-    color: "#fff",
-    thickness: 3,
-    status: "committed",
-    points: [],
-    createdAt: new Date().toISOString(),
-    annotation: {
-      type: "flow_node",
-      source: "gesture",
-      nodeType: "process",
-      label: "Process",
-      bounds: { x: 450, y: 210, width: 100, height: 80 },
-    },
-  };
+    kind: "shape",
+    shapeKind: "process",
+    transform: { x: 450, y: 210, width: 100, height: 80, rotation: 0 },
+  });
   return board;
 }
 
@@ -56,12 +45,6 @@ test("camera targeting exposes object bodies without resize handles", () => {
 
   assert.deepEqual(targets.map((target) => target.id), ["node"]);
   assert.ok(targets.every((target) => !target.id.startsWith("handle:")));
-});
-
-test("camera input cannot resolve a resize handle even when one is selected", () => {
-  assert.equal(resolveResizeHandleForInput("air_gesture", "nw", "se"), null);
-  assert.equal(resolveResizeHandleForInput("pointer", undefined, "se"), "se");
-  assert.equal(resolveResizeHandleForInput("pointer", "nw", "se"), "nw");
 });
 
 test("closing a hand on empty canvas cannot begin a lasso or mutate the board", () => {
@@ -131,14 +114,7 @@ test("hands target v2 scene elements made by commands, the toolbar and the dock"
     start: { point: { x: 200, y: 140 }, binding: { elementId: "api", anchor: "auto" }, decoration: "none" },
     end: { point: { x: 700, y: 140 }, binding: { elementId: "note", anchor: "auto" }, decoration: "solid_arrow" },
   });
-  // A mirror of a legacy stroke is reached through the stroke, never twice.
-  board.elements.node = createBoardSceneElement({
-    id: "node",
-    boardId: board.boardId,
-    kind: "shape",
-    legacyStrokeId: "node",
-    transform: { x: 450, y: 210, width: 100, height: 80, rotation: 0 },
-  });
+  // Sections are containers a closed hand would grab by accident.
   board.elements.section = createBoardSceneElement({
     id: "section",
     boardId: board.boardId,
@@ -149,10 +125,27 @@ test("hands target v2 scene elements made by commands, the toolbar and the dock"
   const ids = buildGestureMoveTargets(board).map((target) => target.id);
   assert.deepEqual([...new Set(ids)].sort(), ["api", "link", "node", "note"]);
   assert.equal(ids.filter((id) => id === "node").length, 1);
-  assert.equal(gestureTargetWorld(board, "node"), "stroke");
-  assert.equal(gestureTargetWorld(board, "api"), "scene");
-  assert.equal(gestureTargetWorld(board, "section"), null);
-  assert.equal(gestureTargetWorld(board, "missing"), null);
+  assert.equal(isHandTargetableSceneElement(board, board.elements.node), true);
+  assert.equal(isHandTargetableSceneElement(board, board.elements.api), true);
+  assert.equal(isHandTargetableSceneElement(board, board.elements.section), false);
+  assert.equal(isHandTargetableSceneElement(board, board.elements.missing), false);
+});
+
+test("members of a hidden or collapsed section are not hand targets", () => {
+  const board = createInitialBoardState("gesture-board");
+  for (const [id, extra] of [["hidden-section", { visible: false }], ["collapsed-section", { collapsed: true }]]) {
+    board.elements[id] = createBoardSceneElement({
+      id,
+      boardId: board.boardId,
+      kind: "section",
+      transform: { x: 0, y: 0, width: 1000, height: 600, rotation: 0 },
+      ...extra,
+    });
+  }
+  sceneShape(board, "in-hidden", 100, 100, { sectionId: "hidden-section" });
+  sceneShape(board, "in-collapsed", 300, 100, { sectionId: "collapsed-section" });
+  sceneShape(board, "loose", 500, 100);
+  assert.deepEqual(buildGestureMoveTargets(board).map((target) => target.id), ["loose"]);
 });
 
 test("hidden or deleted scene elements are not hand targets", () => {

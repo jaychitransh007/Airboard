@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
+import type { AirboardTestWindow } from "./support/testHooks";
 import { signIn } from "./support/signedInApi";
 
 // A board built by the production diagram commands: Shopper → Checkout API → Orders DB.
@@ -19,8 +20,7 @@ test.beforeEach(async ({ page, context }) => {
 
 function boardLabels(page: Page) {
   return page.evaluate(() =>
-    (window as never as { __airboardTestHooks?: { getBoardSummary(): { labels: string[] } } })
-      .__airboardTestHooks?.getBoardSummary().labels ?? [],
+    (window as unknown as Partial<AirboardTestWindow>).__airboardTestHooks?.getBoardSummary().labels ?? [],
   );
 }
 
@@ -76,12 +76,11 @@ test("a command that changes the diagram in one batch, and its undo, are saved",
   const savedLedger = () => {
     const state = api.saves.at(-1)?.state as {
       elements?: Record<string, { status: string }>;
-      strokes?: Record<string, { status: string }>;
     } | undefined;
-    const items = [...Object.values(state?.elements ?? {}), ...Object.values(state?.strokes ?? {})];
+    const items = Object.values(state?.elements ?? {});
     const ledger = items.filter((item) => JSON.stringify(item).includes('"Ledger"'));
     if (!ledger.length) return null;
-    return ledger.some((item) => item.status === "active" || item.status === "committed") ? "on the board" : "removed";
+    return ledger.some((item) => item.status === "active") ? "on the board" : "removed";
   };
 
   // Stand in for the Airo model, so the command takes the same path a real

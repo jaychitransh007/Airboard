@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -260,12 +260,10 @@ test("raw-landmark mapping fails safe for invalid media dimensions", () => {
 });
 
 test("Airboard live detection and eval injection adopt one raw-frame processor", async () => {
-  const source = await readFile(
-    new URL(
-      "../src/features/board/AirboardPrototype.tsx",
-      import.meta.url,
-    ),
-    "utf8",
+  // Reads the whole board feature folder, so the check survives splitting
+  // the board component into smaller files.
+  const source = await readBoardSources(
+    new URL("../src/features/board/", import.meta.url),
   );
   assert.equal(
     source.match(/pipelineRef\.current\.process\(\{/g)?.length,
@@ -280,3 +278,13 @@ test("Airboard live detection and eval injection adopt one raw-frame processor",
   );
   assert.match(source, /processRawLandmarkFrame\(\{\s*hands,\s*timestampMs,/);
 });
+
+async function readBoardSources(directory) {
+  const entries = await readdir(directory, { withFileTypes: true, recursive: true });
+  const files = await Promise.all(
+    entries
+      .filter((entry) => entry.isFile() && /\.tsx?$/u.test(entry.name))
+      .map((entry) => readFile(`${entry.parentPath ?? entry.path}/${entry.name}`, "utf8")),
+  );
+  return files.join("\n");
+}

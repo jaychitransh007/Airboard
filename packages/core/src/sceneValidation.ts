@@ -139,6 +139,7 @@ export function isBoardSceneElement(value: unknown): value is BoardSceneElement 
         value.controlPoints.every(isPoint) &&
         isRichTextDocument(value.label) &&
         Number.isFinite(value.labelPosition) &&
+        (value.routeOffset === undefined || Number.isFinite(value.routeOffset)) &&
         isRecord(value.style)
       );
     case "text":

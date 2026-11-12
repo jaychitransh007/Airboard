@@ -5,7 +5,6 @@ import {
   applyBoardEvent,
   createInitialBoardState,
   createStroke,
-  upgradeBoardStateToSceneVersion,
 } from "../src/boardReducer.ts";
 import {
   createBoardSceneElement,
@@ -20,54 +19,6 @@ const envelope = (createdAt = "2026-07-09T00:00:00.000Z") => ({
   createdAt,
 });
 
-test("stroke.annotation_updated replaces annotation geometry and points", () => {
-  const startedAt = "2026-07-09T00:00:00.000Z";
-  const stroke = createStroke({
-    id: "stroke-1",
-    boardId: "board-1",
-    userId: "user-1",
-    point: { x: 10, y: 10, t: 1 },
-    createdAt: startedAt,
-    annotation: {
-      type: "rectangle",
-      source: "gesture",
-      bounds: { x: 10, y: 10, width: 100, height: 60 },
-    },
-  });
-
-  let state = createInitialBoardState("board-1");
-  state = applyBoardEvent(state, {
-    ...envelope(startedAt),
-    type: "stroke.started",
-    stroke,
-  });
-  state = applyBoardEvent(state, {
-    ...envelope(startedAt),
-    type: "stroke.committed",
-    strokeId: stroke.id,
-  });
-
-  state = applyBoardEvent(state, {
-    ...envelope("2026-07-09T00:00:01.000Z"),
-    type: "stroke.annotation_updated",
-    strokeId: stroke.id,
-    annotation: {
-      type: "rectangle",
-      source: "gesture",
-      bounds: { x: 40, y: 35, width: 140, height: 80 },
-    },
-    points: [
-      { x: 40, y: 35, t: 2 },
-      { x: 180, y: 35, t: 3 },
-    ],
-  });
-
-  assert.equal(state.strokes["stroke-1"].annotation.bounds.x, 40);
-  assert.equal(state.strokes["stroke-1"].annotation.bounds.width, 140);
-  assert.equal(state.strokes["stroke-1"].points.length, 2);
-  assert.equal(state.strokes["stroke-1"].updatedAt, "2026-07-09T00:00:01.000Z");
-});
-
 test("an unknown event type is ignored (state preserved, sequence advanced) not corrupted", () => {
   const state = createInitialBoardState("board-1");
   const next = applyBoardEvent(state, {
@@ -78,21 +29,15 @@ test("an unknown event type is ignored (state preserved, sequence advanced) not 
   });
   assert.ok(next, "reducer must not return undefined for an unknown type");
   assert.equal(next.lastSequence, 5);
-  assert.deepEqual(next.strokes, state.strokes);
+  assert.deepEqual(next.elements, state.elements);
   // A subsequent real event still applies on top (no corruption).
-  const stroke = createStroke({
-    id: "s1",
-    boardId: "board-1",
-    userId: "user-1",
-    point: { x: 0, y: 0, t: 1 },
-    createdAt: "2026-07-09T00:00:00.000Z",
-  });
-  const after = applyBoardEvent(next, { ...envelope(), type: "stroke.started", stroke });
-  assert.ok(after.activeStrokes["s1"]);
+  const sticky = createBoardSceneElement({ id: "sticky-1", boardId: "board-1", kind: "sticky" });
+  const after = applyBoardEvent(next, { ...envelope(), type: "element.created", element: sticky });
+  assert.equal(after.elements["sticky-1"].kind, "sticky");
 });
 
-test("a non-finite point timestamp does not crash the reducer", () => {
-  let state = createInitialBoardState("board-1");
+test("a retired stroke.* or erase.committed event is ignored and only advances lastSequence", () => {
+  const state = createInitialBoardState("board-1");
   const stroke = createStroke({
     id: "s1",
     boardId: "board-1",
@@ -100,47 +45,45 @@ test("a non-finite point timestamp does not crash the reducer", () => {
     point: { x: 0, y: 0, t: 1 },
     createdAt: "2026-07-09T00:00:00.000Z",
   });
-  state = applyBoardEvent(state, { ...envelope(), type: "stroke.started", stroke });
-  const before = state.activeStrokes["s1"].updatedAt;
-  // NaN timestamp must not throw RangeError; updatedAt falls back to prior value.
-  const next = applyBoardEvent(state, {
+  let next = applyBoardEvent(state, { ...envelope(), sequence: 3, type: "stroke.started", stroke });
+  next = applyBoardEvent(next, { ...envelope(), sequence: 4, type: "stroke.committed", strokeId: "s1" });
+  next = applyBoardEvent(next, { ...envelope(), sequence: 5, type: "erase.committed", eraseAction: {
+    id: "erase-1", boardId: "board-1", userId: "user-1", eraserPath: [], radius: 10, affectedStrokeIds: ["s1"], createdAt: "2026-07-09T00:00:00.000Z",
+  } });
+  assert.deepEqual(next, { ...state, lastSequence: 5 });
+  assert.equal("strokes" in next, false);
+});
+
+test("a non-finite point timestamp in a drawing does not crash the reducer", () => {
+  const drawing = createBoardSceneElement({
+    id: "ink-1",
+    boardId: "board-1",
+    kind: "drawing",
+    points: [{ x: 0, y: 0, t: 1 }, { x: 5, y: 5, t: Number.NaN }],
+  });
+  const next = applyBoardEvent(createInitialBoardState("board-1"), {
     ...envelope(),
-    type: "stroke.point_added",
-    strokeId: "s1",
-    point: { x: 5, y: 5, t: Number.NaN },
+    sequence: 2,
+    type: "element.created",
+    element: drawing,
   });
-  assert.equal(next.activeStrokes["s1"].points.length, 2);
-  assert.equal(next.activeStrokes["s1"].updatedAt, before);
+  assert.equal(next.lastSequence, 2);
+  assert.ok(next.elements, "the state is intact");
 });
 
-test("initial state is scene v2 and committed legacy strokes are adapted", () => {
-  const stroke = createStroke({
-    id: "legacy-node",
-    boardId: "board-1",
-    userId: "user-1",
-    point: { x: 10, y: 20, t: 1 },
-    createdAt: "2026-07-09T00:00:00.000Z",
-    annotation: {
-      type: "flow_node",
-      source: "voice",
-      nodeType: "decision",
-      label: "Approve?",
-      bounds: { x: 10, y: 20, width: 180, height: 100 },
-    },
-  });
-  let state = createInitialBoardState("board-1");
-  assert.equal(state.sceneVersion, 2);
+test("initial state is scene v3 with no legacy strokes", () => {
+  const state = createInitialBoardState("board-1");
+  assert.equal(state.sceneVersion, 3);
   assert.deepEqual(state.elements, {});
-  state = applyBoardEvent(state, { ...envelope(), type: "stroke.started", stroke });
-  state = applyBoardEvent(state, {
-    ...envelope("2026-07-09T00:00:01.000Z"),
-    type: "stroke.committed",
-    strokeId: stroke.id,
+  assert.equal("strokes" in state, false);
+  // A snapshot without elements (very old) is read as an empty scene.
+  const { elements: _elements, ...old } = state;
+  const next = applyBoardEvent(old, {
+    ...envelope(),
+    type: "element.created",
+    element: createBoardSceneElement({ id: "sticky-1", boardId: "board-1", kind: "sticky" }),
   });
-  assert.equal(state.strokes[stroke.id].status, "committed", "legacy storage is preserved");
-  assert.equal(state.elements[stroke.id].kind, "shape");
-  assert.equal(state.elements[stroke.id].shapeKind, "diamond");
-  assert.equal(state.elements[stroke.id].legacyStrokeId, stroke.id);
+  assert.equal(next.elements["sticky-1"].kind, "sticky");
 });
 
 test("element patches merge unrelated concurrent fields instead of replacing the element", () => {
@@ -227,7 +170,7 @@ test("table cell and structure patches are granular and enforce the 500-cell cap
   assert.equal(state.elements.full.rows.length, 20);
 });
 
-test("element deletion/restoration is revisioned and legacy snapshots upgrade without loss", () => {
+test("element deletion/restoration is revisioned", () => {
   const sticky = createBoardSceneElement({
     id: "sticky-1",
     boardId: "board-1",
@@ -250,12 +193,4 @@ test("element deletion/restoration is revisioned and legacy snapshots upgrade wi
   });
   assert.equal(state.elements[sticky.id].status, "active");
   assert.equal(state.elements[sticky.id].revision, 3);
-
-  const legacy = structuredClone(createInitialBoardState("board-1"));
-  delete legacy.sceneVersion;
-  delete legacy.elements;
-  const upgraded = upgradeBoardStateToSceneVersion(legacy);
-  assert.equal(upgraded.sceneVersion, 2);
-  assert.deepEqual(upgraded.elements, {});
-  assert.deepEqual(upgraded.strokes, legacy.strokes);
 });

@@ -1222,7 +1222,7 @@ function validateClaimObservation({
 function containsActionObservation(value, action) {
   const commandTypes = {
     create: ["node.create"],
-    connect: ["nodes.connect", "connection.attach"],
+    connect: ["nodes.connect"],
     reverse_connection: ["connection.reverse"],
     delete_connection: ["connection.delete"],
     branch: ["nodes.branch"],

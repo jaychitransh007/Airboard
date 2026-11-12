@@ -2,7 +2,7 @@ import {
   canJoinBoard,
   canStartBoard,
   createInitialBoardState,
-  reduceBoardEvents,
+  replayBoardEvents,
   type BoardEvent,
   type BoardSession,
   type BoardState,
@@ -343,9 +343,11 @@ export class SupabaseSessionStore implements SessionStore {
     const events = eventRows.map((row) => ({
       ...row.payload,
       sequence: row.sequence,
-    })) as BoardEvent[];
+    }));
 
-    return reduceBoardEvents(state, events);
+    // Sessions started before shape-merge phase 3 may still hold stored
+    // stroke.* rows; replayBoardEvents converts them to v2 elements on read.
+    return replayBoardEvents(state, events);
   }
 
   async getSession(sessionId: string): Promise<BoardSession> {

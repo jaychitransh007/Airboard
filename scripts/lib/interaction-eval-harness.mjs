@@ -20,7 +20,6 @@ const LOGICAL_ID_PREFIXES = new Set([
 const BOARD_COLLECTION_KEYS = new Set([
   "nodes",
   "edges",
-  "strokes",
   "activeNodes",
   "activeEdges",
   "activeStrokes",
@@ -28,7 +27,6 @@ const BOARD_COLLECTION_KEYS = new Set([
 
 const RAW_BOARD_KEYS = new Set([
   "boardId",
-  "strokes",
   "activeStrokes",
   "eraseActions",
   "participants",
@@ -94,6 +92,8 @@ const POSITION_CONTAINERS = new Set([
   "position",
   "size",
   "start",
+  // A v2 scene element's position and size.
+  "transform",
 ]);
 
 /**
@@ -185,30 +185,30 @@ export function canonicalizeBoardState(boardState, options = {}) {
     return canonicalizeProjectedBoardState(boardState, context);
   }
 
-  seedBoardStateIdentities(boardState, context);
+  // v2 objects are projected into canonical annotation nodes, edges and
+  // groups, the form the corpus describes boards in.
+  const committedRecord = sceneObjectsAsAnnotations(boardState);
+  seedBoardStateIdentities(boardState, committedRecord, context);
   const result = {};
   if (!isIgnoredField("boardId", "/boardId", context.options)) {
     result.boardId = context.logicalId(boardState.boardId, "board", "board:1");
   }
 
-  const committed = partitionStrokes(boardState.strokes, context.options.includeDeleted);
-  const active = partitionStrokes(boardState.activeStrokes, context.options.includeDeleted);
+  const committed = partitionObjects(committedRecord, context.options.includeDeleted);
+  const active = partitionObjects(boardState.activeStrokes, context.options.includeDeleted);
   result.nodes = committed.nodes
     .map((stroke) => canonicalizeStroke(stroke, context, "node"))
     .sort(compareEntityIds);
   result.edges = committed.edges
     .map((stroke) => canonicalizeStroke(stroke, context, "edge"))
     .sort(compareEntityIds);
-  result.strokes = committed.strokes.map((stroke) =>
-    canonicalizeStroke(stroke, context, "stroke"),
-  ).sort(compareEntityIds);
   result.activeNodes = active.nodes
     .map((stroke) => canonicalizeStroke(stroke, context, "node"))
     .sort(compareEntityIds);
   result.activeEdges = active.edges
     .map((stroke) => canonicalizeStroke(stroke, context, "edge"))
     .sort(compareEntityIds);
-  result.activeStrokes = active.strokes.map((stroke) =>
+  result.activeStrokes = active.freehand.map((stroke) =>
     canonicalizeStroke(stroke, context, "stroke"),
   ).sort(compareEntityIds);
 
@@ -255,7 +255,7 @@ export function canonicalizeBoardState(boardState, options = {}) {
 }
 
 /**
- * Scene elements follow the same semantics as strokes: deleted tombstones are
+ * Scene elements follow the same semantics as canonical objects: deleted tombstones are
  * omitted unless requested, and `revision` is dropped because it is a
  * monotonic concurrency counter (like `lastSequence`) that an undo advances
  * instead of restoring.
@@ -484,7 +484,11 @@ export function checkExactOnce(observation, rules = [], options = {}) {
     let entries;
     let match;
     if (source === "events" || source.endsWith(".events")) {
-      entries = canonicalizeBoardEvents(rawEntries, { context });
+      const aliases = rawEntries.map(modelIndependentEventAlias).filter(Boolean);
+      entries = [
+        ...canonicalizeBoardEvents(rawEntries, { context }),
+        ...aliases.map((alias) => canonicalizeValue(alias, context, { path: "" })),
+      ];
       match = canonicalizeValue(rule.match ?? {}, context, { path: "" });
     } else {
       entries = canonicalizeNonBoardState(rawEntries, { context });
@@ -1325,36 +1329,32 @@ function seedProjectedBoardIdentities(boardState, context) {
   };
   seedCollection("nodes", "node", (node) => preferredNodeId(node, "node"));
   seedCollection("activeNodes", "node", (node) => preferredNodeId(node, "node"));
-  seedCollection("strokes", "stroke");
   seedCollection("activeStrokes", "stroke");
   seedCollection("edges", "edge", (edge) => preferredEdgeId(edge, context));
   seedCollection("activeEdges", "edge", (edge) => preferredEdgeId(edge, context));
 }
 
-function seedBoardStateIdentities(boardState, context) {
+function seedBoardStateIdentities(boardState, committedRecord, context) {
   context.logicalId(boardState.boardId, "board", "board:1");
-  const strokes = [
-    ...Object.values(isRecord(boardState.strokes) ? boardState.strokes : {}),
+  const objects = [
+    ...Object.values(committedRecord),
     ...Object.values(
       isRecord(boardState.activeStrokes) ? boardState.activeStrokes : {},
     ),
   ].filter(isRecord);
-  seedStrokeIdentities(strokes, context);
+  seedObjectIdentities(objects, context);
   seedRecordIdentities(boardState.eraseActions, context, "erase");
   seedRecordIdentities(boardState.participants, context, "participant");
   seedRecordIdentities(boardState.cursors, context, "cursor");
 }
 
 function seedEventIdentities(events, context) {
-  const strokes = [];
   for (const event of events) {
     if (!isRecord(event)) continue;
     context.logicalId(event.boardSessionId, "board", "board:1");
     context.logicalId(event.actorParticipantId, "participant");
     context.logicalId(event.id, "event");
-    if (isRecord(event.stroke)) strokes.push(event.stroke);
   }
-  seedStrokeIdentities(strokes, context);
   for (const event of events) {
     if (!isRecord(event)) continue;
     if (isRecord(event.eraseAction)) {
@@ -1363,11 +1363,11 @@ function seedEventIdentities(events, context) {
   }
 }
 
-function seedStrokeIdentities(strokes, context) {
-  const nodes = strokes
+function seedObjectIdentities(objects, context) {
+  const nodes = objects
     .filter((stroke) => isSemanticObject(stroke) && !isConnector(stroke))
     .sort(compareSemanticEntities);
-  const plain = strokes
+  const plain = objects
     .filter((stroke) => !isSemanticObject(stroke))
     .sort(compareSemanticEntities);
   for (const stroke of nodes) {
@@ -1376,7 +1376,7 @@ function seedStrokeIdentities(strokes, context) {
   }
   for (const stroke of plain) context.logicalId(stroke.id, "stroke");
 
-  const edges = strokes.filter(isConnector).sort((left, right) => {
+  const edges = objects.filter(isConnector).sort((left, right) => {
     const leftKey = preferredEdgeId(left, context);
     const rightKey = preferredEdgeId(right, context);
     return leftKey.localeCompare(rightKey) || compareSemanticEntities(left, right);
@@ -1394,16 +1394,92 @@ function seedRecordIdentities(record, context, kind) {
     .forEach((entity) => context.logicalId(entity.id ?? entity[`${kind}Id`], kind));
 }
 
-function partitionStrokes(record, includeDeleted) {
-  const strokes = Object.values(isRecord(record) ? record : {})
+/**
+ * v2 scene objects as annotation records in the corpus's canonical form:
+ * shapes, stickies and text as nodes, connectors as edges and sections as
+ * group containers.
+ */
+function sceneObjectsAsAnnotations(boardState) {
+  const projected = {};
+  const elements = isRecord(boardState.elements) ? boardState.elements : {};
+  for (const element of Object.values(elements)) {
+    if (!isRecord(element)) continue;
+    const annotation = sceneAnnotation(element);
+    if (!annotation) continue;
+    projected[element.id] = {
+      id: element.id,
+      status: element.status === "active" ? "committed" : "deleted",
+      annotation,
+    };
+  }
+  return projected;
+}
+
+function sceneAnnotation(element) {
+  const transform = element.transform ?? {};
+  const bounds = { x: transform.x, y: transform.y, width: transform.width, height: transform.height };
+  const text = (document) =>
+    (document?.blocks ?? []).map((block) => (block.runs ?? []).map((run) => run.text).join("")).join("\n");
+  switch (element.kind) {
+    case "shape": {
+      const metadata = isRecord(element.metadata) ? element.metadata : {};
+      const nodeType = typeof metadata.nodeType === "string" && metadata.nodeShape === element.shapeKind
+        ? metadata.nodeType
+        : element.shapeKind;
+      return {
+        type: nodeType === "circle" ? "ellipse" : "flow_node",
+        nodeType,
+        shapeKind: element.shapeKind,
+        label: text(element.content),
+        bounds,
+      };
+    }
+    case "sticky":
+      return { type: "sticky_note", label: text(element.content), bounds };
+    case "text":
+      return { type: "text_label", label: text(element.content), bounds };
+    case "section":
+      return {
+        type: "rectangle",
+        label: text(element.title),
+        bounds,
+        groupMemberStrokeIds: [...(element.memberIds ?? [])],
+      };
+    case "connector":
+      return {
+        type: "connector",
+        label: text(element.label),
+        start: { ...element.start?.point },
+        end: { ...element.end?.point },
+        ...(element.start?.binding ? { snappedStartStrokeId: element.start.binding.elementId } : {}),
+        ...(element.end?.binding ? { snappedEndStrokeId: element.end.binding.elementId } : {}),
+        ...(element.routeOffset ? { routeOffset: element.routeOffset } : {}),
+      };
+    default:
+      return null;
+  }
+}
+
+/**
+ * A semantic alias of a v2 event, so one exact-once rule can count a diagram
+ * object (shape, sticky, text, section or connector) being created.
+ */
+function modelIndependentEventAlias(event) {
+  if (event?.type !== "element.created" || !isRecord(event.element)) return null;
+  if (!sceneAnnotation(event.element)) return null;
+  return { type: "object.created", objectId: event.element.id };
+}
+
+function partitionObjects(record, includeDeleted) {
+  const objects = Object.values(isRecord(record) ? record : {})
     .filter(isRecord)
-    .filter((stroke) => includeDeleted || stroke.status !== "deleted");
+    .filter((object) => includeDeleted || object.status !== "deleted");
   return {
-    nodes: strokes
-      .filter((stroke) => isSemanticObject(stroke) && !isConnector(stroke))
+    nodes: objects
+      .filter((object) => isSemanticObject(object) && !isConnector(object))
       .sort(compareByLogicalShape),
-    edges: strokes.filter(isConnector).sort(compareByLogicalShape),
-    strokes: strokes.filter((stroke) => !isSemanticObject(stroke)).sort(compareByLogicalShape),
+    edges: objects.filter(isConnector).sort(compareByLogicalShape),
+    freehand: objects.filter((object) => !isSemanticObject(object)).sort(compareByLogicalShape),
   };
 }
 
@@ -1825,7 +1901,7 @@ function isConnector(stroke) {
 }
 
 function looksLikeRawBoardState(value) {
-  return isRecord(value.strokes) && isRecord(value.activeStrokes);
+  return isRecord(value.elements) && value.sceneVersion !== undefined;
 }
 
 function compareSemanticEntities(left, right) {

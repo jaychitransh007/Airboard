@@ -37,7 +37,6 @@ const EMPTY_BOARD = {
   boardId: "board:primary",
   nodes: [],
   edges: [],
-  strokes: [],
 };
 const CHECKOUT_BOARD = {
   ...EMPTY_BOARD,
@@ -688,8 +687,8 @@ function trialDefinitions() {
           {
             id: "remote-update-exact-once",
             match: {
-              type: "stroke.label_updated",
-              strokeId: "node:checkout",
+              type: "element.patched",
+              elementId: "node:checkout",
             },
             count: 1,
           },
@@ -1187,9 +1186,18 @@ function labelEvent(id) {
     boardSessionId: "board:primary",
     actorParticipantId: "participant:remote",
     createdAt: "2026-07-30T00:00:00.000Z",
-    type: "stroke.label_updated",
-    strokeId: "node:checkout",
-    label: "Payments",
+    type: "element.patched",
+    elementId: "node:checkout",
+    patches: [
+      {
+        op: "field.set",
+        path: ["content"],
+        value: {
+          type: "doc",
+          blocks: [{ id: "node:checkout:content", type: "paragraph", runs: [{ text: "Payments" }] }],
+        },
+      },
+    ],
   };
 }
 

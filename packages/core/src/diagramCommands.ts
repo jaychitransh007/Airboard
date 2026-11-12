@@ -1,21 +1,23 @@
 import { applyBoardEvent, reduceBoardEvents } from "./boardReducer.ts";
-import { nodeVisualDefaultSize, pointOnNodeBoundary } from "./nodeVisuals.ts";
+import { nodeVisualDefaultSize } from "./nodeVisuals.ts";
+import { shapeKindForNodeType } from "./sceneElements.ts";
 import {
   connectElements,
+  createShapeElement,
   deleteElements,
   duplicateElements,
   groupElements,
+  isActiveElement,
   isSceneNodeElement,
-  isSceneOnlyElement,
   moveElements,
   positionElements,
-  refreshAttachedConnectors,
-  removeAttachedConnectors,
   renameElement,
   resizeElement,
   restyleConnectorElement,
+  restyleElement,
   retypeElement,
   reverseConnector,
+  type SceneConnectorStyle,
   type SceneElementEvent,
   type SceneEventSink,
 } from "./sceneDiagramCommands.ts";
@@ -25,11 +27,11 @@ import type {
   AnnotationPoint,
   AnnotationSource,
   BoardEvent,
+  BoardJsonValue,
   BoardState,
+  ConnectorElement,
   ShapeKind,
-  Stroke,
-  StrokeAnnotation,
-  StrokePoint,
+  ShapeStyle,
 } from "./types.ts";
 
 export type DiagramObjectStyle = {
@@ -39,6 +41,15 @@ export type DiagramObjectStyle = {
   thickness?: number;
 };
 
+/**
+ * The commands below are the diagram verbs Airo's plans and the typed
+ * grammar use. They create and edit v2 scene elements: node.create draws a
+ * shape, nodes.connect a connector, objects.group a section,
+ * objects.duplicate copies. The scene.* twins further down do the same work
+ * under the names some callers already use (their arms differ slightly:
+ * objects.move takes `to`, objects.duplicate skips connectors,
+ * objects.delete may leave connectors behind).
+ */
 export type CreateNodeCommand = {
   type: "node.create";
   nodeId?: string;
@@ -62,70 +73,7 @@ export type ConnectNodesCommand = {
   style?: Pick<DiagramObjectStyle, "strokeColor" | "opacity" | "thickness">;
 };
 
-export type AttachConnectionCommand = {
-  type: "connection.attach";
-  /** Existing detached or partially-bound connector whose identity/style is preserved. */
-  connectorId: string;
-  fromId: string;
-  toId: string;
-  /** Omit to preserve the connector's current visible label. */
-  label?: string;
-};
-
 export const DEFAULT_CONNECTOR_ATTACHMENT_TOLERANCE = 6;
-
-export function connectorEndpointMatchesBinding(
-  state: BoardState,
-  annotation: StrokeAnnotation,
-  endpoint: "start" | "end",
-  tolerance = DEFAULT_CONNECTOR_ATTACHMENT_TOLERANCE,
-): boolean {
-  const boundId =
-    endpoint === "start"
-      ? annotation.snappedStartStrokeId
-      : annotation.snappedEndStrokeId;
-  const point = endpoint === "start" ? annotation.start : annotation.end;
-  if (!boundId || !point) return false;
-  const stroke = state.strokes[boundId] ?? state.activeStrokes[boundId];
-  const bounds = stroke?.annotation?.bounds;
-  if (!stroke || stroke.status === "deleted" || !bounds) return false;
-  const expected = pointOnNodeBoundary(
-    bounds,
-    stroke.annotation?.nodeType,
-    point,
-  );
-  return Math.hypot(point.x - expected.x, point.y - expected.y) <= tolerance;
-}
-
-/**
- * True only when connector metadata and rendered endpoints agree. A connector
- * can retain snapped IDs after a whole-line drag; treating those IDs alone as
- * proof of attachment produces a visually detached, semantically "satisfied"
- * edge.
- */
-export function connectorGeometryMatchesBindings(
-  state: BoardState,
-  annotation: StrokeAnnotation,
-  fromId = annotation.snappedStartStrokeId,
-  toId = annotation.snappedEndStrokeId,
-  tolerance = DEFAULT_CONNECTOR_ATTACHMENT_TOLERANCE,
-): boolean {
-  if (
-    !fromId ||
-    !toId ||
-    annotation.snappedStartStrokeId !== fromId ||
-    annotation.snappedEndStrokeId !== toId ||
-    !annotation.start ||
-    !annotation.end ||
-    (annotation.type !== "connector" && annotation.type !== "arrow")
-  ) {
-    return false;
-  }
-  return (
-    connectorEndpointMatchesBinding(state, annotation, "start", tolerance) &&
-    connectorEndpointMatchesBinding(state, annotation, "end", tolerance)
-  );
-}
 
 export type ReverseConnectionCommand = {
   type: "connection.reverse";
@@ -149,7 +97,7 @@ export type ResizeObjectCommand = {
   bounds: AnnotationBounds;
 };
 
-/** Gives a legacy node another node type or catalogue shape, keeping its box, label and arrows. */
+/** Gives a shape another node type or catalogue shape, keeping its box, label and arrows. */
 export type RetypeObjectCommand = {
   type: "object.retype";
   objectId: string;
@@ -158,7 +106,7 @@ export type RetypeObjectCommand = {
   shapeKind?: ShapeKind | null;
 };
 
-/** Draws a legacy connector solid, dashed or dotted. */
+/** Draws a connector solid, dashed or dotted. */
 export type RestyleConnectorCommand = {
   type: "connector.restyle";
   connectorId: string;
@@ -176,9 +124,6 @@ export type GroupObjectsCommand = {
   groupId?: string;
   objectIds: string[];
   label?: string;
-  padding?: number;
-  source?: AnnotationSource;
-  style?: DiagramObjectStyle;
 };
 
 export type RestyleObjectCommand = {
@@ -225,11 +170,7 @@ export type LayoutObjectsCommand = {
   origin?: AnnotationPoint;
 };
 
-/**
- * Commands on v2 scene elements: objects made by typed commands or the toolbar,
- * which the stroke commands above can't reach. Ids may also name legacy nodes'
- * mirrored elements, so a connector can join one of each.
- */
+/** The scene.* twins of the verbs above, named by the element they act on. */
 export type SceneConnectCommand = {
   type: "scene.connect";
   connectorId?: string;
@@ -262,8 +203,13 @@ export type SceneGroupCommand = {
 };
 
 export type SceneResizeCommand = { type: "scene.resize"; elementId: string; bounds: AnnotationBounds };
-/** Gives a v2 shape another catalogue shape. */
-export type SceneRetypeCommand = { type: "scene.retype"; elementId: string; shapeKind: ShapeKind };
+/** Gives a v2 shape another catalogue shape; with a node type, it is named by that type. */
+export type SceneRetypeCommand = {
+  type: "scene.retype";
+  elementId: string;
+  shapeKind: ShapeKind;
+  nodeType?: AnnotationNodeType;
+};
 export type SceneRestyleConnectorCommand = {
   type: "scene.connector.restyle";
   connectorId: string;
@@ -285,7 +231,6 @@ export type DiagramCommand =
   | SceneGroupCommand
   | CreateNodeCommand
   | ConnectNodesCommand
-  | AttachConnectionCommand
   | ReverseConnectionCommand
   | MoveObjectsCommand
   | ResizeObjectCommand
@@ -323,21 +268,8 @@ export type DiagramUndoResult = {
   events: BoardEvent[];
 };
 
-type EventPayload =
-  | { type: "stroke.started"; stroke: Stroke }
-  | { type: "stroke.committed"; strokeId: string }
-  | {
-      type: "stroke.annotation_updated";
-      strokeId: string;
-      annotation: StrokeAnnotation;
-      points: StrokePoint[];
-    }
-  | { type: "stroke.label_updated"; strokeId: string; label: string }
-  | { type: "stroke.deleted"; strokeIds: string[] }
-  | { type: "stroke.restored"; strokeIds: string[] }
-  | SceneElementEvent;
+type EventPayload = SceneElementEvent;
 
-const DEFAULT_GROUP_PADDING = 28;
 const DEFAULT_LAYOUT_GAP = 48;
 
 /**
@@ -358,23 +290,23 @@ export function planDiagramCommand(
     case "nodes.connect":
       planConnectNodes(planner, command);
       break;
-    case "connection.attach":
-      planAttachConnection(planner, command);
-      break;
     case "connection.reverse":
-      planReverseConnection(planner, command);
+      reverseConnector(planner.sceneSink(), command.connectorId, command.label);
       break;
     case "objects.move":
       planMoveObjects(planner, command);
       break;
     case "object.resize":
-      planResizeObject(planner, command);
+      resizeElement(planner.sceneSink(), command.objectId, normalizeBounds(command.bounds));
       break;
     case "object.rename":
-      planRenameObject(planner, command);
+      renameElement(planner.sceneSink(), command.objectId, command.label);
       break;
     case "object.restyle":
-      planRestyleObject(planner, command);
+      restyleElement(planner.sceneSink(), command.objectId, {
+        ...(command.fillColor !== undefined ? { fillColor: command.fillColor } : {}),
+        ...(command.strokeColor !== undefined ? { strokeColor: command.strokeColor } : {}),
+      });
       break;
     case "objects.group":
       planGroupObjects(planner, command);
@@ -416,28 +348,22 @@ export function planDiagramCommand(
       resizeElement(planner.sceneSink(), command.elementId, command.bounds);
       break;
     case "scene.retype":
-      retypeElement(planner.sceneSink(), command.elementId, command.shapeKind);
+      retypeElement(planner.sceneSink(), command.elementId, command.shapeKind, command.nodeType);
       break;
     case "scene.connector.restyle":
       restyleConnectorElement(planner.sceneSink(), command.connectorId, command.lineStyle);
       break;
     case "object.retype":
-      planRetypeObject(planner, command);
+      retypeElement(
+        planner.sceneSink(),
+        command.objectId,
+        command.shapeKind ?? shapeKindForNodeType(command.nodeType),
+        command.nodeType,
+      );
       break;
     case "connector.restyle":
-      planRestyleConnector(planner, command);
+      restyleConnectorElement(planner.sceneSink(), command.connectorId, command.lineStyle);
       break;
-  }
-  // v2 connectors are drawn from stored end points: keep any attached to a
-  // legacy node in step when that node moves.
-  if (
-    command.type === "objects.move" ||
-    command.type === "object.resize" ||
-    command.type === "object.retype" ||
-    command.type === "objects.align" ||
-    command.type === "objects.layout"
-  ) {
-    refreshAttachedConnectors(planner.sceneSink(), planner.touchedStrokeIds());
   }
 
   return planner.plan();
@@ -509,7 +435,6 @@ class CommandPlanner {
   state: BoardState;
   readonly context: DiagramCommandContext;
   readonly createdAt: string;
-  readonly timestampMs: number;
   private readonly events: BoardEvent[] = [];
   private readonly undoEvents: BoardEvent[] = [];
   private readonly affectedStrokeIds = new Set<string>();
@@ -520,35 +445,12 @@ class CommandPlanner {
     this.state = state;
     this.context = context;
     this.createdAt = context.createdAt ?? new Date().toISOString();
-    const parsedTimestamp = Date.parse(this.createdAt);
-    this.timestampMs = Number.isFinite(parsedTimestamp) ? parsedTimestamp : Date.now();
     this.eventIdFactory = context.eventIdFactory ?? randomId;
     this.objectIdFactory = context.objectIdFactory ?? randomId;
   }
 
   objectId(explicitId?: string): string {
     return explicitId ?? this.objectIdFactory();
-  }
-
-  getStroke(id: string): Stroke {
-    const stroke = this.tryGetStroke(id);
-    if (!stroke) {
-      const raw = this.state.strokes[id] ?? this.state.activeStrokes[id];
-      if (!raw || raw.status === "deleted") {
-        throw new DiagramCommandError(`Diagram object not found: ${id}`);
-      }
-      throw new DiagramCommandError(`Stroke is not a semantic diagram object: ${id}`);
-    }
-    return stroke;
-  }
-
-  /** Like getStroke but returns null instead of throwing for missing, deleted, or non-semantic strokes. */
-  tryGetStroke(id: string): Stroke | null {
-    const stroke = this.state.strokes[id] ?? this.state.activeStrokes[id];
-    if (!stroke || stroke.status === "deleted" || !stroke.annotation) {
-      return null;
-    }
-    return stroke;
   }
 
   add(payload: EventPayload, inverse?: EventPayload): void {
@@ -563,67 +465,7 @@ class CommandPlanner {
     }
   }
 
-  createStroke(stroke: Stroke): void {
-    if (this.state.strokes[stroke.id] || this.state.activeStrokes[stroke.id]) {
-      throw new DiagramCommandError(`Diagram object already exists: ${stroke.id}`);
-    }
-    this.add({ type: "stroke.started", stroke });
-    this.add(
-      { type: "stroke.committed", strokeId: stroke.id },
-      { type: "stroke.deleted", strokeIds: [stroke.id] },
-    );
-  }
-
-  updateAnnotation(id: string, annotation: StrokeAnnotation, points: StrokePoint[]): void {
-    const previous = this.getStroke(id);
-    const previousAnnotation = previous.annotation;
-    if (!previousAnnotation) {
-      throw new DiagramCommandError(`Stroke is not a semantic diagram object: ${id}`);
-    }
-    this.add(
-      {
-        type: "stroke.annotation_updated",
-        strokeId: id,
-        annotation,
-        points,
-      },
-      {
-        type: "stroke.annotation_updated",
-        strokeId: id,
-        annotation: cloneAnnotation(previousAnnotation),
-        points: clonePoints(previous.points),
-      },
-    );
-  }
-
-  updateLabel(id: string, label: string): void {
-    const previous = this.getStroke(id);
-    this.add(
-      { type: "stroke.label_updated", strokeId: id, label },
-      {
-        type: "stroke.label_updated",
-        strokeId: id,
-        label: previous.annotation?.label ?? "",
-      },
-    );
-  }
-
-  delete(ids: string[]): void {
-    const uniqueIds = unique(ids);
-    for (const id of uniqueIds) {
-      this.getStroke(id);
-    }
-    this.add(
-      { type: "stroke.deleted", strokeIds: uniqueIds },
-      { type: "stroke.restored", strokeIds: uniqueIds },
-    );
-  }
-
-  touchedStrokeIds(): string[] {
-    return [...this.affectedStrokeIds];
-  }
-
-  /** The planner as a sink for v2 scene element events. */
+  /** The planner as a sink for scene element events. */
   sceneSink(): SceneEventSink {
     return new PlannerSceneSink(this);
   }
@@ -685,318 +527,91 @@ class PlannerSceneSink implements SceneEventSink {
   }
 }
 
+/**
+ * A diagram node's colours when the command names none (the colours Airo's
+ * nodes have always had). A note keeps its yellow paper.
+ */
+const NODE_STROKE = "#2563eb";
+const NODE_FILL = "#f8fafc";
+const NOTE_NODE_FILL = "#fef9c3";
+const NODE_STROKE_WIDTH = 3;
+
+/** Draws a diagram node as a v2 shape. */
 function planCreateNode(planner: CommandPlanner, command: CreateNodeCommand): void {
   if (!command.bounds && !command.center) {
     throw new DiagramCommandError("node.create requires bounds or center");
   }
-  const id = planner.objectId(command.nodeId);
   const bounds = command.bounds
     ? normalizeBounds(command.bounds)
     : boundsAroundCenter(command.center as AnnotationPoint, defaultNodeSize(command.nodeType));
-  const annotation: StrokeAnnotation = {
-    type: command.nodeType === "circle" ? "ellipse" : "flow_node",
-    source: command.source ?? "ai",
-    bounds,
-    nodeType: command.nodeType,
-    strokeColor: command.style?.strokeColor ?? "#2563eb",
-    fillColor:
-      command.style?.fillColor ?? (command.nodeType === "note" ? "#fef9c3" : "#f8fafc"),
+  const shapeKind = command.shapeKind ?? shapeKindForNodeType(command.nodeType);
+  const style: Partial<ShapeStyle> = {
+    stroke: command.style?.strokeColor ?? NODE_STROKE,
+    fill: command.style?.fillColor ?? (command.nodeType === "note" ? NOTE_NODE_FILL : NODE_FILL),
+    strokeWidth: command.style?.thickness ?? NODE_STROKE_WIDTH,
   };
-  if (command.label !== undefined) annotation.label = command.label;
-  if (command.shapeKind !== undefined) annotation.shapeKind = command.shapeKind;
-  if (command.style?.opacity !== undefined) annotation.opacity = command.style.opacity;
-  planner.createStroke(
-    semanticStroke(planner, id, annotation, command.style?.thickness ?? 3),
-  );
+  if (command.style?.opacity !== undefined) style.fillOpacity = command.style.opacity;
+  const metadata: Record<string, BoardJsonValue> = {
+    source: command.source ?? "ai",
+    nodeType: command.nodeType,
+    nodeShape: shapeKind,
+  };
+  createShapeElement(planner.sceneSink(), {
+    ...(command.nodeId !== undefined ? { shapeId: command.nodeId } : {}),
+    shapeKind,
+    bounds,
+    ...(command.label !== undefined ? { label: command.label } : {}),
+    style,
+    metadata,
+  });
 }
 
+/** The weight of the arrows Airo and typed commands draw. */
+export const AIRO_CONNECTOR_THICKNESS: ConnectorElement["style"]["thickness"] = "thick";
+
+/** Draws a v2 connector between two objects. */
 function planConnectNodes(planner: CommandPlanner, command: ConnectNodesCommand): void {
   if (command.fromId === command.toId) {
     throw new DiagramCommandError("nodes.connect requires two different objects");
   }
-  const fromStroke = planner.getStroke(command.fromId);
-  const toStroke = planner.getStroke(command.toId);
-  const from = requireBounds(fromStroke);
-  const to = requireBounds(toStroke);
-  const endpoints = connectorEndpoints(
-    from,
-    to,
-    fromStroke.annotation?.nodeType,
-    toStroke.annotation?.nodeType,
-  );
-  const id = planner.objectId(command.connectorId);
-  const annotation: StrokeAnnotation = {
-    type: "connector",
-    source: command.source ?? "ai",
-    start: endpoints.start,
-    end: endpoints.end,
-    snappedStartStrokeId: command.fromId,
-    snappedEndStrokeId: command.toId,
-    strokeColor: command.style?.strokeColor ?? "#334155",
-  };
-  const routeOffset = nextConnectorRouteOffset(
-    planner.state,
-    command.fromId,
-    command.toId,
-  );
-  if (routeOffset !== 0) annotation.routeOffset = routeOffset;
-  if (command.label !== undefined) annotation.label = command.label;
-  if (command.style?.opacity !== undefined) annotation.opacity = command.style.opacity;
-  planner.createStroke(
-    semanticStroke(planner, id, annotation, command.style?.thickness ?? 3),
-  );
-}
-
-function planAttachConnection(
-  planner: CommandPlanner,
-  command: AttachConnectionCommand,
-): void {
-  if (command.fromId === command.toId) {
-    throw new DiagramCommandError(
-      "connection.attach requires two different objects",
-    );
-  }
-  const connector = planner.getStroke(command.connectorId);
-  const annotation = connector.annotation;
-  if (
-    !annotation ||
-    (annotation.type !== "connector" && annotation.type !== "arrow") ||
-    !annotation.start ||
-    !annotation.end
-  ) {
-    throw new DiagramCommandError(
-      `connection.attach requires an existing line connector: ${command.connectorId}`,
-    );
-  }
-  for (const endpoint of ["start", "end"] as const) {
-    const existingEndpointId =
-      endpoint === "start"
-        ? annotation.snappedStartStrokeId
-        : annotation.snappedEndStrokeId;
-    const requestedEndpointId =
-      endpoint === "start" ? command.fromId : command.toId;
-    if (
-      existingEndpointId &&
-      existingEndpointId !== requestedEndpointId &&
-      connectorEndpointMatchesBinding(planner.state, annotation, endpoint)
-    ) {
-      throw new DiagramCommandError(
-        `connection.attach will not replace a geometrically attached endpoint: ${existingEndpointId}`,
-      );
+  for (const id of [command.fromId, command.toId]) {
+    if (!isSceneNodeElement(planner.state.elements[id])) {
+      throw new DiagramCommandError(`Diagram object not found: ${id}`);
     }
   }
-
-  const fromStroke = planner.getStroke(command.fromId);
-  const toStroke = planner.getStroke(command.toId);
-  const endpoints = connectorEndpoints(
-    requireBounds(fromStroke),
-    requireBounds(toStroke),
-    fromStroke.annotation?.nodeType,
-    toStroke.annotation?.nodeType,
-  );
-  const updated = cloneAnnotation(annotation);
-  updated.snappedStartStrokeId = command.fromId;
-  updated.snappedEndStrokeId = command.toId;
-  updated.start = endpoints.start;
-  updated.end = endpoints.end;
-  const routeOffset = nextConnectorRouteOffset(
-    planner.state,
-    command.fromId,
-    command.toId,
-    connector.id,
-  );
-  if (routeOffset === 0) {
-    delete updated.routeOffset;
-  } else {
-    updated.routeOffset = routeOffset;
-  }
-  if (command.label !== undefined) {
-    updated.label = command.label;
-  }
-  if (
-    annotation.snappedStartStrokeId === command.fromId &&
-    annotation.snappedEndStrokeId === command.toId &&
-    connectorGeometryMatchesBindings(
-      planner.state,
-      annotation,
-      command.fromId,
-      command.toId,
-    ) &&
-    (command.label === undefined || command.label === annotation.label)
-  ) {
-    return;
-  }
-  planner.updateAnnotation(
-    connector.id,
-    updated,
-    pointsForAnnotation(updated, planner.timestampMs),
-  );
-}
-
-function planReverseConnection(
-  planner: CommandPlanner,
-  command: ReverseConnectionCommand,
-): void {
-  const connector = planner.getStroke(command.connectorId);
-  const annotation = connector.annotation;
-  if (
-    !annotation ||
-    (annotation.type !== "connector" && annotation.type !== "arrow") ||
-    !annotation.snappedStartStrokeId ||
-    !annotation.snappedEndStrokeId
-  ) {
-    throw new DiagramCommandError(
-      `connection.reverse requires a snapped connector: ${command.connectorId}`,
-    );
-  }
-
-  const reversedFromId = annotation.snappedEndStrokeId;
-  const reversedToId = annotation.snappedStartStrokeId;
-  const reversedFromStroke = planner.getStroke(reversedFromId);
-  const reversedToStroke = planner.getStroke(reversedToId);
-  const reversedFrom = requireBounds(reversedFromStroke);
-  const reversedTo = requireBounds(reversedToStroke);
-  const endpoints = connectorEndpoints(
-    reversedFrom,
-    reversedTo,
-    reversedFromStroke.annotation?.nodeType,
-    reversedToStroke.annotation?.nodeType,
-  );
-  const updated = cloneAnnotation(annotation);
-  updated.snappedStartStrokeId = reversedFromId;
-  updated.snappedEndStrokeId = reversedToId;
-  updated.start = endpoints.start;
-  updated.end = endpoints.end;
-  const routeOffset = nextConnectorRouteOffset(
-    planner.state,
-    reversedFromId,
-    reversedToId,
-    connector.id,
-  );
-  if (routeOffset === 0) {
-    delete updated.routeOffset;
-  } else {
-    updated.routeOffset = routeOffset;
-  }
-  if (command.label !== undefined) {
-    updated.label = command.label;
-  }
-  planner.updateAnnotation(
-    connector.id,
-    updated,
-    pointsForAnnotation(updated, planner.timestampMs),
-  );
+  // Airo's and typed arrows are drawn heavy (as Airo always drew them), so a
+  // diagram's arrows read at a glance; the toolbar's own connectors keep its
+  // thin default. A stated weight under 3px draws thin.
+  const style: SceneConnectorStyle = { thickness: AIRO_CONNECTOR_THICKNESS };
+  if (command.style?.strokeColor !== undefined) style.color = command.style.strokeColor;
+  if (command.style?.opacity !== undefined) style.opacity = command.style.opacity;
+  if (command.style?.thickness !== undefined) style.thickness = command.style.thickness >= 3 ? "thick" : "thin";
+  connectElements(planner.sceneSink(), {
+    ...(command.connectorId !== undefined ? { connectorId: command.connectorId } : {}),
+    fromId: command.fromId,
+    toId: command.toId,
+    ...(command.label !== undefined ? { label: command.label } : {}),
+    style,
+    metadata: { source: command.source ?? "ai" },
+  });
 }
 
 function planMoveObjects(planner: CommandPlanner, command: MoveObjectsCommand): void {
   if ((command.delta === undefined) === (command.to === undefined)) {
     throw new DiagramCommandError("objects.move requires exactly one of delta or to");
   }
-  const ids = expandSelectedGroups(planner, command.objectIds);
-  const objects = ids.map((id) => planner.getStroke(id));
-  // Only objects with a resolvable position contribute to the selection bounds.
-  // A malformed object (e.g. a connector missing both bounds and endpoints) is
-  // skipped rather than aborting the move of every other object.
-  const positioned = objects.filter(hasResolvablePosition);
-  if (positioned.length === 0) {
+  // Ids that name nothing any more (a shape deleted meanwhile) are skipped;
+  // connectors are not moved on their own (they follow their objects).
+  const ids = unique(command.objectIds).filter((id) => isSceneNodeElement(planner.state.elements[id]));
+  if (ids.length === 0) {
     throw new DiagramCommandError("objects.move has no movable objects in the selection");
   }
-  const selectionBounds = unionBounds(positioned.map(positionBounds));
+  const selection = unionBounds(ids.map((id) => sceneNodeBounds(planner, id)));
   const delta = command.delta ?? {
-    x: (command.to as AnnotationPoint).x - selectionBounds.x,
-    y: (command.to as AnnotationPoint).y - selectionBounds.y,
+    x: (command.to as AnnotationPoint).x - selection.x,
+    y: (command.to as AnnotationPoint).y - selection.y,
   };
-  const changedNodes: string[] = [];
-  const movedIds = new Set(positioned.map((stroke) => stroke.id));
-
-  for (const stroke of positioned) {
-    const annotation = cloneAnnotation(stroke.annotation as StrokeAnnotation);
-    translateAnnotation(annotation, delta.x, delta.y);
-    if (annotation.type === "connector" || annotation.type === "arrow") {
-      if (
-        annotation.snappedStartStrokeId &&
-        !movedIds.has(annotation.snappedStartStrokeId)
-      ) {
-        delete annotation.snappedStartStrokeId;
-      }
-      if (
-        annotation.snappedEndStrokeId &&
-        !movedIds.has(annotation.snappedEndStrokeId)
-      ) {
-        delete annotation.snappedEndStrokeId;
-      }
-      if (
-        !annotation.snappedStartStrokeId ||
-        !annotation.snappedEndStrokeId
-      ) {
-        delete annotation.routeOffset;
-      }
-    }
-    planner.updateAnnotation(stroke.id, annotation, pointsForAnnotation(annotation, planner.timestampMs));
-    if (annotation.bounds) changedNodes.push(stroke.id);
-  }
-  syncAttachedConnectors(planner, changedNodes, movedIds);
-}
-
-function planResizeObject(planner: CommandPlanner, command: ResizeObjectCommand): void {
-  const stroke = planner.getStroke(command.objectId);
-  const annotation = cloneAnnotation(stroke.annotation as StrokeAnnotation);
-  if (!annotation.bounds) {
-    throw new DiagramCommandError(`Diagram object cannot be resized: ${command.objectId}`);
-  }
-  annotation.bounds = normalizeBounds(command.bounds);
-  planner.updateAnnotation(
-    stroke.id,
-    annotation,
-    pointsForAnnotation(annotation, planner.timestampMs),
-  );
-  syncAttachedConnectors(planner, [stroke.id]);
-}
-
-function planRetypeObject(planner: CommandPlanner, command: RetypeObjectCommand): void {
-  const stroke = planner.getStroke(command.objectId);
-  const annotation = cloneAnnotation(stroke.annotation as StrokeAnnotation);
-  if (!annotation.bounds || (annotation.type !== "flow_node" && annotation.type !== "ellipse" && annotation.type !== "rectangle")) {
-    throw new DiagramCommandError(`Diagram object cannot change type: ${command.objectId}`);
-  }
-  annotation.type = command.nodeType === "circle" ? "ellipse" : "flow_node";
-  annotation.nodeType = command.nodeType;
-  if (command.shapeKind) annotation.shapeKind = command.shapeKind;
-  else delete annotation.shapeKind;
-  planner.updateAnnotation(stroke.id, annotation, pointsForAnnotation(annotation, planner.timestampMs));
-  // Arrows meet a node's outline, which a new shape changes.
-  syncAttachedConnectors(planner, [stroke.id]);
-}
-
-function planRestyleConnector(planner: CommandPlanner, command: RestyleConnectorCommand): void {
-  const stroke = planner.getStroke(command.connectorId);
-  const annotation = cloneAnnotation(stroke.annotation as StrokeAnnotation);
-  if (annotation.type !== "connector" && annotation.type !== "arrow") {
-    throw new DiagramCommandError(`Not a connector: ${command.connectorId}`);
-  }
-  if (command.lineStyle === "solid") delete annotation.lineStyle;
-  else annotation.lineStyle = command.lineStyle;
-  planner.updateAnnotation(stroke.id, annotation, pointsForAnnotation(annotation, planner.timestampMs));
-}
-
-function planRenameObject(planner: CommandPlanner, command: RenameObjectCommand): void {
-  planner.updateLabel(command.objectId, command.label);
-}
-
-function planRestyleObject(planner: CommandPlanner, command: RestyleObjectCommand): void {
-  const stroke = planner.getStroke(command.objectId);
-  const annotation = cloneAnnotation(stroke.annotation as StrokeAnnotation);
-  if (command.fillColor !== undefined) {
-    annotation.fillColor = command.fillColor;
-  }
-  if (command.strokeColor !== undefined) {
-    annotation.strokeColor = command.strokeColor;
-  }
-  planner.updateAnnotation(
-    stroke.id,
-    annotation,
-    pointsForAnnotation(annotation, planner.timestampMs),
-  );
+  moveElements(planner.sceneSink(), ids, delta);
 }
 
 function planGroupObjects(planner: CommandPlanner, command: GroupObjectsCommand): void {
@@ -1004,38 +619,12 @@ function planGroupObjects(planner: CommandPlanner, command: GroupObjectsCommand)
   if (memberIds.length === 0) {
     throw new DiagramCommandError("objects.group requires at least one object");
   }
-  const members = memberIds.map((id) => planner.getStroke(id));
-  const padding = Math.max(0, command.padding ?? DEFAULT_GROUP_PADDING);
-  const contentBounds = unionBounds(members.map(requireBounds));
-  const bounds = {
-    x: contentBounds.x - padding,
-    y: contentBounds.y - padding,
-    width: contentBounds.width + padding * 2,
-    height: contentBounds.height + padding * 2,
-  };
-  const groupId = planner.objectId(command.groupId);
-  const groupAnnotation: StrokeAnnotation = {
-    type: "rectangle",
-    source: command.source ?? "ai",
-    bounds,
-    label: command.label ?? "Group",
-    strokeColor: command.style?.strokeColor ?? "#64748b",
-    fillColor: command.style?.fillColor ?? "rgba(248, 250, 252, 0.08)",
-    opacity: command.style?.opacity ?? 0.8,
-    groupMemberStrokeIds: memberIds,
-  };
-  planner.createStroke(
-    semanticStroke(planner, groupId, groupAnnotation, command.style?.thickness ?? 2),
-  );
-  for (const member of members) {
-    const annotation = cloneAnnotation(member.annotation as StrokeAnnotation);
-    annotation.groupId = groupId;
-    planner.updateAnnotation(
-      member.id,
-      annotation,
-      pointsForAnnotation(annotation, planner.timestampMs),
-    );
-  }
+  // Grouped as the toolbar groups them: in a section.
+  groupElements(planner.sceneSink(), {
+    ...(command.groupId !== undefined ? { sectionId: command.groupId } : {}),
+    memberIds,
+    ...(command.label !== undefined ? { label: command.label } : {}),
+  });
 }
 
 function planDeleteObjects(planner: CommandPlanner, command: DeleteObjectsCommand): void {
@@ -1043,85 +632,32 @@ function planDeleteObjects(planner: CommandPlanner, command: DeleteObjectsComman
   if (requested.length === 0) {
     throw new DiagramCommandError("objects.delete requires at least one object");
   }
-  const ids = new Set(requested);
-  if (command.cascadeConnectors !== false) {
-    for (const stroke of activeSemanticStrokes(planner.state)) {
-      const annotation = stroke.annotation;
-      if (
-        (annotation?.type === "connector" || annotation?.type === "arrow") &&
-        ((annotation.snappedStartStrokeId && ids.has(annotation.snappedStartStrokeId)) ||
-          (annotation.snappedEndStrokeId && ids.has(annotation.snappedEndStrokeId)))
-      ) {
-        ids.add(stroke.id);
-      }
+  const remaining = requested.filter((id) => isActiveElement(planner.state, id));
+  if (remaining.length === 0) return;
+  if (command.cascadeConnectors === false) {
+    for (const id of remaining) {
+      planner.add({ type: "element.deleted", elementId: id }, { type: "element.restored", elementId: id });
     }
+  } else {
+    deleteElements(planner.sceneSink(), remaining);
   }
-
-  // Keep optional grouping metadata consistent while still using only the
-  // existing annotation-update/delete event contract.
-  for (const group of activeSemanticStrokes(planner.state)) {
-    const memberIds = group.annotation?.groupMemberStrokeIds;
-    if (!memberIds) continue;
-    if (ids.has(group.id)) {
-      for (const memberId of memberIds) {
-        if (ids.has(memberId)) continue;
-        const member = planner.state.strokes[memberId] ?? planner.state.activeStrokes[memberId];
-        if (!member?.annotation || member.status === "deleted") continue;
-        const annotation = cloneAnnotation(member.annotation);
-        delete annotation.groupId;
-        planner.updateAnnotation(
-          member.id,
-          annotation,
-          pointsForAnnotation(annotation, planner.timestampMs),
-        );
-      }
-      continue;
-    }
-    const remainingMemberIds = memberIds.filter((memberId) => !ids.has(memberId));
-    if (remainingMemberIds.length === memberIds.length) continue;
-    if (remainingMemberIds.length === 0) {
-      ids.add(group.id);
-      continue;
-    }
-    const annotation = cloneAnnotation(group.annotation as StrokeAnnotation);
-    annotation.groupMemberStrokeIds = remainingMemberIds;
-    planner.updateAnnotation(
-      group.id,
-      annotation,
-      pointsForAnnotation(annotation, planner.timestampMs),
-    );
-  }
-  planner.delete([...ids]);
-  if (command.cascadeConnectors !== false) removeAttachedConnectors(planner.sceneSink(), ids);
 }
 
 function planDuplicateObjects(planner: CommandPlanner, command: DuplicateObjectsCommand): void {
-  const sourceIds = expandSelectedGroups(planner, command.objectIds);
-  if (sourceIds.length === 0) {
+  const ids = unique(command.objectIds);
+  if (ids.length === 0) {
     throw new DiagramCommandError("objects.duplicate requires at least one object");
   }
-  const sourceStrokes = sourceIds.map((id) => planner.getStroke(id));
-  const idMap = new Map<string, string>();
-  for (const source of sourceStrokes) {
-    idMap.set(source.id, planner.objectId(command.idMap?.[source.id]));
+  // A connector is not copied on its own: the shapes are.
+  const nodeIds = ids.filter((id) => isSceneNodeElement(planner.state.elements[id]));
+  if (nodeIds.length === 0) {
+    throw new DiagramCommandError("objects.duplicate requires at least one shape");
   }
-  const offset = command.offset ?? { x: 24, y: 24 };
-
-  for (const source of sourceStrokes) {
-    const annotation = cloneAnnotation(source.annotation as StrokeAnnotation);
-    translateAnnotation(annotation, offset.x, offset.y);
-    remapAnnotationReferences(annotation, idMap);
-    const duplicateId = idMap.get(source.id);
-    if (!duplicateId) continue;
-    const overrides: Partial<Pick<Stroke, "color" | "inputSource" | "trackingSource">> = {
-      color: source.color,
-    };
-    if (source.inputSource) overrides.inputSource = source.inputSource;
-    if (source.trackingSource) overrides.trackingSource = source.trackingSource;
-    planner.createStroke(
-      semanticStroke(planner, duplicateId, annotation, source.thickness, overrides),
-    );
-  }
+  duplicateElements(planner.sceneSink(), {
+    elementIds: nodeIds,
+    ...(command.idMap ? { idMap: command.idMap } : {}),
+    offset: command.offset ?? { x: 24, y: 24 },
+  });
 }
 
 function planAlignObjects(planner: CommandPlanner, command: AlignObjectsCommand): void {
@@ -1143,7 +679,7 @@ function planAlignObjects(planner: CommandPlanner, command: AlignObjectsCommand)
       updated.set(entry.id, alignedBounds(entry.bounds, anchor, command.alignment));
     }
   }
-  applyArrangedBounds(planner, entries, updated);
+  applyArrangedBounds(planner, updated);
 }
 
 function planLayoutObjects(planner: CommandPlanner, command: LayoutObjectsCommand): void {
@@ -1175,265 +711,42 @@ function planLayoutObjects(planner: CommandPlanner, command: LayoutObjectsComman
     }
     updated.set(entry.id, bounds);
   }
-  applyArrangedBounds(planner, entries, updated);
+  applyArrangedBounds(planner, updated);
 }
 
-type ArrangeEntry = { id: string; bounds: AnnotationBounds; scene: boolean };
+type ArrangeEntry = { id: string; bounds: AnnotationBounds };
 
-/** Align and layout arrange legacy nodes and v2 shapes alike. */
+function sceneNodeBounds(planner: CommandPlanner, id: string): AnnotationBounds {
+  const element = planner.state.elements[id];
+  if (!isSceneNodeElement(element)) {
+    throw new DiagramCommandError(`Diagram object not found: ${id}`);
+  }
+  const { x, y, width, height } = element.transform;
+  return { x, y, width, height };
+}
+
+/** The objects align and layout arrange, with their boxes. */
 function arrangeEntries(planner: CommandPlanner, ids: readonly string[]): ArrangeEntry[] {
   return ids.map((id) => {
-    const element = planner.state.elements[id];
-    if (isSceneOnlyElement(planner.state, id) && isSceneNodeElement(element)) {
-      const { x, y, width, height } = element.transform;
-      return { id, bounds: { x, y, width, height }, scene: true };
+    if (!isActiveElement(planner.state, id)) {
+      throw new DiagramCommandError(`Diagram object not found: ${id}`);
     }
-    return { id, bounds: requireBounds(planner.getStroke(id)), scene: false };
+    return { id, bounds: sceneNodeBounds(planner, id) };
   });
 }
 
 /**
- * Legacy nodes take annotation updates and v2 shapes take position patches.
- * v2 connectors on either are refreshed after the command (see planDiagramCommand).
+ * Moves each arranged object's top-left corner. (Attached connectors keep
+ * their stored end points, as they did before phase 3.)
  */
 function applyArrangedBounds(
   planner: CommandPlanner,
-  entries: readonly ArrangeEntry[],
   updates: ReadonlyMap<string, AnnotationBounds>,
 ): void {
-  const sceneIds = new Set(entries.filter(({ scene }) => scene).map(({ id }) => id));
-  const legacy = new Map([...updates].filter(([id]) => !sceneIds.has(id)));
-  applyBoundsUpdates(planner, legacy);
   positionElements(
     planner.sceneSink(),
-    new Map([...updates].filter(([id]) => sceneIds.has(id)).map(([id, { x, y }]) => [id, { x, y }])),
+    new Map([...updates].map(([id, { x, y }]) => [id, { x, y }])),
   );
-  syncAttachedConnectors(planner, [...legacy.keys()]);
-}
-
-function applyBoundsUpdates(
-  planner: CommandPlanner,
-  updates: ReadonlyMap<string, AnnotationBounds>,
-): void {
-  for (const [id, bounds] of updates) {
-    const stroke = planner.getStroke(id);
-    const annotation = cloneAnnotation(stroke.annotation as StrokeAnnotation);
-    annotation.bounds = bounds;
-    planner.updateAnnotation(id, annotation, pointsForAnnotation(annotation, planner.timestampMs));
-  }
-}
-
-function syncAttachedConnectors(
-  planner: CommandPlanner,
-  changedIds: readonly string[],
-  explicitlyMovedIds = new Set<string>(),
-): void {
-  const changed = new Set(changedIds);
-  for (const connector of activeSemanticStrokes(planner.state)) {
-    const annotation = connector.annotation;
-    if (
-      !annotation ||
-      (annotation.type !== "connector" && annotation.type !== "arrow") ||
-      explicitlyMovedIds.has(connector.id) ||
-      (!changed.has(annotation.snappedStartStrokeId ?? "") &&
-        !changed.has(annotation.snappedEndStrokeId ?? ""))
-    ) {
-      continue;
-    }
-    const fromId = annotation.snappedStartStrokeId;
-    const toId = annotation.snappedEndStrokeId;
-    if (!fromId || !toId) continue;
-    const from = planner.getStroke(fromId);
-    const to = planner.getStroke(toId);
-    if (!from.annotation?.bounds || !to.annotation?.bounds) continue;
-    const endpoints = connectorEndpoints(
-      from.annotation.bounds,
-      to.annotation.bounds,
-      from.annotation.nodeType,
-      to.annotation.nodeType,
-    );
-    const updated = cloneAnnotation(annotation);
-    updated.start = endpoints.start;
-    updated.end = endpoints.end;
-    planner.updateAnnotation(
-      connector.id,
-      updated,
-      pointsForAnnotation(updated, planner.timestampMs),
-    );
-  }
-}
-
-function semanticStroke(
-  planner: CommandPlanner,
-  id: string,
-  annotation: StrokeAnnotation,
-  thickness: number,
-  overrides: Partial<Pick<Stroke, "color" | "inputSource" | "trackingSource">> = {},
-): Stroke {
-  const stroke: Stroke = {
-    id,
-    boardId: planner.state.boardId,
-    userId: planner.context.userId,
-    tool: "marker",
-    color: overrides.color ?? annotation.strokeColor ?? "#334155",
-    thickness,
-    points: pointsForAnnotation(annotation, planner.timestampMs),
-    createdAt: planner.createdAt,
-    updatedAt: planner.createdAt,
-    status: "active",
-    annotation,
-    inputSource: overrides.inputSource ?? "pointer",
-    trackingSource: overrides.trackingSource ?? "manual",
-  };
-  return stroke;
-}
-
-function pointsForAnnotation(annotation: StrokeAnnotation, timestampMs: number): StrokePoint[] {
-  if (annotation.bounds) {
-    const { x, y, width, height } = annotation.bounds;
-    if (annotation.type === "ellipse" || annotation.type === "pointer") {
-      const points: StrokePoint[] = [];
-      const centerX = x + width / 2;
-      const centerY = y + height / 2;
-      for (let index = 0; index <= 32; index += 1) {
-        const angle = (Math.PI * 2 * index) / 32;
-        points.push(
-          diagramPoint(
-            centerX + Math.cos(angle) * (width / 2),
-            centerY + Math.sin(angle) * (height / 2),
-            timestampMs + index,
-          ),
-        );
-      }
-      return points;
-    }
-    return [
-      diagramPoint(x, y, timestampMs),
-      diagramPoint(x + width, y, timestampMs + 1),
-      diagramPoint(x + width, y + height, timestampMs + 2),
-      diagramPoint(x, y + height, timestampMs + 3),
-      diagramPoint(x, y, timestampMs + 4),
-    ];
-  }
-  if (annotation.start && annotation.end) {
-    return [
-      diagramPoint(annotation.start.x, annotation.start.y, timestampMs),
-      diagramPoint(annotation.end.x, annotation.end.y, timestampMs + 1),
-    ];
-  }
-  return [];
-}
-
-function diagramPoint(x: number, y: number, t: number): StrokePoint {
-  return { x, y, t, inputSource: "pointer", trackingSource: "manual" };
-}
-
-function connectorEndpoints(
-  from: AnnotationBounds,
-  to: AnnotationBounds,
-  fromNodeType?: AnnotationNodeType,
-  toNodeType?: AnnotationNodeType,
-): { start: AnnotationPoint; end: AnnotationPoint } {
-  const fromCenter = centerOf(from);
-  const toCenter = centerOf(to);
-  if (fromCenter.x === toCenter.x && fromCenter.y === toCenter.y) {
-    return {
-      start: { x: from.x + from.width, y: fromCenter.y },
-      end: { x: to.x, y: toCenter.y },
-    };
-  }
-  return {
-    start: pointOnNodeBoundary(from, fromNodeType, toCenter),
-    end: pointOnNodeBoundary(to, toNodeType, fromCenter),
-  };
-}
-
-function nextConnectorRouteOffset(
-  state: BoardState,
-  fromId: string,
-  toId: string,
-  excludedConnectorId?: string,
-): number {
-  const siblingCount = activeSemanticStrokes(state).filter((stroke) => {
-    if (stroke.id === excludedConnectorId) return false;
-    const annotation = stroke.annotation;
-    if (
-      (annotation?.type !== "connector" && annotation?.type !== "arrow") ||
-      !annotation.snappedStartStrokeId ||
-      !annotation.snappedEndStrokeId
-    ) {
-      return false;
-    }
-    return (
-      (annotation.snappedStartStrokeId === fromId &&
-        annotation.snappedEndStrokeId === toId) ||
-      (annotation.snappedStartStrokeId === toId &&
-        annotation.snappedEndStrokeId === fromId)
-    );
-  }).length;
-  if (siblingCount === 0) return 0;
-  const lane = Math.ceil(siblingCount / 2);
-  const direction = siblingCount % 2 === 1 ? 1 : -1;
-  return direction * lane * 72;
-}
-
-function translateAnnotation(annotation: StrokeAnnotation, dx: number, dy: number): void {
-  if (annotation.bounds) {
-    annotation.bounds = {
-      ...annotation.bounds,
-      x: annotation.bounds.x + dx,
-      y: annotation.bounds.y + dy,
-    };
-  }
-  if (annotation.start) {
-    annotation.start = { x: annotation.start.x + dx, y: annotation.start.y + dy };
-  }
-  if (annotation.end) {
-    annotation.end = { x: annotation.end.x + dx, y: annotation.end.y + dy };
-  }
-}
-
-function remapAnnotationReferences(
-  annotation: StrokeAnnotation,
-  idMap: ReadonlyMap<string, string>,
-): void {
-  if (annotation.snappedStartStrokeId) {
-    const remapped = idMap.get(annotation.snappedStartStrokeId);
-    if (remapped) annotation.snappedStartStrokeId = remapped;
-    else delete annotation.snappedStartStrokeId;
-  }
-  if (annotation.snappedEndStrokeId) {
-    const remapped = idMap.get(annotation.snappedEndStrokeId);
-    if (remapped) annotation.snappedEndStrokeId = remapped;
-    else delete annotation.snappedEndStrokeId;
-  }
-  if (annotation.groupId) {
-    const remapped = idMap.get(annotation.groupId);
-    if (remapped) annotation.groupId = remapped;
-    else delete annotation.groupId;
-  }
-  if (annotation.groupMemberStrokeIds) {
-    annotation.groupMemberStrokeIds = annotation.groupMemberStrokeIds
-      .map((id) => idMap.get(id))
-      .filter((id): id is string => id !== undefined);
-  }
-}
-
-function expandSelectedGroups(planner: CommandPlanner, ids: readonly string[]): string[] {
-  const expanded = new Set<string>();
-  const pending = [...ids];
-  while (pending.length > 0) {
-    const id = pending.shift();
-    if (!id || expanded.has(id)) continue;
-    // Skip ids that no longer resolve to a live semantic object. Group metadata
-    // can reference a since-deleted member; a stale member must not abort the
-    // whole move/duplicate.
-    const stroke = planner.tryGetStroke(id);
-    if (!stroke) continue;
-    expanded.add(id);
-    pending.push(...(stroke.annotation?.groupMemberStrokeIds ?? []));
-  }
-  return [...expanded];
 }
 
 function alignedBounds(
@@ -1500,35 +813,6 @@ function distributeBounds(
   }
 }
 
-function requireBounds(stroke: Stroke): AnnotationBounds {
-  const bounds = stroke.annotation?.bounds;
-  if (!bounds) {
-    throw new DiagramCommandError(`Diagram object has no bounds: ${stroke.id}`);
-  }
-  return bounds;
-}
-
-function hasResolvablePosition(stroke: Stroke): boolean {
-  const annotation = stroke.annotation;
-  if (!annotation) return false;
-  return Boolean(annotation.bounds || (annotation.start && annotation.end));
-}
-
-function positionBounds(stroke: Stroke): AnnotationBounds {
-  if (stroke.annotation?.bounds) return stroke.annotation.bounds;
-  const start = stroke.annotation?.start;
-  const end = stroke.annotation?.end;
-  if (start && end) {
-    return {
-      x: Math.min(start.x, end.x),
-      y: Math.min(start.y, end.y),
-      width: Math.max(Math.abs(end.x - start.x), 1),
-      height: Math.max(Math.abs(end.y - start.y), 1),
-    };
-  }
-  throw new DiagramCommandError(`Diagram object has no position: ${stroke.id}`);
-}
-
 function unionBounds(boundsList: readonly AnnotationBounds[]): AnnotationBounds {
   if (boundsList.length === 0) {
     throw new DiagramCommandError("Cannot calculate bounds for an empty selection");
@@ -1567,31 +851,6 @@ function defaultNodeSize(nodeType: AnnotationNodeType): { width: number; height:
   return nodeVisualDefaultSize(nodeType);
 }
 
-function centerOf(bounds: AnnotationBounds): AnnotationPoint {
-  return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
-}
-
-function cloneAnnotation(annotation: StrokeAnnotation): StrokeAnnotation {
-  const clone: StrokeAnnotation = { ...annotation };
-  if (annotation.bounds) clone.bounds = { ...annotation.bounds };
-  if (annotation.start) clone.start = { ...annotation.start };
-  if (annotation.end) clone.end = { ...annotation.end };
-  if (annotation.groupMemberStrokeIds) {
-    clone.groupMemberStrokeIds = [...annotation.groupMemberStrokeIds];
-  }
-  return clone;
-}
-
-function clonePoints(points: readonly StrokePoint[]): StrokePoint[] {
-  return points.map((point) => ({ ...point }));
-}
-
-function activeSemanticStrokes(state: BoardState): Stroke[] {
-  return Object.values(state.strokes).filter(
-    (stroke) => stroke.status !== "deleted" && stroke.annotation !== undefined,
-  );
-}
-
 function stripEnvelope(event: BoardEvent): EventPayload {
   const {
     id: _id,
@@ -1604,17 +863,9 @@ function stripEnvelope(event: BoardEvent): EventPayload {
   return payload as EventPayload;
 }
 
+/** The elements an event touches (reported as `affectedStrokeIds`). */
 function eventStrokeIds(event: BoardEvent): string[] {
   switch (event.type) {
-    case "stroke.started":
-      return [event.stroke.id];
-    case "stroke.committed":
-    case "stroke.annotation_updated":
-    case "stroke.label_updated":
-      return [event.strokeId];
-    case "stroke.deleted":
-    case "stroke.restored":
-      return event.strokeIds;
     case "element.created":
       return [event.element.id];
     case "element.patched":

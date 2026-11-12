@@ -10,6 +10,7 @@ import {
 } from "node:path";
 
 import { expect, test, type Page } from "@playwright/test";
+import type { AirboardTestWindow } from "./support/testHooks";
 import {
   createGestureBrowserEvidence,
   evaluateGestureBrowserEvidence,
@@ -168,50 +169,22 @@ for (const asset of assets) {
       const setup = asset.annotations.browserReplay.setup;
       for (const transcript of setup?.deterministicWakeTranscripts ?? []) {
         await page.evaluate(async (input) => {
-          const hooks = (
-            window as unknown as {
-              __airboardTestHooks: {
-                emitFinalTranscript(transcript: string): Promise<unknown>;
-              };
-            }
-          ).__airboardTestHooks;
+          const hooks = (window as unknown as AirboardTestWindow).__airboardTestHooks;
           await hooks.emitFinalTranscript(input);
         }, transcript);
       }
       if (setup?.viewport) {
         await page.evaluate((viewport) => {
-          (
-            window as unknown as {
-              __airboardTestHooks: {
-                setViewport(value: {
-                  x: number;
-                  y: number;
-                  scale: number;
-                }): void;
-              };
-            }
-          ).__airboardTestHooks.setViewport(viewport);
+          (window as unknown as AirboardTestWindow).__airboardTestHooks.setViewport(viewport);
         }, setup.viewport);
       }
       if (setup?.diagramVisible !== undefined) {
         await page.evaluate((visible) => {
-          (
-            window as unknown as {
-              __airboardTestHooks: {
-                setDiagramVisible(value: boolean): void;
-              };
-            }
-          ).__airboardTestHooks.setDiagramVisible(visible);
+          (window as unknown as AirboardTestWindow).__airboardTestHooks.setDiagramVisible(visible);
         }, setup.diagramVisible);
       }
       await page.evaluate(() => {
-        (
-          window as unknown as {
-            __airboardTestHooks: {
-              clearEvalJournals(): void;
-            };
-          }
-        ).__airboardTestHooks.clearEvalJournals();
+        (window as unknown as AirboardTestWindow).__airboardTestHooks.clearEvalJournals();
       });
       const baseline = await readOutcomeSnapshot(page);
       await page.evaluate(() =>
@@ -225,67 +198,32 @@ for (const asset of assets) {
         asset.annotations.browserReplay.runDurationMs,
       );
       const observation = await page.evaluate(() => {
-        const hooks = (
-          window as unknown as {
-            __airboardTestHooks: {
-              getCanonicalBoardState(): {
-                strokes: Record<
-                  string,
-                  { status: string; annotation?: unknown }
-                >;
-              };
-              getBoardEventLog(): unknown[];
-              getInteractionDiagnostics(): {
-                gestureTrace: {
-                  stage: string;
-                  data: Record<string, unknown>;
-                }[];
-                gestureSummary: {
-                  totalEvents: number;
-                  stageCounts: Record<string, number>;
-                  observedOwners: string[];
-                  appliedActionCounts: Record<string, number>;
-                  targetedGestureCounts: Record<string, number>;
-                  inferenceP95Ms: number | null;
-                };
-                selectionIds: string[];
-                viewport: { x: number; y: number; scale: number };
-                undoDepth: number;
-              };
-              getDiagramVisible(): boolean;
-            };
-          }
-        ).__airboardTestHooks;
+        const hooks = (window as unknown as AirboardTestWindow).__airboardTestHooks;
         const board = hooks.getCanonicalBoardState();
         return {
           events: hooks.getBoardEventLog().length,
-          committedObjects: Object.values(board.strokes).filter(
-            (stroke) =>
-              stroke.status === "committed" &&
-              stroke.annotation !== undefined,
+          committedObjects: Object.values(board.elements).filter(
+            (element) => element.status === "active" && element.kind !== "drawing",
           ).length,
           diagnostics: hooks.getInteractionDiagnostics(),
           canonicalBoard: board,
           diagramVisible: hooks.getDiagramVisible(),
           objects: Object.fromEntries(
-            Object.entries(board.strokes)
+            Object.entries(board.elements)
               .filter(
-                ([, stroke]) =>
-                  stroke.status === "committed" &&
-                  stroke.annotation !== undefined,
+                ([, element]) =>
+                  element.status === "active" && element.kind !== "drawing",
               )
-              .map(([id, stroke]) => [
+              .map(([id, element]) => [
                 id,
-                (
-                  stroke.annotation as {
-                    bounds?: {
-                      x: number;
-                      y: number;
-                      width: number;
-                      height: number;
-                    };
-                  }
-                ).bounds ?? null,
+                element.kind === "connector"
+                  ? null
+                  : {
+                      x: element.transform.x,
+                      y: element.transform.y,
+                      width: element.transform.width,
+                      height: element.transform.height,
+                    },
               ]),
           ),
         };
@@ -303,6 +241,10 @@ for (const asset of assets) {
       );
       const oracle = asset.annotations.browserReplay;
       const gestureSummary = observation.diagnostics.gestureSummary;
+      if (!gestureSummary) {
+        throw new Error("The replay recorded no gesture trace summary.");
+      }
+      const stageCounts: Record<string, number | undefined> = gestureSummary.stageCounts;
       const perceptionFrames =
         gestureSummary.stageCounts.perception_health ?? 0;
       expect(perceptionFrames).toBeGreaterThanOrEqual(
@@ -310,7 +252,7 @@ for (const asset of assets) {
       );
       for (const stage of oracle.requiredStages ?? []) {
         expect(
-          (gestureSummary.stageCounts[stage] ?? 0) > 0,
+          (stageCounts[stage] ?? 0) > 0,
           `required gesture stage ${stage}`,
         ).toBe(true);
       }
@@ -411,17 +353,7 @@ for (const asset of assets) {
       let postUndoBoardHash: string | null = null;
       if (oracle.requireUndoRoundTrip === true) {
         const undoResult = await page.evaluate(() => {
-          const hooks = (
-            window as unknown as {
-              __airboardTestHooks: {
-                undoLastActionForEval(): {
-                  applied: boolean;
-                  depthBefore: number;
-                  depthAfter: number;
-                };
-              };
-            }
-          ).__airboardTestHooks;
+          const hooks = (window as unknown as AirboardTestWindow).__airboardTestHooks;
           return hooks.undoLastActionForEval();
         });
         expect(undoResult.applied, "gesture result must be one-step undoable").toBe(
@@ -507,43 +439,27 @@ for (const asset of assets) {
 
 async function readOutcomeSnapshot(page: Page) {
   return page.evaluate(() => {
-    const hooks = (
-      window as unknown as {
-        __airboardTestHooks: {
-          getCanonicalBoardState(): {
-            strokes: Record<
-              string,
-              {
-                status: string;
-                annotation?: {
-                  bounds?: {
-                    x: number;
-                    y: number;
-                    width: number;
-                    height: number;
-                  };
-                };
-              }
-            >;
-          };
-          getInteractionDiagnostics(): {
-            viewport: { x: number; y: number; scale: number };
-          };
-          getDiagramVisible(): boolean;
-        };
-      }
-    ).__airboardTestHooks;
+    const hooks = (window as unknown as AirboardTestWindow).__airboardTestHooks;
     const board = hooks.getCanonicalBoardState();
     return {
       board,
       objects: Object.fromEntries(
-        Object.entries(board.strokes)
+        Object.entries(board.elements)
           .filter(
-            ([, stroke]) =>
-              stroke.status === "committed" &&
-              stroke.annotation !== undefined,
+            ([, element]) =>
+              element.status === "active" && element.kind !== "drawing",
           )
-          .map(([id, stroke]) => [id, stroke.annotation?.bounds ?? null]),
+          .map(([id, element]) => [
+            id,
+            element.kind === "connector"
+              ? null
+              : {
+                  x: element.transform.x,
+                  y: element.transform.y,
+                  width: element.transform.width,
+                  height: element.transform.height,
+                },
+          ]),
       ),
       viewport: hooks.getInteractionDiagnostics().viewport,
       diagramVisible: hooks.getDiagramVisible(),
@@ -551,34 +467,24 @@ async function readOutcomeSnapshot(page: Page) {
   });
 }
 
-function canonicalBoardHash(board: {
-  strokes: Record<
-    string,
-    {
-      status: string;
-      annotation?: unknown;
-    }
-  >;
-}): string {
-  const active = Object.entries(board.strokes).flatMap(
-    ([id, stroke]) =>
-      stroke.status === "committed" && isRecord(stroke.annotation)
-        ? [[id, { ...stroke, annotation: stroke.annotation }] as const]
-        : [],
+/** A hash of the diagram on the board: v2 objects, with ids and revisions left out. */
+function canonicalBoardHash(board: { elements: Record<string, unknown> }): string {
+  const active = Object.entries(board.elements).flatMap(([id, element]) =>
+    isRecord(element) && element.status === "active" && element.kind !== "drawing"
+      ? [[id, element] as const]
+      : [],
   );
   const nodes = active
-    .filter(([, stroke]) => !isConnector(stroke.annotation))
-    .map(([id, stroke]) => ({
+    .filter(([, element]) => element.kind !== "connector")
+    .map(([id, element]) => ({
       id,
       value: {
-        type: safeString(stroke.annotation?.type),
-        nodeType: safeString(stroke.annotation?.nodeType),
-        label: safeString(stroke.annotation?.label),
-        bounds: canonicalBounds(stroke.annotation?.bounds),
-        groupMemberCount: Array.isArray(
-          stroke.annotation?.groupMemberStrokeIds,
-        )
-          ? stroke.annotation.groupMemberStrokeIds.length
+        kind: safeString(element.kind),
+        shapeKind: safeString(element.shapeKind),
+        label: plainText(element.content ?? element.title),
+        bounds: canonicalBounds(element.transform),
+        groupMemberCount: Array.isArray(element.memberIds)
+          ? element.memberIds.length
           : 0,
       },
     }))
@@ -591,20 +497,17 @@ function canonicalBoardHash(board: {
     nodes.map(({ id }, index) => [id, `node-${index + 1}`]),
   );
   const edges = active
-    .filter(([, stroke]) => isConnector(stroke.annotation))
-    .map(([, stroke]) => ({
-      type: safeString(stroke.annotation?.type),
-      label: safeString(stroke.annotation?.label),
+    .filter(([, element]) => element.kind === "connector")
+    .map(([, element]) => ({
+      label: plainText(element.label),
       from:
-        handles.get(
-          safeString(stroke.annotation.snappedStartStrokeId) ?? "",
-        ) ?? null,
+        handles.get(safeString(element.start?.binding?.elementId) ?? "") ??
+        null,
       to:
-        handles.get(
-          safeString(stroke.annotation.snappedEndStrokeId) ?? "",
-        ) ?? null,
-      start: canonicalPoint(stroke.annotation?.start),
-      end: canonicalPoint(stroke.annotation?.end),
+        handles.get(safeString(element.end?.binding?.elementId) ?? "") ??
+        null,
+      start: canonicalPoint(element.start?.point),
+      end: canonicalPoint(element.end?.point),
     }))
     .sort((left, right) =>
       stableJson(left).localeCompare(stableJson(right)),
@@ -619,11 +522,15 @@ function canonicalBoardHash(board: {
     .digest("hex")}`;
 }
 
-function isConnector(annotation: Record<string, unknown> | undefined) {
-  return (
-    annotation?.type === "connector" ||
-    annotation?.type === "arrow"
-  );
+function plainText(document: unknown): string | null {
+  if (!isRecord(document) || !Array.isArray(document.blocks)) return null;
+  return document.blocks
+    .map((block: unknown) =>
+      isRecord(block) && Array.isArray(block.runs)
+        ? block.runs.map((run: unknown) => (isRecord(run) ? String(run.text ?? "") : "")).join("")
+        : "",
+    )
+    .join("\n");
 }
 
 function canonicalBounds(value: unknown) {

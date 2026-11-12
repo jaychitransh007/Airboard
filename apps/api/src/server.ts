@@ -456,6 +456,7 @@ export async function buildServer(
       });
       return {
         ...result,
+        state: result.state,
         sceneVersion: BOARD_SCENE_VERSION,
         ...liveCredentials(config.sessionSigningSecret, {
           sub: result.participant.id,

@@ -2,22 +2,21 @@ import {
   BOARD_SCENE_VERSION,
   isBoardElementPatchOperation,
   isBoardSceneElement,
+  isLegacyBoardEventType,
   type BoardEvent,
 } from "@airboard/core";
 
+/**
+ * Scene versions the realtime socket accepts: only the current one, so tabs
+ * from before shape-merge phase 3 (version 2) get UPGRADE_REQUIRED and reload.
+ */
+const SUPPORTED_SCENE_VERSIONS: ReadonlySet<string> = new Set([String(BOARD_SCENE_VERSION)]);
+
 export function isSupportedSceneVersion(value: unknown): boolean {
-  return String(value ?? "") === String(BOARD_SCENE_VERSION);
+  return SUPPORTED_SCENE_VERSIONS.has(String(value ?? ""));
 }
 
 export const BOARD_EVENT_TYPES: ReadonlySet<BoardEvent["type"]> = new Set([
-  "stroke.started",
-  "stroke.point_added",
-  "stroke.committed",
-  "stroke.label_updated",
-  "stroke.annotation_updated",
-  "erase.committed",
-  "stroke.deleted",
-  "stroke.restored",
   "undo.requested",
   "redo.requested",
   "board.cleared",
@@ -38,6 +37,9 @@ export const BOARD_EVENT_TYPES: ReadonlySet<BoardEvent["type"]> = new Set([
  */
 export function invalidBoardEventReason(event: unknown): string | null {
   if (!isRecord(event)) return "MALFORMED_EVENT";
+  // The retired annotation-stroke events are never written again. Rows already
+  // stored still replay through core replayBoardEvents.
+  if (isLegacyBoardEventType(event.type)) return "LEGACY_EVENT_RETIRED";
   if (typeof event.type !== "string" || !BOARD_EVENT_TYPES.has(event.type as BoardEvent["type"])) {
     return "UNKNOWN_EVENT_TYPE";
   }
@@ -50,38 +52,6 @@ export function invalidBoardEventReason(event: unknown): string | null {
   }
 
   switch (event.type) {
-    case "stroke.started":
-      return isStroke(event.stroke) ? null : "INVALID_STROKE";
-    case "stroke.point_added":
-      return isNonEmptyString(event.strokeId) && isStrokePoint(event.point)
-        ? null
-        : "INVALID_STROKE_POINT";
-    case "stroke.committed":
-      return isNonEmptyString(event.strokeId) &&
-        (event.points === undefined ||
-          (Array.isArray(event.points) && event.points.every(isStrokePoint)))
-        ? null
-        : "INVALID_STROKE_COMMIT";
-    case "stroke.label_updated":
-      return isNonEmptyString(event.strokeId) && typeof event.label === "string"
-        ? null
-        : "INVALID_STROKE_LABEL";
-    case "stroke.annotation_updated":
-      return isNonEmptyString(event.strokeId) &&
-        isRecord(event.annotation) &&
-        Array.isArray(event.points) &&
-        event.points.every(isStrokePoint)
-        ? null
-        : "INVALID_STROKE_ANNOTATION";
-    case "erase.committed":
-      return isRecord(event.eraseAction) &&
-        isNonEmptyString(event.eraseAction.id) &&
-        isStringArray(event.eraseAction.affectedStrokeIds)
-        ? null
-        : "INVALID_ERASE_ACTION";
-    case "stroke.deleted":
-    case "stroke.restored":
-      return isStringArray(event.strokeIds) ? null : "INVALID_STROKE_IDS";
     case "cursor.moved":
       return isRecord(event.cursor) &&
         isNonEmptyString(event.cursor.participantId) &&
@@ -127,29 +97,6 @@ export function invalidBoardEventReason(event: unknown): string | null {
     default:
       return "UNKNOWN_EVENT_TYPE";
   }
-}
-
-function isStroke(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    isNonEmptyString(value.id) &&
-    isNonEmptyString(value.boardId) &&
-    Array.isArray(value.points) &&
-    value.points.every(isStrokePoint)
-  );
-}
-
-function isStrokePoint(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    Number.isFinite(value.x) &&
-    Number.isFinite(value.y) &&
-    Number.isFinite(value.t)
-  );
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every(isNonEmptyString);
 }
 
 function isNonEmptyString(value: unknown): value is string {

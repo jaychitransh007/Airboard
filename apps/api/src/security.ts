@@ -137,13 +137,13 @@ export function createRateLimiter(options: {
 
 /**
  * Shared-token check. No configured token → open (local development).
- * Browsers cannot set headers on WebSocket upgrades, so a `token` query
- * parameter is accepted as the WS equivalent of the Bearer header.
+ * The operator token is read only from the Authorization header, never from
+ * the URL: credentials travel in headers or JSON bodies. The WebSocket
+ * upgrades take short, purpose-scoped signed tickets in the URL instead.
  */
 export function apiTokenAllowed(
   request: {
     headers: Record<string, string | string[] | undefined>;
-    query?: unknown;
   },
   configuredToken: string | undefined,
 ): boolean {
@@ -151,11 +151,7 @@ export function apiTokenAllowed(
     return true;
   }
   const header = request.headers.authorization;
-  if (typeof header === "string" && secretsMatch(header, `Bearer ${configuredToken}`)) {
-    return true;
-  }
-  const query = request.query as Record<string, unknown> | undefined;
-  return typeof query?.token === "string" && secretsMatch(query.token, configuredToken);
+  return typeof header === "string" && secretsMatch(header, `Bearer ${configuredToken}`);
 }
 
 /** True only for an explicitly configured shared server token. */

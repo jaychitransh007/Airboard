@@ -224,8 +224,8 @@ test("shifts the complete block away from an existing node without distortion", 
     boundsFor(centers, "user", "user"),
     boundsFor(centers, "service", "service"),
   ]);
-  const existing = boardState.strokes.existing.annotation.bounds;
-  assert.ok(existing);
+  const { x, y, width, height } = boardState.elements.existing.transform;
+  const existing = { x, y, width, height };
   const horizontallyClear =
     block.x + block.width <= existing.x - SEMANTIC_AUTO_LAYOUT_GAP ||
     block.x >= existing.x + existing.width + SEMANTIC_AUTO_LAYOUT_GAP;

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import type { AirboardTestWindow } from "./support/testHooks";
 
 import {
   validateRealMediaDevice,
@@ -239,19 +240,7 @@ async function productionPerceptionHealth(page: Page): Promise<{
         },
       };
     };
-    const hooks = (
-      window as unknown as {
-        __airboardTestHooks?: {
-          getInteractionDiagnostics(): {
-            gestureTrace: {
-              frameAtMs: number;
-              stage: string;
-              data: Record<string, unknown>;
-            }[];
-          };
-        };
-      }
-    ).__airboardTestHooks;
+    const hooks = (window as unknown as Partial<AirboardTestWindow>).__airboardTestHooks;
     const trace = hooks?.getInteractionDiagnostics().gestureTrace ?? [];
     const health = trace.filter(
       (event) => event.stage === "perception_health",

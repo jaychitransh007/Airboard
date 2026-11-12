@@ -270,7 +270,6 @@ function wouldMutateAgainstTemptingBoard(command) {
     canvasHeight: 600,
     selectionIds: [],
     primarySelectionId: null,
-    hoverStrokeId: null,
     strokeColor: "#111111",
   });
   return !("error" in resolved) && resolved.commands.length > 0;

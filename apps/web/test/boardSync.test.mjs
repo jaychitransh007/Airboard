@@ -162,6 +162,52 @@ test("join path returns the server board state for hydration", async () => {
   assert.equal(result.handle.role, "editor");
 });
 
+test("join intake drops the API's strokes key and converts a board still holding legacy strokes", async () => {
+  const legacyNode = {
+    id: "legacy-node",
+    boardId: "session-4",
+    userId: "u",
+    color: "#0f172a",
+    thickness: 3,
+    status: "committed",
+    points: [{ x: 100, y: 100, t: 0 }],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    annotation: {
+      type: "flow_node",
+      source: "voice",
+      confidence: 1,
+      nodeType: "service",
+      label: "Billing",
+      bounds: { x: 100, y: 100, width: 160, height: 80 },
+    },
+  };
+  for (const [id, strokes] of [["session-4", { [legacyNode.id]: legacyNode }], ["session-5", {}]]) {
+    const { fetchImpl } = fakeFetchRouter([
+      {
+        match: `/sessions/${id}/join`,
+        body: {
+          session: { id },
+          participant: { id: "guest-p", role: "editor" },
+          state: { ...createInitialBoardState(id), lastSequence: 12, strokes },
+        },
+      },
+    ]);
+    const result = await startBoardSync(
+      { apiBaseUrl: "http://127.0.0.1:4600", boardSessionId: id, ownerUserId: "user-1" },
+      { onRemoteEvent: () => {} },
+      { fetchImpl, createClient: (o) => new FakeClient(o), ...noTimers },
+    );
+    assert.equal("strokes" in result.initialState, false, `${id}: no strokes key`);
+    assert.equal(result.initialState.lastSequence, 12, `${id}: the catch-up watermark is kept`);
+    if (id === "session-4") {
+      assert.equal(result.initialState.elements[legacyNode.id]?.kind, "shape", "the legacy node is now a v2 shape");
+      assert.equal(result.initialState.elements[legacyNode.id]?.status, "active");
+    } else {
+      assert.deepEqual(result.initialState.elements, {});
+    }
+  }
+});
+
 test("join failures surface the server error code", async () => {
   const { fetchImpl } = fakeFetchRouter([
     { match: "/join", status: 404, body: { error: "SESSION_NOT_FOUND" } },
@@ -198,8 +244,8 @@ test("ECHO INVARIANT: published events never come back as remote events", async 
       ...noTimers,
     },
   );
-  const mine = { id: "evt-1", type: "stroke.deleted", strokeIds: ["s1"] };
-  const theirs = { id: "evt-2", type: "stroke.deleted", strokeIds: ["s2"] };
+  const mine = { id: "evt-1", type: "element.deleted", elementId: "s1" };
+  const theirs = { id: "evt-2", type: "element.deleted", elementId: "s2" };
   handle.publish(mine);
   clients[0].eventListener({ ...mine, sequence: 7 }); // server echo
   clients[0].eventListener(theirs);
@@ -233,7 +279,7 @@ test("board changes made while disconnected wait and go out on reconnect; cursor
     },
   );
   clients[0].sendResult = false;
-  const held = { id: "evt-9", type: "stroke.deleted", strokeIds: ["x"] };
+  const held = { id: "evt-9", type: "element.deleted", elementId: "x" };
   assert.equal(handle.publish(held), true, "held for the reconnect");
   assert.equal(handle.publish({ id: "cur-1", type: "cursor.moved", cursor: { participantId: "p", x: 0, y: 0 } }), false);
 
@@ -247,48 +293,29 @@ test("board changes made while disconnected wait and go out on reconnect; cursor
   assert.equal(remote.length, 0);
 });
 
-test("snapshotBoardEvents seeds committed objects re-addressed to the session", () => {
+test("snapshotBoardEvents seeds the board's objects re-addressed to the session", () => {
   let state = createInitialBoardState("local-board");
-  const stroke = {
-    id: "s1",
-    boardId: "local-board",
-    userId: "u",
-    color: "#000",
-    thickness: 2,
-    status: "active",
-    points: [{ x: 0, y: 0, t: 0 }],
-    createdAt: new Date().toISOString(),
-  };
+  for (const [id, kind] of [["sticky", "sticky"], ["gone", "text"]]) {
+    state = applyBoardEvent(state, {
+      ...createEventEnvelope({ boardSessionId: "local-board", actorParticipantId: "p" }),
+      type: "element.created",
+      element: createBoardSceneElement({ id, boardId: "local-board", kind }),
+    });
+  }
   state = applyBoardEvent(state, {
     ...createEventEnvelope({ boardSessionId: "local-board", actorParticipantId: "p" }),
-    type: "stroke.started",
-    stroke,
-  });
-  state = applyBoardEvent(state, {
-    ...createEventEnvelope({ boardSessionId: "local-board", actorParticipantId: "p" }),
-    type: "stroke.committed",
-    strokeId: "s1",
-    points: [{ x: 0, y: 0, t: 0 }],
-  });
-  state = applyBoardEvent(state, {
-    ...createEventEnvelope({ boardSessionId: "local-board", actorParticipantId: "p" }),
-    type: "element.created",
-    element: createBoardSceneElement({ id: "sticky", boardId: "local-board", kind: "sticky" }),
+    type: "element.deleted",
+    elementId: "gone",
   });
 
   const events = snapshotBoardEvents(state, {
     boardSessionId: "server-session",
     actorParticipantId: "owner-p",
   });
-  assert.equal(events.length, 3);
-  assert.equal(events[0].type, "stroke.started");
-  assert.equal(events[0].stroke.boardId, "server-session");
+  assert.deepEqual(events.map((event) => event.type), ["element.created"], "only element.created, deleted objects skipped");
+  assert.equal(events[0].element.id, "sticky");
+  assert.equal(events[0].element.boardId, "server-session");
   assert.equal(events[0].boardSessionId, "server-session");
-  assert.equal(events[1].type, "stroke.committed");
-  assert.equal(events[1].strokeId, "s1");
-  assert.equal(events[2].type, "element.created");
-  assert.equal(events[2].element.id, "sticky");
-  assert.equal(events[2].element.boardId, "server-session");
 });
 
 test("buildBoardWebSocketUrl maps http(s) to ws(s)", () => {
@@ -533,7 +560,7 @@ test("a guest far behind reloads the whole board after 20 pages; the owner alway
   const guest = await joinLive({
     routes: {
       "/events": pages,
-      "/state": { body: { session: { id: "s" }, state: { ...createInitialBoardState("s"), lastSequence: 100_000 } } },
+      "/state": { body: { session: { id: "s" }, state: { ...createInitialBoardState("s"), lastSequence: 100_000, strokes: {} } } },
     },
     callbacks: { onResync: (state) => resynced.push(state) },
   });
@@ -545,6 +572,8 @@ test("a guest far behind reloads the whole board after 20 pages; the owner alway
   for (let i = 0; i < 4; i += 1) await flush();
   assert.equal(guest.calls.filter((call) => call.path.endsWith("/events")).length, 20);
   assert.equal(resynced.length, 1);
+  assert.equal("strokes" in resynced[0], false, "the reloaded board drops the API's strokes key");
+  assert.equal(resynced[0].lastSequence, 100_000);
   guest.client.eventListener(liveEvent(99_999));
   assert.ok(!guest.remote.some((e) => e.sequence === 99_999), "already in the reloaded board");
   // The reloaded board lacks the held change, so its echo applies.

@@ -26,6 +26,8 @@ function at(isoSecond) {
   return { boardSessionId: BOARD, actorParticipantId: "p", userId: "u", createdAt: `2026-11-11T10:00:${isoSecond}.000Z` };
 }
 
+// Airo's own nodes, drawn through node.create; toolbar shapes come from
+// sceneShape below.
 function node(state, nodeId, label, x, second, nodeType = "service", y = 100) {
   return applyDiagramCommand(
     state,
@@ -55,7 +57,6 @@ function context(boardState, overrides = {}) {
     canvasHeight: 800,
     selectionIds: [],
     primarySelectionId: null,
-    hoverStrokeId: null,
     strokeColor: "#111111",
     ...overrides,
   };
@@ -77,11 +78,11 @@ test("a name that fits several objects picks the selected one, else the newest",
   const state = twoServices();
   const selected = resolve(state, { type: "delete", targets: [named("service")] }, { selectionIds: ["payments"], primarySelectionId: "payments" });
   assert.ok(!("error" in selected), JSON.stringify(selected));
-  assert.deepEqual(selected.commands[0].objectIds, ["payments"]);
+  assert.deepEqual(selected.commands[0].elementIds, ["payments"]);
 
   const newest = resolve(state, { type: "delete", targets: [named("service")] });
   assert.ok(!("error" in newest), JSON.stringify(newest));
-  assert.deepEqual(newest.commands[0].objectIds, ["auth"], "Auth Service was created last");
+  assert.deepEqual(newest.commands[0].elementIds, ["auth"], "Auth Service was created last");
 });
 
 test("a type word finds an object of that type, and 'it' with nothing selected is the newest", () => {
@@ -90,11 +91,11 @@ test("a type word finds an object of that type, and 'it' with nothing selected i
   state = node(state, "api", "Gateway", 500, "02", "api");
   const byType = resolve(state, { type: "rename", target: named("the database"), label: "Orders DB" });
   assert.ok(!("error" in byType), JSON.stringify(byType));
-  assert.equal(byType.commands[0].objectId, "orders");
+  assert.equal(byType.commands[0].elementId, "orders");
 
   const pronoun = resolve(state, { type: "rename", target: { kind: "current_selection" }, label: "Edge" });
   assert.ok(!("error" in pronoun), JSON.stringify(pronoun));
-  assert.equal(pronoun.commands[0].objectId, "api");
+  assert.equal(pronoun.commands[0].elementId, "api");
 });
 
 test("connecting to a shape that isn't there creates it, shaped from its name", () => {
@@ -112,7 +113,8 @@ test("connecting to a shape that isn't there creates it, shaped from its name", 
   assert.deepEqual(resolution.repairKinds, ["created_missing_object"]);
 
   const after = apply(state, resolution.commands);
-  assert.equal(after.strokes[create.nodeId].annotation.shapeKind, "horizontal-cylinder");
+  assert.equal(after.elements[create.nodeId].shapeKind, "horizontal-cylinder");
+  assert.equal(after.elements[connect.connectorId].start.binding.elementId, "user", "its arrow starts at the existing node");
   assert.ok(create.center.x > 200, "the new shape sits beside the user, not on top of it");
 });
 
@@ -124,9 +126,8 @@ test("create draws a catalogue shape, and an unmet pointer placement falls back 
   assert.ok(!("error" in resolution), JSON.stringify(resolution));
   assert.equal(resolution.commands[0].shapeKind, "cloud");
   const after = apply(state, resolution.commands);
-  const created = after.strokes[resolution.commands[0].nodeId];
-  assert.equal(created.annotation.shapeKind, "cloud");
-  assert.equal(after.elements[created.id].shapeKind, "cloud", "the mirrored v2 element draws the same shape");
+  assert.equal("strokes" in after, false, "Airo draws v2 shapes only");
+  assert.equal(after.elements[resolution.commands[0].nodeId].shapeKind, "cloud");
 });
 
 test("change type works on Airo's nodes and on toolbar shapes", () => {
@@ -137,23 +138,23 @@ test("change type works on Airo's nodes and on toolbar shapes", () => {
     type: "change_type", targets: [named("Review"), named("Check")], nodeType: "decision", shape: null,
   });
   assert.ok(!("error" in resolution), JSON.stringify(resolution));
-  assert.deepEqual(resolution.commands.map(({ type }) => type), ["object.retype", "scene.retype"]);
+  assert.deepEqual(resolution.commands.map(({ type }) => type), ["scene.retype", "scene.retype"]);
   const after = apply(state, resolution.commands);
-  assert.equal(after.strokes.review.annotation.nodeType, "decision");
-  assert.equal(after.strokes.review.annotation.label, "Review", "the label stays");
+  assert.equal(after.elements.review.shapeKind, "diamond");
+  assert.equal(richTextToPlainText(after.elements.review.content), "Review", "the label stays");
   assert.equal(after.elements.box.shapeKind, "diamond");
 });
 
-test("resize makes legacy and toolbar shapes bigger around their centers", () => {
+test("resize makes Airo's and toolbar shapes bigger around their centers", () => {
   let state = createInitialBoardState(BOARD);
   state = node(state, "api", "API", 200, "01", "api");
   state = sceneShape(state, "box", "Box", 500);
-  const before = state.strokes.api.annotation.bounds;
+  const before = state.elements.api.transform;
   const resolution = resolve(state, { type: "resize", targets: [named("API"), named("Box")], change: "bigger" });
   assert.ok(!("error" in resolution), JSON.stringify(resolution));
-  assert.deepEqual(resolution.commands.map(({ type }) => type), ["object.resize", "scene.resize"]);
+  assert.deepEqual(resolution.commands.map(({ type }) => type), ["scene.resize", "scene.resize"]);
   const after = apply(state, resolution.commands);
-  const bounds = after.strokes.api.annotation.bounds;
+  const bounds = after.elements.api.transform;
   assert.ok(bounds.width > before.width);
   assert.equal(Math.round(bounds.x + bounds.width / 2), Math.round(before.x + before.width / 2));
   assert.equal(after.elements.box.transform.width, 150);
@@ -168,18 +169,19 @@ test("connectors can be labelled and dashed by naming their ends", () => {
 
   const labelled = resolve(state, { type: "label_connection", connection, label: "login" });
   assert.ok(!("error" in labelled), JSON.stringify(labelled));
+  assert.deepEqual(labelled.commands.map(({ type }) => type), ["scene.rename"]);
   state = apply(state, labelled.commands);
-  assert.equal(state.strokes.edge.annotation.label, "login");
+  assert.equal(richTextToPlainText(state.elements.edge.label), "login");
 
   const dashed = resolve(state, { type: "style_connection", connection, lineStyle: "dashed" });
   assert.ok(!("error" in dashed), JSON.stringify(dashed));
+  assert.deepEqual(dashed.commands.map(({ type }) => type), ["scene.connector.restyle"]);
   state = apply(state, dashed.commands);
-  assert.equal(state.strokes.edge.annotation.lineStyle, "dashed");
-  assert.equal(state.elements.edge.style.strokeStyle, "dashed", "the v2 mirror is dashed too");
+  assert.equal(state.elements.edge.style.strokeStyle, "dashed");
 
   const solid = resolve(state, { type: "style_connection", connection, lineStyle: "solid" });
   state = apply(state, solid.commands);
-  assert.equal(state.strokes.edge.annotation.lineStyle, undefined);
+  assert.equal(state.elements.edge.style.strokeStyle, "solid");
 });
 
 test("v2 connectors take labels and dash styles through scene commands", () => {
@@ -222,7 +224,7 @@ test("several parallel connectors: the newest is the one meant", () => {
     connection: { kind: "connection", from: named("User"), to: named("API"), label: "requests", occurrence: null },
   });
   assert.ok(!("error" in resolution), JSON.stringify(resolution));
-  assert.deepEqual(resolution.commands[0].objectIds, ["new"]);
+  assert.deepEqual(resolution.commands[0].elementIds, ["new"]);
 });
 
 test("tree layout follows the arrows from the root down", () => {
@@ -239,7 +241,7 @@ test("tree layout follows the arrows from the root down", () => {
   assert.ok(!("error" in resolution), JSON.stringify(resolution));
   const after = apply(state, resolution.commands);
   const center = (id) => {
-    const bounds = after.strokes[id].annotation.bounds;
+    const bounds = after.elements[id].transform;
     return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
   };
   assert.ok(center("root").y < center("left").y, "the root is above its children");
@@ -259,11 +261,11 @@ test("radial layout keeps the hub and rings the spokes around it", () => {
   assert.ok(!("error" in resolution), JSON.stringify(resolution));
   assert.ok(resolution.commands.some(({ type }) => type === "scene.move"), "toolbar shapes move through scene commands");
   const after = apply(state, resolution.commands);
-  const hub = after.strokes.hub.annotation.bounds;
-  assert.deepEqual(hub, state.strokes.hub.annotation.bounds, "the hub stays put");
+  const hub = after.elements.hub.transform;
+  assert.deepEqual(hub, state.elements.hub.transform, "the hub stays put");
   const hubCenter = { x: hub.x + hub.width / 2, y: hub.y + hub.height / 2 };
   const distances = ["a", "b"].map((id) => {
-    const bounds = after.strokes[id].annotation.bounds;
+    const bounds = after.elements[id].transform;
     return Math.round(Math.hypot(bounds.x + bounds.width / 2 - hubCenter.x, bounds.y + bounds.height / 2 - hubCenter.y));
   });
   const search = after.elements.c.transform;
@@ -331,14 +333,14 @@ test("a step whose change fails leaves nothing half-applied", () => {
     context: context(state),
     applyCommand: (current, command) => {
       calls += 1;
-      if (command.type === "object.rename") throw new Error("That label can't be changed.");
+      if (command.type === "scene.rename") throw new Error("That label can't be changed.");
       return applyCommand(current, command);
     },
   });
   assert.equal(calls, 2);
   assert.equal(result.status, "grounded");
   assert.deepEqual(result.skipped.map(({ errorCode }) => errorCode), ["command_failed"]);
-  assert.equal(result.previewState.strokes.user.annotation.label, "User");
+  assert.equal(richTextToPlainText(result.previewState.elements.user.content), "User");
 });
 
 test("a plan with nothing that can apply is rejected with the reason", () => {
@@ -372,8 +374,8 @@ test("'this' with only a connector selected deletes the connector, never the new
   const state = userApiEdge();
   const deleted = resolve(state, { type: "delete", targets: [{ kind: "current_selection" }] }, { selectionIds: ["edge"], primarySelectionId: "edge" });
   assert.ok(!("error" in deleted), JSON.stringify(deleted));
-  assert.deepEqual(deleted.commands.map(({ type }) => type), ["objects.delete"]);
-  assert.deepEqual(deleted.commands[0].objectIds, ["edge"]);
+  assert.deepEqual(deleted.commands.map(({ type }) => type), ["scene.delete"]);
+  assert.deepEqual(deleted.commands[0].elementIds, ["edge"]);
 
   // A step that can't take a connector is skipped rather than aimed at Cache.
   const resized = resolve(state, { type: "resize", targets: [{ kind: "current_selection" }], change: "bigger" }, { selectionIds: ["edge"], primarySelectionId: "edge" });
@@ -391,7 +393,7 @@ test("'this' whose selection vanished while Airo was planning is skipped, not gu
   assert.ok("error" in goneIds, JSON.stringify(goneIds));
   // Nothing selected at all still means the shape just made.
   const newest = resolve(state, { type: "delete", targets: [{ kind: "current_selection" }] });
-  assert.deepEqual(newest.commands[0].objectIds, ["cache"]);
+  assert.deepEqual(newest.commands[0].elementIds, ["cache"]);
 });
 
 test("a connector with a clearly different label is never taken for a misheard one", () => {
@@ -408,12 +410,12 @@ test("a connector with a clearly different label is never taken for a misheard o
   }
   // A near match is a mishearing.
   const near = resolve(state, { type: "delete_connection", connection: connection("log out") });
-  assert.deepEqual(near.commands[0].objectIds, ["edge"]);
+  assert.deepEqual(near.commands[0].elementIds, ["edge"]);
   const typo = resolve(userApiEdge("requests"), { type: "delete_connection", connection: connection("request") });
-  assert.deepEqual(typo.commands[0].objectIds, ["edge"]);
+  assert.deepEqual(typo.commands[0].elementIds, ["edge"]);
   // The only connector, unlabelled, is the one meant.
   const unlabelled = resolve(userApiEdge(), { type: "delete_connection", connection: connection("login") });
-  assert.deepEqual(unlabelled.commands[0].objectIds, ["edge"]);
+  assert.deepEqual(unlabelled.commands[0].elementIds, ["edge"]);
 });
 
 test("labelling the arrow between two shapes finds it whichever way it points", () => {
@@ -424,10 +426,10 @@ test("labelling the arrow between two shapes finds it whichever way it points", 
     label: "login",
   });
   assert.ok(!("error" in resolution), JSON.stringify(resolution));
-  assert.deepEqual(resolution.commands.map(({ type }) => type), ["object.rename"]);
-  assert.equal(resolution.commands[0].objectId, "edge");
+  assert.deepEqual(resolution.commands.map(({ type }) => type), ["scene.rename"]);
+  assert.equal(resolution.commands[0].elementId, "edge");
   const after = apply(state, resolution.commands);
-  const connectors = Object.values(after.strokes).filter((stroke) => stroke.annotation?.type === "connector");
+  const connectors = Object.values(after.elements).filter((element) => element.kind === "connector" && element.status === "active");
   assert.equal(connectors.length, 1, "no second, opposing arrow");
 });
 
@@ -435,13 +437,13 @@ test("a plural name changes every object it fits, a singular one only the best g
   const state = twoServices();
   const plural = resolve(state, { type: "delete", targets: [named("the services")] });
   assert.ok(!("error" in plural), JSON.stringify(plural));
-  assert.deepEqual([...plural.commands[0].objectIds].sort(), ["auth", "payments"]);
+  assert.deepEqual([...plural.commands[0].elementIds].sort(), ["auth", "payments"]);
   const singular = resolve(state, { type: "delete", targets: [named("the service")] });
-  assert.deepEqual(singular.commands[0].objectIds, ["auth"]);
+  assert.deepEqual(singular.commands[0].elementIds, ["auth"]);
   // A name that is plural on the board itself still means one object.
   let orders = createInitialBoardState(BOARD);
   orders = node(orders, "o1", "Orders Service", 200, "01");
   orders = node(orders, "o2", "Orders DB", 500, "02", "database");
   const named1 = resolve(orders, { type: "delete", targets: [named("orders")] });
-  assert.equal(named1.commands[0].objectIds.length, 1);
+  assert.equal(named1.commands[0].elementIds.length, 1);
 });

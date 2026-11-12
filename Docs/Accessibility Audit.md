@@ -4,11 +4,13 @@ Evidence for the launch gate `accessibility-audit` in `ops/launch-evidence.json`
 core non-media workflows pass an accessibility audit, and the limitations
 Airboard publishes are accurate.
 
+> **Re-run required:** recorded on 6 November 2026, before RGB-046 (Trash removed) and RGB-047 (creation-first redesign) changed the UI it tested. Treat the results below as history until the audit is run again.
+
 **Status (6 November 2026):** every page outside the drawing canvas passes
 WCAG 2.2 AA automated rules at 1280 and 320 CSS px, works with a keyboard,
 keeps focus visible and returns it after menus and dialogs, reflows to 320 px
 and respects reduced motion. Two structural fixes wait on files another
-engineer is editing (see [Changes waiting on other files](#changes-waiting-on-other-files)).
+engineer is editing (see [Fixes in the board and live-link files](#fixes-in-the-board-and-live-link-files)).
 This was an internal audit with automated tools and keyboard testing. No one
 has yet used Airboard with a real screen reader, so Airboard does not claim
 conformance. The owner signs the gate off.

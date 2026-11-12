@@ -199,24 +199,10 @@ export async function main(args = process.argv.slice(2), env = process.env) {
   if (env.AIRBOARD_EVAL_OUTPUT_DIR) {
     const outputDirectory = resolve(env.AIRBOARD_EVAL_OUTPUT_DIR, "audio");
     await mkdir(outputDirectory, { recursive: true });
-    await Promise.all([
-      writeFile(
-        resolve(outputDirectory, "audio-results.json"),
-        `${JSON.stringify(output, null, 2)}\n`,
-      ),
-      writeFile(
-        resolve(outputDirectory, "audio-results.xml"),
-        junit(output),
-      ),
-      writeFile(
-        resolve(outputDirectory, "audio-results.md"),
-        markdown(output),
-      ),
-      writeFile(
-        resolve(outputDirectory, "audio-results.html"),
-        html(output),
-      ),
-    ]);
+    await writeFile(
+      resolve(outputDirectory, "audio-results.json"),
+      `${JSON.stringify(output, null, 2)}\n`,
+    );
   }
 
   console.log(
@@ -577,126 +563,10 @@ function isSafetyAudioScenario(scenario) {
   );
 }
 
-function junit(report) {
-  const gateFailureCount = report.gateFailures.length;
-  const lines = [
-    '<?xml version="1.0" encoding="UTF-8"?>',
-    `<testsuite name="Airboard audio/STT" tests="${report.summary.total + gateFailureCount}" failures="${report.aggregate.qualityFailures + gateFailureCount}" errors="${report.aggregate.providerFailures}" skipped="${report.summary.skipped}">`,
-  ];
-  for (const result of report.results) {
-    lines.push(
-      `  <testcase classname="audio-stt.${xml(result.adapter)}" name="${xml(result.id)}" time="${(result.durationMs / 1000).toFixed(3)}">`,
-    );
-    if (result.status === "skipped") {
-      lines.push('    <skipped message="External asset unavailable"/>');
-    } else if (result.status === "failed") {
-      const details = result.assessment?.failures ?? result.failures ?? [];
-      const provider = details.some((failure) =>
-        failure.startsWith("provider infrastructure error:"),
-      );
-      const tag = provider ? "error" : "failure";
-      lines.push(
-        `    <${tag} message="${provider ? "provider infrastructure" : "quality gate"}">${xml(details.join("\n"))}</${tag}>`,
-      );
-    }
-    lines.push("  </testcase>");
-  }
-  report.gateFailures.forEach((failure, index) => {
-    lines.push(
-      `  <testcase classname="audio-stt.release-gate" name="aggregate-${index + 1}"><failure message="quality gate">${xml(failure)}</failure></testcase>`,
-    );
-  });
-  lines.push(
-    `  <system-out>${xml(JSON.stringify({ confusionMatrices: report.confusionMatrices }, null, 2))}</system-out>`,
-  );
-  lines.push("</testsuite>");
-  return `${lines.join("\n")}\n`;
-}
-
-function markdown(report) {
-  const lines = [
-    "# Airboard audio/STT evaluation",
-    "",
-    `Dataset: \`${report.metadata.datasetHash}\`  `,
-    `Replay: \`${report.metadata.replay}\``,
-    "",
-    `Passed **${report.summary.passed}/${report.summary.total}**; failed ${report.summary.failed}; skipped ${report.summary.skipped}. Critical-token recall: ${(report.aggregate.criticalTokenRecall * 100).toFixed(2)}%. Downstream action correctness: ${(report.aggregate.downstreamActionCorrectness * 100).toFixed(2)}%.`,
-    "",
-    "## Gate failures",
-    "",
-    ...(report.gateFailures.length
-      ? report.gateFailures.map((failure) => `- ${failure}`)
-      : ["- None"]),
-    "",
-    "| Status | Scenario | Adapter | Critical recall | Action F1 |",
-    "| --- | --- | --- | ---: | ---: |",
-  ];
-  for (const result of report.results) {
-    lines.push(
-      `| ${result.status.toUpperCase()} | ${result.id} | ${result.adapter} | ${formatScore(result.assessment?.criticalTokens.recall)} | ${formatScore(result.assessment?.actionScore.f1)} |`,
-    );
-  }
-  appendAudioConfusionMarkdown(lines, report.confusionMatrices);
-  return `${lines.join("\n")}\n`;
-}
-
-function html(report) {
-  const rows = report.results
-    .map(
-      (result) =>
-        `<tr><td>${xml(result.status.toUpperCase())}</td><td>${xml(result.id)}</td><td>${xml(result.adapter)}</td><td>${xml(formatScore(result.assessment?.criticalTokens.recall))}</td><td>${xml(formatScore(result.assessment?.actionScore.f1))}</td></tr>`,
-    )
-    .join("\n");
-  const confusion = renderAudioConfusionHtml(report.confusionMatrices);
-  return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Airboard audio/STT evaluation</title><style>body{font:15px/1.5 system-ui,sans-serif;max-width:1100px;margin:40px auto;padding:0 20px}table{border-collapse:collapse;width:100%}th,td{padding:9px;border-bottom:1px solid #ddd;text-align:left}</style></head>
-<body><h1>Airboard audio/STT evaluation</h1><p><strong>${report.summary.passed}/${report.summary.total} passed</strong>. Dataset <code>${xml(report.metadata.datasetHash)}</code>.</p><h2>Gate failures</h2><ul>${(report.gateFailures.length ? report.gateFailures : ["None"]).map((failure) => `<li>${xml(failure)}</li>`).join("")}</ul>${confusion}<table><thead><tr><th>Status</th><th>Scenario</th><th>Adapter</th><th>Critical recall</th><th>Action F1</th></tr></thead><tbody>${rows}</tbody></table></body></html>
-`;
-}
-
-function appendAudioConfusionMarkdown(lines, matrices) {
-  for (const [name, matrix] of Object.entries(matrices ?? {})) {
-    if (!Array.isArray(matrix?.labels) || !matrix.matrix) continue;
-    lines.push(
-      "",
-      `## Confusion matrix: ${name}`,
-      "",
-      `| Expected \\ Actual | ${matrix.labels.join(" | ")} |`,
-      `| --- | ${matrix.labels.map(() => "---:").join(" | ")} |`,
-    );
-    for (const expected of matrix.labels) {
-      lines.push(
-        `| ${expected} | ${matrix.labels
-          .map((actual) => matrix.matrix[expected]?.[actual] ?? 0)
-          .join(" | ")} |`,
-      );
-    }
-  }
-}
-
-function renderAudioConfusionHtml(matrices) {
-  return Object.entries(matrices ?? {})
-    .filter(([, matrix]) => Array.isArray(matrix?.labels) && matrix.matrix)
-    .map(
-      ([name, matrix]) =>
-        `<section><h2>Confusion matrix: ${xml(name)}</h2><table><thead><tr><th>Expected \\ Actual</th>${matrix.labels.map((label) => `<th>${xml(label)}</th>`).join("")}</tr></thead><tbody>${matrix.labels.map((expected) => `<tr><th>${xml(expected)}</th>${matrix.labels.map((actual) => `<td>${matrix.matrix[expected]?.[actual] ?? 0}</td>`).join("")}</tr>`).join("")}</tbody></table></section>`,
-    )
-    .join("");
-}
-
 function percentile(values, proportion) {
   if (values.length === 0) return null;
   const sorted = [...values].sort((left, right) => left - right);
   return sorted[Math.max(0, Math.ceil(sorted.length * proportion) - 1)];
-}
-
-function xml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;");
 }
 
 function parseArguments(args) {

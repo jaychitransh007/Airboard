@@ -1,55 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  nodeLabelPlacement,
-  orderCommittedStrokesForRender,
-} from "../src/renderer.ts";
-
-function stroke(id, annotationType, status = "committed") {
-  return {
-    id,
-    boardId: "board",
-    userId: "user",
-    tool: "marker",
-    color: "#fff",
-    thickness: 3,
-    points: [],
-    createdAt: "2026-01-01T00:00:00.000Z",
-    updatedAt: "2026-01-01T00:00:00.000Z",
-    status,
-    ...(annotationType
-      ? { annotation: { type: annotationType, source: "keyboard" } }
-      : {}),
-  };
-}
-
-test("committed connectors render behind nodes with stable order inside each layer", () => {
-  const ordered = orderCommittedStrokesForRender([
-    stroke("node-a", "flow_node"),
-    stroke("connector-a", "connector"),
-    stroke("freehand", null),
-    stroke("arrow-a", "arrow"),
-    stroke("node-b", "flow_node"),
-    stroke("deleted-connector", "connector", "deleted"),
-    stroke("active-connector", "connector", "active"),
-    stroke("connector-b", "connector"),
-  ]);
-
-  assert.deepEqual(
-    ordered.map(({ id }) => id),
-    [
-      "connector-a",
-      "arrow-a",
-      "connector-b",
-      "node-a",
-      "freehand",
-      "node-b",
-      "deleted-connector",
-      "active-connector",
-    ],
-  );
-});
+import { nodeLabelPlacement } from "../src/renderer.ts";
 
 test("queue labels occupy the undecorated lower lane instead of the center divider", () => {
   const bounds = { x: 100, y: 200, width: 152, height: 82 };

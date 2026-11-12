@@ -1,18 +1,19 @@
-import type {
-  AnnotationBounds,
-  AnnotationPoint,
-  BoardState,
-  Stroke,
+import {
+  boardDiagramGraph,
+  type AnnotationBounds,
+  type AnnotationPoint,
+  type BoardDiagramEdgeGeometry,
+  type BoardState,
+  type ConnectorElement,
 } from "@airboard/core";
 import {
-  getConnectorRoutePoints,
-  getRouteMidpoint,
-} from "./connectorGeometry.ts";
+  estimateSceneConnectorLabelWidth,
+  layoutSceneConnectorLabel,
+  sampleSceneConnector,
+  sceneConnectorLabelLayoutOnBoard,
+} from "./sceneConnectorGeometry.ts";
 
 const GEOMETRY_EPSILON = 0.001;
-const CONNECTOR_LABEL_OFFSET_Y = -10;
-const CONNECTOR_LABEL_LINE_HEIGHT = 15;
-const CONNECTOR_LABEL_PADDING = 2;
 
 export type DiagramSpatialConstraints = {
   /** Minimum edge-to-edge distance between every pair of committed nodes. */
@@ -91,6 +92,8 @@ type SpatialConnector = {
   targetId: string | null;
   route: AnnotationPoint[];
   labelBounds: AnnotationBounds | null;
+  /** The label box sits on its own line, which breaks around it. */
+  labelOnLine?: boolean;
 };
 
 type SpatialNodePair = {
@@ -134,48 +137,57 @@ type SpatialConnectorLabelEdgeIntersection = {
 export function inspectBoardSpatialQuality(
   state: BoardState,
 ): DiagramSpatialFacts {
-  const committed = Object.values(state.strokes).filter(
-    (stroke) => stroke.status === "committed" && stroke.annotation,
-  );
-  const nodes = committed.flatMap((stroke): SpatialNode[] => {
-    const annotation = stroke.annotation;
-    if (
-      !annotation?.bounds ||
-      annotation.type === "connector" ||
-      annotation.type === "arrow" ||
-      annotation.type === "highlight" ||
-      annotation.type === "pointer" ||
-      annotation.type === "text_label" ||
-      annotation.type === "cross_mark" ||
-      annotation.type === "freehand" ||
-      (annotation.groupMemberStrokeIds?.length ?? 0) > 0
-    ) {
-      return [];
-    }
+  // Read the diagram graph of the board's elements. Text, highlights,
+  // pointers, crosses, freehand ink and group containers don't take part in
+  // the spacing rules.
+  const graph = boardDiagramGraph(state);
+  const nodes = graph.nodes.flatMap((node): SpatialNode[] => {
+    if (node.role !== "shape") return [];
     return [{
-      id: stroke.id,
-      label: annotation.label?.trim() || null,
-      bounds: normalizeBounds(annotation.bounds),
+      id: node.id,
+      label: node.label?.trim() || null,
+      bounds: normalizeBounds(node.bounds),
     }];
   });
-  const connectors = committed.flatMap((stroke): SpatialConnector[] => {
-    const annotation = stroke.annotation;
-    if (
-      !annotation ||
-      (annotation.type !== "connector" && annotation.type !== "arrow") ||
-      !annotation.start ||
-      !annotation.end
-    ) {
-      return [];
+  const routes = new Map(graph.edges.flatMap((edge) =>
+    edge.geometry.start && edge.geometry.end ? [[edge.id, edgeRoutePoints(edge.geometry).map(clonePoint)] as const] : []));
+  const connectors = graph.edges.flatMap((edge): SpatialConnector[] => {
+    const geometry = edge.geometry;
+    const route = routes.get(edge.id);
+    if (!route || !geometry.start || !geometry.end) return [];
+    const label = edge.label?.trim() || null;
+    // A connector's label goes where the renderer draws it: the same cached
+    // layout, when the connector is one of the board's elements.
+    const element = state.elements?.[edge.id];
+    if (element?.kind === "connector") {
+      const layout = label ? sceneConnectorLabelLayoutOnBoard(element, state.elements) : null;
+      return [{
+        id: edge.id,
+        label,
+        sourceId: edge.from,
+        targetId: edge.to,
+        route,
+        labelBounds: layout?.bounds ?? null,
+        labelOnLine: layout?.placement === "on_line",
+      }];
     }
-    const route = getConnectorRoutePoints(annotation).map(clonePoint);
+    const obstacles = {
+      shapes: nodes.map((node) => node.bounds),
+      // As the renderer: the other connectors' lines.
+      lines: graph.edges.flatMap((other) =>
+        other.id !== edge.id ? [routes.get(other.id) ?? []] : []),
+    };
+    const layout = label
+      ? layoutSceneConnectorLabel(sceneConnectorShape(geometry), label, estimateSceneConnectorLabelWidth, obstacles)
+      : null;
     return [{
-      id: stroke.id,
-      label: annotation.label?.trim() || null,
-      sourceId: annotation.snappedStartStrokeId ?? null,
-      targetId: annotation.snappedEndStrokeId ?? null,
+      id: edge.id,
+      label,
+      sourceId: edge.from,
+      targetId: edge.to,
       route,
-      labelBounds: connectorLabelBounds(stroke, route),
+      labelBounds: layout?.bounds ?? null,
+      labelOnLine: layout?.placement === "on_line",
     }];
   });
 
@@ -510,6 +522,8 @@ function inspectConnectorLabelEdgeIntersections(
   for (const labelConnector of connectors) {
     if (!labelConnector.labelBounds) continue;
     for (const edgeConnector of connectors) {
+      // A label on its own line is meant to sit there: the line breaks around it.
+      if (edgeConnector === labelConnector && labelConnector.labelOnLine) continue;
       if (
         polylineIntersectsBounds(
           edgeConnector.route,
@@ -526,68 +540,21 @@ function inspectConnectorLabelEdgeIntersections(
   return intersections;
 }
 
-/**
- * Conservative deterministic approximation of the renderer's 13px semibold
- * connector labels. Exact font metrics vary by host, but midpoint-in-node and
- * duplicate-anchor failures remain stable across fonts.
- */
-function connectorLabelBounds(
-  stroke: Stroke,
-  route: readonly AnnotationPoint[],
-): AnnotationBounds | null {
-  const annotation = stroke.annotation;
-  const label = annotation?.label?.trim();
-  if (!annotation?.start || !annotation.end || !label) return null;
-  const midpoint = getRouteMidpoint(route);
-  if (!midpoint) return null;
-  const maxWidth = Math.max(
-    Math.abs(annotation.end.x - annotation.start.x),
-    72,
-  );
-  const lines = wrapEstimatedLabel(label, maxWidth).slice(0, 2);
-  if (lines.length === 0) return null;
-  const width = Math.max(
-    ...lines.map((line) => Math.min(maxWidth, estimateTextWidth(line))),
-  );
-  const height = lines.length * CONNECTOR_LABEL_LINE_HEIGHT;
+/** The rendered route of an edge. */
+function edgeRoutePoints(geometry: BoardDiagramEdgeGeometry): AnnotationPoint[] {
+  return sampleSceneConnector(sceneConnectorShape(geometry));
+}
+
+/** The fields the scene connector geometry reads, without the rest of the element. */
+function sceneConnectorShape(geometry: BoardDiagramEdgeGeometry): ConnectorElement {
   return {
-    x: midpoint.x - width / 2 - CONNECTOR_LABEL_PADDING,
-    y:
-      midpoint.y +
-      CONNECTOR_LABEL_OFFSET_Y -
-      height / 2 -
-      CONNECTOR_LABEL_PADDING,
-    width: width + CONNECTOR_LABEL_PADDING * 2,
-    height: height + CONNECTOR_LABEL_PADDING * 2,
-  };
-}
-
-function wrapEstimatedLabel(label: string, maxWidth: number): string[] {
-  const lines: string[] = [];
-  let current = "";
-  for (const word of label.split(/\s+/u).filter(Boolean)) {
-    const next = current ? `${current} ${word}` : word;
-    if (current && estimateTextWidth(next) > maxWidth) {
-      lines.push(current);
-      current = word;
-    } else {
-      current = next;
-    }
-  }
-  if (current) lines.push(current);
-  return lines;
-}
-
-function estimateTextWidth(value: string): number {
-  let width = 0;
-  for (const character of value) {
-    if (character === " ") width += 3.5;
-    else if (/[ilI1.,'|]/u.test(character)) width += 3.7;
-    else if (/[MW@#%]/u.test(character)) width += 9.4;
-    else if (/[A-Z0-9]/u.test(character)) width += 7.8;
-    else width += 7;
-  }
-  return Math.max(width, 1);
+    pathKind: geometry.pathKind,
+    start: { point: geometry.start, decoration: "none" },
+    end: { point: geometry.end, decoration: "none" },
+    controlPoints: geometry.controlPoints,
+    labelPosition: geometry.labelPosition,
+    ...(geometry.routeOffset ? { routeOffset: geometry.routeOffset } : {}),
+  } as ConnectorElement;
 }
 
 function polylineIntersectsBounds(

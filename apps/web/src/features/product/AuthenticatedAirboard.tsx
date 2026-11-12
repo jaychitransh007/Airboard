@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BOARD_SCENE_VERSION, type BoardState } from "@airboard/core";
+import { BOARD_SCENE_VERSION, upgradeLegacyBoardState, type BoardState, type LegacyBoardStateInput } from "@airboard/core";
 import { AirboardPrototype } from "../board/AirboardPrototype";
 import type { BoardShareAccess, BoardVisibility } from "../board/ShareDialog";
 import type { ViewLink, ViewLinkControls } from "../board/ViewLinksSection";
@@ -387,15 +387,25 @@ type DurableBoard = {
   owner_profile_id?: string;
 };
 
+/**
+ * A saved board in the current model. A board saved before the shape merge
+ * (or restored from such a backup) still holds legacy strokes: it is
+ * converted here, on open, and saved in the new model on its next change.
+ */
 function normalizeBoardState(value: unknown, boardId: string): BoardState {
-  const candidate = value && typeof value === "object" ? value as Partial<BoardState> : {};
+  const candidate = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const upgraded = upgradeLegacyBoardState({
+    boardId,
+    elements: isRecord(candidate.elements) ? candidate.elements as BoardState["elements"] : {},
+    ...(isRecord(candidate.strokes) ? { strokes: candidate.strokes as NonNullable<LegacyBoardStateInput["strokes"]> } : {}),
+    eraseActions: isRecord(candidate.eraseActions) ? candidate.eraseActions as BoardState["eraseActions"] : {},
+  });
   return {
     boardId,
     sceneVersion: BOARD_SCENE_VERSION,
-    elements: isRecord(candidate.elements) ? candidate.elements as BoardState["elements"] : {},
-    strokes: isRecord(candidate.strokes) ? candidate.strokes as BoardState["strokes"] : {},
+    elements: upgraded.elements,
     activeStrokes: {},
-    eraseActions: isRecord(candidate.eraseActions) ? candidate.eraseActions as BoardState["eraseActions"] : {},
+    eraseActions: upgraded.eraseActions,
     participants: {},
     cursors: {},
     lastSequence: Number.isSafeInteger(candidate.lastSequence) ? Number(candidate.lastSequence) : 0,
@@ -411,7 +421,6 @@ function sameBoardContent(stored: unknown, local: BoardState): boolean {
 function boardContentKey(state: BoardState): string {
   return stableStringify({
     elements: state.elements,
-    strokes: state.strokes,
     eraseActions: state.eraseActions,
     clearedAt: state.clearedAt ?? null,
   });

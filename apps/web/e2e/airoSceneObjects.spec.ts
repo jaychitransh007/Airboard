@@ -1,17 +1,17 @@
 import { expect, test, type Page } from "@playwright/test";
+import type { AirboardTestWindow } from "./support/testHooks";
 import { signIn } from "./support/signedInApi";
 
 // RGB-039: in the live journey Airo drew a second "API" because the first one,
 // made by a typed command, was invisible to it.
 
 type SceneShape = { id: string; kind: string; status: string; shapeKind?: string; content?: { blocks: Array<{ runs: Array<{ text: string }> }> } };
-type SceneConnector = { id: string; kind: "connector"; status: string; legacyStrokeId?: string; start: { binding?: { elementId: string } }; end: { binding?: { elementId: string } } };
+type SceneConnector = { id: string; kind: "connector"; status: string; start: { binding?: { elementId: string } }; end: { binding?: { elementId: string } } };
 
 function boardElements(page: Page) {
   return page.evaluate(() =>
     Object.values(
-      (window as never as { __airboardTestHooks: { getCanonicalBoardState(): { elements: Record<string, unknown> } } })
-        .__airboardTestHooks.getCanonicalBoardState().elements,
+      (window as unknown as AirboardTestWindow).__airboardTestHooks.getCanonicalBoardState().elements,
     ),
   ) as Promise<Array<SceneShape | SceneConnector>>;
 }
@@ -64,7 +64,7 @@ const byLabel = (label: string) => ({ kind: "visible_label", label, occurrence: 
 
 async function openMixedBoard(page: Page) {
   await page.addInitScript(() => window.localStorage.setItem("airboard.onboarding.v1", "done"));
-  const api = await signIn(page, { boards: [{ title: "Mixed board", state: { elements: {}, strokes: {} } }] });
+  const api = await signIn(page, { boards: [{ title: "Mixed board", state: { elements: {} } }] });
   return api;
 }
 
@@ -89,7 +89,7 @@ test("Airo connects to the API a typed command made instead of drawing a second 
   const apis = shapes.filter((shape) => text(shape) === "API");
   expect(apis).toHaveLength(1);
   const connectors = elements.filter((element): element is SceneConnector =>
-    element.kind === "connector" && element.status === "active" && !(element as SceneConnector).legacyStrokeId);
+    element.kind === "connector" && element.status === "active");
   expect(connectors.some((connector) => connector.start.binding?.elementId === apis[0]!.id)).toBe(true);
   // And it all reaches the saved board.
   await expect.poll(() => JSON.stringify(api.saves.at(-1)?.state ?? null), { timeout: 10_000 }).toContain("talks to");

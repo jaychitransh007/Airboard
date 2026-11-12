@@ -1,20 +1,27 @@
-import { createBoardSceneElement, createRichTextDocument } from "./sceneElements.ts";
+import { pointOnNodeBoundary } from "./nodeVisuals.ts";
+import {
+  createBoardSceneElement,
+  createRichTextDocument,
+  DEFAULT_SHAPE_STYLE,
+} from "./sceneElements.ts";
 import type {
   AnnotationBounds,
+  AnnotationNodeType,
   AnnotationPoint,
   BoardElementPatchOperation,
+  BoardJsonValue,
   BoardSceneElement,
   BoardState,
   ConnectorElement,
   ShapeKind,
+  ShapeStyle,
 } from "./types.ts";
 
 /**
- * Board objects come in two kinds. Airo's own diagram nodes are legacy
- * annotation strokes, mirrored into scene elements under the same id. Typed
- * commands such as "add a user" and the toolbar create v2 scene elements with
- * no stroke behind them. These helpers let a diagram command plan change v2
- * elements, and keep v2 connectors attached to anything that moves or goes.
+ * The diagram verbs' work on v2 scene elements: everything on a board (typed
+ * commands, the toolbar, the hand and Airo all make them). These helpers let
+ * a diagram command plan create and change elements, and keep connectors
+ * attached to anything that moves or goes.
  */
 
 /** Element kinds a plan can name, connect, rename, move and delete. */
@@ -40,10 +47,9 @@ export function isSceneNodeElement(element: BoardSceneElement | undefined): elem
   return Boolean(element && element.status === "active" && SCENE_NODE_KINDS.has(element.kind));
 }
 
-/** A v2 element with no legacy stroke behind it; legacy commands can't reach it. */
-export function isSceneOnlyElement(state: BoardState, id: string): boolean {
-  const element = state.elements[id];
-  return Boolean(element && element.status === "active" && !element.legacyStrokeId && !state.strokes[id]);
+/** True when the id names an element that is on the board (not deleted). */
+export function isActiveElement(state: BoardState, id: string): boolean {
+  return state.elements[id]?.status === "active";
 }
 
 export function sceneElementCenter(element: BoardSceneElement): AnnotationPoint {
@@ -59,16 +65,63 @@ export function sceneElementCenter(element: BoardSceneElement): AnnotationPoint 
   };
 }
 
-/** Where a connector meets the element's box on the way toward a point. */
+/**
+ * The legacy node outline a v2 shape's silhouette matches, so an arrow meets
+ * a diamond, ellipse, stadium or slanted side where it is drawn rather than at
+ * its box. Every other shape is met at its box.
+ */
+function outlineNodeType(element: BoardSceneElement): AnnotationNodeType | undefined {
+  if (element.kind !== "shape") return undefined;
+  switch (element.shapeKind) {
+    case "diamond": return "decision";
+    case "ellipse": return "circle";
+    case "terminator": return "terminator";
+    case "right-parallelogram": return "io";
+    default: return undefined;
+  }
+}
+
+/** Where a connector meets the element's outline on the way toward a point. */
 function anchorToward(element: BoardSceneElement, toward: AnnotationPoint): AnnotationPoint {
   const center = sceneElementCenter(element);
   const dx = toward.x - center.x;
   const dy = toward.y - center.y;
   if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return center;
+  const nodeType = outlineNodeType(element);
+  if (nodeType) {
+    const { x, y, width, height } = element.transform;
+    return pointOnNodeBoundary({ x, y, width, height }, nodeType, toward);
+  }
   const halfWidth = Math.max(0.5, element.transform.width / 2);
   const halfHeight = Math.max(0.5, element.transform.height / 2);
   const scale = 1 / Math.max(Math.abs(dx) / halfWidth, Math.abs(dy) / halfHeight);
   return { x: center.x + dx * scale, y: center.y + dy * scale };
+}
+
+/** How far apart, in board units, parallel arrows between the same two objects are drawn. */
+export const CONNECTOR_LANE_SPACING = 72;
+
+/**
+ * The lane for a new arrow between two objects: the first takes the direct
+ * route, later ones alternate either side of it, so parallel and two-way
+ * arrows never draw on top of each other.
+ */
+export function sceneConnectorRouteOffset(
+  state: BoardState,
+  fromId: string,
+  toId: string,
+  excludedConnectorId?: string,
+): number {
+  const joins = (start: string | undefined, end: string | undefined) =>
+    (start === fromId && end === toId) || (start === toId && end === fromId);
+  const siblingCount = Object.values(state.elements).filter((element) =>
+    element.id !== excludedConnectorId &&
+    element.kind === "connector" &&
+    element.status === "active" &&
+    joins(element.start.binding?.elementId, element.end.binding?.elementId)).length;
+  if (siblingCount === 0) return 0;
+  const lane = Math.ceil(siblingCount / 2);
+  return (siblingCount % 2 === 1 ? 1 : -1) * lane * CONNECTOR_LANE_SPACING;
 }
 
 function boundsBetween(start: AnnotationPoint, end: AnnotationPoint): BoardSceneElement["transform"] {
@@ -87,6 +140,12 @@ function activeNode(state: BoardState, id: string): BoardSceneElement {
   return element;
 }
 
+/** An object an arrow can end at. */
+function connectableNode(state: BoardState, id: string): BoardSceneElement | undefined {
+  const element = state.elements[id];
+  return isSceneNodeElement(element) ? element : undefined;
+}
+
 function activeConnector(state: BoardState, id: string): ConnectorElement {
   const element = state.elements[id];
   if (!element || element.status !== "active" || element.kind !== "connector") {
@@ -102,38 +161,58 @@ function nextZIndex(state: BoardState): number {
   ) + 1;
 }
 
-/** Active v2 connectors (not legacy mirrors) attached to any of the ids. */
+/** Active connectors attached to any of the ids. */
 export function sceneConnectorsAttachedTo(state: BoardState, ids: ReadonlySet<string>): ConnectorElement[] {
   return Object.values(state.elements).filter((element): element is ConnectorElement =>
     element.kind === "connector" &&
     element.status === "active" &&
-    !element.legacyStrokeId &&
     Boolean(
       (element.start.binding && ids.has(element.start.binding.elementId)) ||
       (element.end.binding && ids.has(element.end.binding.elementId)),
     ));
 }
 
-/** Active v2 connectors from one element to another, in that direction. */
+/** Active connectors from one element to another, in that direction. */
 export function sceneConnectorsBetween(state: BoardState, fromId: string, toId: string): ConnectorElement[] {
   return Object.values(state.elements).filter((element): element is ConnectorElement =>
     element.kind === "connector" &&
     element.status === "active" &&
-    !element.legacyStrokeId &&
     element.start.binding?.elementId === fromId &&
     element.end.binding?.elementId === toId);
 }
 
+/** How a new v2 connector is drawn; anything left out takes the toolbar's default. */
+export type SceneConnectorStyle = {
+  color?: string;
+  opacity?: number;
+  thickness?: ConnectorElement["style"]["thickness"];
+};
+
+/**
+ * Draws a v2 arrow from one object to another. Its ends meet each object's outline, and a second arrow between
+ * the same two objects takes its own lane.
+ */
 export function connectElements(
   sink: SceneEventSink,
-  input: { connectorId?: string; fromId: string; toId: string; label?: string },
+  input: {
+    connectorId?: string;
+    fromId: string;
+    toId: string;
+    label?: string;
+    style?: SceneConnectorStyle;
+    metadata?: Record<string, BoardJsonValue>;
+  },
 ): string {
-  const from = activeNode(sink.state, input.fromId);
-  const to = activeNode(sink.state, input.toId);
+  const from = connectableNode(sink.state, input.fromId);
+  const to = connectableNode(sink.state, input.toId);
+  if (!from) throw new Error(`Board object not found: ${input.fromId}`);
+  if (!to) throw new Error(`Board object not found: ${input.toId}`);
   if (from.id === to.id) throw new Error("A connector needs two different objects.");
   const start = anchorToward(from, sceneElementCenter(to));
   const end = anchorToward(to, sceneElementCenter(from));
   const id = sink.objectId(input.connectorId);
+  if (sink.state.elements[id]) throw new Error(`Board object already exists: ${id}`);
+  const routeOffset = sceneConnectorRouteOffset(sink.state, from.id, to.id);
   const connector = createBoardSceneElement({
     id,
     boardId: sink.boardSessionId,
@@ -146,9 +225,96 @@ export function connectElements(
     zIndex: nextZIndex(sink.state),
     createdAt: sink.createdAt,
     ...(sink.userId ? { creatorId: sink.userId } : {}),
+    ...(input.metadata ? { metadata: input.metadata } : {}),
   });
+  if (routeOffset !== 0) connector.routeOffset = routeOffset;
+  if (input.style?.color !== undefined) connector.style.color = input.style.color;
+  if (input.style?.opacity !== undefined) connector.style.opacity = input.style.opacity;
+  if (input.style?.thickness !== undefined) connector.style.thickness = input.style.thickness;
   sink.add({ type: "element.created", element: connector }, { type: "element.deleted", elementId: id });
   return id;
+}
+
+/**
+ * Draws a v2 shape: Airo's and the typed grammar's diagram nodes. Colours
+ * left out take the toolbar shape's defaults.
+ */
+export function createShapeElement(
+  sink: SceneEventSink,
+  input: {
+    shapeId?: string;
+    shapeKind: ShapeKind;
+    bounds: AnnotationBounds;
+    label?: string;
+    style?: Partial<ShapeStyle>;
+    metadata?: Record<string, BoardJsonValue>;
+  },
+): string {
+  const id = sink.objectId(input.shapeId);
+  if (sink.state.elements[id]) throw new Error(`Board object already exists: ${id}`);
+  const shape = createBoardSceneElement({
+    id,
+    boardId: sink.boardSessionId,
+    kind: "shape",
+    shapeKind: input.shapeKind,
+    transform: {
+      x: input.bounds.x,
+      y: input.bounds.y,
+      width: Math.max(1, input.bounds.width),
+      height: Math.max(1, input.bounds.height),
+      rotation: 0,
+    },
+    content: createRichTextDocument(input.label ?? "", `${id}:content`),
+    style: { ...DEFAULT_SHAPE_STYLE, ...input.style },
+    zIndex: nextZIndex(sink.state),
+    createdAt: sink.createdAt,
+    ...(sink.userId ? { creatorId: sink.userId } : {}),
+    ...(input.metadata ? { metadata: input.metadata } : {}),
+  });
+  sink.add({ type: "element.created", element: shape }, { type: "element.deleted", elementId: id });
+  return id;
+}
+
+/**
+ * Recolours a v2 object: a shape's fill and outline, a sticky's paper, a
+ * text's or connector's ink. Colours left out stay as they are.
+ */
+export function restyleElement(
+  sink: SceneEventSink,
+  elementId: string,
+  colors: { fillColor?: string; strokeColor?: string },
+): void {
+  const element = sink.state.elements[elementId];
+  if (!element || element.status !== "active") throw new Error(`Board object not found: ${elementId}`);
+  const patches: BoardElementPatchOperation[] = [];
+  const inverse: BoardElementPatchOperation[] = [];
+  const set = (path: [string, ...string[]], value: string | undefined, previous: string) => {
+    if (value === undefined || value === previous) return;
+    patches.push({ op: "field.set", path, value });
+    inverse.push({ op: "field.set", path, value: previous });
+  };
+  switch (element.kind) {
+    case "shape":
+      set(["style", "fill"], colors.fillColor, element.style.fill);
+      set(["style", "stroke"], colors.strokeColor, element.style.stroke);
+      break;
+    case "sticky":
+      set(["color"], colors.fillColor, element.color);
+      break;
+    case "text":
+      set(["style", "color"], colors.strokeColor, element.style.color);
+      break;
+    case "connector":
+      set(["style", "color"], colors.strokeColor, element.style.color);
+      break;
+    default:
+      throw new Error("That object can't change colour.");
+  }
+  if (patches.length === 0) return;
+  sink.add(
+    { type: "element.patched", elementId, patches },
+    { type: "element.patched", elementId, patches: inverse },
+  );
 }
 
 export function renameElement(sink: SceneEventSink, elementId: string, label: string): void {
@@ -222,7 +388,6 @@ export function duplicateElements(
     copy.createdAt = sink.createdAt;
     copy.updatedAt = sink.createdAt;
     copy.revision = 1;
-    delete copy.legacyStrokeId;
     if (sink.userId) copy.creatorId = sink.userId;
     // A copied mind-map node starts its own map rather than claiming the original's links.
     if (copy.kind === "mind_map_node") {
@@ -239,8 +404,7 @@ export function groupElements(
   input: { sectionId?: string; memberIds: readonly string[]; label?: string },
 ): string {
   const members = [...new Set(input.memberIds)].map((id) => {
-    // A section can't own a legacy node: the stroke, not the element, decides where that is.
-    if (!isSceneOnlyElement(sink.state, id)) throw new Error(`Not a v2 board object: ${id}`);
+    if (!isActiveElement(sink.state, id)) throw new Error(`Not a v2 board object: ${id}`);
     return activeNode(sink.state, id);
   });
   if (members.length === 0) throw new Error("A group needs at least one object.");
@@ -278,13 +442,13 @@ export function groupElements(
 }
 
 /**
- * Re-route v2 connectors attached to objects that just moved, legacy or v2:
+ * Re-route connectors attached to objects that just moved:
  * connectors are drawn from their stored end points, not their bindings.
  */
 export function refreshAttachedConnectors(sink: SceneEventSink, movedIds: readonly string[]): void {
   for (const connector of sceneConnectorsAttachedTo(sink.state, new Set(movedIds))) {
-    const from = connector.start.binding ? sink.state.elements[connector.start.binding.elementId] : undefined;
-    const to = connector.end.binding ? sink.state.elements[connector.end.binding.elementId] : undefined;
+    const from = connector.start.binding ? connectableNode(sink.state, connector.start.binding.elementId) : undefined;
+    const to = connector.end.binding ? connectableNode(sink.state, connector.end.binding.elementId) : undefined;
     const fromCenter = from ? sceneElementCenter(from) : connector.start.point;
     const toCenter = to ? sceneElementCenter(to) : connector.end.point;
     const start = from ? anchorToward(from, toCenter) : connector.start.point;
@@ -385,13 +549,29 @@ export function resizeElement(sink: SceneEventSink, elementId: string, bounds: A
   refreshAttachedConnectors(sink, [elementId]);
 }
 
-/** Gives a v2 shape another catalogue shape ("turn it into a decision"). */
-export function retypeElement(sink: SceneEventSink, elementId: string, shapeKind: ShapeKind): void {
+/**
+ * Gives a v2 shape another catalogue shape ("turn it into a decision"). With
+ * a diagram node type, the shape is named by that type from then on.
+ */
+export function retypeElement(
+  sink: SceneEventSink,
+  elementId: string,
+  shapeKind: ShapeKind,
+  nodeType?: AnnotationNodeType,
+): void {
   const element = activeNode(sink.state, elementId);
   if (element.kind !== "shape") throw new Error("Only a shape can change to another shape.");
+  const patches: BoardElementPatchOperation[] = [{ op: "field.set", path: ["shapeKind"], value: shapeKind }];
+  const inverse: BoardElementPatchOperation[] = [{ op: "field.set", path: ["shapeKind"], value: element.shapeKind }];
+  if (nodeType) {
+    patches.push({ op: "field.set", path: ["metadata"], value: { ...element.metadata, nodeType, nodeShape: shapeKind } });
+    inverse.push(element.metadata
+      ? { op: "field.set", path: ["metadata"], value: structuredClone(element.metadata) }
+      : { op: "field.unset", path: ["metadata"] });
+  }
   sink.add(
-    { type: "element.patched", elementId, patches: [{ op: "field.set", path: ["shapeKind"], value: shapeKind }] },
-    { type: "element.patched", elementId, patches: [{ op: "field.set", path: ["shapeKind"], value: element.shapeKind }] },
+    { type: "element.patched", elementId, patches },
+    { type: "element.patched", elementId, patches: inverse },
   );
 }
 

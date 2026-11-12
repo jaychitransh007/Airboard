@@ -8,7 +8,7 @@
 
 import {
   applyDiagramCommand,
-  isSceneOnlyElement,
+  isActiveElement,
   type BoardEvent,
   type BoardState,
   type DiagramCommand,
@@ -108,13 +108,7 @@ export function commitCommandTurn(
 
   const requestedSelectionIds =
     input.requestedSelectionIds ?? input.currentSelectionIds;
-  // Airo's own nodes, or shapes typed commands and the toolbar made.
-  const validRequestedSelection = requestedSelectionIds.filter(
-    (id) => state.strokes[id]?.status === "committed" || isSceneOnlyElement(state, id),
-  );
-  const fallbackSelection = [...affectedStrokeIds].filter(
-    (strokeId) => state.strokes[strokeId]?.status === "committed",
-  );
+  const validRequestedSelection = requestedSelectionIds.filter((id) => isActiveElement(state, id));
 
   return {
     status: "applied",
@@ -122,10 +116,7 @@ export function commitCommandTurn(
     events,
     undoEvents,
     affectedStrokeIds: [...affectedStrokeIds],
-    selectionIds:
-      validRequestedSelection.length > 0
-        ? [...validRequestedSelection]
-        : fallbackSelection.slice(-1),
+    selectionIds: [...validRequestedSelection],
   };
 }
 

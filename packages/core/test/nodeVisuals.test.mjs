@@ -3,7 +3,6 @@ import test from "node:test";
 
 import {
   AIRBOARD_SEMANTIC_NODE_CAPABILITIES,
-  nodeVisualContainsPoint,
   nodeVisualDefaultSize,
   nodeVisualKind,
   pointOnNodeBoundary,
@@ -36,12 +35,4 @@ test("shape-aware boundaries terminate connectors on visible geometry", () => {
   const circle = pointOnNodeBoundary(bounds, "circle", { x: 300, y: 0 });
   assert.ok(circle.x < 120);
   assert.ok(circle.y >= 0);
-});
-
-test("transparent shape corners are not selectable", () => {
-  const bounds = { x: 0, y: 0, width: 120, height: 80 };
-  assert.equal(nodeVisualContainsPoint(bounds, "process", { x: 2, y: 2 }), true);
-  assert.equal(nodeVisualContainsPoint(bounds, "decision", { x: 2, y: 2 }), false);
-  assert.equal(nodeVisualContainsPoint(bounds, "circle", { x: 2, y: 2 }), false);
-  assert.equal(nodeVisualContainsPoint(bounds, "io", { x: 2, y: 2 }), false);
 });
