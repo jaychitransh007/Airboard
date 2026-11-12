@@ -62,7 +62,9 @@ export async function readElementStyle(page: Page, element: ContractElement): Pr
       flexDirection: get("flex-direction"),
       alignItems: get("align-items"),
       justifyContent: get("justify-content"),
-      fontFamily: get("font-family"),
+      // Chrome on macOS reports BlinkMacSystemFont as "system-ui"; Linux
+      // keeps the name. Normalise so one baseline fits both platforms.
+      fontFamily: get("font-family").replace(/"system-ui"/g, "BlinkMacSystemFont"),
       fontSize: get("font-size"),
       fontWeight: get("font-weight"),
       fontStyle: get("font-style"),

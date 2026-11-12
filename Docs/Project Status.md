@@ -8,8 +8,8 @@
 
 | Part | Where | Notes |
 | --- | --- | --- |
-| Web | Cloud Run `airboard-pilot-web`, revision `launch-9d5bd39` | `https://airboard-pilot-web-634900453473.asia-south1.run.app`; one instance, kept warm |
-| API | Cloud Run `airboard-pilot-api`, revision `launch-9d5bd39` | Up to 3 instances, one kept warm, each taking up to 250 connections and 50 live voice streams; live boards and per-minute limits are shared across instances. Each person gets 500 Airo model commands and 240 voice minutes a day (since RGB-049, minutes count only while someone speaks), and everyone together at most 5,000 and 3,000 a day (RGB-044) |
+| Web | Cloud Run `airboard-pilot-web`, revision `launch-3a5c7ab` | `https://airboard-pilot-web-634900453473.asia-south1.run.app`; one instance, kept warm |
+| API | Cloud Run `airboard-pilot-api`, revision `launch-3a5c7ab` | Up to 3 instances, one kept warm, each taking up to 250 connections and 50 live voice streams; live boards and per-minute limits are shared across instances. Each person gets 500 Airo model commands and 240 voice minutes a day (since RGB-049, minutes count only while someone speaks), and everyone together at most 5,000 and 3,000 a day (RGB-044) |
 | Database and sign-in | Supabase `ujotgzjpkocuhtfrvbzu` (ap-south-1, Mumbai) | Every migration in `supabase/migrations` applied, the last `20261112120000` (drops the nine tables nothing uses: extension installations, board history, SSO/SCIM, and four first-schema leftovers) |
 | Google sign-in | Google Auth Platform in the pilot Google Cloud project | Consent screen "Airboard", published to every Google account; client "Airboard sign-in (Supabase)" |
 | Lifecycle jobs | Cloud Scheduler `airboard-lifecycle-hourly` | Failed runs are logged; no alerts (the support inbox carries customer mail only) |
@@ -22,8 +22,8 @@
 
 ## Roll back to
 
-- **Web:** live `launch-9d5bd39`; roll back to `launch-553e83b`.
-- **API:** live `launch-9d5bd39`; no earlier API is safe, so fix forward.
+- **Web:** live `launch-3a5c7ab`; roll back to `launch-9d5bd39`.
+- **API:** live `launch-3a5c7ab`; roll back to `launch-9d5bd39` (the floor).
 - **Rollback floor:** no API revision older than `launch-9d5bd39`. Migration `20261112120000` dropped tables older APIs use (their board saves return 500). Restoring dropped data needs the 12 Nov 02:36 UTC Supabase backup.
 - **Images:** Artifact Registry keeps `live` and the 10 newest per image, and deletes any other image older than 3 days.
 
@@ -31,10 +31,10 @@
 
 Newest first; the [change log](Release%20Readiness%20Backlog.md#change-log) has every deploy with its evidence and rollback target.
 
+- `launch-3a5c7ab` (both, 12 Nov): refactoring steps 1–3; operator token header-only, CI trimmed, test safety net. No user-facing change.
 - `launch-9d5bd39` (both, 12 Nov): Touchpad Writing removed; then migration `20261112120000` dropped the nine unused tables.
 - `launch-553e83b` (web, 12 Nov): `/pilot/*` pages describe presenting the tab, with nothing to install.
 - `launch-2ddda24` (both, 12 Nov): Chrome extension, Meet add-on, Electron app, SSO/SCIM and board-history writes removed.
-- `launch-2f8678c` (both, 12 Nov): about 3,600 lines of dead code removed, with no product change.
 - `launch-a4c7947` (web, 12 Nov): `/meet/overlay-engine` refuses all framing; board planning uses the tested helpers.
 
 ## What is left
