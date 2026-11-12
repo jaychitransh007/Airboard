@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   applyBoardEvent,
-  applyDiagramCommand,
+  applyLegacyDiagramFixture,
   createBoardSceneElement,
   createEventEnvelope,
   createInitialBoardState,
@@ -287,13 +287,14 @@ const BLOCKER = { x: 180, y: 0, width: 100, height: 80 };
 const TARGET = { x: 360, y: 0, width: 100, height: 80 };
 const CLOSE = { x: 470, y: 0, width: 100, height: 80 };
 
+// A v2 label is placed as the v2 renderer draws it (a box on the line, or
+// beside it), not as the legacy renderer did, so its box is compared apart.
 function geometryOf(facts) {
   return {
     nodes: facts.nodes,
-    connectors: facts.connectors,
+    connectors: facts.connectors.map(({ labelBounds, labelOnLine, ...connector }) => connector),
     nodePairs: facts.nodePairs,
     connectorNodeIntersections: facts.connectorNodeIntersections,
-    connectorLabelNodeIntersections: facts.connectorLabelNodeIntersections,
   };
 }
 
@@ -316,16 +317,21 @@ test("the same diagram as legacy strokes or as v2 elements scores the same", () 
   const fromStrokes = analyzeBoardSpatialQuality(legacy, constraints);
   const fromScene = analyzeBoardSpatialQuality(scene, constraints);
   assert.deepEqual(geometryOf(fromScene.facts), geometryOf(fromStrokes.facts));
-  assert.deepEqual(fromScene.violations, fromStrokes.violations);
+  // The legacy label sits on the blocker; the v2 label slides along the line
+  // into the clear gap past it. Every other finding is the same.
+  const aside = (violations) => violations.filter(({ kind }) => kind !== "connector_label_node_overlap");
+  assert.deepEqual(aside(fromScene.violations), aside(fromStrokes.violations));
   assert.deepEqual(
-    new Set(fromScene.violations.map(({ kind }) => kind)),
+    new Set(fromStrokes.violations.map(({ kind }) => kind)),
     new Set(["connector_through_node", "node_clearance", "connector_label_node_overlap"]),
   );
+  assert.deepEqual(fromScene.facts.connectorLabelNodeIntersections, []);
 });
 
 test("a mixed board scores legacy and v2 objects together, each once", () => {
   let state = createInitialBoardState("board");
-  state = applyDiagramCommand(state, {
+  // A node on a board saved before Airo drew v2 shapes.
+  state = applyLegacyDiagramFixture(state, {
     type: "node.create",
     nodeId: "legacy",
     nodeType: "service",
@@ -374,4 +380,20 @@ test("a v2 bent connector is traced along their rendered route", () => {
   const bent = facts.connectors.find(({ id }) => id === "bent");
   assert.deepEqual(bent.route, [{ x: 100, y: 40 }, { x: 450, y: 40 }, { x: 450, y: 300 }]);
   assert.deepEqual(facts.connectorNodeIntersections, [{ connectorId: "bent", nodeId: "corner" }]);
+});
+
+test("a v2 connector in a side lane is scored along that lane", () => {
+  let state = createInitialBoardState("board");
+  state = sceneNode(state, "a", { x: 0, y: 0, width: 100, height: 80 });
+  state = sceneNode(state, "b", { x: 400, y: 0, width: 100, height: 80 });
+  state = withElement(state, {
+    id: "lane",
+    kind: "connector",
+    pathKind: "bent",
+    start: { point: { x: 100, y: 40 }, binding: { elementId: "a" }, decoration: "none" },
+    end: { point: { x: 400, y: 40 }, binding: { elementId: "b" }, decoration: "solid_arrow" },
+    routeOffset: 72,
+  });
+  const lane = inspectBoardSpatialQuality(state).connectors.find(({ id }) => id === "lane");
+  assert.deepEqual(lane.route, [{ x: 100, y: 40 }, { x: 100, y: 112 }, { x: 400, y: 112 }, { x: 400, y: 40 }]);
 });

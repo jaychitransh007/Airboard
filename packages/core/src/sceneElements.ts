@@ -184,6 +184,7 @@ export function createBoardSceneElement(input: BoardSceneElementDraft): BoardSce
         controlPoints: input.controlPoints ?? [],
         label: input.label ?? createRichTextDocument("", `${input.id}:label`),
         labelPosition: input.labelPosition ?? 0.5,
+        ...(input.routeOffset ? { routeOffset: input.routeOffset } : {}),
         style: input.style ?? {
           color: "#111827",
           opacity: 1,
@@ -873,6 +874,33 @@ function transformFromBounds(bounds: AnnotationBounds): BoardElementTransform {
     height: Math.max(1, bounds.height),
     rotation: 0,
   };
+}
+
+/** The catalogue shape a diagram node type is drawn as (a decision is a diamond). */
+export function shapeKindForNodeType(nodeType: AnnotationNodeType): ShapeKind {
+  return legacyShapeKind(nodeType === "circle" ? "ellipse" : "flow_node", nodeType);
+}
+
+/**
+ * The diagram type of a v2 node, as Airo and the evals name it. A shape drawn
+ * for a diagram node type keeps that type ("decision", not "diamond") while
+ * it still has the shape it was drawn with; any other shape is named by its
+ * shape, a sticky is a "sticky_note" and anything else by its kind.
+ */
+export function sceneElementNodeType(element: BoardSceneElement): string {
+  if (element.kind === "shape") {
+    const metadata = element.metadata;
+    if (
+      metadata &&
+      typeof metadata.nodeType === "string" &&
+      metadata.nodeType &&
+      metadata.nodeShape === element.shapeKind
+    ) {
+      return metadata.nodeType;
+    }
+    return element.shapeKind;
+  }
+  return element.kind === "sticky" ? "sticky_note" : element.kind;
 }
 
 function legacyShapeKind(

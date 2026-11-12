@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   AIRBOARD_SEMANTIC_CAPABILITY_REGISTRY,
   applyDiagramCommand,
+  boardDiagramGraph,
   createInitialBoardState,
 } from "@airboard/core";
 import {
@@ -15,6 +16,11 @@ import {
 } from "../src/features/board/intentCanvasParser.ts";
 
 const BOARD_ID = "capability-evidence";
+// Final graphs are read through the model-independent diagram graph, so the
+// evidence holds whichever shape model the commands write (v2, since shape
+// merge phase 1).
+const node = (board, id) => boardDiagramGraph(board).nodes.find((entry) => entry.id === id);
+
 const commandContext = {
   boardSessionId: BOARD_ID,
   actorParticipantId: "participant",
@@ -44,13 +50,11 @@ test("grounds every shipped node type and applies its final graph", () => {
     assert.equal(command.type, "node.create");
     assert.equal(command.nodeType, capability.nodeType);
     board = applyDiagramCommand(board, command, commandContext).state;
-    const committed = Object.values(board.strokes).filter(
-      (stroke) =>
-        stroke.status === "committed" &&
-        stroke.annotation?.nodeType === capability.nodeType,
+    const committed = boardDiagramGraph(board).nodes.filter(
+      (entry) => entry.kind === capability.nodeType,
     );
     assert.equal(committed.length, 1, capability.nodeType);
-    assert.deepEqual(committed[0].annotation.bounds, {
+    assert.deepEqual(committed[0].bounds, {
       x: 450 - capability.visual.defaultSize.width / 2,
       y: 300 - capability.visual.defaultSize.height / 2,
       ...capability.visual.defaultSize,
@@ -118,16 +122,11 @@ test("grounds ordinal decision branches and applies their final graph", () => {
     board = applyDiagramCommand(board, command, commandContext).state;
   }
 
-  const connectors = Object.values(board.strokes)
-    .filter(
-      (stroke) =>
-        stroke.status === "committed" &&
-        stroke.annotation?.type === "connector",
-    )
-    .map((stroke) => ({
-      from: stroke.annotation.snappedStartStrokeId,
-      to: stroke.annotation.snappedEndStrokeId,
-      label: stroke.annotation.label,
+  const connectors = boardDiagramGraph(board).edges
+    .map((edge) => ({
+      from: edge.from,
+      to: edge.to,
+      label: edge.label,
     }))
     .sort((left, right) => left.label.localeCompare(right.label));
   assert.deepEqual(connectors, [
@@ -184,7 +183,7 @@ test("grounds distribution and applies deterministic final geometry", () => {
   ).state;
   assert.deepEqual(
     ["a", "b", "c"].map(
-      (id) => board.strokes[id].annotation.bounds.x,
+      (id) => node(board, id).bounds.x,
     ),
     [0, 300, 600],
   );
@@ -217,10 +216,7 @@ test("plan handles ground to committed objects and apply their final state", () 
     resolution.commands[0],
     commandContext,
   ).state;
-  assert.equal(
-    board.strokes["created-in-plan"].annotation.label,
-    "Checkout",
-  );
+  assert.equal(node(board, "created-in-plan").label, "Checkout");
 });
 
 test("grounds selection and applies its final non-board state", () => {
@@ -249,7 +245,7 @@ test("grounds selection and applies its final non-board state", () => {
   assert.ok(!("error" in resolution), JSON.stringify(resolution));
   assert.deepEqual(resolution.commands, []);
   assert.deepEqual(resolution.selectionAfter, ["select-me"]);
-  assert.equal(board.strokes["select-me"].status, "committed");
+  assert.ok(node(board, "select-me"), "the selected shape is on the board");
 });
 
 test("cancel remains an immediate no-mutation terminal result", () => {

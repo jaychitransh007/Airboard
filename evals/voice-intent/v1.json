@@ -1431,7 +1431,7 @@
             "label": "Checkout Services"
           }
         ],
-        "selectionCount": 1,
+        "selectionCount": 2,
         "finalState": {
           "nodeCountDelta": 1,
           "edgeCountDelta": 0,

@@ -36,8 +36,11 @@ import {
 } from "./shapeGeometry.ts";
 import {
   sampleSceneConnector,
+  SCENE_CONNECTOR_LABEL_FONT_SIZE,
+  SCENE_CONNECTOR_LABEL_FONT_WEIGHT,
   sceneConnectorCurveControls,
-  sceneConnectorPointAt,
+  sceneConnectorLabelLayoutOnBoard,
+  type SceneConnectorLabelLayout,
 } from "./sceneConnectorGeometry.ts";
 
 export type AnnotationRenderObject = {
@@ -264,7 +267,10 @@ function renderBoardContent(
       context,
       element,
       element.status === "deleted" ? 0.12 : 1,
-      options.resolvedImages ? { resolvedImages: options.resolvedImages } : {},
+      {
+        ...(options.resolvedImages ? { resolvedImages: options.resolvedImages } : {}),
+        ...(state.elements ? { elements: state.elements } : {}),
+      },
     );
   }
 
@@ -637,6 +643,12 @@ export function drawStroke(
 
 export type SceneElementRenderResources = {
   resolvedImages?: Readonly<Record<string, CanvasImageSource>>;
+  /**
+   * The board's elements, so a connector's label can keep clear of the
+   * shapes it joins, other objects and other lines nearby. Without them it
+   * keeps clear of its own ends only.
+   */
+  elements?: Readonly<Record<string, BoardSceneElement>>;
 };
 
 /** Paints any committed v2 scene element using only board-state data. */
@@ -659,7 +671,7 @@ export function drawSceneElement(
       drawShapeElement(context, element);
       break;
     case "connector":
-      drawConnectorElement(context, element);
+      drawConnectorElement(context, element, resources.elements);
       break;
     case "text":
       drawTextElement(context, element);
@@ -770,9 +782,22 @@ function drawStickyElement(
   });
 }
 
+/**
+ * Where a connector's label box is drawn: on the line between the two
+ * outlines when it fits, otherwise just beside it, clear of nearby shapes.
+ * Computed once per elements record and shared with hit testing.
+ */
+export function sceneConnectorLabelLayout(
+  element: ConnectorElement,
+  elements?: Readonly<Record<string, BoardSceneElement>>,
+): SceneConnectorLabelLayout | null {
+  return sceneConnectorLabelLayoutOnBoard(element, elements);
+}
+
 function drawConnectorElement(
   context: CanvasRenderingContext2D,
   element: ConnectorElement,
+  elements?: Readonly<Record<string, BoardSceneElement>>,
 ): void {
   withElementRotation(context, element.transform, () => {
     context.save();
@@ -784,6 +809,17 @@ function drawConnectorElement(
     context.lineWidth = element.style.thickness === "thick" ? 4 : 2;
     context.lineCap = "round";
     context.lineJoin = "round";
+    const labelLayout = sceneConnectorLabelLayout(element, elements);
+
+    // A label on the line breaks it: the line stops short of the label box.
+    context.save();
+    if (labelLayout?.placement === "on_line") {
+      const box = labelLayout.bounds;
+      context.beginPath();
+      context.rect(-1e6, -1e6, 2e6, 2e6);
+      context.rect(box.x, box.y, box.width, box.height);
+      context.clip("evenodd");
+    }
     context.setLineDash(
       element.style.strokeStyle === "dashed"
         ? [10, 7]
@@ -793,6 +829,7 @@ function drawConnectorElement(
     );
     traceSceneConnector(context, element);
     context.stroke();
+    context.restore();
     context.setLineDash([]);
 
     const samples = sampleSceneConnector(element);
@@ -817,35 +854,33 @@ function drawConnectorElement(
       );
     }
 
-    const label = richTextPlainText(element.label);
-    if (label) {
-      const anchor = sceneConnectorPointAt(element, element.labelPosition);
-      const labelWidth = Math.min(220, Math.max(72, label.length * 7.2 + 24));
-      const labelHeight = Math.min(76, Math.max(28, element.label.blocks.length * 18 + 12));
-      const bounds = {
-        x: anchor.x - labelWidth / 2,
-        y: anchor.y - labelHeight / 2,
-        width: labelWidth,
-        height: labelHeight,
-        rotation: 0,
-      };
+    if (labelLayout) {
+      const bounds = { ...labelLayout.bounds, rotation: 0 };
       if (element.style.labelBackground === "matching") {
         context.fillStyle = themedFill(element.style.color);
         context.globalAlpha = baseAlpha * connectorAlpha * 0.14;
-        roundRectPath(context, bounds.x, bounds.y, bounds.width, bounds.height, 8);
+        roundRectPath(context, bounds.x, bounds.y, bounds.width, bounds.height, 6);
         context.fill();
         context.globalAlpha = baseAlpha * connectorAlpha;
       } else {
         context.fillStyle = themedFill("rgba(255, 255, 255, 0.92)");
-        roundRectPath(context, bounds.x, bounds.y, bounds.width, bounds.height, 8);
+        roundRectPath(context, bounds.x, bounds.y, bounds.width, bounds.height, 6);
         context.fill();
       }
-      drawRichTextDocument(context, element.label, insetBounds(bounds, 8), {
-        color: element.style.color,
-        fontSize: 13,
-        align: "center",
-        verticalAlign: "middle",
-      });
+      // The text box is a hair wider than the widest line, so the rich-text
+      // layout wraps the label exactly where the label layout did.
+      drawRichTextDocument(
+        context,
+        element.label,
+        { x: bounds.x + 7, y: bounds.y, width: bounds.width - 14, height: bounds.height, rotation: 0 },
+        {
+          color: element.style.color,
+          fontSize: SCENE_CONNECTOR_LABEL_FONT_SIZE,
+          fontWeight: SCENE_CONNECTOR_LABEL_FONT_WEIGHT,
+          align: "center",
+          verticalAlign: "middle",
+        },
+      );
     }
     context.restore();
   });
@@ -1249,6 +1284,9 @@ export function drawShapeElement(
     const centerX = bounds.x + bounds.width / 2;
     const centerY = bounds.y + bounds.height / 2;
     const band = labelBand ? catalogShapeLabelBand(bounds) : null;
+    // A queue's label sits in its front (lower) lane, as Airo's legacy
+    // queues drew it, not across the gap between the two lanes.
+    const lane = !band && element.shapeKind === "queue" ? nodeLabelPlacement(bounds, "queue") : null;
     context.translate(centerX, centerY);
     context.rotate(((bounds.rotation ?? 0) * Math.PI) / 180);
     context.translate(-centerX, -centerY);
@@ -1257,9 +1295,9 @@ export function drawShapeElement(
     drawWrappedLabel(
       context,
       text,
-      centerX,
-      band ? band.y + band.height / 2 : centerY,
-      Math.max(12, bounds.width - Math.min(32, bounds.width * 0.2)),
+      lane?.centerX ?? centerX,
+      band ? band.y + band.height / 2 : lane?.centerY ?? centerY,
+      lane ? Math.max(12, lane.maxWidth) : Math.max(12, bounds.width - Math.min(32, bounds.width * 0.2)),
       element.style.textAlign ?? "center",
     );
   }
@@ -1519,7 +1557,10 @@ function drawConnectorEndpoint(
 ): void {
   if (decoration === "none") return;
   const angle = Math.atan2(endpoint.y - reference.y, endpoint.x - reference.x);
-  const length = decoration === "diamond" ? 13 : decoration === "triangle" ? 12 : 11;
+  // A heavier line gets a proportionally larger head, so thick arrows read
+  // as boldly as the legacy connectors' 14px heads.
+  const scale = 1 + Math.max(0, lineWidth - 2) * 0.2;
+  const length = (decoration === "diamond" ? 13 : decoration === "triangle" ? 12 : 11) * scale;
   const wing = decoration === "line_arrow" ? Math.PI / 5 : Math.PI / 6;
   const left = {
     x: endpoint.x - length * Math.cos(angle - wing),

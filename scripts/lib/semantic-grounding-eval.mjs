@@ -3,8 +3,10 @@ import {
   applyBoardEvent,
   applyDiagramCommand,
   applyDiagramUndo,
+  applyLegacyDiagramFixture,
   boardDiagramGraph,
   createInitialBoardState,
+  isSceneOnlyElement,
 } from "../../packages/core/src/index.ts";
 import { commitCommandTurn } from "../../apps/web/src/features/board/commandTurnCoordinator.ts";
 import { resolveSemanticPlanAction } from "../../apps/web/src/features/board/intentPipeline.ts";
@@ -28,9 +30,17 @@ const FIXED_TIME = "2026-07-30T00:00:00.000Z";
 /**
  * Recreate the board snapshot sent to the semantic provider. The resulting
  * state is reduced through the production DiagramCommand implementation, so
- * grounding tests exercise the same annotation shapes as the application.
+ * grounding tests exercise the same objects as the application: v2 shapes
+ * and connectors, as Airo and the typed grammar draw them now. A context with
+ * a hand-drawn line pulled off its shapes (seedGeometry) describes a board
+ * saved before Airo drew v2 shapes, so it is seeded as legacy strokes: only
+ * legacy lines can come loose.
  */
 export function seedBoardFromSemanticContext(semanticContext) {
+  const legacyBoard = semanticContext.edges.some(
+    (edge) => edge.seedGeometry?.start && edge.seedGeometry?.end,
+  );
+  const applySeed = legacyBoard ? applyLegacyDiagramFixture : applyDiagramCommand;
   let state = createInitialBoardState(BOARD_ID);
   const objectIds = [];
   const objectIdBySummaryKey = new Map();
@@ -42,7 +52,7 @@ export function seedBoardFromSemanticContext(semanticContext) {
       y: 140 + Math.floor(index / 4) * 150,
     });
     const size = sizeValue(object.size, { width: 160, height: 92 });
-    state = applyDiagramCommand(
+    state = applySeed(
       state,
       {
         type: "node.create",
@@ -71,7 +81,7 @@ export function seedBoardFromSemanticContext(semanticContext) {
         `Semantic eval context edge ${index + 1} references an object absent from context.objects`,
       );
     }
-    state = applyDiagramCommand(
+    state = applySeed(
       state,
       {
         type: "nodes.connect",
@@ -360,7 +370,7 @@ export function evaluateGroundedSemanticPlan(plan, semanticContext) {
     }
     if (resolved.selectionAfter) {
       workingSelectionIds = resolved.selectionAfter.filter(
-        (strokeId) => previewState.strokes[strokeId]?.status === "committed",
+        (id) => previewState.strokes[id]?.status === "committed" || isSceneOnlyElement(previewState, id),
       );
       workingPrimarySelectionId =
         workingSelectionIds[workingSelectionIds.length - 1] ?? null;

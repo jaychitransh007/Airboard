@@ -1,6 +1,6 @@
 import { connectorGeometryMatchesBindings, DEFAULT_CONNECTOR_ATTACHMENT_TOLERANCE } from "./diagramCommands.ts";
 import { isSceneNodeElement, isSceneOnlyElement } from "./sceneDiagramCommands.ts";
-import { richTextToPlainText } from "./sceneElements.ts";
+import { richTextToPlainText, sceneElementNodeType } from "./sceneElements.ts";
 import { shapeCatalogEntry } from "./shapeCatalog.ts";
 import type {
   AnnotationBounds,
@@ -16,9 +16,9 @@ import type {
 /**
  * A model-independent view of the diagram on a board.
  *
- * A board holds objects in two models: Airo's legacy annotation strokes
- * (mirrored into scene elements under the same id) and v2 scene elements made
- * by typed commands, the toolbar and, later, Airo. Evals and the layout scorer
+ * A board holds objects in two models: legacy annotation strokes that Airo
+ * drew before November 2026 (mirrored into scene elements under the same id)
+ * and v2 scene elements, which everything (Airo included) makes now. Evals and the layout scorer
  * read this graph instead of either model, so they keep giving the same
  * answers when an object moves from one model to the other.
  *
@@ -40,7 +40,11 @@ export type BoardDiagramNode = {
   label: string | null;
   /** What a person would call it: its text, or for a blank object its type. */
   name: string;
-  /** Diagram type: the node type ("api", "database", "sticky_note", "rectangle", ...). */
+  /**
+   * Diagram type: the node type ("api", "database", "decision", "sticky_note",
+   * "rectangle", ...). A v2 shape drawn for a node type keeps that type; any
+   * other v2 shape is named by its catalogue shape.
+   */
   kind: string;
   /** The object's own type in its model: an annotation type or a scene element kind. */
   objectType: string;
@@ -67,6 +71,7 @@ export type BoardDiagramEdgeGeometry =
     end: AnnotationPoint;
     controlPoints: AnnotationPoint[];
     labelPosition: number;
+    routeOffset?: number;
   };
 
 export type BoardDiagramEdge = {
@@ -218,9 +223,7 @@ function plainLabel(text: string): string | null {
 
 function sceneNode(element: BoardSceneElement, groupIds: string[]): BoardDiagramNode {
   const label = "content" in element ? plainLabel(richTextToPlainText(element.content)) : null;
-  const kind = element.kind === "shape"
-    ? element.shapeKind
-    : element.kind === "sticky" ? "sticky_note" : element.kind;
+  const kind = sceneElementNodeType(element);
   const name = label
     ?? (element.kind === "shape" ? shapeCatalogEntry(element.shapeKind).name : SCENE_KIND_NAMES[element.kind] ?? element.kind);
   return {
@@ -271,6 +274,7 @@ function sceneEdge(state: BoardState, connector: ConnectorElement): BoardDiagram
       end: { ...connector.end.point },
       controlPoints: connector.controlPoints.map((point) => ({ ...point })),
       labelPosition: connector.labelPosition,
+      ...(connector.routeOffset ? { routeOffset: connector.routeOffset } : {}),
     },
   };
 }

@@ -3,8 +3,9 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 import {
-  applyDiagramCommand,
+  applyDiagramCommand as applyCommand,
   applyDiagramUndo,
+  applyLegacyDiagramFixture,
   createInitialBoardState,
 } from "../../packages/core/src/index.ts";
 import {
@@ -28,6 +29,14 @@ import {
 } from "../lib/interaction-eval-production-executor.mjs";
 
 const CREATED_AT = "2026-07-30T00:00:00.000Z";
+
+// The canonical form was defined on legacy annotation strokes (boards saved
+// before Airo drew v2 shapes), which these tests build. A v2 board projects
+// into the same form: see "a v2 board canonicalizes like its legacy twin".
+const applyDiagramCommand = (state, command, commandContext) =>
+  command.type === "node.create" || command.type === "nodes.connect"
+    ? applyLegacyDiagramFixture(state, command, commandContext)
+    : applyCommand(state, command, commandContext);
 
 function context(createdAt = CREATED_AT) {
   let eventNumber = 0;
@@ -147,6 +156,35 @@ test("canonical BoardState uses logical IDs/timestamps and sorted nodes/edges", 
     "edge:node:alpha->node:zeta:calls",
   );
   assert.match(canonicalEvents[0].id, /^event:\d+$/);
+});
+
+test("a v2 board canonicalizes like its legacy twin, and a v2 commit counts as a stroke commit", () => {
+  const build = (apply) => {
+    let state = createInitialBoardState("physical-board-7d91");
+    state = apply(state, { type: "node.create", nodeId: "generated-uuid-z", nodeType: "service", label: "Zeta", center: { x: 500, y: 200 }, source: "voice" }, context()).state;
+    state = apply(state, { type: "node.create", nodeId: "generated-uuid-a", nodeType: "decision", label: "Alpha", center: { x: 200, y: 200 }, source: "voice" }, context()).state;
+    return apply(state, { type: "nodes.connect", connectorId: "generated-edge-uuid", fromId: "generated-uuid-a", toId: "generated-uuid-z", label: "calls", source: "voice" }, context("2026-07-30T00:00:01.000Z"));
+  };
+  const legacy = build(applyLegacyDiagramFixture);
+  const scene = build(applyCommand);
+  assert.deepEqual(scene.state.strokes, {});
+  const pick = (canonical) => ({
+    nodes: canonical.nodes.map(({ id, status, annotation }) => ({
+      id, status, type: annotation.type, nodeType: annotation.nodeType, label: annotation.label, bounds: annotation.bounds,
+    })),
+    edges: canonical.edges.map(({ id, annotation }) => ({
+      id, label: annotation.label, from: annotation.snappedStartStrokeId, to: annotation.snappedEndStrokeId,
+    })),
+  });
+  assert.deepEqual(pick(canonicalizeBoardState(scene.state)), pick(canonicalizeBoardState(legacy.state)));
+  assert.deepEqual(pick(canonicalizeBoardState(scene.state)).edges, [
+    { id: "edge:node:alpha->node:zeta:calls", label: "calls", from: "node:alpha", to: "node:zeta" },
+  ]);
+  const once = checkExactOnce(
+    { finalBoardState: scene.state, events: scene.events },
+    [{ id: "edge-committed", match: { type: "stroke.committed", strokeId: "generated-edge-uuid" }, count: 1 }],
+  );
+  assert.equal(once.pass, true, JSON.stringify(once.checks));
 });
 
 test("geometry comparison tolerates small drift but reports larger drift", () => {
@@ -483,7 +521,7 @@ test("pre-grounded direct commands are labeled harness-only", async () => {
   });
 
   assert.equal(observation.outcome, "applied");
-  assert.equal(observation.events.length, 2);
+  assert.deepEqual(observation.events.map(({ type }) => type), ["element.created"], "a v2 shape");
   assert.equal(observation.evidenceProvenance.class, "harness-fixture");
   assert.equal(observation.evidenceProvenance.releaseEligible, false);
   assert.equal(

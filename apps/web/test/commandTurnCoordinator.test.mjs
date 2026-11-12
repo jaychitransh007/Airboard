@@ -62,21 +62,19 @@ test("commits a compound turn atomically as one event and undo batch", () => {
 
   assert.equal(result.status, "applied");
   assert.deepEqual(result.events.map((event) => event.type), [
-    "stroke.started",
-    "stroke.committed",
-    "stroke.started",
-    "stroke.committed",
-    "stroke.started",
-    "stroke.committed",
+    "element.created",
+    "element.created",
+    "element.created",
   ]);
   assert.deepEqual(result.selectionIds, ["api", "db"]);
-  assert.deepEqual(Object.keys(result.state.strokes).sort(), ["api", "api-db", "db"]);
+  assert.deepEqual(Object.keys(result.state.elements).sort(), ["api", "api-db", "db"]);
+  assert.deepEqual(result.state.strokes, {});
 
   const undone = applyDiagramUndo(result.state, {
     undoEvents: result.undoEvents,
   });
   assert.equal(
-    Object.values(undone.state.strokes).filter((stroke) => stroke.status === "committed").length,
+    Object.values(undone.state.elements).filter((element) => element.status === "active").length,
     0,
     "one Undo compensates the complete user turn",
   );

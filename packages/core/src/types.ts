@@ -485,6 +485,12 @@ export type ConnectorElement = BoardElementBase<"connector"> & {
   controlPoints: AnnotationPoint[];
   label: RichTextDocument;
   labelPosition: number;
+  /**
+   * Sideways shift, in board units, that keeps parallel or two-way arrows
+   * between the same two objects in separate lanes. Absent or 0 draws the
+   * usual route. Older clients ignore the field.
+   */
+  routeOffset?: number;
   style: {
     color: string;
     opacity: number;

@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   applyBoardEvent,
   applyDiagramCommand,
+  applyLegacyDiagramFixture,
   createBoardSceneElement,
   createEventEnvelope,
   createInitialBoardState,
@@ -26,8 +27,11 @@ function at(isoSecond) {
   return { boardSessionId: BOARD, actorParticipantId: "p", userId: "u", createdAt: `2026-11-11T10:00:${isoSecond}.000Z` };
 }
 
+// Airo's nodes on a board saved before it drew v2 shapes: legacy strokes,
+// which must stay reachable by name. (Shapes Airo draws now are v2, as
+// toolbar shapes are: see sceneShape and the plan-created objects below.)
 function node(state, nodeId, label, x, second, nodeType = "service", y = 100) {
-  return applyDiagramCommand(
+  return applyLegacyDiagramFixture(
     state,
     { type: "node.create", nodeId, nodeType, label, center: { x, y }, source: "voice" },
     at(second),
@@ -112,7 +116,9 @@ test("connecting to a shape that isn't there creates it, shaped from its name", 
   assert.deepEqual(resolution.repairKinds, ["created_missing_object"]);
 
   const after = apply(state, resolution.commands);
-  assert.equal(after.strokes[create.nodeId].annotation.shapeKind, "horizontal-cylinder");
+  assert.equal(after.strokes[create.nodeId], undefined, "the new shape is a v2 shape");
+  assert.equal(after.elements[create.nodeId].shapeKind, "horizontal-cylinder");
+  assert.equal(after.elements[connect.connectorId].start.binding.elementId, "user", "its arrow starts at the older legacy node");
   assert.ok(create.center.x > 200, "the new shape sits beside the user, not on top of it");
 });
 
@@ -124,9 +130,8 @@ test("create draws a catalogue shape, and an unmet pointer placement falls back 
   assert.ok(!("error" in resolution), JSON.stringify(resolution));
   assert.equal(resolution.commands[0].shapeKind, "cloud");
   const after = apply(state, resolution.commands);
-  const created = after.strokes[resolution.commands[0].nodeId];
-  assert.equal(created.annotation.shapeKind, "cloud");
-  assert.equal(after.elements[created.id].shapeKind, "cloud", "the mirrored v2 element draws the same shape");
+  assert.deepEqual(after.strokes, {}, "Airo draws v2 shapes only");
+  assert.equal(after.elements[resolution.commands[0].nodeId].shapeKind, "cloud");
 });
 
 test("change type works on Airo's nodes and on toolbar shapes", () => {
@@ -163,7 +168,7 @@ test("connectors can be labelled and dashed by naming their ends", () => {
   let state = createInitialBoardState(BOARD);
   state = node(state, "user", "User", 200, "01", "user");
   state = node(state, "api", "API", 600, "02", "api");
-  state = applyDiagramCommand(state, { type: "nodes.connect", connectorId: "edge", fromId: "user", toId: "api" }, at("03")).state;
+  state = applyLegacyDiagramFixture(state, { type: "nodes.connect", connectorId: "edge", fromId: "user", toId: "api" }, at("03")).state;
   const connection = { kind: "connection", from: named("User"), to: named("API"), label: null, occurrence: null };
 
   const labelled = resolve(state, { type: "label_connection", connection, label: "login" });
@@ -215,8 +220,8 @@ test("several parallel connectors: the newest is the one meant", () => {
   let state = createInitialBoardState(BOARD);
   state = node(state, "user", "User", 200, "01", "user");
   state = node(state, "api", "API", 600, "02", "api");
-  state = applyDiagramCommand(state, { type: "nodes.connect", connectorId: "old", fromId: "user", toId: "api", label: "requests" }, at("03")).state;
-  state = applyDiagramCommand(state, { type: "nodes.connect", connectorId: "new", fromId: "user", toId: "api", label: "requests" }, at("04")).state;
+  state = applyLegacyDiagramFixture(state, { type: "nodes.connect", connectorId: "old", fromId: "user", toId: "api", label: "requests" }, at("03")).state;
+  state = applyLegacyDiagramFixture(state, { type: "nodes.connect", connectorId: "new", fromId: "user", toId: "api", label: "requests" }, at("04")).state;
   const resolution = resolve(state, {
     type: "delete_connection",
     connection: { kind: "connection", from: named("User"), to: named("API"), label: "requests", occurrence: null },
@@ -231,7 +236,7 @@ test("tree layout follows the arrows from the root down", () => {
   state = node(state, "left", "Left", 100, "02", "service", 100);
   state = node(state, "right", "Right", 900, "03", "service", 100);
   for (const [id, to] of [["e1", "left"], ["e2", "right"]]) {
-    state = applyDiagramCommand(state, { type: "nodes.connect", connectorId: id, fromId: "root", toId: to }, at("04")).state;
+    state = applyLegacyDiagramFixture(state, { type: "nodes.connect", connectorId: id, fromId: "root", toId: to }, at("04")).state;
   }
   const resolution = resolve(state, {
     type: "layout", targets: [named("Root"), named("Left"), named("Right")], direction: "tree",
@@ -361,7 +366,7 @@ function userApiEdge(label) {
   state = node(state, "user", "User", 200, "01", "user");
   state = node(state, "api", "API", 600, "02", "api");
   state = node(state, "cache", "Cache", 900, "04", "database");
-  return applyDiagramCommand(
+  return applyLegacyDiagramFixture(
     state,
     { type: "nodes.connect", connectorId: "edge", fromId: "user", toId: "api", ...(label ? { label } : {}) },
     at("03"),

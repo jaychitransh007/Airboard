@@ -10,7 +10,11 @@ import {
   type StrokePoint,
 } from "@airboard/core";
 import { getConnectorRoutePoints } from "./connectorGeometry.ts";
-import { sampleSceneConnector, sceneConnectorPointAt } from "./sceneConnectorGeometry.ts";
+import {
+  sampleSceneConnector,
+  sceneConnectorLabelLayoutOnBoard,
+  sceneConnectorPointAt,
+} from "./sceneConnectorGeometry.ts";
 import {
   catalogShapeContainsPoint,
   catalogShapeIntersectsCircle,
@@ -62,7 +66,7 @@ export function findSceneElementAtPoint(
     .sort((a, b) => b.element.zIndex - a.element.zIndex || b.index - a.index);
 
   for (const { element } of elements) {
-    if (sceneElementContainsPoint(element, point)) return element;
+    if (sceneElementContainsPoint(element, point, state.elements)) return element;
   }
   return null;
 }
@@ -220,6 +224,7 @@ function annotationContainsPoint(
 function sceneElementContainsPoint(
   element: BoardSceneElement,
   point: Pick<StrokePoint, "x" | "y">,
+  elements?: Readonly<Record<string, BoardSceneElement>>,
 ): boolean {
   if (element.kind === "shape") return sceneShapeContainsPoint(element, point);
 
@@ -240,6 +245,17 @@ function sceneElementContainsPoint(
       const anchor = sceneConnectorPointAt(element, element.labelPosition);
       const halfWidth = Math.min(110, Math.max(36, label.length * 3.6 + 12));
       if (Math.abs(localPoint.x - anchor.x) <= halfWidth && Math.abs(localPoint.y - anchor.y) <= 38) {
+        return true;
+      }
+      // A label moved beside the line is hit where it is drawn.
+      const layout = sceneConnectorLabelLayoutOnBoard(element, elements);
+      if (
+        layout &&
+        localPoint.x >= layout.bounds.x - 4 &&
+        localPoint.x <= layout.bounds.x + layout.bounds.width + 4 &&
+        localPoint.y >= layout.bounds.y - 4 &&
+        localPoint.y <= layout.bounds.y + layout.bounds.height + 4
+      ) {
         return true;
       }
     }

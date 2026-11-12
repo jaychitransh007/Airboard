@@ -185,13 +185,17 @@ export function canonicalizeBoardState(boardState, options = {}) {
     return canonicalizeProjectedBoardState(boardState, context);
   }
 
-  seedBoardStateIdentities(boardState, context);
+  // One model-independent form: v2 objects (all Airo and the typed grammar
+  // make since shape-merge phase 1) are projected into the same canonical
+  // nodes and edges as legacy annotation strokes.
+  const committedRecord = { ...boardState.strokes, ...sceneObjectsAsAnnotations(boardState) };
+  seedBoardStateIdentities({ ...boardState, strokes: committedRecord }, context);
   const result = {};
   if (!isIgnoredField("boardId", "/boardId", context.options)) {
     result.boardId = context.logicalId(boardState.boardId, "board", "board:1");
   }
 
-  const committed = partitionStrokes(boardState.strokes, context.options.includeDeleted);
+  const committed = partitionStrokes(committedRecord, context.options.includeDeleted);
   const active = partitionStrokes(boardState.activeStrokes, context.options.includeDeleted);
   result.nodes = committed.nodes
     .map((stroke) => canonicalizeStroke(stroke, context, "node"))
@@ -484,7 +488,11 @@ export function checkExactOnce(observation, rules = [], options = {}) {
     let entries;
     let match;
     if (source === "events" || source.endsWith(".events")) {
-      entries = canonicalizeBoardEvents(rawEntries, { context });
+      const aliases = rawEntries.map(modelIndependentEventAlias).filter(Boolean);
+      entries = [
+        ...canonicalizeBoardEvents(rawEntries, { context }),
+        ...aliases.map((alias) => canonicalizeValue(alias, context, { path: "" })),
+      ];
       match = canonicalizeValue(rule.match ?? {}, context, { path: "" });
     } else {
       entries = canonicalizeNonBoardState(rawEntries, { context });
@@ -1392,6 +1400,84 @@ function seedRecordIdentities(record, context, kind) {
     .filter(isRecord)
     .sort(compareSemanticEntities)
     .forEach((entity) => context.logicalId(entity.id ?? entity[`${kind}Id`], kind));
+}
+
+/**
+ * v2 scene objects with no legacy stroke behind them, as annotation records
+ * in the canonical form legacy strokes take: shapes, stickies and text as
+ * nodes, connectors as edges and sections as group containers. Mirrors of
+ * legacy strokes are left out, so every object appears once.
+ */
+function sceneObjectsAsAnnotations(boardState) {
+  const projected = {};
+  const elements = isRecord(boardState.elements) ? boardState.elements : {};
+  const strokes = isRecord(boardState.strokes) ? boardState.strokes : {};
+  for (const element of Object.values(elements)) {
+    if (!isRecord(element) || element.legacyStrokeId || strokes[element.id]) continue;
+    const annotation = sceneAnnotation(element);
+    if (!annotation) continue;
+    projected[element.id] = {
+      id: element.id,
+      status: element.status === "active" ? "committed" : "deleted",
+      annotation,
+    };
+  }
+  return projected;
+}
+
+function sceneAnnotation(element) {
+  const transform = element.transform ?? {};
+  const bounds = { x: transform.x, y: transform.y, width: transform.width, height: transform.height };
+  const text = (document) =>
+    (document?.blocks ?? []).map((block) => (block.runs ?? []).map((run) => run.text).join("")).join("\n");
+  switch (element.kind) {
+    case "shape": {
+      const metadata = isRecord(element.metadata) ? element.metadata : {};
+      const nodeType = typeof metadata.nodeType === "string" && metadata.nodeShape === element.shapeKind
+        ? metadata.nodeType
+        : element.shapeKind;
+      return {
+        type: nodeType === "circle" ? "ellipse" : "flow_node",
+        nodeType,
+        shapeKind: element.shapeKind,
+        label: text(element.content),
+        bounds,
+      };
+    }
+    case "sticky":
+      return { type: "sticky_note", label: text(element.content), bounds };
+    case "text":
+      return { type: "text_label", label: text(element.content), bounds };
+    case "section":
+      return {
+        type: "rectangle",
+        label: text(element.title),
+        bounds,
+        groupMemberStrokeIds: [...(element.memberIds ?? [])],
+      };
+    case "connector":
+      return {
+        type: "connector",
+        label: text(element.label),
+        start: { ...element.start?.point },
+        end: { ...element.end?.point },
+        ...(element.start?.binding ? { snappedStartStrokeId: element.start.binding.elementId } : {}),
+        ...(element.end?.binding ? { snappedEndStrokeId: element.end.binding.elementId } : {}),
+        ...(element.routeOffset ? { routeOffset: element.routeOffset } : {}),
+      };
+    default:
+      return null;
+  }
+}
+
+/**
+ * The model-independent alias of a v2 event, so one exact-once rule counts a
+ * commit in either model: a v2 object created is a stroke committed.
+ */
+function modelIndependentEventAlias(event) {
+  if (event?.type !== "element.created" || !isRecord(event.element)) return null;
+  if (!sceneAnnotation(event.element) || event.element.legacyStrokeId) return null;
+  return { type: "stroke.committed", strokeId: event.element.id };
 }
 
 function partitionStrokes(record, includeDeleted) {

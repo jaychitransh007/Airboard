@@ -1,14 +1,15 @@
-import type { BoardState } from "@airboard/core";
+import { createBoardSceneElement, createInitialBoardState, createRichTextDocument, type BoardState } from "@airboard/core";
 import { expect, test, type Page } from "@playwright/test";
 import { byLabel, standInForAiro } from "./support/airoStandIn";
-import { boardToCanvas, canvasSize, grabAndMove, pageNow } from "./support/handLandmarks";
+import { boardToCanvas, canvasSize, carryFromDock, grabAndMove, pageNow } from "./support/handLandmarks";
 import { signIn, type StandInControlPlane } from "./support/signedInApi";
 import { withHooks } from "./support/testHooks";
 
 /**
  * Every way the board changes must reach the saved board. Each mutation path
  * applies its change in its own place (applyLocalEvent, the command-turn
- * commit, undo, redo, the hand's move commit, a peer's event), so each one
+ * commit, undo, redo, the hand's move commit, the dock carry, a peer's event,
+ * a live-session resync), so each one
  * schedules the save itself; a refactor that moves one of them and drops the
  * call would leave the change only in the open tab. For every path this
  * checks that the stand-in API receives a new board save (PATCH
@@ -74,7 +75,8 @@ test("every mutation path schedules a save of the live board", async ({ page }) 
 
   await expectSaved(page, api, "typed scene command", () => run(page, "add a service named API"));
 
-  await expectSaved(page, api, "legacy annotation command", async () => {
+  // The older typed grammar (once the legacy annotation path); it draws v2 shapes now.
+  await expectSaved(page, api, "older typed grammar command", async () => {
     const result = await withHooks(page, (hooks) =>
       hooks.prepareLegacyIntentCommandForEval("add a database named Legacy store"),
     );
@@ -105,6 +107,12 @@ test("every mutation path schedules a save of the live board", async ({ page }) 
     await grabAndMove(page, canvas, from, { x: from.x, y: from.y + 160 }, await pageNow(page));
   });
 
+  await expectSaved(page, api, "dock carry", async () => {
+    const canvas = await canvasSize(page);
+    const placed = await carryFromDock(page, canvas, "Square", { x: canvas.width * 0.25, y: canvas.height * 0.25 }, (await pageNow(page)) + 500);
+    expect(placed).toBe(true);
+  });
+
   await expectSaved(page, api, "live-session peer event", () =>
     withHooks(page, (hooks) => {
       const state = hooks.getCanonicalBoardState();
@@ -126,10 +134,82 @@ test("every mutation path schedules a save of the live board", async ({ page }) 
 
   await expectSaved(page, api, "delete", () => run(page, "delete Gateway"));
 
+  // Since shape-merge phase 1 nothing in this journey makes a legacy stroke.
+  expect(api.saves.every((save) => Object.keys((save.state as BoardState).strokes ?? {}).length === 0)).toBe(true);
+
   // Selecting changes nothing that is saved, so it sends no save.
   const savesBefore = api.saves.length;
   await run(page, "select everything");
   await page.waitForTimeout(1_500);
   expect(api.saves.length).toBe(savesBefore);
   expect(airo.unplanned).toEqual([]);
+});
+
+test("a live-session resync replaces the board, and the board is saved", async ({ page }) => {
+  // A tab that missed too much of a live session to replay takes the
+  // session's whole state (boardSync's guest catch-up). Today only a
+  // non-owner tab resyncs, so the session start is answered as an editor's,
+  // and the catch-up keeps reporting more to fetch until the tab gives up
+  // paging and asks for the state.
+  const api = await signIn(page, { boards: [{ title: "Resync", state: { elements: {}, strokes: {} } }] });
+  await page.route("**/sessions/start", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.ownerParticipant = { ...body.ownerParticipant, role: "editor" };
+    await route.fulfill({ response, json: body });
+  });
+  let pages = 0;
+  let resynced = false;
+  await page.route("**/sessions/*/events", async (route) => {
+    if (resynced || route.request().method() !== "POST") return route.fallback();
+    const after = (route.request().postDataJSON() as { after?: number }).after ?? 0;
+    pages += 1;
+    return route.fulfill({
+      headers: { "access-control-allow-origin": "*" },
+      json: {
+        events: [{
+          id: `event:resync-page-${pages}`,
+          boardSessionId: "session",
+          actorParticipantId: "participant:peer",
+          createdAt: "2026-11-12T09:00:00.000Z",
+          type: "cursor.moved",
+          cursor: { participantId: "participant:peer", x: 1, y: 1, mode: "pointer", updatedAt: "2026-11-12T09:00:00.000Z" },
+          sequence: after + 1,
+        }],
+        latestSequence: 1_000,
+      },
+    });
+  });
+  const shape = createBoardSceneElement({
+    id: "shape:resynced",
+    boardId: "session",
+    kind: "shape",
+    shapeKind: "service",
+    transform: { x: 200, y: 200, width: 160, height: 90, rotation: 0 },
+    content: createRichTextDocument("Made while away", "shape:resynced:content"),
+  });
+  await page.route("**/sessions/*/state*", (route) => {
+    if (resynced) return route.fallback();
+    resynced = true;
+    return route.fulfill({
+      headers: { "access-control-allow-origin": "*" },
+      json: {
+        session: { allowParticipantDrawing: true },
+        state: { ...createInitialBoardState("session"), elements: { [shape.id]: shape }, lastSequence: 1_000 },
+      },
+    });
+  });
+
+  await page.goto(`/app/boards/${api.boardId("Resync")}`);
+  await expect(page.getByTestId("share-board")).toBeVisible({ timeout: 30_000 });
+  await expect.poll(() => resynced, { message: "the tab resynced", timeout: 20_000 }).toBe(true);
+  await expect
+    .poll(async () => (await withHooks(page, (hooks) => hooks.getCanonicalBoardState())).elements[shape.id]?.status)
+    .toBe("active");
+  await expect
+    .poll(() => (api.saves.at(-1)?.state as BoardState | undefined)?.elements?.[shape.id]?.status, {
+      message: "the resynced board was saved",
+      timeout: 10_000,
+    })
+    .toBe("active");
 });

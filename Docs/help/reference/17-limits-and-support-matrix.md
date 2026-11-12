@@ -30,8 +30,10 @@ providers are unavailable, pointer, keyboard, and typed canonical commands
 remain available.
 
 Airo changes shapes added from the toolbar or with typed commands as it changes
-its own. It can't yet group them together with its own diagram shapes; use the
-toolbar for that.
+its own, and groups any of them together. The one exception is a board saved
+before Airo drew its shapes the way the toolbar does: a shape from that older
+diagram can't yet be grouped with a newer shape until older boards are
+converted. Group each kind on its own.
 
 ## Default service limits
 

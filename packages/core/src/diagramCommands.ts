@@ -1,7 +1,9 @@
 import { applyBoardEvent, reduceBoardEvents } from "./boardReducer.ts";
 import { nodeVisualDefaultSize, pointOnNodeBoundary } from "./nodeVisuals.ts";
+import { shapeKindForNodeType } from "./sceneElements.ts";
 import {
   connectElements,
+  createShapeElement,
   deleteElements,
   duplicateElements,
   groupElements,
@@ -14,8 +16,10 @@ import {
   renameElement,
   resizeElement,
   restyleConnectorElement,
+  restyleElement,
   retypeElement,
   reverseConnector,
+  type SceneConnectorStyle,
   type SceneElementEvent,
   type SceneEventSink,
 } from "./sceneDiagramCommands.ts";
@@ -25,8 +29,11 @@ import type {
   AnnotationPoint,
   AnnotationSource,
   BoardEvent,
+  BoardJsonValue,
   BoardState,
+  ConnectorElement,
   ShapeKind,
+  ShapeStyle,
   Stroke,
   StrokeAnnotation,
   StrokePoint,
@@ -39,6 +46,16 @@ export type DiagramObjectStyle = {
   thickness?: number;
 };
 
+/**
+ * The commands below are the diagram verbs Airo's plans and the typed
+ * grammar use. Everything they create is a v2 scene element: node.create
+ * draws a shape, nodes.connect a connector, objects.group (of v2 objects) a
+ * section, objects.duplicate (of v2 objects) v2 copies. Each verb that edits
+ * takes legacy and v2 objects alike: an id naming a legacy annotation stroke
+ * (on a board saved before Airo drew v2 shapes) edits that stroke as it
+ * always has, any other id edits the v2 element. The scene.* twins further
+ * down remain for callers that already know they hold v2 ids.
+ */
 export type CreateNodeCommand = {
   type: "node.create";
   nodeId?: string;
@@ -262,8 +279,13 @@ export type SceneGroupCommand = {
 };
 
 export type SceneResizeCommand = { type: "scene.resize"; elementId: string; bounds: AnnotationBounds };
-/** Gives a v2 shape another catalogue shape. */
-export type SceneRetypeCommand = { type: "scene.retype"; elementId: string; shapeKind: ShapeKind };
+/** Gives a v2 shape another catalogue shape; with a node type, it is named by that type. */
+export type SceneRetypeCommand = {
+  type: "scene.retype";
+  elementId: string;
+  shapeKind: ShapeKind;
+  nodeType?: AnnotationNodeType;
+};
 export type SceneRestyleConnectorCommand = {
   type: "scene.connector.restyle";
   connectorId: string;
@@ -416,7 +438,7 @@ export function planDiagramCommand(
       resizeElement(planner.sceneSink(), command.elementId, command.bounds);
       break;
     case "scene.retype":
-      retypeElement(planner.sceneSink(), command.elementId, command.shapeKind);
+      retypeElement(planner.sceneSink(), command.elementId, command.shapeKind, command.nodeType);
       break;
     case "scene.connector.restyle":
       restyleConnectorElement(planner.sceneSink(), command.connectorId, command.lineStyle);
@@ -437,10 +459,33 @@ export function planDiagramCommand(
     command.type === "objects.align" ||
     command.type === "objects.layout"
   ) {
-    refreshAttachedConnectors(planner.sceneSink(), planner.touchedStrokeIds());
+    // (v2 objects refresh their own connectors as they move.)
+    refreshAttachedConnectors(
+      planner.sceneSink(),
+      planner.touchedStrokeIds().filter((id) => planner.isLegacy(id)),
+    );
   }
 
   return planner.plan();
+}
+
+/**
+ * Builds the legacy annotation strokes that boards saved before Airo drew v2
+ * shapes still hold: a node (`node.create`) or a connector between two legacy
+ * nodes (`nodes.connect`), exactly as Airo drew them then. For tests, the
+ * per-verb parity checks and eval fixtures of older boards only: nothing in
+ * the app calls it, and a guard test keeps it that way.
+ */
+export function applyLegacyDiagramFixture(
+  state: BoardState,
+  command: CreateNodeCommand | ConnectNodesCommand,
+  context: DiagramCommandContext,
+): DiagramCommandResult {
+  const planner = new CommandPlanner(state, context);
+  if (command.type === "node.create") legacyCreateNode(planner, command);
+  else legacyConnectNodes(planner, command);
+  const plan = planner.plan();
+  return { ...plan, state: reduceBoardEvents(state, plan.events) };
 }
 
 /** Plan and immediately reduce a command into a new BoardState. */
@@ -619,6 +664,11 @@ class CommandPlanner {
     );
   }
 
+  /** True when the id names a legacy annotation stroke (committed or in flight). */
+  isLegacy(id: string): boolean {
+    return Boolean(this.state.strokes[id] ?? this.state.activeStrokes[id]);
+  }
+
   touchedStrokeIds(): string[] {
     return [...this.affectedStrokeIds];
   }
@@ -685,7 +735,7 @@ class PlannerSceneSink implements SceneEventSink {
   }
 }
 
-function planCreateNode(planner: CommandPlanner, command: CreateNodeCommand): void {
+function legacyCreateNode(planner: CommandPlanner, command: CreateNodeCommand): void {
   if (!command.bounds && !command.center) {
     throw new DiagramCommandError("node.create requires bounds or center");
   }
@@ -710,17 +760,15 @@ function planCreateNode(planner: CommandPlanner, command: CreateNodeCommand): vo
   );
 }
 
-function planConnectNodes(planner: CommandPlanner, command: ConnectNodesCommand): void {
+function legacyConnectNodes(planner: CommandPlanner, command: ConnectNodesCommand): void {
   if (command.fromId === command.toId) {
     throw new DiagramCommandError("nodes.connect requires two different objects");
   }
   const fromStroke = planner.getStroke(command.fromId);
   const toStroke = planner.getStroke(command.toId);
-  const from = requireBounds(fromStroke);
-  const to = requireBounds(toStroke);
   const endpoints = connectorEndpoints(
-    from,
-    to,
+    requireBounds(fromStroke),
+    requireBounds(toStroke),
     fromStroke.annotation?.nodeType,
     toStroke.annotation?.nodeType,
   );
@@ -734,17 +782,88 @@ function planConnectNodes(planner: CommandPlanner, command: ConnectNodesCommand)
     snappedEndStrokeId: command.toId,
     strokeColor: command.style?.strokeColor ?? "#334155",
   };
-  const routeOffset = nextConnectorRouteOffset(
-    planner.state,
-    command.fromId,
-    command.toId,
-  );
+  const routeOffset = nextConnectorRouteOffset(planner.state, command.fromId, command.toId);
   if (routeOffset !== 0) annotation.routeOffset = routeOffset;
   if (command.label !== undefined) annotation.label = command.label;
   if (command.style?.opacity !== undefined) annotation.opacity = command.style.opacity;
   planner.createStroke(
     semanticStroke(planner, id, annotation, command.style?.thickness ?? 3),
   );
+}
+
+/**
+ * A diagram node's colours when the command names none: the same as Airo's
+ * legacy nodes had (and as their scene mirrors show), so a diagram looks the
+ * same whichever model holds it. A note keeps its yellow paper.
+ */
+const NODE_STROKE = "#2563eb";
+const NODE_FILL = "#f8fafc";
+const NOTE_NODE_FILL = "#fef9c3";
+const NODE_STROKE_WIDTH = 3;
+
+/** Draws a diagram node as a v2 shape (never a legacy stroke). */
+function planCreateNode(planner: CommandPlanner, command: CreateNodeCommand): void {
+  if (!command.bounds && !command.center) {
+    throw new DiagramCommandError("node.create requires bounds or center");
+  }
+  const bounds = command.bounds
+    ? normalizeBounds(command.bounds)
+    : boundsAroundCenter(command.center as AnnotationPoint, defaultNodeSize(command.nodeType));
+  const shapeKind = command.shapeKind ?? shapeKindForNodeType(command.nodeType);
+  const style: Partial<ShapeStyle> = {
+    stroke: command.style?.strokeColor ?? NODE_STROKE,
+    fill: command.style?.fillColor ?? (command.nodeType === "note" ? NOTE_NODE_FILL : NODE_FILL),
+    strokeWidth: command.style?.thickness ?? NODE_STROKE_WIDTH,
+  };
+  if (command.style?.opacity !== undefined) style.fillOpacity = command.style.opacity;
+  const metadata: Record<string, BoardJsonValue> = {
+    source: command.source ?? "ai",
+    nodeType: command.nodeType,
+    nodeShape: shapeKind,
+  };
+  if (command.nodeId !== undefined && planner.isLegacy(command.nodeId)) {
+    throw new DiagramCommandError(`Diagram object already exists: ${command.nodeId}`);
+  }
+  createShapeElement(planner.sceneSink(), {
+    ...(command.nodeId !== undefined ? { shapeId: command.nodeId } : {}),
+    shapeKind,
+    bounds,
+    ...(command.label !== undefined ? { label: command.label } : {}),
+    style,
+    metadata,
+  });
+}
+
+/** The weight of the arrows Airo and typed commands draw. */
+export const AIRO_CONNECTOR_THICKNESS: ConnectorElement["style"]["thickness"] = "thick";
+
+/** Draws a v2 connector between two objects, legacy or v2. */
+function planConnectNodes(planner: CommandPlanner, command: ConnectNodesCommand): void {
+  if (command.fromId === command.toId) {
+    throw new DiagramCommandError("nodes.connect requires two different objects");
+  }
+  for (const id of [command.fromId, command.toId]) {
+    if (planner.isLegacy(id)) planner.getStroke(id);
+    else if (!isSceneNodeElement(planner.state.elements[id])) {
+      throw new DiagramCommandError(`Diagram object not found: ${id}`);
+    }
+  }
+  // Airo's and typed arrows are drawn heavy, as legacy connectors were (3px
+  // with a large head), so a diagram's arrows read at a glance; the toolbar's
+  // own connectors keep its thin default. A stated weight under the legacy
+  // 3px draws thin.
+  const style: SceneConnectorStyle = { thickness: AIRO_CONNECTOR_THICKNESS };
+  if (command.style?.strokeColor !== undefined) style.color = command.style.strokeColor;
+  if (command.style?.opacity !== undefined) style.opacity = command.style.opacity;
+  if (command.style?.thickness !== undefined) style.thickness = command.style.thickness >= 3 ? "thick" : "thin";
+  connectElements(planner.sceneSink(), {
+    ...(command.connectorId !== undefined ? { connectorId: command.connectorId } : {}),
+    fromId: command.fromId,
+    toId: command.toId,
+    ...(command.label !== undefined ? { label: command.label } : {}),
+    style,
+    metadata: { source: command.source ?? "ai" },
+  });
 }
 
 function planAttachConnection(
@@ -837,6 +956,10 @@ function planReverseConnection(
   planner: CommandPlanner,
   command: ReverseConnectionCommand,
 ): void {
+  if (!planner.isLegacy(command.connectorId)) {
+    reverseConnector(planner.sceneSink(), command.connectorId, command.label);
+    return;
+  }
   const connector = planner.getStroke(command.connectorId);
   const annotation = connector.annotation;
   if (
@@ -892,6 +1015,28 @@ function planMoveObjects(planner: CommandPlanner, command: MoveObjectsCommand): 
   if ((command.delta === undefined) === (command.to === undefined)) {
     throw new DiagramCommandError("objects.move requires exactly one of delta or to");
   }
+  // Ids that name nothing any more (a shape deleted meanwhile) are skipped.
+  const sceneIds = unique(command.objectIds).filter(
+    (id) => !planner.isLegacy(id) && isSceneNodeElement(planner.state.elements[id]),
+  );
+  if (sceneIds.length > 0) {
+    // v2 objects take the same shift as the legacy ones, as one selection.
+    const legacyIds = expandSelectedGroups(planner, command.objectIds.filter((id) => planner.isLegacy(id)));
+    const boxes = [
+      ...legacyIds.map((id) => planner.getStroke(id)).filter(hasResolvablePosition).map(positionBounds),
+      ...sceneIds.map((id) => sceneNodeBounds(planner, id)),
+    ];
+    const selection = unionBounds(boxes);
+    const delta = command.delta ?? {
+      x: (command.to as AnnotationPoint).x - selection.x,
+      y: (command.to as AnnotationPoint).y - selection.y,
+    };
+    if (legacyIds.length > 0) {
+      planMoveObjects(planner, { type: "objects.move", objectIds: legacyIds, delta });
+    }
+    moveElements(planner.sceneSink(), sceneIds, delta);
+    return;
+  }
   const ids = expandSelectedGroups(planner, command.objectIds);
   const objects = ids.map((id) => planner.getStroke(id));
   // Only objects with a resolvable position contribute to the selection bounds.
@@ -939,6 +1084,10 @@ function planMoveObjects(planner: CommandPlanner, command: MoveObjectsCommand): 
 }
 
 function planResizeObject(planner: CommandPlanner, command: ResizeObjectCommand): void {
+  if (!planner.isLegacy(command.objectId)) {
+    resizeElement(planner.sceneSink(), command.objectId, normalizeBounds(command.bounds));
+    return;
+  }
   const stroke = planner.getStroke(command.objectId);
   const annotation = cloneAnnotation(stroke.annotation as StrokeAnnotation);
   if (!annotation.bounds) {
@@ -954,6 +1103,15 @@ function planResizeObject(planner: CommandPlanner, command: ResizeObjectCommand)
 }
 
 function planRetypeObject(planner: CommandPlanner, command: RetypeObjectCommand): void {
+  if (!planner.isLegacy(command.objectId)) {
+    retypeElement(
+      planner.sceneSink(),
+      command.objectId,
+      command.shapeKind ?? shapeKindForNodeType(command.nodeType),
+      command.nodeType,
+    );
+    return;
+  }
   const stroke = planner.getStroke(command.objectId);
   const annotation = cloneAnnotation(stroke.annotation as StrokeAnnotation);
   if (!annotation.bounds || (annotation.type !== "flow_node" && annotation.type !== "ellipse" && annotation.type !== "rectangle")) {
@@ -969,6 +1127,10 @@ function planRetypeObject(planner: CommandPlanner, command: RetypeObjectCommand)
 }
 
 function planRestyleConnector(planner: CommandPlanner, command: RestyleConnectorCommand): void {
+  if (!planner.isLegacy(command.connectorId)) {
+    restyleConnectorElement(planner.sceneSink(), command.connectorId, command.lineStyle);
+    return;
+  }
   const stroke = planner.getStroke(command.connectorId);
   const annotation = cloneAnnotation(stroke.annotation as StrokeAnnotation);
   if (annotation.type !== "connector" && annotation.type !== "arrow") {
@@ -980,10 +1142,21 @@ function planRestyleConnector(planner: CommandPlanner, command: RestyleConnector
 }
 
 function planRenameObject(planner: CommandPlanner, command: RenameObjectCommand): void {
+  if (!planner.isLegacy(command.objectId)) {
+    renameElement(planner.sceneSink(), command.objectId, command.label);
+    return;
+  }
   planner.updateLabel(command.objectId, command.label);
 }
 
 function planRestyleObject(planner: CommandPlanner, command: RestyleObjectCommand): void {
+  if (!planner.isLegacy(command.objectId)) {
+    restyleElement(planner.sceneSink(), command.objectId, {
+      ...(command.fillColor !== undefined ? { fillColor: command.fillColor } : {}),
+      ...(command.strokeColor !== undefined ? { strokeColor: command.strokeColor } : {}),
+    });
+    return;
+  }
   const stroke = planner.getStroke(command.objectId);
   const annotation = cloneAnnotation(stroke.annotation as StrokeAnnotation);
   if (command.fillColor !== undefined) {
@@ -1004,6 +1177,21 @@ function planGroupObjects(planner: CommandPlanner, command: GroupObjectsCommand)
   if (memberIds.length === 0) {
     throw new DiagramCommandError("objects.group requires at least one object");
   }
+  const legacyCount = memberIds.filter((id) => planner.isLegacy(id)).length;
+  if (legacyCount === 0) {
+    // v2 objects are grouped as the toolbar groups them: in a section.
+    groupElements(planner.sceneSink(), {
+      ...(command.groupId !== undefined ? { sectionId: command.groupId } : {}),
+      memberIds,
+      ...(command.label !== undefined ? { label: command.label } : {}),
+    });
+    return;
+  }
+  if (legacyCount < memberIds.length) {
+    throw new DiagramCommandError(MIXED_GROUP_MESSAGE);
+  }
+  // Only shapes from a board saved before Airo drew v2 shapes: they are
+  // grouped the way they always were, until those boards are converted.
   const members = memberIds.map((id) => planner.getStroke(id));
   const padding = Math.max(0, command.padding ?? DEFAULT_GROUP_PADDING);
   const contentBounds = unionBounds(members.map(requireBounds));
@@ -1042,6 +1230,23 @@ function planDeleteObjects(planner: CommandPlanner, command: DeleteObjectsComman
   const requested = unique(command.objectIds);
   if (requested.length === 0) {
     throw new DiagramCommandError("objects.delete requires at least one object");
+  }
+  const sceneIds = requested.filter((id) => !planner.isLegacy(id));
+  if (sceneIds.length > 0) {
+    const legacyIds = requested.filter((id) => planner.isLegacy(id));
+    if (legacyIds.length > 0) {
+      planDeleteObjects(planner, { ...command, objectIds: legacyIds });
+    }
+    const remaining = sceneIds.filter((id) => planner.state.elements[id]?.status === "active");
+    if (remaining.length === 0) return;
+    if (command.cascadeConnectors === false) {
+      for (const id of remaining) {
+        planner.add({ type: "element.deleted", elementId: id }, { type: "element.restored", elementId: id });
+      }
+    } else {
+      deleteElements(planner.sceneSink(), remaining);
+    }
+    return;
   }
   const ids = new Set(requested);
   if (command.cascadeConnectors !== false) {
@@ -1096,6 +1301,27 @@ function planDeleteObjects(planner: CommandPlanner, command: DeleteObjectsComman
 }
 
 function planDuplicateObjects(planner: CommandPlanner, command: DuplicateObjectsCommand): void {
+  const sceneIds = unique(command.objectIds).filter((id) => !planner.isLegacy(id));
+  if (sceneIds.length > 0) {
+    // v2 objects are copied as v2 objects; legacy ones as they always were.
+    const legacyIds = command.objectIds.filter((id) => planner.isLegacy(id));
+    const offset = command.offset ?? { x: 24, y: 24 };
+    if (legacyIds.length > 0) {
+      planDuplicateObjects(planner, { ...command, objectIds: legacyIds, offset });
+    }
+    // A v2 connector is not copied on its own: the shapes are.
+    const sceneNodeIds = sceneIds.filter((id) => isSceneNodeElement(planner.state.elements[id]));
+    if (sceneNodeIds.length === 0) {
+      if (legacyIds.length > 0) return;
+      throw new DiagramCommandError("objects.duplicate requires at least one shape");
+    }
+    duplicateElements(planner.sceneSink(), {
+      elementIds: sceneNodeIds,
+      ...(command.idMap ? { idMap: command.idMap } : {}),
+      offset,
+    });
+    return;
+  }
   const sourceIds = expandSelectedGroups(planner, command.objectIds);
   if (sourceIds.length === 0) {
     throw new DiagramCommandError("objects.duplicate requires at least one object");
@@ -1179,6 +1405,19 @@ function planLayoutObjects(planner: CommandPlanner, command: LayoutObjectsComman
 }
 
 type ArrangeEntry = { id: string; bounds: AnnotationBounds; scene: boolean };
+
+/** The refusal for a group that mixes shapes from before v2 Airo shapes with v2 ones. */
+export const MIXED_GROUP_MESSAGE =
+  "Shapes from an older diagram can't be grouped with newer shapes yet. Group each kind on its own.";
+
+function sceneNodeBounds(planner: CommandPlanner, id: string): AnnotationBounds {
+  const element = planner.state.elements[id];
+  if (!isSceneNodeElement(element)) {
+    throw new DiagramCommandError(`Diagram object not found: ${id}`);
+  }
+  const { x, y, width, height } = element.transform;
+  return { x, y, width, height };
+}
 
 /** Align and layout arrange legacy nodes and v2 shapes alike. */
 function arrangeEntries(planner: CommandPlanner, ids: readonly string[]): ArrangeEntry[] {

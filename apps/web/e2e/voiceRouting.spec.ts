@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { seedLegacyDiagram } from "./support/legacyBoard";
 import { waitForTestHooks, type AirboardTestWindow } from "./support/testHooks";
 
 /**
@@ -29,30 +30,6 @@ function summary(page: import("@playwright/test").Page) {
   return page.evaluate(() =>
     (window as unknown as AirboardTestWindow).__airboardTestHooks.getBoardSummary(),
   );
-}
-
-async function seedLegacyDiagram(
-  page: import("@playwright/test").Page,
-  commands: readonly string[],
-) {
-  for (const [index, command] of commands.entries()) {
-    const result = await page.evaluate(
-      (instruction) =>
-        (window as unknown as AirboardTestWindow)
-          .__airboardTestHooks.prepareLegacyIntentCommandForEval(instruction),
-      command,
-    );
-    expect(["previewed", "applied"]).toContain(result);
-    await expect.poll(async () => {
-      const state = await page.evaluate(() =>
-        (window as unknown as AirboardTestWindow)
-          .__airboardTestHooks.getCanonicalBoardState(),
-      );
-      return Object.values(state.strokes).filter(
-        (stroke) => stroke.status === "committed" && stroke.annotation,
-      ).length;
-    }).toBe(index + 1);
-  }
 }
 
 test.beforeEach(async ({ context }) => {
@@ -228,13 +205,18 @@ test("PTT repairs the production stale connector in place, undoes exactly, and r
   await page.goto("/?testStandalone=1");
   await hooks(page);
 
-  await seedLegacyDiagram(page, [
-    "add a service named User here",
-    "add a service named Client right of selected",
-    "add a service named Planner right of selected",
-    "connect User to Client as makes a request",
-    "connect User to Planner as request goes to",
-  ]);
+  // Only legacy lines (on boards saved before Airo drew v2 shapes) come loose.
+  await seedLegacyDiagram(page, {
+    nodes: [
+      { id: "user", label: "User", center: { x: 300, y: 300 } },
+      { id: "client", label: "Client", center: { x: 580, y: 300 } },
+      { id: "planner", label: "Planner", center: { x: 860, y: 300 } },
+    ],
+    edges: [
+      { id: "edge:request", from: "user", to: "client", label: "makes a request" },
+      { id: "edge:goes", from: "user", to: "planner", label: "request goes to" },
+    ],
+  });
   await expect.poll(async () => (await summary(page)).objectCount).toBe(5);
 
   const corrupted = await page.evaluate(() => {
@@ -397,12 +379,16 @@ test("ambiguous disconnected lines clarify without semantic fallback or mutation
   await page.goto("/?testStandalone=1");
   await hooks(page);
 
-  await seedLegacyDiagram(page, [
-    "add a service named Client here",
-    "add a service named Planner right of selected",
-    "connect Client to Planner as primary",
-    "connect Client to Planner as secondary",
-  ]);
+  await seedLegacyDiagram(page, {
+    nodes: [
+      { id: "client", label: "Client", center: { x: 300, y: 300 } },
+      { id: "planner", label: "Planner", center: { x: 580, y: 300 } },
+    ],
+    edges: [
+      { id: "edge:primary", from: "client", to: "planner", label: "primary" },
+      { id: "edge:secondary", from: "client", to: "planner", label: "secondary" },
+    ],
+  });
 
   const before = await page.evaluate(() => {
     const testHooks = (window as unknown as AirboardTestWindow)

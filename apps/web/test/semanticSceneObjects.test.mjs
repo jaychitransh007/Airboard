@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   applyBoardEvent,
   applyDiagramCommand,
+  applyLegacyDiagramFixture,
   createBoardSceneElement,
   createEventEnvelope,
   createInitialBoardState,
@@ -18,7 +19,8 @@ import { commitCommandTurn } from "../src/features/board/commandTurnCoordinator.
 import { computeSemanticAutoLayout } from "../src/features/board/semanticAutoLayout.ts";
 
 // RGB-039: Airo must see, and change, the shapes typed commands and the
-// toolbar make (v2 scene elements), not only its own legacy nodes.
+// toolbar make (v2 scene elements), alongside the legacy nodes it drew on
+// boards saved before it drew v2 shapes itself.
 
 const BOARD = "scene-board";
 const commandContext = { boardSessionId: BOARD, actorParticipantId: "participant", userId: "user" };
@@ -31,7 +33,7 @@ function created(state, element) {
   });
 }
 
-/** User and API from typed commands, joined by a toolbar connector, plus Airo's own Database. */
+/** User and API from typed commands, joined by a toolbar connector, plus a Database Airo drew on an older board. */
 function mixedBoard() {
   let state = createInitialBoardState(BOARD);
   state = created(state, createBoardSceneElement({
@@ -45,7 +47,7 @@ function mixedBoard() {
     content: createRichTextDocument("API", "api:content"),
   }));
   state = applyDiagramCommand(state, { type: "scene.connect", connectorId: "user-api", fromId: "user", toId: "api", label: "requests" }, commandContext).state;
-  state = applyDiagramCommand(state, {
+  state = applyLegacyDiagramFixture(state, {
     type: "node.create", nodeId: "db", nodeType: "database", label: "Database", center: { x: 760, y: 140 }, source: "voice",
   }, commandContext).state;
   return state;
@@ -85,7 +87,7 @@ test("connecting a typed shape to Airo's own node draws one connector between th
   const resolution = resolve(state, { type: "connect", from: label("API"), to: label("Database"), label: "talks to" });
   assert.ok(!("error" in resolution), JSON.stringify(resolution));
   assert.equal(resolution.commands.length, 1);
-  assert.equal(resolution.commands[0].type, "scene.connect");
+  assert.equal(resolution.commands[0].type, "nodes.connect", "a new arrow, drawn as a v2 connector");
   const next = applyDiagramCommand(state, resolution.commands[0], commandContext).state;
   const connectors = Object.values(next.elements).filter((element) => element.kind === "connector" && element.status === "active" && !element.legacyStrokeId);
   assert.equal(connectors.length, 2);
@@ -220,7 +222,16 @@ test("Airo groups typed shapes in a section, and says why it can't mix them with
   assert.deepEqual(resolution.selectionAfter, ["user", "api"]);
 
   const mixed = resolve(mixedBoard(), { type: "group", targets: [label("API"), label("Database")], label: null, handle: "g_2" });
-  assert.match(mixed.error, /can't group its own diagram shapes with shapes added from the toolbar/);
+  assert.match(mixed.error, /older diagram can't be grouped with newer shapes/);
+
+  // Shapes Airo draws now are v2, so they group with typed shapes.
+  let fresh = mixedBoard();
+  fresh = applyDiagramCommand(fresh, {
+    type: "node.create", nodeId: "cache", nodeType: "database", label: "Cache", center: { x: 760, y: 400 }, source: "voice",
+  }, commandContext).state;
+  const together = applyAction(fresh, { type: "group", targets: [label("API"), label("Cache")], label: "Back end", handle: "g_3" });
+  assert.equal(together.resolution.commands[0].type, "scene.group");
+  assert.deepEqual(together.state.elements[together.resolution.commands[0].sectionId].memberIds, ["api", "cache"]);
 });
 
 test("automatic placement keeps new nodes off typed shapes", () => {

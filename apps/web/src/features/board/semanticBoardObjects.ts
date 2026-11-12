@@ -2,6 +2,7 @@ import {
   isSceneNodeElement,
   isSceneOnlyElement,
   richTextToPlainText,
+  sceneElementNodeType,
   shapeCatalogEntry,
   type BoardSceneElement,
   type BoardState,
@@ -9,10 +10,10 @@ import {
 } from "@airboard/core";
 
 /**
- * Every object Airo can name on a board. Airo's own nodes are legacy
- * annotation strokes; typed commands and the toolbar make v2 scene elements.
- * Airo has to see both, or it draws a second "API" beside the one the person
- * typed (RGB-039).
+ * Every object Airo can name on a board. Boards saved before November 2026
+ * hold Airo's nodes as legacy annotation strokes; everything made since
+ * (Airo, typed commands, the toolbar) is a v2 scene element. Airo has to see
+ * both, or it draws a second "API" beside the one already there (RGB-039).
  */
 export type SemanticBoardNode = {
   id: string;
@@ -37,9 +38,9 @@ const KIND_LABELS: Partial<Record<BoardSceneElement["kind"], string>> = {
   mind_map_node: "Mind map",
 };
 
+/** Its diagram type: a decision Airo drew is a "decision", a toolbar diamond a "diamond". */
 export function sceneNodeType(element: BoardSceneElement): string {
-  if (element.kind === "shape") return element.shapeKind;
-  return element.kind === "sticky" ? "sticky_note" : element.kind;
+  return sceneElementNodeType(element);
 }
 
 /** Hidden elements, and those inside a hidden or collapsed section, aren't on view. */

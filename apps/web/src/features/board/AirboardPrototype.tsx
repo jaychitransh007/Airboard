@@ -1,8 +1,6 @@
 "use client";
 
-import Link from "next/link";
 import {
-  AIRBOARD_SEMANTIC_NODE_CAPABILITIES,
   applyDiagramCommand,
   applyDiagramUndo,
   applyBoardEvent,
@@ -17,15 +15,11 @@ import {
   invertBoardElementPatches,
   isCompoundBoardCommand,
   parseBoardSceneIntent,
-  richTextToPlainText,
-  shapeCatalogEntry,
   type AnnotationPoint,
-  type AnnotationNodeType,
   type BoardElementPatchOperation,
   type BoardEvent,
   type BoardSceneElement,
   type BoardSceneIntent,
-  type SceneIntentPronoun,
   type SceneIntentTarget,
   type BoardState,
   type SceneIntentPlacementDirection,
@@ -73,11 +67,8 @@ import {
   GestureTraceJournal,
   coordinateRawLandmarkFrame,
   reportGestureInferenceFailure,
-  type RawLandmarkFrameGeometry,
-  type RawLandmarkFrameSource,
   type GestureTraceStage,
 } from "./gestureFrameCoordinator";
-import type { GestureFrameOwner } from "./gestureFrameArbitration";
 import { createGestureTraceReporter } from "./gestureTrace";
 import { handPerceptionOptions } from "./gesturePerceptionConfig";
 import {
@@ -103,7 +94,6 @@ import {
 import {
   CAMERA_PRESENTATION_SCRIM,
   cameraCanvasScrim,
-  MIN_CAMERA_PRESENTATION_SCRIM,
   SCREEN_PRESENTATION_SCRIM,
   screenFriendlyScrim,
 } from "./lightboardComposition";
@@ -115,17 +105,24 @@ import {
   stickyHeightForText,
 } from "./sceneContextToolbarHelpers";
 import { SceneTextEditor } from "./SceneTextEditor";
+import { AiroPanel } from "./ui/AiroPanel";
+import { BoardNotices } from "./ui/BoardNotices";
+import { BoardSettingsDrawer } from "./ui/BoardSettingsDrawer";
+import { BoardTopBar } from "./ui/BoardTopBar";
+import { CanvasHistoryControls } from "./ui/CanvasHistoryControls";
+import { DeleteBoardDialog } from "./ui/DeleteBoardDialog";
 import { ShareDialog, type BoardShareAccess, type LiveLinkControls } from "./ShareDialog";
 import { forgetLiveSession, liveBoardLink, liveStartFailure, rememberedLiveSession, rememberLiveSession, type LiveStartFailure } from "./shareLinks";
-import { deniedMediaHelp } from "./mediaPermissionHelp";
 import { ScenePlaybackOverlay } from "./ScenePlaybackOverlay";
 import {
   ALL_SHAPES,
   CREATION_DRAG_MIME,
+  creationToolForPlacementTool,
   creationToolLabel,
   legacyToolForCreationTool,
   resolveCreationShortcut,
   type CreationToolId,
+  type LegacyPlacementTool,
 } from "./creationToolCatalog";
 import {
   centeredTransform,
@@ -163,7 +160,7 @@ import {
   type VoiceGateMode,
   type VoiceRouteDecision,
 } from "./voiceCommandRouter";
-import { airoSoundsEnabled, playAiroCue, setAiroSoundsEnabled } from "./airoCues";
+import { airoSoundsEnabled, playAiroCue } from "./airoCues";
 import {
   createRealtimeSpeechSession,
   fetchRealtimeTranscriptionConfig,
@@ -179,7 +176,6 @@ import {
   semanticIntentIssueMessage,
   shouldUseSemanticIntentFallback,
   type SemanticIntentConfig,
-  type SemanticIntentPendingClarification,
   type SemanticIntentAddressedBy,
   type SemanticIntentParserIssue,
 } from "./semanticIntent";
@@ -253,7 +249,6 @@ import {
   shouldRetryCameraStart,
   type CameraRecoveryReason,
 } from "./cameraRecovery";
-import { sceneNodeLabel } from "./semanticBoardObjects";
 import {
   parseIntentCanvasCommand,
   type ParsedIntentCanvasCommand,
@@ -270,312 +265,119 @@ import {
 } from "./interactionAttribution";
 import {
   airoStartPlan,
-  mediaPermissionLabel,
   queryMediaPermission,
   requestMediaAccess,
   type MediaPermissionState,
 } from "./mediaPermissionPreference";
-
-type CameraStatus = "idle" | "starting" | "tracker_loading" | "active" | "blocked" | "tracker_error" | "error";
-type ScreenUnderlayStatus = "idle" | "starting" | "active" | "blocked" | "error";
-
-type RawLandmarkFrameRequest = {
-  hands: readonly DetectedHand[];
-  timestampMs: number;
-  inferenceMs?: number;
-  source: RawLandmarkFrameSource;
-  geometry: RawLandmarkFrameGeometry;
-};
-
-type RawLandmarkFrameOutcome = {
-  owner: GestureFrameOwner | null;
-  pipelineGesture: GestureResult["gesture"] | null;
-  hybridState: HybridGestureControllerOutput["state"] | null;
-};
-
-type ObjectGestureState =
-  | "hover"
-  | "grab"
-  | "placing"
-  | "no target"
-  | "erase";
-
-type SpeechRecognitionStatus =
-  | "idle"
-  | "waiting"
-  | "hearing"
-  | "wake-detected"
-  | "wake-missing"
-  | "interpreting"
-  | "command-recognized"
-  | "command-rejected"
-  | "error";
-
-type CopilotActivityEntry = {
-  id: number;
-  source: "Voice" | "Airo" | "Board" | "You";
-  title: string;
-  detail: string;
-  tone: "neutral" | "active" | "success" | "warning";
-  /** Applied a board change; offer the one-tap undo toast. */
-  undoable?: boolean;
-};
-
-type PrepareIntentCommandResult = "previewed" | "applied" | "no-op" | "rejected";
-
-type IntentPreparationOutcome = {
-  result: PrepareIntentCommandResult;
-  preparedText: string;
-  source: "deterministic" | "semantic";
-  stepCount: number;
-};
-
-type SceneIntentExecutionResult =
-  | "applied"
-  | "rejected"
-  | "deferred"
-  | "unrecognized";
-
-type VoiceCommandTraceContext = {
-  voiceTurnId: string;
-  transcript: string;
-  wakePhrase: string;
-  engine: "realtime";
-  provider?: string | undefined;
-  model?: string | undefined;
-  confidence?: number | undefined;
-  turnIndex?: number | undefined;
-  /** Pointing captured when the command was routed, not when it runs. */
-  reference?: VoiceReference | undefined;
-};
-
-type SpeechEngine = "loading" | "realtime" | "unavailable";
-
-type ActiveSpeechSession = RealtimeSpeechSession;
-
-type UndoAction =
-  | {
-      type: "stroke";
-      strokeId: string;
-    }
-  | {
-      type: "erase";
-      strokeIds: string[];
-    }
-  | {
-      type: "diagram";
-      undoEvents: BoardEvent[];
-      /** The forward events, kept so an undone Airo change can be redone. */
-      redoEvents?: BoardEvent[];
-      selectionBefore: string[];
-      originatingInteractionId?: string;
-    }
-  | {
-      type: "scene_created";
-      elementId: string;
-    }
-  | {
-      type: "scene_deleted";
-      elementId: string;
-    }
-  | {
-      type: "scene_created_batch" | "scene_deleted_batch";
-      elementIds: string[];
-      selectionBefore?: string[];
-      selectionAfter?: string[];
-    }
-  | {
-      type: "scene_patched";
-      elementId: string;
-      inversePatches: BoardElementPatchOperation[];
-    }
-  | {
-      type: "scene_batch";
-      entries: { elementId: string; inversePatches: BoardElementPatchOperation[] }[];
-    };
-
-type UndoSource = "button" | "keyboard" | "voice" | "semantic";
-
-type SceneMoveSnapshot = {
-  pointerId: number;
-  inputSource: NonNullable<CursorState["inputSource"]>;
-  elementId: string;
-  start: AnnotationPoint;
-  element: BoardSceneElement;
-  relatedElements: BoardSceneElement[];
-  boundConnectors: Extract<BoardSceneElement, { kind: "connector" }>[];
-  /** Where the latest preview put the pointer. */
-  lastPoint?: AnnotationPoint;
-};
-
-type PendingIntent = {
-  parsed: ParsedIntentCanvasCommand | null;
-  parsedSteps: ParsedIntentCanvasCommand[];
-  stepCount: number;
-  confidenceBand: "high" | "medium" | "low";
-  requestText: string;
-  message: string;
-  baseState: BoardState;
-  baseSelectionIds: string[];
-  requiresExplicitConfirmation: boolean;
-  commands: DiagramCommand[];
-  selectionAfter?: string[];
-  ghosts?: AnnotationRenderObject[];
-  voiceTurnId?: string;
-};
-
-type SemanticExecutionSnapshot = {
-  boardState: BoardState;
-  /** What "current_selection" means in the plan: the request-time selection. */
-  selectionIds: string[];
-  /**
-   * The selection the commit is checked against. It is the live selection when
-   * a turn was rebased because the selection changed during planning, so the
-   * rebased turn is not rejected as stale for that very change.
-   */
-  baseSelectionIds?: string[];
-  /**
-   * The selection when the person spoke, kept through a rebase: when it held
-   * anything, "this" never falls back to guessing the newest shape.
-   */
-  requestSelectionIds?: string[];
-  primarySelectionId: string | null;
-  hoverStrokeId: string | null;
-  pointer: { x: number; y: number } | null;
-  /** Dimensions of the VISIBLE board window (screen size ÷ viewport scale). */
-  canvasWidth: number;
-  canvasHeight: number;
-  /** Board coordinates of the visible window's top-left corner. */
-  viewOrigin: { x: number; y: number };
-};
-
-type PendingSemanticClarification = {
-  request: SemanticIntentPendingClarification;
-  boardState: BoardState;
-  selectionIds: string[];
-  askedAt: number;
-};
-
-/** How long Airo's question waits for an answer, whatever else happens on the board. */
-const CLARIFICATION_ANSWER_MS = 30_000;
-
-
-type ObjectInteraction =
-  | {
-      mode: "placing";
-      tool: ObjectDockTool;
-      creationTool?: CreationToolId;
-      start: AnnotationPoint;
-    }
-  | {
-      mode: "catalog_carrying";
-      tool: ObjectDockTool;
-      creationTool?: CreationToolId;
-      point: AnnotationPoint;
-      pickupScreenPoint: { x: number; y: number };
-      catalogBounds: {
-        left: number;
-        top: number;
-        right: number;
-        bottom: number;
-      };
-      enteredCanvas: boolean;
-    }
-  | {
-      mode: "moving";
-      strokeId: string;
-      start: AnnotationPoint;
-      initialAnnotation: StrokeAnnotation;
-    }
-  | {
-      mode: "resizing";
-      strokeId: string;
-      handle: AnnotationResizeHandle;
-      initialAnnotation: StrokeAnnotation;
-    };
-
-const BOARD_SESSION_ID = "local-standalone-board";
-const PARTICIPANT_ID = "local-owner-participant";
-const OWNER_USER_ID = "local-owner";
-const AIRBOARD_API_URL =
-  process.env.NEXT_PUBLIC_AIRBOARD_API_URL?.trim() || "http://127.0.0.1:4000";
-const ERASER_RADIUS = 42;
-const OBJECT_GESTURE_GRAB_THRESHOLD = 0.45;
-const OBJECT_GESTURE_RELEASE_THRESHOLD = 0.32;
-const SEMANTIC_NODE_DOCK_TOOLS: Record<AnnotationNodeType, ObjectDockTool> = {
-  process: "flow",
-  service: "service",
-  database: "database",
-  queue: "queue",
-  user: "user",
-  api: "api",
-  decision: "decision",
-  terminator: "terminator",
-  io: "io",
-  document: "document",
-  note: "note",
-  circle: "circle",
-  custom: "box",
-};
-const OBJECT_DOCK: readonly { label: string; tool: ObjectDockTool }[] = [
-  { label: "Select", tool: "select" },
-  ...[...AIRBOARD_SEMANTIC_NODE_CAPABILITIES]
-    .sort((left, right) => left.palette.order - right.palette.order)
-    .map(({ title, nodeType }) => ({
-      label: title,
-      tool: SEMANTIC_NODE_DOCK_TOOLS[nodeType],
-    })),
-  { label: "Arrow", tool: "arrow" },
-  { label: "Connector", tool: "connector" },
-  { label: "Highlight", tool: "highlight" },
-  { label: "Eraser", tool: "eraser" },
-];
-
-/** How long the browser may take to answer for the camera before Airboard explains the wait. */
-const CAMERA_PROMPT_HINT_DELAY_MS = 1_500;
-const CAMERA_PROMPT_HINT =
-  "Your browser is asking to use the camera. Choose Allow in its prompt near the address bar. No prompt? Another app or tab may be using the camera.";
-/**
- * When a voice stream reaches the server's time limit and nobody has spoken
- * for this long, voice pauses instead of reconnecting: the tab is probably
- * forgotten, and streaming an empty room spends voice minutes.
- */
-const VOICE_QUIET_PAUSE_MS = 20 * 60_000;
-
-type SpeechPointing = { at: number; point: { x: number; y: number } | null; targetId: string | null };
-
-/** What the hand pointed at for one voice command: at speech start, then now. */
-type VoiceReference = {
-  point: { x: number; y: number } | null;
-  /** The shape under the hand when speech began: what "it" and "this" mean. */
-  startTargetId: string | null;
-  /** Up to two shapes pointed at during the command, in order. */
-  pointedIds: string[];
-};
-
-/** Words that mean "what I'm pointing at". */
-const DEICTIC_REFERENCE_PATTERN = /\b(?:this|that|it|these|those|them)\b/i;
-
-/** The planner accepts up to this much dialogue for a clarification answer. */
-const MAX_CLARIFICATION_TRANSCRIPT_CHARS = 2_000;
-
-/** Pointing older than this when speech starts is ignored. */
-const SPEECH_POINTING_MAX_AGE_MS = 4_000;
-
-type VoiceDecisionMetadata = {
-  engine: VoiceCommandTraceContext["engine"];
-  /**
-   * What the hand pointed at for this decision, captured when it was routed.
-   * The coalescer may hold the command and an earlier planner call may delay
-   * it; by then the next sentence's pointing has replaced the shared refs.
-   */
-  reference?: VoiceReference | undefined;
-  voiceTurnId?: string | undefined;
-  provider?: string | undefined;
-  model?: string | undefined;
-  confidence?: number | undefined;
-  turnIndex?: number | undefined;
-};
+import {
+  AIRBOARD_API_URL,
+  AIRO_NOTICE_VISIBLE_MS,
+  AIRO_QUESTION_VISIBLE_MS,
+  BOARD_SESSION_ID,
+  BOARD_TEXT_LIST_LIMIT,
+  CAMERA_PROMPT_HINT,
+  CAMERA_PROMPT_HINT_DELAY_MS,
+  CATALOG_DROP_EXIT_PX,
+  CATALOG_DROP_MIN_TRAVEL_PX,
+  CLARIFICATION_ANSWER_MS,
+  DEICTIC_REFERENCE_PATTERN,
+  ERASER_RADIUS,
+  EXPORTS_BLOCKED_MESSAGE,
+  HAND_CUE_MS,
+  HAND_SCENE_POINTER_ID,
+  MAX_CLARIFICATION_TRANSCRIPT_CHARS,
+  MAX_PLAN_BOARD_CHANGES,
+  OBJECT_GESTURE_GRAB_THRESHOLD,
+  OBJECT_GESTURE_RELEASE_THRESHOLD,
+  OWNER_USER_ID,
+  PARTICIPANT_ID,
+  SPEECH_POINTING_MAX_AGE_MS,
+  UNDO_TOAST_VISIBLE_MS,
+  VOICE_QUIET_PAUSE_MS,
+  type ActiveSpeechSession,
+  type CameraStatus,
+  type CopilotActivityEntry,
+  type DockGestureOutcome,
+  type IntentPreparationOutcome,
+  type ObjectGestureState,
+  type ObjectInteraction,
+  type PendingIntent,
+  type PendingSemanticClarification,
+  type PrepareIntentCommandResult,
+  type RawLandmarkFrameOutcome,
+  type RawLandmarkFrameRequest,
+  type SceneIntentExecutionResult,
+  type SceneMoveSnapshot,
+  type ScreenUnderlayStatus,
+  type SemanticExecutionSnapshot,
+  type SpeechEngine,
+  type SpeechPointing,
+  type SpeechRecognitionStatus,
+  type VoiceCommandTraceContext,
+  type VoiceDecisionMetadata,
+  type VoiceGateUi,
+  type VoiceReference,
+} from "./engine/boardTypes";
+import {
+  appendBoundedBoardEvents,
+  diagramCommandContext,
+  undoEntryCanBeRedone,
+  type UndoAction,
+  type UndoSource,
+} from "./history/boardHistory";
+import {
+  boardTargetLabel,
+  formatRecordingClock,
+  truncateSpeechTranscript,
+  mediaUploadFailure,
+  objectToolLabel,
+  sceneElementKindLabel,
+  sceneIntentFeedback,
+} from "./ui/boardLabels";
+import {
+  isScenePlacementTool,
+  scenePlacementPreviewTool,
+} from "./scene/scenePlacement";
+import {
+  COPILOT_VISIBILITY_KEY,
+  copilotRightInset,
+  copilotStartsOpen,
+} from "./ui/copilotPanel";
+import {
+  OPEN_SPOT_KINDS,
+  boundsBetween,
+  buildSceneMovePreview,
+  connectorAnchorPoint,
+  drawingElementIntersectsCircle,
+  elementCenter,
+  isInlineTextEditable,
+  layoutSceneElements,
+  mindMapDirectionOffset,
+  openSceneTransform,
+  sceneElementFitsInside,
+  sceneElementUnionBounds,
+  sceneIntentPlacementPoint,
+  sceneSectionMembers,
+  sceneTextEditorBounds,
+  strokePointBounds,
+  tableCellIdAtPoint,
+} from "./scene/sceneGeometry";
+import {
+  appendSectionContainmentChanges,
+  buildUniformSceneMoveChanges,
+  connectorGeometryPatches,
+  sceneElementColorPatches,
+  sceneElementMovePatches,
+  sceneElementRenamePatches,
+} from "./scene/sceneIntentPatches";
+import {
+  buildSceneFanInContext,
+  resolveContextualSceneTarget,
+  resolveSceneIntentTargetIds,
+  sceneElementLockedForMutation,
+  sceneElementReferenceLabel,
+  uniqueGeneratedSceneLabel,
+} from "./scene/sceneTargets";
 
 /** Trace label for how a command reached Airo. */
 function voiceTraceChannel(decision: VoiceRouteDecision | undefined): string {
@@ -589,71 +391,6 @@ function voiceTraceChannel(decision: VoiceRouteDecision | undefined): string {
 function configRetryDelayMs(attempt: number): number {
   return Math.min(60_000, 1_000 * 2 ** Math.min(attempt, 6));
 }
-
-/** The live socket dropped after connecting and is trying again on its own. */
-function liveLinkDropped(status: string): boolean {
-  return status === "reconnecting" || status === "closed" || status === "error";
-}
-const CATALOG_DROP_EXIT_PX = 12;
-/** Synthetic pointer id for v2 scene moves driven by the camera hand. */
-const HAND_SCENE_POINTER_ID = -7;
-/** How long a hand cue (why a carry ended, nothing to grab) stays by the hand. */
-const HAND_CUE_MS = 2_600;
-const CATALOG_DROP_MIN_TRAVEL_PX = 24;
-const UNDO_TOAST_VISIBLE_MS = 6_000;
-/** Board changes one spoken request may make (a narrated flow of ~25 steps). */
-const MAX_PLAN_BOARD_CHANGES = 150;
-const AIRO_NOTICE_VISIBLE_MS = 6_000;
-/** Matches the router's answer window: after it, a reply needs "Airo" again. */
-const AIRO_QUESTION_VISIBLE_MS = 12_000;
-
-type DockGestureOutcome =
-  | {
-      type: "hover";
-      targetId: string;
-    }
-  | {
-      type: "activated";
-      targetId: string;
-      creationTool?: CreationToolId;
-      catalogBounds: {
-        left: number;
-        top: number;
-        right: number;
-        bottom: number;
-      };
-    };
-
-/**
- * The name of a board target id for the scoped voice pill: a legacy stroke's
- * label, or a v2 scene element's text (or its kind when blank).
- */
-function boardTargetLabel(state: BoardState, targetId: string): string {
-  const strokeLabel = state.strokes[targetId]?.annotation?.label?.trim();
-  if (strokeLabel) return strokeLabel;
-  const element = state.elements[targetId];
-  return element?.status === "active" ? sceneNodeLabel(element) : "";
-}
-
-function placementToolFromDockTarget(targetId: string): ObjectDockTool | null {
-  if (!targetId.startsWith("tool:")) {
-    return null;
-  }
-  const tool = targetId.slice("tool:".length) as ObjectDockTool;
-  return OBJECT_DOCK.some((entry) => entry.tool === tool) && isPlacementTool(tool)
-    ? tool
-    : null;
-}
-
-// ---- Voice gates -----------------------------------------------------------
-// A "gate" is an explicit, user-held addressing channel: while a gate is open
-// (or within its short grace window after closing), finalized speech routes
-// straight to the command pipeline without the "Airo" wake word. All gate
-// timing/routing rules live in VoiceCommandRouter + PalmVoiceGestureTracker +
-// HoldToEditTracker (unit-tested, React-free); the component only wires them.
-type VoiceGateUi =
-  | { mode: "ptt" }
-  | { mode: "scoped"; strokeId: string; label: string };
 
 function parseDiagramVisibilityIntent(text: string): "hide" | "show" | null {
   const normalized = text
@@ -676,19 +413,6 @@ function parseDiagramVisibilityIntent(text: string): "hide" | "show" | null {
   }
   return null;
 }
-
-/** Limits people can act on get plain words; anything else keeps its code for support. */
-function mediaUploadFailure(code: string): string {
-  if (code === "ASSET_QUOTA_EXCEEDED") return "This workspace has used its 2 GB for board images and videos. Delete boards you no longer need to free space.";
-  if (code === "RATE_LIMITED") return "That's a lot of uploads at once. Wait a minute, then add the rest.";
-  if (code === "BOARD_READ_ONLY_ROLE") return "Your role in this workspace can view boards but not add to them.";
-  return code ? `Media upload failed: ${code}` : "Media upload failed.";
-}
-
-/** The most board words listed for screen readers beside the canvas. */
-const BOARD_TEXT_LIST_LIMIT = 200;
-
-const EXPORTS_BLOCKED_MESSAGE = "Your workspace admin turned off downloading and copying boards.";
 
 export function AirboardPrototype({
   initialBoardSessionId,
@@ -907,9 +631,6 @@ export function AirboardPrototype({
   const speechSessionRef = useRef<ActiveSpeechSession | null>(null);
   const selectedSpeechModelRef = useRef("");
   const selectedSemanticIntentModelRef = useRef("");
-  const prepareIntentCommandRef = useRef<
-    ((text: string, voiceTurnId?: string) => PrepareIntentCommandResult) | null
-  >(null);
   const prepareIntentCommandWithSemanticRef = useRef<
     ((text: string, voiceTurnId?: string) => Promise<IntentPreparationOutcome>) | null
   >(null);
@@ -4215,102 +3936,6 @@ export function AirboardPrototype({
     [createPlacementObject],
   );
 
-  const createCommittedAnnotation = useCallback(
-    (annotationResult: GestureAnnotationResult): string | null => {
-      const firstPoint = annotationResult.points[0];
-      if (!firstPoint) {
-        return null;
-      }
-
-      const now = new Date().toISOString();
-      const stroke = createStroke({
-        id: crypto.randomUUID(),
-        boardId: boardSessionIdRef.current,
-        userId: OWNER_USER_ID,
-        point: firstPoint,
-        color: annotationResult.color,
-        thickness: annotationResult.thickness,
-        inputSource: firstPoint.inputSource ?? "air_gesture",
-        annotation: annotationResult.annotation,
-        createdAt: now,
-      });
-
-      applyLocalEvent({
-        ...createEventEnvelope({
-          boardSessionId: boardSessionIdRef.current,
-          actorParticipantId: PARTICIPANT_ID,
-          createdAt: now,
-        }),
-        type: "stroke.started",
-        stroke,
-      });
-      applyLocalEvent({
-        ...createEventEnvelope({
-          boardSessionId: boardSessionIdRef.current,
-          actorParticipantId: PARTICIPANT_ID,
-          createdAt: now,
-        }),
-        type: "stroke.committed",
-        strokeId: stroke.id,
-        points: annotationResult.points,
-        cleanupApplied: true,
-        lineSnapApplied:
-          annotationResult.intent === "arrow" || annotationResult.intent === "connector",
-      });
-
-      undoStackRef.current.push({
-        type: "stroke",
-        strokeId: stroke.id,
-      });
-      // A new change ends any redo chain, Airo's diagram redo included.
-      sceneRedoStackRef.current = [];
-
-      // Never auto-open the label editor: the augmented path is to hold the
-      // element and say "rename to …" (double-click/F2 still open typing).
-      setLabelDraft("");
-      setEditingAnnotationId(null);
-      if (annotationResult.needsLabel) {
-        setCommandFeedback(
-          "Placed. Hold it and say “rename to …”, or double-click to type a label.",
-        );
-      }
-      setSelectedAnnotationId(stroke.id);
-      setSelectedAnnotationIds([stroke.id]);
-      return stroke.id;
-    },
-    [applyLocalEvent],
-  );
-
-  const commitPlacementObject = useCallback(
-    (tool: ObjectDockTool, start: AnnotationPoint, end?: AnnotationPoint) => {
-      const object = createPlacementObject(tool, start, end);
-      if (!object) {
-        setGhostAnnotation(null);
-        setGhostAnnotations([]);
-        setAlignmentGuides([]);
-        return;
-      }
-
-      const snapped = object.annotation.bounds
-        ? snapAnnotationToBoard({
-            annotation: object.annotation,
-            boardState: boardRef.current,
-          })
-        : null;
-      const annotation = snapped?.annotation ?? object.annotation;
-      createCommittedAnnotation({
-        ...object,
-        annotation,
-        points: buildAnnotationPoints(annotation, performance.now()),
-      });
-      setGhostAnnotation(null);
-      setGhostAnnotations([]);
-      setAlignmentGuides([]);
-      setActiveObjectTool("select");
-    },
-    [createCommittedAnnotation, createPlacementObject],
-  );
-
   const commitActiveEraseInteraction = useCallback(() => {
     const strokeIds = [...activeEraseAffectedStrokeIdsRef.current];
     if (strokeIds.length > 0) {
@@ -4580,22 +4205,29 @@ export function AirboardPrototype({
         });
       };
       const interaction = objectInteractionRef.current;
-      if (interaction?.mode === "placing") {
-        if (interaction.creationTool) {
-          placeSceneElement(interaction.creationTool, { mode: "drag", from: interaction.start });
-          setGhostAnnotation(null);
-          setGhostAnnotations([]);
-        } else {
-          commitPlacementObject(interaction.tool, interaction.start, point);
+      // Placing always makes a v2 object. An interaction armed with only an
+      // older placement tool (not reachable from the dock or the toolbar
+      // today) places the toolbar's equivalent rather than a legacy stroke.
+      const placedTool = (
+        target: Extract<ObjectInteraction, { mode: "placing" | "catalog_carrying" }>,
+      ): CreationToolId | null => {
+        const tool = target.creationTool ?? creationToolForPlacementTool(target.tool as LegacyPlacementTool);
+        return tool && isScenePlacementTool(tool) ? tool : null;
+      };
+      if (interaction?.mode === "placing" || interaction?.mode === "catalog_carrying") {
+        const tool = placedTool(interaction);
+        if (tool) {
+          placeSceneElement(
+            tool,
+            interaction.mode === "placing"
+              ? { mode: "drag", from: interaction.start }
+              : { mode: "drop", from: point },
+          );
         }
-      } else if (interaction?.mode === "catalog_carrying") {
-        if (interaction.creationTool) {
-          placeSceneElement(interaction.creationTool, { mode: "drop", from: point });
-          setGhostAnnotation(null);
-          setGhostAnnotations([]);
-        } else {
-          commitPlacementObject(interaction.tool, point);
-        }
+        setGhostAnnotation(null);
+        setGhostAnnotations([]);
+        setAlignmentGuides([]);
+        if (!tool) setActiveObjectTool("select");
       } else if (interaction?.mode === "moving" || interaction?.mode === "resizing") {
         const initialState = objectInteractionInitialStateRef.current;
         const undoEvents = initialState
@@ -4620,7 +4252,6 @@ export function AirboardPrototype({
     },
     [
       commitActiveEraseInteraction,
-      commitPlacementObject,
       createSceneElementAtPoint,
       selectedAnnotationIds,
     ],
@@ -5116,11 +4747,11 @@ export function AirboardPrototype({
             activatedCreationTool && isScenePlacementTool(activatedCreationTool)
               ? activatedCreationTool
               : null;
+          // Every dock tile that places something carries its creation tool
+          // (the catalogDock e2e guards this), so a carry always makes a v2 object.
           const placementTool = sceneCreationTool
             ? scenePlacementPreviewTool(sceneCreationTool)
-            : dockOutcome.type === "activated" && !activatedCreationTool
-              ? placementToolFromDockTarget(dockOutcome.targetId)
-              : null;
+            : null;
           if (
             placementTool &&
             point &&
@@ -5911,6 +5542,23 @@ export function AirboardPrototype({
     setCommandFeedback(message);
   }, []);
 
+  /**
+   * Selects what a command left selected. The board selects one kind of
+   * object at a time: v2 objects as scene elements (with their toolbar), or
+   * legacy nodes from a board saved before Airo drew v2 shapes, which win.
+   */
+  const applyIntentSelection = useCallback((ids: string[], primary: string | null) => {
+    const annotationSelection = ids.filter((id) => !isSceneOnlyElement(boardRef.current, id));
+    if (annotationSelection.length === 0 && ids.length > 0) {
+      selectSceneElements(ids, primary && ids.includes(primary) ? primary : ids.at(-1) ?? null);
+      return;
+    }
+    setSelectedAnnotationIds(annotationSelection);
+    setSelectedAnnotationId(
+      primary && annotationSelection.includes(primary) ? primary : annotationSelection.at(-1) ?? null,
+    );
+  }, [selectSceneElements]);
+
   const prepareParsedIntentPlan = useCallback(
     (
       parsedSteps: ParsedIntentCanvasCommand[],
@@ -5952,8 +5600,9 @@ export function AirboardPrototype({
           y: (canvasRect?.height ?? 600) / 2,
         });
       let previewState = baseState;
-      let workingSelectionIds = selectedAnnotationIds.filter(
-        (strokeId) => previewState.strokes[strokeId]?.status === "committed",
+      // The selection, Airo's older legacy nodes or v2 objects alike.
+      let workingSelectionIds = currentSemanticSelectionIds().filter(
+        (id) => previewState.strokes[id]?.status === "committed" || isSceneOnlyElement(previewState, id),
       );
       let workingPrimarySelectionId =
         selectedAnnotationId && workingSelectionIds.includes(selectedAnnotationId)
@@ -6025,8 +5674,7 @@ export function AirboardPrototype({
           });
         }
         if (commands.length === 0 && alreadySatisfied) {
-          setSelectedAnnotationIds(workingSelectionIds);
-          setSelectedAnnotationId(workingPrimarySelectionId);
+          applyIntentSelection(workingSelectionIds, workingPrimarySelectionId);
           setCommandFeedback("That line is already attached to those objects.");
           if (!voiceTurnId) setIntentCommandText("");
           if (voiceTurnId) {
@@ -6115,13 +5763,13 @@ export function AirboardPrototype({
       }
     },
     [
+      applyIntentSelection,
       currentSemanticSelectionIds,
       appendCopilotActivity,
       cancelPendingIntent,
       hoverStrokeId,
       reportVoiceTrace,
       selectedAnnotationId,
-      selectedAnnotationIds,
       strokeColor,
       toBoardPoint,
     ],
@@ -6175,7 +5823,7 @@ export function AirboardPrototype({
         x: viewOrigin.x + canvasWidth / 2,
         y: viewOrigin.y + canvasHeight / 2,
       };
-      const initialSelectionIds = executionSnapshot?.selectionIds ?? selectedAnnotationIds;
+      const initialSelectionIds = executionSnapshot?.selectionIds ?? currentSemanticSelectionIds();
       // current_selection is a reference to the user's request-time snapshot.
       // Actions may change the final UI selection, but those incidental
       // selectionAfter values must not retarget later actions in the same plan.
@@ -6260,8 +5908,7 @@ export function AirboardPrototype({
           });
         }
         if (commands.length === 0) {
-          setSelectedAnnotationIds(workingSelectionIds);
-          setSelectedAnnotationId(workingPrimarySelectionId);
+          applyIntentSelection(workingSelectionIds, workingPrimarySelectionId);
           const selectionOnly = plan.actions.every(
             (action) => action.type === "select",
           );
@@ -6359,11 +6006,12 @@ export function AirboardPrototype({
       }
     },
     [
+      applyIntentSelection,
       cancelPendingIntent,
+      currentSemanticSelectionIds,
       hoverStrokeId,
       reportVoiceTrace,
       selectedAnnotationId,
-      selectedAnnotationIds,
       strokeColor,
       toBoardPoint,
       undoLastAction,
@@ -6464,13 +6112,6 @@ export function AirboardPrototype({
       undoLastAction,
     ],
   );
-
-  useEffect(() => {
-    prepareIntentCommandRef.current = prepareIntentCommand;
-    return () => {
-      prepareIntentCommandRef.current = null;
-    };
-  }, [prepareIntentCommand]);
 
   useEffect(() => {
     executeSceneIntentRef.current = executeSceneIntent;
@@ -10077,45 +9718,16 @@ export function AirboardPrototype({
   return (
     <main className={`airboard-shell${diagramVisible ? "" : " diagram-hidden"}`}>
       {deleteDialogOpen ? (
-        <div className="board-lifecycle-backdrop">
-          <section
-            ref={deleteDialogRef}
-            tabIndex={-1}
-            className="board-lifecycle-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="delete-canvas-title"
-          >
-            <span className="eyebrow">Delete</span>
-            <h2 id="delete-canvas-title">Delete “{boardTitle}”?</h2>
-            <p>
-              This permanently deletes the canvas with its versions, images, share links and live-session history.
-              It can&apos;t be undone.
-            </p>
-            {deleteError ? <p className="board-lifecycle-error" role="alert">{deleteError}</p> : null}
-            <div className="board-lifecycle-actions">
-              <button
-                type="button"
-                disabled={deleteStatus === "deleting"}
-                onClick={() => {
-                  setDeleteDialogOpen(false);
-                  setDeleteStatus("idle");
-                  setDeleteError(null);
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="danger"
-                disabled={deleteStatus === "deleting"}
-                onClick={() => void confirmDeleteBoard()}
-              >
-                {deleteStatus === "deleting" ? "Deleting…" : "Delete permanently"}
-              </button>
-            </div>
-          </section>
-        </div>
+        <DeleteBoardDialog
+          deleteDialogRef={deleteDialogRef}
+          boardTitle={boardTitle}
+          deleteError={deleteError}
+          deleteStatus={deleteStatus}
+          setDeleteDialogOpen={setDeleteDialogOpen}
+          setDeleteStatus={setDeleteStatus}
+          setDeleteError={setDeleteError}
+          confirmDeleteBoard={confirmDeleteBoard}
+        />
       ) : null}
       {shareOpen ? (
         <ShareDialog
@@ -10135,268 +9747,46 @@ export function AirboardPrototype({
           onClose={closeShareDialog}
         />
       ) : null}
-      <header className="topbar canvas-topbar">
-        <div className="canvas-topbar-identity">
-          <Link
-            className="canvas-back-link"
-            href={liveGuest ? "/" : "/app"}
-            aria-label={liveGuest ? "Leave the live board" : "Back to boards"}
-          >
-            <span aria-hidden="true">←</span>
-          </Link>
-          <span className="canvas-brand-orbit" aria-hidden="true" />
-          <div className="canvas-title-stack">
-            <h1 className="canvas-title-heading">
-            {titleEditing ? (
-              <input
-                className="canvas-title-input"
-                aria-label="Canvas name"
-                autoFocus
-                maxLength={240}
-                value={titleDraft}
-                onChange={(event) => setTitleDraft(event.target.value)}
-                onBlur={() => {
-                  if (titleCancelPendingRef.current) {
-                    titleCancelPendingRef.current = false;
-                    return;
-                  }
-                  void commitTitleEdit();
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    restoreTitleFocusRef.current = true;
-                    void commitTitleEdit();
-                  } else if (event.key === "Escape") {
-                    event.preventDefault();
-                    restoreTitleFocusRef.current = true;
-                    cancelTitleEdit();
-                  }
-                }}
-              />
-            ) : (
-              <button
-                ref={titleButtonRef}
-                type="button"
-                className="canvas-title-button"
-                aria-label={`Rename canvas ${boardTitle}`}
-                title="Rename canvas"
-                disabled={!onRenameBoard}
-                onClick={beginTitleEdit}
-              >
-                {boardTitle}
-              </button>
-            )}
-            </h1>
-            <span
-              className={`canvas-save-state ${
-                liveGuest
-                  ? boardSyncStatus === "connected"
-                    ? "saved"
-                    : boardSyncStatus === "connecting" ||
-                        boardSyncStatus === "paused" ||
-                        liveLinkDropped(boardSyncStatus)
-                      ? "saving"
-                      : "error"
-                  : titleStatus === "saving"
-                  ? "saving"
-                  : titleStatus === "error"
-                    ? "error"
-                    : persistentSaveStatus
-              }`}
-              role="status"
-              aria-live="polite"
-            >
-              {liveGuest
-                ? boardSyncStatus === "connected"
-                  ? "Live · changes save to the host's board"
-                  : boardSyncStatus === "connecting"
-                    ? "Connecting…"
-                    : boardSyncStatus === "ended"
-                      ? "This live session has ended"
-                      : boardSyncStatus === "paused"
-                        ? "Waiting for the host to come back…"
-                        : liveLinkDropped(boardSyncStatus)
-                          ? "Reconnecting…"
-                          : "Not connected"
-                : `${
-                    titleError ??
-                    (titleStatus === "saving"
-                      ? "Renaming…"
-                      : titleStatus === "saved"
-                        ? "Renamed"
-                        : persistentSaveStatus === "saving"
-                          ? "Saving…"
-                          : persistentSaveStatus === "error"
-                            ? "Save interrupted"
-                            : "Saved")
-                  }${
-                    // The host's board saves either way; say when guests stop seeing it.
-                    !activeBoardSessionId
-                      ? ""
-                      : boardSyncStatus === "ended" || boardSyncStatus === "rejected"
-                        ? " · Live session ended"
-                        : liveLinkDropped(boardSyncStatus) || boardSyncStatus === "paused"
-                          ? " · Live link reconnecting…"
-                          : ""
-                  }`}
-            </span>
-          </div>
-        </div>
-        {/* The top bar keeps two menus: Share (sharing and exports) and
-            ••• for the board's other actions and settings. */}
-        <div className="toolbar canvas-toolbar">
-          <div className="canvas-more canvas-share">
-            <button
-              ref={shareButtonRef}
-              type="button"
-              className="toolbar-share-button"
-              data-testid="share-board"
-              aria-haspopup="menu"
-              aria-expanded={shareMenuOpen}
-              onClick={() => {
-                setShareMenuOpen((value) => !value);
-                setMoreMenuOpen(false);
-              }}
-            >
-              Share
-              <svg aria-hidden="true" viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="m2.5 4.5 3.5 3.5 3.5-3.5" />
-              </svg>
-            </button>
-            {shareMenuOpen ? (
-              <div ref={shareMenuRef} className="canvas-more-menu" role="menu" aria-label="Share and export">
-                <button
-                  type="button"
-                  role="menuitem"
-                  data-testid="share-board-people"
-                  onClick={() => {
-                    setShareMenuOpen(false);
-                    setSettingsOpen(false);
-                    setShareOpen(true);
-                  }}
-                >
-                  <span aria-hidden="true">⤴</span>
-                  Share with people
-                </button>
-                <div className="canvas-more-separator" role="separator" />
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    exportPdf();
-                    setShareMenuOpen(false);
-                  }}
-                >
-                  <span aria-hidden="true">⇩</span>
-                  Export PDF
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    exportPng();
-                    setShareMenuOpen(false);
-                  }}
-                >
-                  <span aria-hidden="true">⇩</span>
-                  Export PNG
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    copyBoardImage();
-                    setShareMenuOpen(false);
-                  }}
-                >
-                  <span aria-hidden="true">⧉</span>
-                  Copy image
-                </button>
-              </div>
-            ) : null}
-          </div>
-          <div className="canvas-more">
-            <button
-              type="button"
-              className={`toolbar-icon-button${moreMenuOpen || settingsOpen ? " active" : ""}`}
-              aria-label="More board actions"
-              aria-haspopup="menu"
-              aria-expanded={moreMenuOpen}
-              onClick={() => {
-                setMoreMenuOpen((value) => !value);
-                setShareMenuOpen(false);
-              }}
-            >
-              <span aria-hidden="true">•••</span>
-            </button>
-            {moreMenuOpen ? (
-              <div ref={moreMenuRef} className="canvas-more-menu" role="menu" aria-label="Board actions">
-                <button
-                  type="button"
-                  role="menuitem"
-                  data-testid="screen-underlay-toggle"
-                  disabled={screenUnderlayStatus === "starting" || recordingState === "recording"}
-                  onClick={() => {
-                    setMoreMenuOpen(false);
-                    if (screenUnderlayStatus === "active") {
-                      stopScreenUnderlay("Screen background stopped.");
-                    } else {
-                      void startScreenUnderlay();
-                    }
-                  }}
-                >
-                  <span aria-hidden="true">▣</span>
-                  {screenUnderlayStatus === "starting"
-                    ? "Choosing a screen…"
-                    : screenUnderlayStatus === "active"
-                      ? "Stop the screen behind the board"
-                      : "Show a screen behind the board"}
-                </button>
-                <div className="canvas-more-separator" role="separator" />
-                <button
-                  type="button"
-                  role="menuitem"
-                  aria-controls={settingsOpen ? "canvas-settings" : undefined}
-                  onClick={() => {
-                    setSettingsOpen((value) => !value);
-                    setMoreMenuOpen(false);
-                  }}
-                >
-                  <span aria-hidden="true">⚙</span>
-                  {settingsOpen ? "Close board settings" : "Board settings"}
-                </button>
-                <Link
-                  href="/help/using-the-board/commands"
-                  target="_blank"
-                  rel="noreferrer"
-                  role="menuitem"
-                  onClick={() => setMoreMenuOpen(false)}
-                >
-                  <span aria-hidden="true">?</span>
-                  Help center
-                </Link>
-                {onDeleteBoard ? (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="danger"
-                    onClick={() => {
-                      setMoreMenuOpen(false);
-                      setDeleteStatus("idle");
-                      setDeleteError(null);
-                      setDeleteDialogOpen(true);
-                    }}
-                  >
-                    <span aria-hidden="true">⌫</span>
-                    Delete canvas
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        </div>
-      </header>
+      <BoardTopBar
+        liveGuest={liveGuest}
+        titleEditing={titleEditing}
+        titleDraft={titleDraft}
+        setTitleDraft={setTitleDraft}
+        titleCancelPendingRef={titleCancelPendingRef}
+        commitTitleEdit={commitTitleEdit}
+        restoreTitleFocusRef={restoreTitleFocusRef}
+        cancelTitleEdit={cancelTitleEdit}
+        titleButtonRef={titleButtonRef}
+        boardTitle={boardTitle}
+        onRenameBoard={onRenameBoard}
+        beginTitleEdit={beginTitleEdit}
+        boardSyncStatus={boardSyncStatus}
+        titleStatus={titleStatus}
+        persistentSaveStatus={persistentSaveStatus}
+        titleError={titleError}
+        activeBoardSessionId={activeBoardSessionId}
+        shareButtonRef={shareButtonRef}
+        shareMenuOpen={shareMenuOpen}
+        setShareMenuOpen={setShareMenuOpen}
+        setMoreMenuOpen={setMoreMenuOpen}
+        shareMenuRef={shareMenuRef}
+        setSettingsOpen={setSettingsOpen}
+        setShareOpen={setShareOpen}
+        exportPdf={exportPdf}
+        exportPng={exportPng}
+        copyBoardImage={copyBoardImage}
+        moreMenuOpen={moreMenuOpen}
+        settingsOpen={settingsOpen}
+        moreMenuRef={moreMenuRef}
+        screenUnderlayStatus={screenUnderlayStatus}
+        recordingState={recordingState}
+        stopScreenUnderlay={stopScreenUnderlay}
+        startScreenUnderlay={startScreenUnderlay}
+        onDeleteBoard={onDeleteBoard}
+        setDeleteStatus={setDeleteStatus}
+        setDeleteError={setDeleteError}
+        setDeleteDialogOpen={setDeleteDialogOpen}
+      />
 
       <div
         className={`content canvas-workspace${settingsOpen ? " settings-open" : ""}${
@@ -10407,175 +9797,27 @@ export function AirboardPrototype({
           className={`board-area${boardTheme === "lightboard" ? " lightboard" : ""}`}
           aria-label="Airboard canvas"
         >
-          {copilotOpen ? (
-            <aside
-              className="canvas-copilot"
-              data-testid="canvas-copilot"
-              aria-label="Airo copilot"
-            >
-              <header className="canvas-copilot-header">
-                <div>
-                  <span className="canvas-copilot-orbit" aria-hidden="true">✦</span>
-                  <span>
-                    <strong>Airo</strong>
-                    <small>
-                      {speechArmed
-                        ? "Listening continuously"
-                        : cameraStatus === "active"
-                          ? "Watching for your hands"
-                          : cameraStatus === "starting" || cameraStatus === "tracker_loading"
-                            ? "Starting voice and hands…"
-                            : voiceDropped
-                              ? "Voice paused"
-                              : airoBlockedByBrowser
-                              ? "Camera and microphone are blocked"
-                              : airoNotAllowed
-                                ? "Camera and microphone aren't allowed"
-                                : cameraStatus === "error" || cameraStatus === "tracker_error"
-                                  ? "The camera couldn't start"
-                                  : "Type a command below"}
-                    </small>
-                  </span>
-                </div>
-                <div className="canvas-copilot-header-actions">
-                  <button
-                    type="button"
-                    aria-label="Hide Airo panel"
-                    title="Hide"
-                    onClick={() => setCopilotVisibility(false)}
-                  >
-                    ›
-                  </button>
-                </div>
-              </header>
-
-              <>
-                  <section className="canvas-copilot-heard" data-testid="copilot-transcript">
-                    <span>What I heard</span>
-                    <p>
-                      {speechHeardText
-                        ? `“${truncateSpeechTranscript(speechHeardText, 180)}”`
-                        : speechArmed
-                          ? "Listening for your next command…"
-                          : voiceDropped
-                            ? "Airo's voice paused. Hold an open palm, or click the board, to wake it."
-                            : airoBlockedByBrowser
-                              ? "Allow the camera and microphone for this site in your browser's settings, then reload the board."
-                              : airoNotAllowed
-                                ? "Reload the board to be asked again, or allow the camera and microphone in your browser's site settings."
-                                : voiceOffReason
-                                  ? `Airo's voice is off: ${voiceOffReason}`
-                                  : cameraStatus === "error" || cameraStatus === "tracker_error"
-                                    ? "Close other apps using the camera, then come back to this tab to try again."
-                                    : cameraStatus === "active"
-                                      ? "Hold an open palm for 0.4 seconds and speak."
-                                      : "Type a command below."}
-                    </p>
-                    <small className={`copilot-status ${speechRecognitionStatus}`}>
-                      {speechRecognitionLabel(speechRecognitionStatus)}
-                    </small>
-                  </section>
-
-                  <section className="canvas-copilot-progress" aria-live="polite">
-                    <div className="canvas-copilot-section-title">
-                      <span>Activity</span>
-                      <small>What Airo is doing</small>
-                    </div>
-                    <ol data-testid="copilot-activity">
-                      {copilotActivity.map((entry) => (
-                        <li key={entry.id} className={entry.tone}>
-                          <span className="copilot-activity-source">{entry.source}</span>
-                          <div>
-                            <strong>{entry.title}</strong>
-                            <p>{entry.detail}</p>
-                          </div>
-                        </li>
-                      ))}
-                    </ol>
-                  </section>
-
-                  <section className="canvas-copilot-current">
-                    <span>Current status</span>
-                    <p
-                      id="canvas-command-feedback"
-                      className="intent-feedback"
-                    >
-                      {commandFeedback}
-                    </p>
-                  </section>
-              </>
-
-              <form
-                className="canvas-copilot-composer"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (speechRecognitionStatus !== "interpreting") {
-                    runIntentCommand(intentCommandText);
-                  }
-                }}
-              >
-                <label className="sr-only" htmlFor="canvas-command-input">
-                  Type a board command
-                </label>
-                <textarea
-                  id="canvas-command-input"
-                  ref={intentCommandInputRef}
-                  data-testid="intent-command-input"
-                  value={intentCommandText}
-                  rows={2}
-                  onChange={(event) => {
-                    semanticIntentRequestIdRef.current += 1;
-                    if (speechRecognitionStatus === "interpreting") {
-                      setSpeechRecognitionStatus(speechSessionRef.current ? "waiting" : "idle");
-                    }
-                    setIntentCommandText(event.target.value);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && !event.shiftKey) {
-                      event.preventDefault();
-                      if (
-                        intentCommandText.trim() &&
-                        speechRecognitionStatus !== "interpreting"
-                      ) {
-                        runIntentCommand(intentCommandText);
-                      }
-                    }
-                  }}
-                  placeholder="Type only when you want to…"
-                  aria-describedby="canvas-command-feedback"
-                />
-                <button
-                  className="primary"
-                  data-testid="intent-primary-action"
-                  type="submit"
-                  aria-label="Send typed command"
-                  disabled={!intentCommandText.trim() || speechRecognitionStatus === "interpreting"}
-                >
-                  {speechRecognitionStatus === "interpreting" ? "…" : "↑"}
-                </button>
-              </form>
-              <footer className="canvas-copilot-hint">
-                <span><strong>Undo:</strong> the arrow at the bottom left, Cmd/Ctrl+Z, or say “Airo, undo”</span>
-                <span>Shift+Enter for a new line</span>
-              </footer>
-            </aside>
-          ) : (
-            <button
-              type="button"
-              className="canvas-copilot-toggle"
-              data-testid="canvas-copilot-toggle"
-              aria-label="Show Airo panel"
-              title="Show Airo"
-              onClick={() => setCopilotVisibility(true)}
-            >
-              <span aria-hidden="true">✦</span>
-              <span>Airo</span>
-              {speechRecognitionStatus === "hearing" ||
-              speechRecognitionStatus === "interpreting" ? (
-                <i aria-hidden="true" />
-              ) : null}
-            </button>
-          )}
+          <AiroPanel
+            copilotOpen={copilotOpen}
+            speechArmed={speechArmed}
+            cameraStatus={cameraStatus}
+            voiceDropped={voiceDropped}
+            airoBlockedByBrowser={airoBlockedByBrowser}
+            airoNotAllowed={airoNotAllowed}
+            setCopilotVisibility={setCopilotVisibility}
+            speechHeardText={speechHeardText}
+            voiceOffReason={voiceOffReason}
+            speechRecognitionStatus={speechRecognitionStatus}
+            copilotActivity={copilotActivity}
+            commandFeedback={commandFeedback}
+            runIntentCommand={runIntentCommand}
+            intentCommandText={intentCommandText}
+            intentCommandInputRef={intentCommandInputRef}
+            semanticIntentRequestIdRef={semanticIntentRequestIdRef}
+            setSpeechRecognitionStatus={setSpeechRecognitionStatus}
+            speechSessionRef={speechSessionRef}
+            setIntentCommandText={setIntentCommandText}
+          />
           {boardTheme === "lightboard" && cameraUnderlayEnabled ? (
             <video
               ref={cameraUnderlayVideoRef}
@@ -10636,51 +9878,13 @@ export function AirboardPrototype({
           />
           {/* Undo, redo and hide sit at the bottom left, level with the
              element catalog, so they're one click away without a menu. */}
-          <div className="canvas-history-controls" role="toolbar" aria-label="Undo, redo and hide">
-            <button
-              type="button"
-              aria-label="Undo"
-              title="Undo (Cmd/Ctrl+Z)"
-              onClick={() => undoLastAction("button")}
-            >
-              <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 14 4 9l5-5" />
-                <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              aria-label="Redo"
-              title="Redo (Shift+Cmd/Ctrl+Z)"
-              onClick={redoLastSceneAction}
-            >
-              <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-                <path d="m15 14 5-5-5-5" />
-                <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              data-testid="diagram-visibility-menu-action"
-              aria-label={diagramVisible ? "Hide diagram" : "Show diagram"}
-              aria-pressed={!diagramVisible}
-              title={diagramVisible ? "Hide diagram (Shift+H)" : "Show diagram (Shift+H)"}
-              onClick={() => setDiagramVisibility(!diagramVisibleRef.current, "menu")}
-            >
-              {diagramVisible ? (
-                <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" />
-                  <circle cx="12" cy="12" r="3" />
-                </svg>
-              ) : (
-                <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 3l18 18" />
-                  <path d="M10.6 5.6A9.7 9.7 0 0 1 12 5.5C18 5.5 21.5 12 21.5 12a17 17 0 0 1-3.1 3.9M6.1 7.1C3.8 8.8 2.5 12 2.5 12S6 18.5 12 18.5a9 9 0 0 0 4.4-1.1" />
-                  <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
-                </svg>
-              )}
-            </button>
-          </div>
+          <CanvasHistoryControls
+            undoLastAction={undoLastAction}
+            redoLastSceneAction={redoLastSceneAction}
+            diagramVisible={diagramVisible}
+            setDiagramVisibility={setDiagramVisibility}
+            diagramVisibleRef={diagramVisibleRef}
+          />
           <>
             <CreationToolbar
               dockRef={dockRef}
@@ -10781,94 +9985,18 @@ export function AirboardPrototype({
               }}
             />
           </>
-          {airoNotice ? (
-            <div
-              className={`airo-notice ${airoNotice.tone}`}
-              role="status"
-              aria-live="polite"
-              data-testid="airo-notice"
-            >
-              <span aria-hidden="true">{airoNotice.tone === "question" ? "?" : "!"}</span>
-              <span className="airo-notice-detail">{airoNotice.detail}</span>
-            </div>
-          ) : null}
-          {undoToast ? (
-            <div className="undo-toast" role="status" aria-live="polite" data-testid="undo-toast">
-              <span className="undo-toast-detail">{undoToast.detail}</span>
-              <button type="button" onClick={() => undoLastAction("button")}>
-                Undo
-              </button>
-            </div>
-          ) : null}
-          {voiceGate ? (
-            <div
-              className={`voice-gate-pill ${speechArmed ? "armed" : "unarmed"}`}
-              role="status"
-              data-testid="voice-gate-pill"
-            >
-              <span className="voice-gate-dot" aria-hidden="true" />
-              {voiceGate.mode === "ptt"
-                ? speechArmed
-                  ? "Listening — speak a board command"
-                  : "Open palm detected — Airo's voice is off"
-                : speechArmed
-                  ? `Editing “${voiceGate.label}” — “rename to …”, “delete”, “connect to …”`
-                  : `Holding “${voiceGate.label}” — Airo's voice is off`}
-            </div>
-          ) : null}
-          {cameraStatus === "active" &&
-          objectGestureState !== "hover" &&
-          objectGestureState !== "no target" ? (
-            <div
-              className={`object-gesture-pill ${voiceGate ? "with-voice" : ""}`}
-              role="status"
-              aria-live="polite"
-            >
-              {objectGestureState === "placing"
-                ? "Placement locked — move, then reopen"
-                : objectGestureState === "erase"
-                  ? "Erase locked — sweep, then reopen"
-                  : "Move locked — move, then reopen"}
-            </div>
-          ) : null}
-          {handCue ? (
-            <div
-              key={handCue.id}
-              className={`hand-cue ${handCue.tone}`}
-              role="status"
-              aria-live="polite"
-              data-testid="hand-cue"
-              style={{ left: handCue.x, top: handCue.y }}
-            >
-              {handCue.text}
-            </div>
-          ) : null}
-          {onboardingVisible ? (
-            // A corner card, not a dialog: the board stays usable behind it,
-            // and it closes by itself after the first change.
-            <aside className="onboarding-overlay" aria-label="Build by talking and pointing">
-              <div className="onboarding-card">
-                <h2>Build by talking and pointing</h2>
-                <ol className="onboarding-commands">
-                  <li>Say <code>Airo, add a user</code>, or hold an open palm still and speak.</li>
-                  <li>
-                    Describe a flow: <code>Airo, users sign in through the auth service, which checks the user database</code>.
-                  </li>
-                  <li>Close your hand over a shape to move it; open it to drop.</li>
-                  <li>Changes apply at once. Say <code>Airo, undo</code> to take one back.</li>
-                </ol>
-                <p className="onboarding-aside">
-                  This card closes after your first change.{" "}
-                  <a href="/help/using-the-board/gestures" target="_blank" rel="noreferrer">
-                    All camera gestures
-                  </a>
-                </p>
-                <button type="button" className="secondary" onClick={finishOnboarding}>
-                  Got it
-                </button>
-              </div>
-            </aside>
-          ) : null}
+          <BoardNotices
+            airoNotice={airoNotice}
+            undoToast={undoToast}
+            undoLastAction={undoLastAction}
+            voiceGate={voiceGate}
+            speechArmed={speechArmed}
+            cameraStatus={cameraStatus}
+            objectGestureState={objectGestureState}
+            handCue={handCue}
+            onboardingVisible={onboardingVisible}
+            finishOnboarding={finishOnboarding}
+          />
           <canvas
             ref={canvasRef}
             role="application"
@@ -10972,376 +10100,43 @@ export function AirboardPrototype({
         </section>
 
         {settingsOpen ? (
-        <aside id="canvas-settings" className="sidebar canvas-inspector open">
-          <div className="canvas-inspector-heading">
-            <div>
-              <span>Board</span>
-              <h2>Settings</h2>
-            </div>
-            <button
-              type="button"
-              aria-label="Close board settings"
-              onClick={() => setSettingsOpen(false)}
-            >
-              ×
-            </button>
-          </div>
-          <section className="section media-permission-section">
-            <div className="section-heading-inline">
-              <div>
-                <h2>Camera & microphone</h2>
-                <p>Airboard asks for both when a board opens, then reuses them on every Airboard.</p>
-              </div>
-            </div>
-            <div className="media-permission-row">
-              <span className="media-permission-icon" aria-hidden="true">◉</span>
-              <div>
-                <strong>Microphone</strong>
-                <small>Airo voice commands</small>
-              </div>
-              <span className={`permission-state ${microphonePermission}`}>
-                {mediaPermissionLabel(microphonePermission)}
-              </span>
-            </div>
-            <div className="media-permission-row">
-              <span className="media-permission-icon" aria-hidden="true">◎</span>
-              <div>
-                <strong>Camera</strong>
-                <small>Hands and presenter view</small>
-              </div>
-              <span className={`permission-state ${cameraPermission}`}>
-                {mediaPermissionLabel(cameraPermission)}
-              </span>
-            </div>
-            {cameraPromptWaiting ? (
-              <p className="permission-warning" role="status">{CAMERA_PROMPT_HINT}</p>
-            ) : null}
-            <p className="permission-note">
-              Choose <strong>Allow while visiting the site</strong> in the browser prompt, so
-              Airboard doesn&apos;t ask again. To keep the camera or microphone off on every
-              board, turn it off in Settings → Preferences. Screen sharing is still chosen each
-              time.
-            </p>
-            {deniedMediaHelp(cameraPermission, microphonePermission, navigator.userAgent) ? (
-              <p className="permission-warning">
-                {deniedMediaHelp(cameraPermission, microphonePermission, navigator.userAgent)}
-              </p>
-            ) : null}
-          </section>
-
-          <section className="section">
-            <h2>Appearance</h2>
-            <label className="check-row" htmlFor="lightboard-theme">
-              <input
-                id="lightboard-theme"
-                type="checkbox"
-                checked={boardTheme === "lightboard"}
-                disabled={cameraCanvasLocked}
-                onChange={(event) => {
-                  const nextTheme = event.target.checked ? "lightboard" : "classic";
-                  if (nextTheme === "classic" && cameraCanvasLocked) {
-                    return;
-                  }
-                  if (nextTheme === "classic" && screenUnderlayStatus === "active") {
-                    stopScreenUnderlay("Screen background stopped because Lightboard was turned off.");
-                  }
-                  setBoardTheme(nextTheme);
-                  try {
-                    window.localStorage.setItem("airboard.theme.v1", nextTheme);
-                  } catch {
-                    // Preference persistence is best-effort.
-                  }
-                }}
-              />
-              <span>
-                Lightboard (neon) theme
-                {cameraCanvasLocked ? " · required while camera overlay is on" : ""}
-              </span>
-            </label>
-            <label className="check-row" htmlFor="airo-sounds">
-              <input
-                id="airo-sounds"
-                type="checkbox"
-                checked={airoSounds}
-                onChange={(event) => {
-                  setAiroSoundsEnabled(event.target.checked);
-                  setAiroSounds(event.target.checked);
-                }}
-              />
-              <span>Quiet sounds when Airo applies, misses, or asks</span>
-            </label>
-            {boardTheme === "lightboard" ? (
-              <>
-                <div className="status-grid screen-underlay-status" data-testid="screen-underlay-status">
-                  <span>Screen/window</span>
-                  <strong
-                    className={
-                      screenUnderlayStatus === "active"
-                        ? "pill"
-                        : screenUnderlayStatus === "blocked" || screenUnderlayStatus === "error"
-                          ? "pill warning"
-                          : undefined
-                    }
-                  >
-                    {screenUnderlayStatusLabel(screenUnderlayStatus)}
-                  </strong>
-                </div>
-                <label className="check-row" htmlFor="camera-underlay">
-                  <input
-                    id="camera-underlay"
-                    type="checkbox"
-                    checked={cameraUnderlayEnabled}
-                    disabled={cameraStatus === "active"}
-                    onChange={(event) => {
-                      setCameraUnderlayEnabled(event.target.checked);
-                      try {
-                        window.localStorage.setItem(
-                          "airboard.underlay.v1",
-                          event.target.checked ? "on" : "off",
-                        );
-                      } catch {
-                        // Preference persistence is best-effort.
-                      }
-                    }}
-                  />
-                  <span>Camera behind the dark canvas when no screen is selected</span>
-                </label>
-                <label className="check-row" htmlFor="local-contrast-plates">
-                  <input
-                    id="local-contrast-plates"
-                    data-testid="local-contrast-plates"
-                    type="checkbox"
-                    checked={localContrastPlatesEnabled}
-                    onChange={(event) => {
-                      setLocalContrastPlatesEnabled(event.target.checked);
-                      try {
-                        window.localStorage.setItem(
-                          "airboard.contrast-plates.v1",
-                          event.target.checked ? "on" : "off",
-                        );
-                      } catch {
-                        // Preference persistence is best-effort.
-                      }
-                    }}
-                  />
-                  <span>Local contrast behind diagram clusters</span>
-                </label>
-                <div className="control-row">
-                  <label htmlFor="scrim-opacity">Dark overlay</label>
-                  <div className="range-with-value">
-                    <input
-                      id="scrim-opacity"
-                      type="range"
-                      min={screenUnderlayStatus === "active" ? 0 : MIN_CAMERA_PRESENTATION_SCRIM}
-                      max={1}
-                      step={0.05}
-                      value={scrimOpacity}
-                      onChange={(event) => {
-                        const requested = Number(event.target.value);
-                        const next =
-                          screenUnderlayStatus === "active"
-                            ? screenFriendlyScrim(requested)
-                            : cameraCanvasScrim(requested);
-                        scrimOpacityRef.current = next;
-                        setScrimOpacity(next);
-                        try {
-                          window.localStorage.setItem(
-                            screenUnderlayStatus === "active"
-                              ? "airboard.scrim.screen.v1"
-                              : "airboard.scrim.camera.v1",
-                            String(next),
-                          );
-                        } catch {
-                          // Preference persistence is best-effort.
-                        }
-                      }}
-                    />
-                    <output htmlFor="scrim-opacity" data-testid="scrim-value">
-                      {Math.round(scrimOpacity * 100)}%
-                    </output>
-                  </div>
-                </div>
-                <p className="hint" data-testid="screen-underlay-notice">
-                  {screenUnderlayNotice ??
-                    (cameraUnderlayEnabled && cameraStatus === "active"
-                      ? "Camera is behind the board. Choose Show a screen behind the board in ••• to use a screen or window instead."
-                      : "No live background is selected, so the dark overlay appears solid. Choose Show a screen behind the board in •••, or allow the camera for this site.")}
-                </p>
-              </>
-            ) : null}
-          </section>
-
-          <section className="section">
-            <h2>Studio</h2>
-            <p className="hint">
-              Record what a viewer sees — your selected screen or camera behind the glowing
-              board, with your microphone — as a local WebM file. Nothing is uploaded.
-            </p>
-            <button
-              type="button"
-              className={recordingState === "recording" ? "danger" : "primary"}
-              data-testid="studio-record"
-              onClick={() =>
-                recordingState === "recording"
-                  ? void stopStudioRecording()
-                  : void startStudioRecording()
-              }
-            >
-              {recordingState === "recording"
-                ? `Stop recording (${formatRecordingClock(recordingSeconds)})`
-                : "Start recording"}
-            </button>
-            {recordingNotice ? <p className="hint">{recordingNotice}</p> : null}
-          </section>
-
-          <section className="section">
-            <h2>Input Controls</h2>
-            <p className="hint">
-              Hold an open palm still for 0.4 seconds to speak. Use a relaxed hand to aim and a closed hand to move.
-            </p>
-            <details className="advanced-settings gesture-guide">
-              <summary>Gesture guide</summary>
-              <dl>
-                <div>
-                  <dt>Aim</dt>
-                  <dd>Move one relaxed hand without holding a command pose.</dd>
-                </div>
-                <div>
-                  <dt>Choose or select</dt>
-                  <dd>
-                    Aim near a dock control or object and start closing one hand. The first
-                    highlighted target activates; reopen before choosing another. Camera
-                    gestures select one object only and never draw a lasso.
-                  </dd>
-                </div>
-                <div>
-                  <dt>Move</dt>
-                  <dd>
-                    Keep Select active. Close over the object body, wait for “Move locked,”
-                    move it, then reopen.
-                  </dd>
-                </div>
-                <div>
-                  <dt>Place</dt>
-                  <dd>
-                    Choose a shape first. Move onto the canvas, close one hand, wait for
-                    “Holding,” position the preview, then reopen.
-                  </dd>
-                </div>
-                <div>
-                  <dt>Erase</dt>
-                  <dd>
-                    Choose Eraser first. Close over an object, wait for the erase state,
-                    sweep across targets, then reopen.
-                  </dd>
-                </div>
-                <div>
-                  <dt>Speak to Airo</dt>
-                  <dd>
-                    Hold one open palm still (no sideways motion) for about 0.4 seconds.
-                    Lower or relax it when finished.
-                  </dd>
-                </div>
-                <div>
-                  <dt>Voice-edit one object</dt>
-                  <dd>
-                    Close one hand over the object and hold it still for about
-                    0.6 seconds, then say the change.
-                  </dd>
-                </div>
-                <div>
-                  <dt>Hide or show diagram</dt>
-                  <dd>
-                    With one hand, touch thumb to middle finger while keeping the index
-                    separated. Then flick the middle finger away quickly—the touch alone
-                    does nothing. Fully relax before snapping again.
-                  </dd>
-                </div>
-                <div>
-                  <dt>Pan</dt>
-                  <dd>Hold two open hands briefly, then move them together.</dd>
-                </div>
-                <div>
-                  <dt>Zoom</dt>
-                  <dd>
-                    Hold two closed hands briefly, then spread them apart or bring them
-                    together.
-                  </dd>
-                </div>
-              </dl>
-              <p>
-                Camera gestures do not resize objects or select an area. Use pointer
-                handles or a typed or voice resize command. Shift+H toggles diagram
-                visibility, and Cmd/Ctrl+Z always undoes.
-              </p>
-            </details>
-            <details className="advanced-settings">
-              <summary>Advanced settings</summary>
-              <div className="control-row">
-                <label htmlFor="confidence">Hand confidence</label>
-                <input
-                  id="confidence"
-                  type="range"
-                  min="0.4"
-                  max="0.95"
-                  step="0.01"
-                  value={confidenceThreshold}
-                  onChange={(event) => {
-                    const nextConfidence = Number(event.target.value);
-                    setConfidenceThreshold(nextConfidence);
-                    if (cameraStatus === "active") {
-                      pendingCameraConfidenceRestartRef.current = true;
-                      stopCamera();
-                    }
-                  }}
-                />
-              </div>
-              <p className="hint">
-                This controls HandLandmarker detection, presence, and tracking thresholds.
-                An active camera restarts so the new threshold takes effect immediately.
-              </p>
-              <label className="check-row" htmlFor="auto-snap-connectors">
-                <input
-                  id="auto-snap-connectors"
-                  type="checkbox"
-                  checked={autoSnapConnectors}
-                  onChange={(event) => setAutoSnapConnectors(event.target.checked)}
-                />
-                <span>Object, grid, and connector snapping</span>
-              </label>
-            </details>
-          </section>
-
-          <section className="section">
-            <h2>Shortcuts</h2>
-            <p className="hint">
-              Use the Gesture guide above for exact poses. A held open palm activates voice. A relaxed hand aims, a closed hand moves, and thumb-middle snaps hide or restore the diagram. Use Cmd/Ctrl+Z or the toolbar to undo.
-            </p>
-          </section>
-        </aside>
+        <BoardSettingsDrawer
+          setSettingsOpen={setSettingsOpen}
+          microphonePermission={microphonePermission}
+          cameraPermission={cameraPermission}
+          cameraPromptWaiting={cameraPromptWaiting}
+          boardTheme={boardTheme}
+          cameraCanvasLocked={cameraCanvasLocked}
+          screenUnderlayStatus={screenUnderlayStatus}
+          stopScreenUnderlay={stopScreenUnderlay}
+          setBoardTheme={setBoardTheme}
+          airoSounds={airoSounds}
+          setAiroSounds={setAiroSounds}
+          cameraUnderlayEnabled={cameraUnderlayEnabled}
+          cameraStatus={cameraStatus}
+          setCameraUnderlayEnabled={setCameraUnderlayEnabled}
+          localContrastPlatesEnabled={localContrastPlatesEnabled}
+          setLocalContrastPlatesEnabled={setLocalContrastPlatesEnabled}
+          scrimOpacity={scrimOpacity}
+          scrimOpacityRef={scrimOpacityRef}
+          setScrimOpacity={setScrimOpacity}
+          screenUnderlayNotice={screenUnderlayNotice}
+          recordingState={recordingState}
+          stopStudioRecording={stopStudioRecording}
+          startStudioRecording={startStudioRecording}
+          recordingSeconds={recordingSeconds}
+          recordingNotice={recordingNotice}
+          confidenceThreshold={confidenceThreshold}
+          setConfidenceThreshold={setConfidenceThreshold}
+          pendingCameraConfidenceRestartRef={pendingCameraConfidenceRestartRef}
+          stopCamera={stopCamera}
+          autoSnapConnectors={autoSnapConnectors}
+          setAutoSnapConnectors={setAutoSnapConnectors}
+        />
         ) : null}
       </div>
     </main>
   );
-}
-
-function diagramCommandContext(boardSessionId: string) {
-  return {
-    boardSessionId,
-    actorParticipantId: PARTICIPANT_ID,
-    userId: OWNER_USER_ID,
-  };
-}
-
-function appendBoundedBoardEvents(
-  journal: BoardEvent[],
-  events: readonly BoardEvent[],
-  maxEvents = 2_000,
-): void {
-  journal.push(...events.map((event) => structuredClone(event)));
-  if (journal.length > maxEvents) {
-    journal.splice(0, journal.length - maxEvents);
-  }
 }
 
 function createAnnotationRestoreEvents(boardSessionId: string, initial: BoardState, current: BoardState): BoardEvent[] {
@@ -11369,21 +10164,6 @@ function createAnnotationRestoreEvents(boardSessionId: string, initial: BoardSta
   return events;
 }
 
-function screenUnderlayStatusLabel(status: ScreenUnderlayStatus): string {
-  switch (status) {
-    case "idle":
-      return "not selected";
-    case "starting":
-      return "choosing…";
-    case "active":
-      return "live";
-    case "blocked":
-      return "cancelled / blocked";
-    case "error":
-      return "unavailable";
-  }
-}
-
 function isObjectGestureGrabStart(result: GestureResult): boolean {
   return getObjectGestureConfidence(result) >= OBJECT_GESTURE_GRAB_THRESHOLD;
 }
@@ -11408,99 +10188,6 @@ function getObjectGestureConfidence(result: GestureResult): number {
   );
 }
 
-function objectToolLabel(tool: ObjectDockTool): string {
-  return OBJECT_DOCK.find((item) => item.tool === tool)?.label ?? "Object";
-}
-
-function isScenePlacementTool(tool: CreationToolId): boolean {
-  return (
-    tool === "sticky" ||
-    tool.startsWith("shape:") ||
-    tool.startsWith("connector:") ||
-    tool === "text" ||
-    tool === "section" ||
-    tool === "table" ||
-    tool === "stamp" ||
-    tool === "insert:face-stamp" ||
-    tool === "insert:code-block" ||
-    tool === "insert:mind-map"
-  );
-}
-
-function scenePlacementPreviewTool(tool: CreationToolId): ObjectDockTool {
-  const legacyTool = legacyToolForCreationTool(tool) as ObjectDockTool | null;
-  if (legacyTool && isPlacementTool(legacyTool)) return legacyTool;
-  if (tool === "connector:straight") return "arrow";
-  if (tool.startsWith("connector:")) return "connector";
-  if (tool === "stamp" || tool === "insert:face-stamp") return "circle";
-  return "box";
-}
-
-function sceneElementKindLabel(kind: BoardSceneElement["kind"]): string {
-  return {
-    drawing: "Drawing",
-    sticky: "Sticky note",
-    shape: "Shape",
-    connector: "Connector",
-    text: "Text",
-    section: "Section",
-    table: "Table",
-    stamp: "Stamp",
-    media: "Media",
-    link_preview: "Link preview",
-    code_block: "Code block",
-    mind_map_node: "Mind map",
-  }[kind];
-}
-
-function strokePointBounds(
-  points: readonly Pick<StrokePoint, "x" | "y">[],
-  padding = 0,
-): { x: number; y: number; width: number; height: number } {
-  const xs = points.map(({ x }) => x);
-  const ys = points.map(({ y }) => y);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  return {
-    x: minX - padding,
-    y: minY - padding,
-    width: Math.max(1, maxX - minX + padding * 2),
-    height: Math.max(1, maxY - minY + padding * 2),
-  };
-}
-
-function drawingElementIntersectsCircle(
-  element: Extract<BoardSceneElement, { kind: "drawing" }>,
-  center: AnnotationPoint,
-  radius: number,
-): boolean {
-  const hitRadius = radius + element.style.thickness / 2;
-  if (element.points.length === 1) {
-    const point = element.points[0]!;
-    return Math.hypot(point.x - center.x, point.y - center.y) <= hitRadius;
-  }
-  for (let index = 1; index < element.points.length; index += 1) {
-    const start = element.points[index - 1];
-    const end = element.points[index];
-    if (start && end && pointToSegmentDistance(center, start, end) <= hitRadius) return true;
-  }
-  return false;
-}
-
-function pointToSegmentDistance(
-  point: AnnotationPoint,
-  start: AnnotationPoint,
-  end: AnnotationPoint,
-): number {
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  if (dx === 0 && dy === 0) return Math.hypot(point.x - start.x, point.y - start.y);
-  const amount = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / (dx * dx + dy * dy)));
-  return Math.hypot(point.x - (start.x + amount * dx), point.y - (start.y + amount * dy));
-}
-
 function decodeCanvasImage(source: string, signal: AbortSignal): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
@@ -11520,310 +10207,6 @@ function decodeCanvasImage(source: string, signal: AbortSignal): Promise<HTMLIma
     };
     image.src = source;
   });
-}
-
-function translateSceneElement(
-  source: BoardSceneElement,
-  dx: number,
-  dy: number,
-): BoardSceneElement {
-  const element = structuredClone(source);
-  element.transform.x += dx;
-  element.transform.y += dy;
-  if (element.kind === "connector") {
-    element.start.point.x += dx;
-    element.start.point.y += dy;
-    element.end.point.x += dx;
-    element.end.point.y += dy;
-    element.controlPoints = element.controlPoints.map((point) => ({ x: point.x + dx, y: point.y + dy }));
-  }
-  if (element.kind === "drawing") {
-    element.points = element.points.map((point) => ({ ...point, x: point.x + dx, y: point.y + dy }));
-  }
-  return element;
-}
-
-function sceneSectionMembers(
-  state: BoardState,
-  section: Extract<BoardSceneElement, { kind: "section" }>,
-): BoardSceneElement[] {
-  const memberIds = new Set<string>();
-  const pendingSections = [section.id];
-  const visitedSections = new Set<string>();
-  while (pendingSections.length > 0) {
-    const sectionId = pendingSections.shift()!;
-    if (visitedSections.has(sectionId)) continue;
-    visitedSections.add(sectionId);
-    const current = state.elements[sectionId];
-    if (current?.kind === "section") {
-      for (const memberId of current.memberIds) memberIds.add(memberId);
-    }
-    for (const element of Object.values(state.elements)) {
-      if (element.sectionId === sectionId) memberIds.add(element.id);
-    }
-    for (const memberId of memberIds) {
-      if (state.elements[memberId]?.kind === "section" && !visitedSections.has(memberId)) {
-        pendingSections.push(memberId);
-      }
-    }
-  }
-  memberIds.delete(section.id);
-  return [...memberIds].flatMap((id) => {
-    const element = state.elements[id];
-    return element?.status === "active" ? [element] : [];
-  });
-}
-
-function buildSceneMovePreview(
-  movement: SceneMoveSnapshot,
-  dx: number,
-  dy: number,
-  baseElements: Readonly<Record<string, BoardSceneElement>>,
-): Record<string, BoardSceneElement> {
-  const elements = { ...baseElements };
-  for (const original of [movement.element, ...movement.relatedElements, ...movement.boundConnectors]) {
-    elements[original.id] = structuredClone(original);
-  }
-  for (const original of [movement.element, ...movement.relatedElements]) {
-    elements[original.id] = translateSceneElement(original, dx, dy);
-  }
-  for (const connector of movement.boundConnectors) {
-    elements[connector.id] = rebindSceneConnector(connector, elements);
-  }
-  return elements;
-}
-
-function buildUniformSceneMoveChanges(
-  state: BoardState,
-  roots: readonly BoardSceneElement[],
-  dx: number,
-  dy: number,
-): { elementId: string; patches: BoardElementPatchOperation[] }[] {
-  const moving = new Map<string, BoardSceneElement>();
-  const enqueue = (element: BoardSceneElement) => {
-    if (element.status === "active" && !moving.has(element.id)) moving.set(element.id, element);
-  };
-  roots.forEach(enqueue);
-  for (const root of roots) {
-    if (root.kind === "section") sceneSectionMembers(state, root).forEach(enqueue);
-  }
-  let discovered = true;
-  while (discovered) {
-    discovered = false;
-    for (const candidate of Object.values(state.elements)) {
-      if (candidate.status !== "active" || moving.has(candidate.id) || !candidate.attachment) continue;
-      const follows = candidate.attachment.kind === "element"
-        ? moving.has(candidate.attachment.elementId)
-        : moving.has(candidate.attachment.tableId);
-      if (follows) {
-        enqueue(candidate);
-        discovered = true;
-      }
-    }
-  }
-  const previewElements = { ...state.elements };
-  for (const element of moving.values()) {
-    previewElements[element.id] = translateSceneElement(element, dx, dy);
-  }
-  const boundConnectors = Object.values(state.elements).filter(
-    (candidate): candidate is Extract<BoardSceneElement, { kind: "connector" }> =>
-      candidate.kind === "connector" &&
-      candidate.status === "active" &&
-      !moving.has(candidate.id) &&
-      Boolean(
-        (candidate.start.binding && moving.has(candidate.start.binding.elementId)) ||
-        (candidate.end.binding && moving.has(candidate.end.binding.elementId)),
-      ),
-  );
-  for (const connector of boundConnectors) {
-    previewElements[connector.id] = rebindSceneConnector(connector, previewElements);
-  }
-  const changes = [...moving.values()].map((element) => ({
-    elementId: element.id,
-    patches: sceneElementMovePatches(element, dx, dy),
-  }));
-  for (const connector of boundConnectors) {
-    const rebound = previewElements[connector.id];
-    if (rebound?.kind === "connector") {
-      changes.push({ elementId: connector.id, patches: connectorGeometryPatches(rebound) });
-    }
-  }
-  for (const root of roots) {
-    if (root.kind === "section") continue;
-    const moved = previewElements[root.id];
-    if (moved) appendSectionContainmentChanges(state, root, moved, changes);
-  }
-  return changes;
-}
-
-function rebindSceneConnector(
-  source: Extract<BoardSceneElement, { kind: "connector" }>,
-  elements: Readonly<Record<string, BoardSceneElement>>,
-): Extract<BoardSceneElement, { kind: "connector" }> {
-  const connector = structuredClone(source);
-  if (connector.start.binding) {
-    const target = elements[connector.start.binding.elementId];
-    if (target?.status === "active") {
-      const previous = connector.start.point;
-      const next = connectorAnchorPoint(target, connector.start.binding.anchor, connector.end.point);
-      connector.start.point = next;
-      if (connector.controlPoints[0]) {
-        connector.controlPoints[0] = {
-          x: connector.controlPoints[0].x + next.x - previous.x,
-          y: connector.controlPoints[0].y + next.y - previous.y,
-        };
-      }
-    }
-  }
-  if (connector.end.binding) {
-    const target = elements[connector.end.binding.elementId];
-    if (target?.status === "active") {
-      const previous = connector.end.point;
-      const next = connectorAnchorPoint(target, connector.end.binding.anchor, connector.start.point);
-      connector.end.point = next;
-      const lastIndex = connector.controlPoints.length - 1;
-      if (lastIndex >= 0 && connector.controlPoints[lastIndex]) {
-        connector.controlPoints[lastIndex] = {
-          x: connector.controlPoints[lastIndex]!.x + next.x - previous.x,
-          y: connector.controlPoints[lastIndex]!.y + next.y - previous.y,
-        };
-      }
-    }
-  }
-  const points = [connector.start.point, ...connector.controlPoints, connector.end.point];
-  const bounds = strokePointBounds(points);
-  connector.transform = { ...bounds, rotation: 0 };
-  return connector;
-}
-
-function connectorAnchorPoint(
-  element: BoardSceneElement,
-  anchor: "top" | "right" | "bottom" | "left" | "center" | "auto" | undefined,
-  toward: AnnotationPoint,
-): AnnotationPoint {
-  const center = elementCenter(element);
-  const { x, y, width, height } = element.transform;
-  if (anchor === "top") return { x: center.x, y };
-  if (anchor === "right") return { x: x + width, y: center.y };
-  if (anchor === "bottom") return { x: center.x, y: y + height };
-  if (anchor === "left") return { x, y: center.y };
-  if (anchor === "center") return center;
-  const dx = toward.x - center.x;
-  const dy = toward.y - center.y;
-  if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return center;
-  const halfWidth = Math.max(0.5, width / 2);
-  const halfHeight = Math.max(0.5, height / 2);
-  const scale = 1 / Math.max(Math.abs(dx) / halfWidth, Math.abs(dy) / halfHeight);
-  return { x: center.x + dx * scale, y: center.y + dy * scale };
-}
-
-function connectorGeometryPatches(
-  connector: Extract<BoardSceneElement, { kind: "connector" }>,
-): BoardElementPatchOperation[] {
-  return [
-    { op: "field.set", path: ["transform"], value: connector.transform },
-    { op: "field.set", path: ["start", "point"], value: connector.start.point },
-    { op: "field.set", path: ["end", "point"], value: connector.end.point },
-    { op: "field.set", path: ["controlPoints"], value: connector.controlPoints },
-  ];
-}
-
-function appendSectionContainmentChanges(
-  state: BoardState,
-  original: BoardSceneElement,
-  moved: BoardSceneElement,
-  changes: { elementId: string; patches: BoardElementPatchOperation[] }[],
-): void {
-  const nextSection = Object.values(state.elements)
-    .filter(
-      (candidate): candidate is Extract<BoardSceneElement, { kind: "section" }> =>
-        candidate.kind === "section" &&
-        candidate.status === "active" &&
-        candidate.visible &&
-        candidate.id !== moved.id &&
-        sceneElementFitsInside(moved, candidate),
-    )
-    .sort((a, b) => b.zIndex - a.zIndex)[0];
-  const previousSection = original.sectionId
-    ? state.elements[original.sectionId]
-    : null;
-  const previousSectionId = previousSection?.kind === "section" ? previousSection.id : undefined;
-  if (previousSectionId === nextSection?.id) return;
-
-  const movedChange = changes.find(({ elementId }) => elementId === moved.id);
-  const membershipPatch: BoardElementPatchOperation = nextSection
-    ? { op: "field.set", path: ["sectionId"], value: nextSection.id }
-    : { op: "field.unset", path: ["sectionId"] };
-  if (movedChange) movedChange.patches.push(membershipPatch);
-  else changes.push({ elementId: moved.id, patches: [membershipPatch] });
-
-  if (previousSection?.kind === "section") {
-    changes.push({
-      elementId: previousSection.id,
-      patches: [{
-        op: "field.set",
-        path: ["memberIds"],
-        value: previousSection.memberIds.filter((id) => id !== moved.id),
-      }],
-    });
-  }
-  if (nextSection) {
-    changes.push({
-      elementId: nextSection.id,
-      patches: [{
-        op: "field.set",
-        path: ["memberIds"],
-        value: [...new Set([...nextSection.memberIds, moved.id])],
-      }],
-    });
-  }
-}
-
-function sceneElementFitsInside(
-  element: BoardSceneElement,
-  section: Extract<BoardSceneElement, { kind: "section" }>,
-): boolean {
-  const outer = section.transform;
-  const inner = element.transform;
-  return (
-    inner.x >= outer.x &&
-    inner.y >= outer.y &&
-    inner.x + inner.width <= outer.x + outer.width &&
-    inner.y + inner.height <= outer.y + outer.height
-  );
-}
-
-function tableCellIdAtPoint(
-  table: Extract<BoardSceneElement, { kind: "table" }>,
-  point: AnnotationPoint,
-): string | null {
-  const relativeX = (point.x - table.transform.x) / Math.max(1, table.transform.width);
-  const relativeY = (point.y - table.transform.y) / Math.max(1, table.transform.height);
-  if (relativeX < 0 || relativeX > 1 || relativeY < 0 || relativeY > 1) return null;
-  const totalWidth = table.columns.reduce((sum, column) => sum + Math.max(1, column.width), 0);
-  const totalHeight = table.rows.reduce((sum, row) => sum + Math.max(1, row.height), 0);
-  const targetX = relativeX * totalWidth;
-  const targetY = relativeY * totalHeight;
-  let width = 0;
-  const column = table.columns.find((candidate) => {
-    width += Math.max(1, candidate.width);
-    return targetX <= width;
-  });
-  let height = 0;
-  const row = table.rows.find((candidate) => {
-    height += Math.max(1, candidate.height);
-    return targetY <= height;
-  });
-  if (!row || !column) return null;
-  return Object.values(table.cells).find(
-    (cell) => cell.rowId === row.id && cell.columnId === column.id,
-  )?.id ?? null;
-}
-
-/** Whether undoing this entry leaves a redo entry that puts it back exactly. */
-function undoEntryCanBeRedone(action: UndoAction): boolean {
-  if (action.type === "diagram") return Boolean(action.redoEvents?.length);
-  return action.type.startsWith("scene_");
 }
 
 /** The hidden scene copy the reducer keeps of a legacy (Airo-drawn) stroke. */
@@ -11846,545 +10229,6 @@ function pointedLegacyStrokeIds(
   return [...new Set(ids)];
 }
 
-function resolveSceneIntentTargetIds(
-  state: BoardState,
-  target: SceneIntentTarget,
-  selectionIds: readonly string[],
-  reference: VoiceReference | null = null,
-): string[] {
-  if (target.kind === "selection") {
-    return selectionIds.filter((id) => state.elements[id]?.status === "active");
-  }
-  if (target.kind === "contextual") {
-    return resolveContextualSceneTarget(state, target.pronoun, selectionIds, reference);
-  }
-  const requested = normalizeSceneReference(target.label);
-  const matches = Object.values(state.elements)
-    .filter((element) =>
-      element.status === "active" &&
-      sceneElementVisibleForIntent(state, element) &&
-      !element.legacyStrokeId &&
-      sceneElementReferenceLabels(element).some(
-        (label) => normalizeSceneReference(label) === requested,
-      ),
-    )
-    .sort((a, b) => b.zIndex - a.zIndex);
-  // Shape-type names match every shape of that type; a shape whose own label
-  // is the requested name ("User" beside "User 2") is the one meant.
-  const labelled = matches.length > 1
-    ? matches.filter((element) => normalizeSceneReference(sceneElementPlainLabel(element)) === requested)
-    : [];
-  return (labelled.length > 0 ? labelled : matches).map(({ id }) => id);
-}
-
-/**
- * "it", "this", "that", "them": what the hand pointed at while speaking, else
- * the selection, else the shape made or changed most recently. Best guess,
- * never a question; undo is the safety net.
- */
-function resolveContextualSceneTarget(
-  state: BoardState,
-  pronoun: SceneIntentPronoun,
-  selectionIds: readonly string[],
-  reference: VoiceReference | null,
-): string[] {
-  const active = (id: string) => state.elements[id]?.status === "active";
-  const pointed = (reference?.pointedIds ?? []).filter(active);
-  const selected = selectionIds.filter(active);
-  const plural = pronoun === "them" || pronoun === "these" || pronoun === "those";
-  if (plural) {
-    if (pointed.length > 1) return pointed;
-    return selected;
-  }
-  if (pointed.length > 0) {
-    // "that" is the latest thing pointed at; "this" and "it" what was under
-    // the hand as speech began, else the latest.
-    const start = reference?.startTargetId && active(reference.startTargetId) ? reference.startTargetId : null;
-    return [pronoun === "that" ? pointed[pointed.length - 1]! : start ?? pointed[pointed.length - 1]!];
-  }
-  if (selected.length > 0) return [selected[selected.length - 1]!];
-  const recent = Object.values(state.elements)
-    .filter((element) =>
-      element.status === "active" &&
-      element.visible &&
-      element.kind !== "connector" &&
-      element.kind !== "section" &&
-      !element.legacyStrokeId,
-    )
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-  return recent ? [recent.id] : [];
-}
-
-function sceneElementVisibleForIntent(
-  state: BoardState,
-  element: BoardSceneElement,
-): boolean {
-  if (!element.visible) return false;
-  const parent = element.sectionId ? state.elements[element.sectionId] : null;
-  return !(
-    parent?.kind === "section" &&
-    parent.status === "active" &&
-    (!parent.visible || parent.collapsed)
-  );
-}
-
-function sceneElementReferenceLabels(element: BoardSceneElement): string[] {
-  const plain = sceneElementPlainLabel(element).trim();
-  if (element.kind === "shape") {
-    const catalog = shapeCatalogEntry(element.shapeKind);
-    return [plain, catalog.name, catalog.kind, ...catalog.aliases].filter(Boolean);
-  }
-  return [plain || sceneElementKindLabel(element.kind)];
-}
-
-function sceneElementLockedForMutation(
-  state: BoardState,
-  element: BoardSceneElement,
-): boolean {
-  if (element.locked) return true;
-  if (element.kind === "section" && element.lockMode !== "none") return true;
-  const parent = element.sectionId ? state.elements[element.sectionId] : null;
-  return Boolean(
-    parent?.kind === "section" &&
-    parent.status === "active" &&
-    parent.lockMode === "all",
-  );
-}
-
-function sceneElementReferenceLabel(element: BoardSceneElement): string {
-  return sceneElementReferenceLabels(element)[0] || sceneElementKindLabel(element.kind);
-}
-
-function normalizeSceneReference(value: string): string {
-  return value
-    .normalize("NFKC")
-    .toLocaleLowerCase("en-US")
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/^(?:(?:the|a|an|another)\s+)+/, "")
-    .replace(/\b(?:dataset|datasets)\b/g, "data")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function buildSceneFanInContext(state: BoardState, selectionIds: readonly string[]) {
-  const selectedSet = new Set(selectionIds);
-  const elements = Object.values(state.elements)
-    .filter((element) =>
-      element.status === "active" &&
-      sceneElementVisibleForIntent(state, element) &&
-      !element.legacyStrokeId &&
-      element.kind !== "connector" &&
-      element.kind !== "drawing",
-    )
-    .sort((left, right) => left.zIndex - right.zIndex);
-  const ordinals = new Map<string, number>();
-  const objects = elements.map((element) => {
-    const nodeType = element.kind === "shape" ? element.shapeKind : element.kind;
-    const ordinal = (ordinals.get(nodeType) ?? 0) + 1;
-    ordinals.set(nodeType, ordinal);
-    return {
-      label: sceneElementReferenceLabel(element),
-      nodeType,
-      ordinal,
-    };
-  });
-  const labelsById = new Map(elements.map((element) => [element.id, sceneElementReferenceLabel(element)]));
-  const edges = Object.values(state.elements).flatMap((element) => {
-    if (
-      element.kind !== "connector" ||
-      element.status !== "active" ||
-      !sceneElementVisibleForIntent(state, element) ||
-      element.legacyStrokeId ||
-      !element.start.binding ||
-      !element.end.binding
-    ) return [];
-    const from = labelsById.get(element.start.binding.elementId);
-    const to = labelsById.get(element.end.binding.elementId);
-    if (!from || !to) return [];
-    const label = richTextToPlainText(element.label).trim();
-    return [{ from: { label: from }, to: { label: to }, ...(label ? { label } : {}) }];
-  });
-  const selected = elements
-    .filter((element) => selectedSet.has(element.id))
-    .map((element) => {
-      const object = objects[elements.indexOf(element)];
-      return object!;
-    });
-  return {
-    selectionCount: selected.length,
-    selected,
-    objects,
-    edges,
-  };
-}
-
-const OPEN_SPOT_KINDS: ReadonlySet<BoardSceneElement["kind"]> = new Set([
-  "shape",
-  "sticky",
-  "text",
-  "table",
-  "code_block",
-  "mind_map_node",
-]);
-
-const OPEN_SPOT_DIRECTIONS: Readonly<Record<SceneIntentPlacementDirection, readonly [number, number]>> = {
-  right: [1, 0],
-  left: [-1, 0],
-  down: [0, 1],
-  up: [0, -1],
-};
-
-/**
- * Moves a command-created element to the nearest open spot so a run of typed
- * or spoken additions builds a readable diagram instead of a stack. Searches
- * rings of element-sized steps around the requested spot, preferring the
- * requested direction, then the axis-aligned neighbours.
- */
-function openSceneTransform(
-  state: BoardState,
-  transform: BoardSceneElement["transform"],
-  prefer: SceneIntentPlacementDirection,
-): BoardSceneElement["transform"] {
-  const gapX = 48;
-  const gapY = 40;
-  const occupied = Object.values(state.elements)
-    .filter((element) =>
-      element.status === "active" &&
-      element.kind !== "connector" &&
-      element.kind !== "section" &&
-      sceneElementVisibleForIntent(state, element),
-    )
-    .map(({ transform: bounds }) => bounds);
-  const overlaps = (x: number, y: number) => occupied.some((bounds) =>
-    x < bounds.x + bounds.width + gapX &&
-    x + transform.width + gapX > bounds.x &&
-    y < bounds.y + bounds.height + gapY &&
-    y + transform.height + gapY > bounds.y,
-  );
-  if (!overlaps(transform.x, transform.y)) return transform;
-  const [preferX, preferY] = OPEN_SPOT_DIRECTIONS[prefer];
-  const stepX = transform.width + gapX;
-  const stepY = transform.height + gapY;
-  for (let ring = 1; ring <= 8; ring += 1) {
-    const offsets: [number, number][] = [];
-    for (let column = -ring; column <= ring; column += 1) {
-      for (let row = -ring; row <= ring; row += 1) {
-        if (Math.max(Math.abs(column), Math.abs(row)) === ring) offsets.push([column, row]);
-      }
-    }
-    offsets.sort(([ax, ay], [bx, by]) =>
-      (bx * preferX + by * preferY) - (ax * preferX + ay * preferY) ||
-      (Math.abs(ax) + Math.abs(ay)) - (Math.abs(bx) + Math.abs(by)),
-    );
-    for (const [column, row] of offsets) {
-      const x = transform.x + column * stepX;
-      const y = transform.y + row * stepY;
-      if (!overlaps(x, y)) return { ...transform, x, y };
-    }
-  }
-  return transform;
-}
-
-/** Numbers a generated name ("User 2") already on the board so each element stays addressable by name. */
-function uniqueGeneratedSceneLabel(state: BoardState, label: string): string {
-  const taken = new Set(
-    Object.values(state.elements)
-      .filter((element) => element.status === "active")
-      .map((element) => normalizeSceneReference(sceneElementPlainLabel(element))),
-  );
-  if (!taken.has(normalizeSceneReference(label))) return label;
-  for (let suffix = 2; ; suffix += 1) {
-    const candidate = `${label} ${suffix}`;
-    if (!taken.has(normalizeSceneReference(candidate))) return candidate;
-  }
-}
-
-type InlineTextElement = Extract<BoardSceneElement, { kind: "sticky" | "shape" | "text" | "mind_map_node" }>;
-
-function isInlineTextEditable(element: BoardSceneElement): element is InlineTextElement {
-  return (
-    element.kind === "sticky" ||
-    element.kind === "shape" ||
-    element.kind === "text" ||
-    element.kind === "mind_map_node"
-  );
-}
-
-/**
- * Places the on-canvas text editor over its element in the board area's
- * coordinates. Sections edit their title in a strip along the top edge.
- */
-function sceneTextEditorBounds(
-  element: InlineTextElement | Extract<BoardSceneElement, { kind: "section" }>,
-  viewport: BoardViewport,
-  canvas: HTMLCanvasElement | null,
-): { left: number; top: number; width: number; height: number } | null {
-  if (!canvas) return null;
-  const area = canvas.closest(".board-area")?.getBoundingClientRect();
-  const canvasRect = canvas.getBoundingClientRect();
-  const offsetX = area ? canvasRect.left - area.left : 0;
-  const offsetY = area ? canvasRect.top - area.top : 0;
-  const { x, y, width, height } = element.transform;
-  const topLeft = screenPointFromBoard(viewport, { x, y });
-  const bottomRight = screenPointFromBoard(viewport, { x: x + width, y: y + height });
-  const editorWidth = Math.max(160, bottomRight.x - topLeft.x);
-  const editorHeight = element.kind === "section" ? 44 : Math.max(48, bottomRight.y - topLeft.y);
-  const centerX = (topLeft.x + bottomRight.x) / 2;
-  const top = element.kind === "section"
-    ? topLeft.y
-    : (topLeft.y + bottomRight.y) / 2 - editorHeight / 2;
-  return {
-    left: centerX - editorWidth / 2 + offsetX,
-    top: top + offsetY,
-    width: editorWidth,
-    height: editorHeight,
-  };
-}
-
-function sceneIntentPlacementPoint(
-  target: BoardSceneElement,
-  direction: "left" | "right" | "up" | "down",
-): AnnotationPoint {
-  const center = elementCenter(target);
-  const horizontal = target.transform.width / 2 + 180;
-  const vertical = target.transform.height / 2 + 130;
-  return {
-    x: center.x + (direction === "left" ? -horizontal : direction === "right" ? horizontal : 0),
-    y: center.y + (direction === "up" ? -vertical : direction === "down" ? vertical : 0),
-  };
-}
-
-function sceneIntentFeedback(intent: Exclude<BoardSceneIntent, { type: "invalid" }>): string {
-  switch (intent.type) {
-    case "create": return `Add ${intent.kind.replaceAll("_", " ")}`;
-    case "create_connected": return "Add and connect shape";
-    case "connect": return "Connect board elements";
-    case "rename": return "Rename board element";
-    case "delete": return "Delete board element";
-    case "move": return "Move board element";
-    case "resize": return "Resize selected object";
-    case "style": return "Color selected object";
-    case "select_all": return "Select every object";
-    case "group": return "Create section around selection";
-    case "layout": return "Lay out board elements";
-    case "move_to": return "Move board element";
-    case "change_shape": return "Change shape type";
-    case "reorder": return intent.position === "front" ? "Bring to front" : "Send to back";
-    case "undo": return intent.count > 1 ? `Undo ${intent.count} changes` : "Undo";
-    case "redo": return intent.count > 1 ? `Redo ${intent.count} changes` : "Redo";
-    case "correct": return "Correct the last change";
-    case "zoom_to_fit": return "Zoom to fit";
-    case "focus": return "Focus";
-  }
-}
-
-function sceneElementPlainLabel(element: BoardSceneElement): string {
-  switch (element.kind) {
-    case "sticky":
-    case "shape":
-    case "text":
-    case "mind_map_node":
-      return richTextToPlainText(element.content);
-    case "connector":
-      return richTextToPlainText(element.label);
-    case "section":
-      return richTextToPlainText(element.title);
-    case "table":
-      return Object.values(element.cells).map((cell) => richTextToPlainText(cell.content)).find(Boolean) ?? "Table";
-    case "stamp":
-      return element.label ?? element.emoji;
-    case "media":
-      return element.altText || element.asset.fileName || "Media";
-    case "link_preview":
-      return element.title ?? element.url;
-    case "code_block":
-      return element.code.split("\n", 1)[0] ?? "Code block";
-    case "drawing":
-      return element.drawingKind;
-  }
-}
-
-function sceneElementRenamePatches(
-  element: BoardSceneElement,
-  label: string,
-): BoardElementPatchOperation[] {
-  switch (element.kind) {
-    case "sticky":
-    case "shape":
-    case "text":
-    case "mind_map_node":
-      return [{ op: "field.set", path: ["content"], value: createRichTextDocument(label) }];
-    case "connector":
-      return [{ op: "field.set", path: ["label"], value: createRichTextDocument(label) }];
-    case "section":
-      return [{ op: "field.set", path: ["title"], value: createRichTextDocument(label) }];
-    case "table": {
-      const cell = Object.values(element.cells)[0];
-      return cell
-        ? [{ op: "table.cell.patched", cellId: cell.id, patch: { content: createRichTextDocument(label) } }]
-        : [];
-    }
-    case "stamp":
-      return [{ op: "field.set", path: ["label"], value: label }];
-    case "media":
-      return [{ op: "field.set", path: ["altText"], value: label }];
-    case "link_preview":
-      return [{ op: "field.set", path: ["title"], value: label }];
-    case "code_block":
-      return [{ op: "field.set", path: ["code"], value: label }];
-    case "drawing":
-      return [{ op: "field.set", path: ["metadata", "label"], value: label }];
-  }
-}
-
-function sceneElementMovePatches(
-  element: BoardSceneElement,
-  dx: number,
-  dy: number,
-): BoardElementPatchOperation[] {
-  const moved = translateSceneElement(element, dx, dy);
-  const patches: BoardElementPatchOperation[] = [
-    { op: "field.set", path: ["transform", "x"], value: moved.transform.x },
-    { op: "field.set", path: ["transform", "y"], value: moved.transform.y },
-  ];
-  if (moved.kind === "connector") {
-    patches.push(
-      { op: "field.set", path: ["start", "point"], value: moved.start.point },
-      { op: "field.set", path: ["end", "point"], value: moved.end.point },
-      { op: "field.set", path: ["controlPoints"], value: moved.controlPoints },
-    );
-  }
-  if (moved.kind === "drawing") {
-    patches.push({ op: "field.set", path: ["points"], value: moved.points });
-  }
-  return patches;
-}
-
-function sceneElementColorPatches(
-  element: BoardSceneElement,
-  color: string,
-): BoardElementPatchOperation[] {
-  switch (element.kind) {
-    case "drawing":
-    case "connector":
-      return [{ op: "field.set", path: ["style", "color"], value: color }];
-    case "sticky":
-      return [{ op: "field.set", path: ["color"], value: color }];
-    case "shape":
-    case "section":
-      return [{ op: "field.set", path: ["style", "fill"], value: color }];
-    case "text":
-      return [{ op: "field.set", path: ["style", "color"], value: color }];
-    case "mind_map_node":
-      return [{ op: "field.set", path: ["style", "fill"], value: color }];
-    case "table":
-      return Object.values(element.cells).map((cell) => ({
-        op: "table.cell.patched" as const,
-        cellId: cell.id,
-        patch: { style: { ...cell.style, fill: color } },
-      }));
-    default:
-      return [{ op: "field.set", path: ["metadata", "accentColor"], value: color }];
-  }
-}
-
-function elementCenter(element: BoardSceneElement): AnnotationPoint {
-  if (element.kind === "connector") {
-    return {
-      x: (element.start.point.x + element.end.point.x) / 2,
-      y: (element.start.point.y + element.end.point.y) / 2,
-    };
-  }
-  return {
-    x: element.transform.x + element.transform.width / 2,
-    y: element.transform.y + element.transform.height / 2,
-  };
-}
-
-function boundsBetween(
-  start: AnnotationPoint,
-  end: AnnotationPoint,
-): BoardSceneElement["transform"] {
-  return {
-    x: Math.min(start.x, end.x),
-    y: Math.min(start.y, end.y),
-    width: Math.max(1, Math.abs(end.x - start.x)),
-    height: Math.max(1, Math.abs(end.y - start.y)),
-    rotation: 0,
-  };
-}
-
-function sceneElementUnionBounds(
-  elements: readonly BoardSceneElement[],
-  padding = 0,
-): { x: number; y: number; width: number; height: number } {
-  const left = Math.min(...elements.map((element) => element.transform.x));
-  const top = Math.min(...elements.map((element) => element.transform.y));
-  const right = Math.max(...elements.map((element) => element.transform.x + element.transform.width));
-  const bottom = Math.max(...elements.map((element) => element.transform.y + element.transform.height));
-  return {
-    x: left - padding,
-    y: top - padding,
-    width: right - left + padding * 2,
-    height: bottom - top + padding * 2,
-  };
-}
-
-function layoutSceneElements(
-  elements: readonly BoardSceneElement[],
-  direction: Extract<BoardSceneIntent, { type: "layout" }>["direction"],
-): Map<string, AnnotationPoint> {
-  const ordered = [...elements].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
-  const originX = Math.min(...ordered.map((element) => element.transform.x));
-  const originY = Math.min(...ordered.map((element) => element.transform.y));
-  const gap = 48;
-  const positions = new Map<string, AnnotationPoint>();
-  const columns = direction === "grid" ? Math.max(1, Math.ceil(Math.sqrt(ordered.length))) : ordered.length;
-  let horizontalCursor = originX;
-  let verticalCursor = originY;
-  ordered.forEach((element, index) => {
-    if (direction === "grid") {
-      const column = index % columns;
-      const row = Math.floor(index / columns);
-      const maxWidth = Math.max(...ordered.map((candidate) => candidate.transform.width));
-      const maxHeight = Math.max(...ordered.map((candidate) => candidate.transform.height));
-      positions.set(element.id, { x: originX + column * (maxWidth + gap), y: originY + row * (maxHeight + gap) });
-      return;
-    }
-    if (direction === "left_to_right" || direction === "right_to_left") {
-      positions.set(element.id, { x: horizontalCursor, y: originY });
-      horizontalCursor += element.transform.width + gap;
-    } else {
-      positions.set(element.id, { x: originX, y: verticalCursor });
-      verticalCursor += element.transform.height + gap;
-    }
-  });
-  if (direction === "right_to_left" || direction === "bottom_to_top") {
-    const values = [...positions.values()].reverse();
-    ordered.forEach((element, index) => positions.set(element.id, values[index]!));
-  }
-  return positions;
-}
-
-function mindMapDirectionOffset(
-  direction: Extract<BoardSceneElement, { kind: "mind_map_node" }>["relation"]["direction"],
-  transform: BoardSceneElement["transform"],
-): AnnotationPoint {
-  const horizontal = transform.width + 120;
-  const vertical = transform.height + 96;
-  if (direction === "left") return { x: -horizontal, y: 0 };
-  if (direction === "up") return { x: 0, y: -vertical };
-  if (direction === "down") return { x: 0, y: vertical };
-  return { x: horizontal, y: 0 };
-}
-
-function truncateSpeechTranscript(transcript: string, maxLength = 64): string {
-  const normalized = transcript.trim();
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-  return `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
-}
 
 /**
  * Speech recognizers commonly render “add a database, uh, later that is
@@ -12404,29 +10248,6 @@ function expandSpokenCreateAndConnect(text: string): [string, string] | null {
     return null;
   }
   return [`add a ${nodeType} here`, `connect this to ${target}`];
-}
-
-function speechRecognitionLabel(status: SpeechRecognitionStatus): string {
-  switch (status) {
-    case "wake-detected":
-      return "wake word detected";
-    case "wake-missing":
-      return "wake word not detected";
-    case "command-recognized":
-      return "command recognized";
-    case "interpreting":
-      return "understanding command";
-    case "command-rejected":
-      return "command not understood";
-    case "hearing":
-      return "hearing speech";
-    case "waiting":
-      return "listening";
-    case "error":
-      return "speech error";
-    case "idle":
-      return "stopped";
-  }
 }
 
 function nextAnimationFrame(): Promise<void> {
@@ -12486,36 +10307,4 @@ function getSelectableAnnotationIds(state: BoardState): string[] {
             : 1,
     )
     .map((stroke) => stroke.id);
-}
-
-function formatRecordingClock(totalSeconds: number): string {
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-}
-
-/**
- * The Airo panel's show/hide choice. A new key: the panel used to start open,
- * and now starts hidden for everyone until they choose to show it.
- */
-const COPILOT_VISIBILITY_KEY = "airboard.copilot.v2";
-
-/**
- * Whether the Airo panel opens with the board: hidden by default, so voice,
- * hands and the on-board notices carry the board; shown only once the person
- * chose to show it. On a phone it would cover the canvas, so it starts hidden.
- */
-function copilotStartsOpen(): boolean {
-  if (typeof window === "undefined") return false;
-  if (window.matchMedia?.("(max-width: 700px)").matches) return false;
-  try {
-    return window.localStorage.getItem(COPILOT_VISIBILITY_KEY) === "open";
-  } catch {
-    return false;
-  }
-}
-
-/** Canvas width the open Airo panel covers on the right. */
-function copilotRightInset(panelOpen: boolean, canvasWidth: number): number {
-  return panelOpen ? Math.min(400, canvasWidth * 0.45) : 0;
 }

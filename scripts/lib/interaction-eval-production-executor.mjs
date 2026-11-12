@@ -1,6 +1,7 @@
 import {
   applyBoardEvent,
   applyDiagramCommand,
+  applyLegacyDiagramFixture,
   applyDiagramUndo,
   createInitialBoardState,
   parseSemanticPlan,
@@ -673,12 +674,18 @@ function pointerFrom(evalCase) {
   };
 }
 
+/**
+ * The corpus describes starting boards as annotation nodes and edges: boards
+ * saved before Airo drew v2 shapes. They are seeded as those legacy strokes,
+ * so every case keeps exercising edits of legacy content; what a case
+ * creates is v2, and the harness projects both into one canonical form.
+ */
 function seedProjectedBoard(projected = {}) {
   let state = createInitialBoardState(projected.boardId ?? "board:primary");
   for (const [index, node] of (projected.nodes ?? []).entries()) {
     const annotation = node.annotation ?? {};
     const bounds = annotation.bounds;
-    state = applyDiagramCommand(
+    state = applyLegacyDiagramFixture(
       state,
       {
         type: "node.create",
@@ -698,7 +705,7 @@ function seedProjectedBoard(projected = {}) {
     if (!annotation.snappedStartStrokeId || !annotation.snappedEndStrokeId) {
       continue;
     }
-    state = applyDiagramCommand(
+    state = applyLegacyDiagramFixture(
       state,
       {
         type: "nodes.connect",

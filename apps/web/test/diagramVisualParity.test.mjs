@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   AIRBOARD_SEMANTIC_NODE_CAPABILITIES,
-  applyDiagramCommand,
+  applyLegacyDiagramFixture,
   createInitialBoardState,
 } from "@airboard/core";
 import {
@@ -52,7 +52,8 @@ test("every catalog placement uses the registry node type and canonical default 
 });
 
 test("manual arrow endpoints use the same node snapping contract as connectors", () => {
-  const boardState = applyDiagramCommand(
+  // Hand-dragged legacy arrows snap to legacy nodes (boards saved before Airo drew v2 shapes).
+  const boardState = applyLegacyDiagramFixture(
     createInitialBoardState("board-1"),
     {
       type: "node.create",

@@ -5,6 +5,7 @@ import {
   applyBoardEvent,
   applyDiagramCommand,
   applyDiagramUndo,
+  boardDiagramGraph,
   createEventEnvelope,
   createInitialBoardState,
 } from "@airboard/core";
@@ -98,6 +99,13 @@ test("committed strokes and board clears ARE content staleness", () => {
     type: "board.cleared",
   });
   assert.equal(boardContentChanged(committed, cleared), true);
+
+  // A v2 shape (all Airo and typed commands make now) is content too.
+  const shaped = applyDiagramCommand(cleared, {
+    type: "node.create", nodeId: "v2", nodeType: "service", label: "API", center: { x: 100, y: 100 },
+  }, { boardSessionId: BOARD_ID, actorParticipantId: "p1", userId: "u" }).state;
+  assert.equal(shaped.strokes, cleared.strokes, "no stroke was touched");
+  assert.equal(boardContentChanged(cleared, shaped), true);
 });
 
 test("grounds a create operation into a diagram command at the pointer", () => {
@@ -725,12 +733,10 @@ test("REGRESSION: reverses the existing edge, adds only the missing edge, and un
   assert.equal(state.strokes.calls.id, "calls");
   assert.equal(state.strokes.calls.annotation.snappedStartStrokeId, "user2");
   assert.equal(state.strokes.calls.annotation.snappedEndStrokeId, "user1");
-  const updatesEdges = Object.values(state.strokes).filter(
-    (stroke) =>
-      stroke.status === "committed" &&
-      stroke.annotation?.snappedStartStrokeId === "user2" &&
-      stroke.annotation?.snappedEndStrokeId === "database" &&
-      stroke.annotation?.label === "updates",
+  // The added edge is a v2 connector between the two legacy nodes: read it
+  // through the model-independent graph.
+  const updatesEdges = boardDiagramGraph(state).edges.filter(
+    (edge) => edge.from === "user2" && edge.to === "database" && edge.label === "updates" && edge.attached,
   );
   assert.equal(updatesEdges.length, 1);
   assert.equal(
@@ -752,11 +758,8 @@ test("REGRESSION: reverses the existing edge, adds only the missing edge, and un
     before.strokes.database.annotation,
   );
   assert.equal(
-    Object.values(undone.state.strokes).filter(
-      (stroke) =>
-        stroke.annotation?.snappedStartStrokeId === "user2" &&
-        stroke.annotation?.snappedEndStrokeId === "database" &&
-        stroke.status === "committed",
+    boardDiagramGraph(undone.state).edges.filter(
+      (edge) => edge.from === "user2" && edge.to === "database",
     ).length,
     0,
     "the added edge is removed by the same undo batch",
@@ -1022,12 +1025,8 @@ test("REGRESSION: the reported flowing-request transcript grounds into the inten
   assert.equal(board.strokes.request.annotation.snappedStartStrokeId, "user2");
   assert.equal(board.strokes.request.annotation.snappedEndStrokeId, "user1");
   assert.equal(
-    Object.values(board.strokes).filter(
-      (stroke) =>
-        stroke.status === "committed" &&
-        stroke.annotation?.snappedStartStrokeId === "user1" &&
-        stroke.annotation?.snappedEndStrokeId === "database" &&
-        stroke.annotation?.label === "updates",
+    boardDiagramGraph(board).edges.filter(
+      (edge) => edge.from === "user1" && edge.to === "database" && edge.label === "updates" && edge.attached,
     ).length,
     1,
   );

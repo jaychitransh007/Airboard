@@ -3,7 +3,8 @@ import { test } from "node:test";
 
 import {
   applyBoardEvent,
-  applyDiagramCommand,
+  applyDiagramCommand as applyCommand,
+  applyLegacyDiagramFixture,
   applyDiagramUndo,
   createBoardSceneElement,
   createEventEnvelope,
@@ -11,6 +12,14 @@ import {
   createRichTextDocument,
   richTextToPlainText,
 } from "../src/index.ts";
+
+// These boards are ones saved before Airo drew v2 shapes: their nodes and
+// connectors are legacy annotation strokes, which must stay editable exactly
+// as before. (New nodes and connectors are v2; see diagramCommandsV2.test.mjs.)
+const applyDiagramCommand = (state, command, commandContext) =>
+  command.type === "node.create" || command.type === "nodes.connect"
+    ? applyLegacyDiagramFixture(state, command, commandContext)
+    : applyCommand(state, command, commandContext);
 
 let eventCounter = 0;
 const context = {

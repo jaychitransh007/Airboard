@@ -12,8 +12,10 @@ import {
   getRouteMidpoint,
 } from "./connectorGeometry.ts";
 import {
+  estimateSceneConnectorLabelWidth,
+  layoutSceneConnectorLabel,
   sampleSceneConnector,
-  sceneConnectorPointAt,
+  sceneConnectorLabelLayoutOnBoard,
 } from "./sceneConnectorGeometry.ts";
 
 const GEOMETRY_EPSILON = 0.001;
@@ -98,6 +100,8 @@ type SpatialConnector = {
   targetId: string | null;
   route: AnnotationPoint[];
   labelBounds: AnnotationBounds | null;
+  /** The label box sits on its own line, which breaks around it. */
+  labelOnLine?: boolean;
 };
 
 type SpatialNodePair = {
@@ -153,11 +157,48 @@ export function inspectBoardSpatialQuality(
       bounds: normalizeBounds(node.bounds),
     }];
   });
+  const routes = new Map(graph.edges.flatMap((edge) =>
+    edge.geometry.start && edge.geometry.end ? [[edge.id, edgeRoutePoints(edge.geometry).map(clonePoint)] as const] : []));
   const connectors = graph.edges.flatMap((edge): SpatialConnector[] => {
     const geometry = edge.geometry;
-    if (!geometry.start || !geometry.end) return [];
-    const route = edgeRoutePoints(geometry).map(clonePoint);
+    const route = routes.get(edge.id);
+    if (!route || !geometry.start || !geometry.end) return [];
     const label = edge.label?.trim() || null;
+    if (geometry.model === "scene") {
+      // A v2 connector's label goes where the renderer draws it: the same
+      // cached layout, when the connector is one of the board's elements.
+      const element = state.elements?.[edge.id];
+      if (element?.kind === "connector") {
+        const layout = label ? sceneConnectorLabelLayoutOnBoard(element, state.elements) : null;
+        return [{
+          id: edge.id,
+          label,
+          sourceId: edge.from,
+          targetId: edge.to,
+          route,
+          labelBounds: layout?.bounds ?? null,
+          labelOnLine: layout?.placement === "on_line",
+        }];
+      }
+      const obstacles = {
+        shapes: nodes.map((node) => node.bounds),
+        // As the renderer: other v2 connectors' lines (it doesn't see legacy strokes).
+        lines: graph.edges.flatMap((other) =>
+          other.id !== edge.id && other.geometry.model === "scene" ? [routes.get(other.id) ?? []] : []),
+      };
+      const layout = label
+        ? layoutSceneConnectorLabel(sceneConnectorShape(geometry), label, estimateSceneConnectorLabelWidth, obstacles)
+        : null;
+      return [{
+        id: edge.id,
+        label,
+        sourceId: edge.from,
+        targetId: edge.to,
+        route,
+        labelBounds: layout?.bounds ?? null,
+        labelOnLine: layout?.placement === "on_line",
+      }];
+    }
     return [{
       id: edge.id,
       label,
@@ -499,6 +540,8 @@ function inspectConnectorLabelEdgeIntersections(
   for (const labelConnector of connectors) {
     if (!labelConnector.labelBounds) continue;
     for (const edgeConnector of connectors) {
+      // A label on its own line is meant to sit there: the line breaks around it.
+      if (edgeConnector === labelConnector && labelConnector.labelOnLine) continue;
       if (
         polylineIntersectsBounds(
           edgeConnector.route,
@@ -515,11 +558,6 @@ function inspectConnectorLabelEdgeIntersections(
   return intersections;
 }
 
-/**
- * Conservative deterministic approximation of the renderer's 13px semibold
- * connector labels. Exact font metrics vary by host, but midpoint-in-node and
- * duplicate-anchor failures remain stable across fonts.
- */
 /** The rendered route of an edge, from whichever model drew it. */
 function edgeRoutePoints(geometry: BoardDiagramEdgeGeometry): AnnotationPoint[] {
   if (geometry.model === "stroke") {
@@ -545,6 +583,8 @@ function sceneConnectorShape(
     start: { point: geometry.start, decoration: "none" },
     end: { point: geometry.end, decoration: "none" },
     controlPoints: geometry.controlPoints,
+    labelPosition: geometry.labelPosition,
+    ...(geometry.routeOffset ? { routeOffset: geometry.routeOffset } : {}),
   } as ConnectorElement;
 }
 
@@ -554,9 +594,7 @@ function connectorLabelBounds(
   route: readonly AnnotationPoint[],
 ): AnnotationBounds | null {
   if (!geometry.start || !geometry.end || !label) return null;
-  const midpoint = geometry.model === "scene"
-    ? sceneConnectorPointAt(sceneConnectorShape(geometry), geometry.labelPosition)
-    : getRouteMidpoint(route);
+  const midpoint = getRouteMidpoint(route);
   if (!midpoint) return null;
   const annotation = { start: geometry.start, end: geometry.end };
   const maxWidth = Math.max(
@@ -566,7 +604,7 @@ function connectorLabelBounds(
   const lines = wrapEstimatedLabel(label, maxWidth).slice(0, 2);
   if (lines.length === 0) return null;
   const width = Math.max(
-    ...lines.map((line) => Math.min(maxWidth, estimateTextWidth(line))),
+    ...lines.map((line) => Math.min(maxWidth, estimateSceneConnectorLabelWidth(line))),
   );
   const height = lines.length * CONNECTOR_LABEL_LINE_HEIGHT;
   return {
@@ -586,7 +624,7 @@ function wrapEstimatedLabel(label: string, maxWidth: number): string[] {
   let current = "";
   for (const word of label.split(/\s+/u).filter(Boolean)) {
     const next = current ? `${current} ${word}` : word;
-    if (current && estimateTextWidth(next) > maxWidth) {
+    if (current && estimateSceneConnectorLabelWidth(next) > maxWidth) {
       lines.push(current);
       current = word;
     } else {
@@ -595,18 +633,6 @@ function wrapEstimatedLabel(label: string, maxWidth: number): string[] {
   }
   if (current) lines.push(current);
   return lines;
-}
-
-function estimateTextWidth(value: string): number {
-  let width = 0;
-  for (const character of value) {
-    if (character === " ") width += 3.5;
-    else if (/[ilI1.,'|]/u.test(character)) width += 3.7;
-    else if (/[MW@#%]/u.test(character)) width += 9.4;
-    else if (/[A-Z0-9]/u.test(character)) width += 7.8;
-    else width += 7;
-  }
-  return Math.max(width, 1);
 }
 
 function polylineIntersectsBounds(

@@ -14,11 +14,15 @@ import {
   connectorEndpointMatchesBinding,
   inferSemanticNodeForLabel,
   connectorGeometryMatchesBindings,
+  isSceneNodeElement,
   isSceneOnlyElement,
+  MIXED_GROUP_MESSAGE,
   nodeVisualDefaultSize,
   pointOnNodeBoundary,
   richTextToPlainText,
   sceneConnectorsBetween,
+  sceneElementNodeType,
+  shapeKindForNodeType,
   type AnnotationNodeType,
   type AnnotationPoint,
   type BoardState,
@@ -28,7 +32,6 @@ import {
   type SemanticPlacement,
   type SemanticLayoutDirection,
   type SemanticPlanAction,
-  type ShapeKind,
   type StrokeAnnotation,
 } from "@airboard/core";
 import { findAnnotationObjectAtPoint } from "@airboard/drawing-engine";
@@ -48,11 +51,12 @@ import {
  * second while a hand or pointer is moving, so object identity is useless as
  * a staleness signal — it would reject every semantic plan while the camera
  * is live. Grounding only cares about committed diagram content: the reducer
- * replaces `strokes` on every commit/label/erase/delete/restore/clear and
- * preserves it for cursor and in-flight ink events.
+ * replaces `strokes` (legacy annotations) and `elements` (v2 objects, which is
+ * all Airo and the typed grammar make now) on every change to either, and
+ * preserves both for cursor, presence and in-flight ink events.
  */
 export function boardContentChanged(a: BoardState, b: BoardState): boolean {
-  return a.strokes !== b.strokes || a.clearedAt !== b.clearedAt;
+  return a.strokes !== b.strokes || a.elements !== b.elements || a.clearedAt !== b.clearedAt;
 }
 
 /**
@@ -228,9 +232,7 @@ function resolveSemanticPlanActionSteps(
       if (endpoints.created.length > 0) {
         // The new shapes aren't on the board yet, so there is nothing to
         // reuse: create them and draw the arrow in one step.
-        const connect = endpoints.sceneEndpoint
-          ? sceneConnectCommand(endpoints.fromId, endpoints.toId, action.label)
-          : semanticConnectCommand(endpoints.fromId, endpoints.toId, action.label, context.strokeColor);
+        const connect = semanticConnectCommand(endpoints.fromId, endpoints.toId, action.label, context.strokeColor);
         return {
           commands: [...endpoints.created, connect],
           selectionAfter: [endpoints.fromId, endpoints.toId],
@@ -260,7 +262,7 @@ function resolveSemanticPlanActionSteps(
           ...(repairKinds.length > 0 ? { repairKinds } : {}),
         };
       }
-      // A v2 shape (typed command or toolbar) can only take a v2 connector.
+      // A v2 shape can only take a v2 connector (which is all nodes.connect draws).
       if (isSceneOnlyElement(context.boardState, from.id) || isSceneOnlyElement(context.boardState, to.id)) {
         const relabel = action.label !== null && existing.length === 1 ? existing[0]! : null;
         return {
@@ -269,7 +271,7 @@ function resolveSemanticPlanActionSteps(
               ? relabel.scene
                 ? { type: "scene.rename", elementId: relabel.id, label: action.label! }
                 : { type: "object.rename", objectId: relabel.id, label: action.label! }
-              : sceneConnectCommand(from.id, to.id, action.label),
+              : semanticConnectCommand(from.id, to.id, action.label, context.strokeColor),
           ],
           selectionAfter: [from.id, to.id],
           ...(repairKinds.length > 0 ? { repairKinds } : {}),
@@ -448,11 +450,7 @@ function resolveSemanticPlanActionSteps(
         if (to.id === from.id) {
           return { error: "A decision branch cannot point back to its source object." };
         }
-        commands.push(
-          isSceneOnlyElement(context.boardState, from.id) || isSceneOnlyElement(context.boardState, to.id)
-            ? sceneConnectCommand(from.id, to.id, branch.label)
-            : semanticConnectCommand(from.id, to.id, branch.label, context.strokeColor),
-        );
+        commands.push(semanticConnectCommand(from.id, to.id, branch.label, context.strokeColor));
         targetIds.push(to.id);
       }
       if (new Set(targetIds).size !== targetIds.length) {
@@ -610,10 +608,10 @@ function resolveSemanticPlanActionSteps(
       const groupId = crypto.randomUUID();
       const { legacy, scene } = splitByWorld(context.boardState, targets.ids);
       if (scene.length > 0) {
+        // Only shapes on a board saved before Airo drew v2 shapes are
+        // legacy; every shape made since, Airo's included, groups together.
         if (legacy.length > 0) {
-          return {
-            error: "Airo can't group its own diagram shapes with shapes added from the toolbar or with typed commands yet. Select them and use the toolbar.",
-          };
+          return { error: MIXED_GROUP_MESSAGE };
         }
         // A section, as the toolbar makes. Sections aren't objects Airo names,
         // so the shapes stay selected rather than the section.
@@ -661,7 +659,12 @@ function resolveSemanticPlanActionSteps(
         }
         // Only v2 shapes have a shape to change; a sticky or text stays as it is.
         return context.boardState.elements[id]?.kind === "shape"
-          ? [{ type: "scene.retype", elementId: id, shapeKind: action.shape ?? shapeKindForNodeType(action.nodeType) }]
+          ? [{
+              type: "scene.retype",
+              elementId: id,
+              shapeKind: action.shape ?? shapeKindForNodeType(action.nodeType),
+              nodeType: action.nodeType,
+            }]
           : [];
       });
       return commands.length > 0
@@ -727,18 +730,6 @@ function resolveSemanticPlanActionSteps(
   }
 }
 
-/** The shape a v2 element takes for a node type, matching how legacy nodes are mirrored. */
-function shapeKindForNodeType(nodeType: AnnotationNodeType): ShapeKind {
-  switch (nodeType) {
-    case "decision": return "diamond";
-    case "io": return "right-parallelogram";
-    case "circle": return "ellipse";
-    case "note":
-    case "custom": return "rounded-rectangle";
-    default: return nodeType;
-  }
-}
-
 /**
  * Grounds both ends of a connect step. A name that matches nothing on the
  * board is a shape the person expects to exist ("connect the user to the
@@ -755,7 +746,6 @@ function resolveConnectEndpointsCreatingMissing(
       fromId: string;
       toId: string;
       created: DiagramCommand[];
-      sceneEndpoint: boolean;
       repairKinds: SemanticGroundingRepairKind[];
     }
   | Extract<SemanticActionResolution, { error: string }> {
@@ -803,7 +793,6 @@ function resolveConnectEndpointsCreatingMissing(
     fromId,
     toId,
     created,
-    sceneEndpoint: isSceneOnlyElement(context.boardState, fromId) || isSceneOnlyElement(context.boardState, toId),
     repairKinds: [...repairKinds],
   };
 }
@@ -855,6 +844,7 @@ function besideCenter(
   return { x: center.x + (direction === "left" ? -offset : offset), y: center.y };
 }
 
+/** A new arrow, drawn as a v2 connector whichever kind of object each end is. */
 function semanticConnectCommand(
   fromId: string,
   toId: string,
@@ -869,16 +859,6 @@ function semanticConnectCommand(
     ...(label ? { label } : {}),
     source: "voice",
     style: { strokeColor },
-  };
-}
-
-function sceneConnectCommand(fromId: string, toId: string, label: string | null): DiagramCommand {
-  return {
-    type: "scene.connect",
-    connectorId: crypto.randomUUID(),
-    fromId,
-    toId,
-    ...(label ? { label } : {}),
   };
 }
 
@@ -1914,8 +1894,12 @@ export function resolveIntentOperation(
   operation: IntentCanvasOperation,
   context: IntentResolutionContext,
 ): IntentResolution {
+  // Legacy strokes (boards saved before Airo drew v2 shapes) and v2 objects
+  // alike: everything this grammar creates now is v2.
   const selectionIds = context.selectionIds.filter(
-    (strokeId) => context.boardState.strokes[strokeId]?.status === "committed",
+    (strokeId) =>
+      context.boardState.strokes[strokeId]?.status === "committed" ||
+      isSceneOnlyElement(context.boardState, strokeId),
   );
   const primarySelectionId =
     context.primarySelectionId && selectionIds.includes(context.primarySelectionId)
@@ -2188,7 +2172,9 @@ export function resolveIntentOperation(
       }
       const commands: DiagramCommand[] = [];
       for (const objectId of targetIds) {
-        const bounds = context.boardState.strokes[objectId]?.annotation?.bounds;
+        const bounds = isNodeObject(context.boardState, objectId)
+          ? semanticObjectBounds(context.boardState, objectId)
+          : null;
         if (!bounds) {
           continue;
         }
@@ -2246,9 +2232,14 @@ export function resolveIntentOperation(
     }
 
     case "select_all": {
-      const ids = Object.values(context.boardState.strokes)
-        .filter((stroke) => stroke.status === "committed" && stroke.annotation)
-        .map((stroke) => stroke.id);
+      const ids = [
+        ...Object.values(context.boardState.strokes)
+          .filter((stroke) => stroke.status === "committed" && stroke.annotation)
+          .map((stroke) => stroke.id),
+        ...Object.values(context.boardState.elements)
+          .filter((element) => element.visible && isSceneOnlyElement(context.boardState, element.id))
+          .map((element) => element.id),
+      ];
       if (ids.length === 0) {
         return { error: "The board has no objects to select yet." };
       }
@@ -2426,28 +2417,18 @@ function resolveConnectionReference(
   }
 
   const search = (lookup: string, nodeTypeFilter: string | null) => {
-    const candidates = Object.values(state.strokes).flatMap((stroke) => {
-      const annotation = stroke.annotation;
-      if (
-        stroke.status !== "committed" ||
-        !annotation ||
-        annotation.type === "connector" ||
-        annotation.type === "arrow" ||
-        !annotation.bounds
-      ) {
+    const candidates = nameableObjects(state).flatMap((object) => {
+      if (nodeTypeFilter && object.nodeType !== nodeTypeFilter) {
         return [];
       }
-      if (nodeTypeFilter && annotation.nodeType !== nodeTypeFilter) {
-        return [];
-      }
-      const label = normalizeObjectLookup(annotation.label ?? "");
-      const nodeType = normalizeObjectLookup(annotation.nodeType ?? "");
+      const label = normalizeObjectLookup(object.label);
+      const nodeType = normalizeObjectLookup(object.nodeType);
       const exactLabel = lookup.length > 0 && label === lookup;
       const exactType = lookup.length > 0 && nodeType === lookup;
       if (!exactLabel && !exactType && !(lookup.length === 0 && nodeTypeFilter)) {
         return [];
       }
-      return [{ id: stroke.id, exactLabel }];
+      return [{ id: object.id, exactLabel }];
     });
     const exactLabelMatches = candidates.filter((candidate) => candidate.exactLabel);
     return exactLabelMatches.length > 0 ? exactLabelMatches : candidates;
@@ -2475,6 +2456,44 @@ function resolveConnectionReference(
     };
   }
   return { id: matches[0]!.id };
+}
+
+/**
+ * Objects this grammar can name, with the label as written (empty when it has
+ * none) and the diagram type: legacy nodes on boards saved before Airo drew
+ * v2 shapes, then v2 nodes.
+ */
+function nameableObjects(state: BoardState): Array<{ id: string; label: string; nodeType: string }> {
+  const legacy = Object.values(state.strokes).flatMap((stroke) => {
+    const annotation = stroke.annotation;
+    if (
+      stroke.status !== "committed" ||
+      !annotation ||
+      annotation.type === "connector" ||
+      annotation.type === "arrow" ||
+      !annotation.bounds
+    ) {
+      return [];
+    }
+    return [{ id: stroke.id, label: annotation.label ?? "", nodeType: annotation.nodeType ?? "" }];
+  });
+  const scene = Object.values(state.elements).flatMap((element) =>
+    isSceneNodeElement(element) && isSceneOnlyElement(state, element.id)
+      ? [{
+          id: element.id,
+          label: "content" in element ? richTextToPlainText(element.content).trim() : "",
+          nodeType: sceneElementNodeType(element),
+        }]
+      : []);
+  return [...legacy, ...scene];
+}
+
+/** A shape (not a line): a legacy node with a box, or a v2 node. */
+function isNodeObject(state: BoardState, id: string | null | undefined): id is string {
+  if (!id) return false;
+  const annotation = state.strokes[id]?.annotation;
+  if (annotation) return Boolean(annotation.bounds) && state.strokes[id]?.status !== "deleted";
+  return isSceneOnlyElement(state, id) && isSceneNodeElement(state.elements[id]);
 }
 
 type AttachableConnection = { id: string; fromId: string; toId: string };
@@ -2664,6 +2683,13 @@ function findConnectionsBetween(
       }
     }
   }
+  // v2 connectors are always bound at both ends.
+  for (const connector of [
+    ...sceneConnectorsBetween(boardState, firstId, secondId),
+    ...sceneConnectorsBetween(boardState, secondId, firstId),
+  ]) {
+    if (!boardState.strokes[connector.id]) matches.push(connector.id);
+  }
   return matches.sort((left, right) => left.localeCompare(right));
 }
 
@@ -2752,7 +2778,9 @@ function resolvePlacementCenter(
     case "pointer":
       return context.pointer;
   }
-  const bounds = referenceId ? context.boardState.strokes[referenceId]?.annotation?.bounds : undefined;
+  const bounds = isNodeObject(context.boardState, referenceId)
+    ? semanticObjectBounds(context.boardState, referenceId)
+    : null;
   if (!bounds) {
     return placement.relativeTo.kind === "focus" ? context.pointer : null;
   }
@@ -2780,8 +2808,7 @@ function resolveDeicticIds(input: {
   primarySelectionId: string | null;
   hoverStrokeId: string | null;
 }): { thisId: string | null; thatId: string | null } {
-  const isNode = (strokeId: string | null): strokeId is string =>
-    Boolean(strokeId && input.boardState.strokes[strokeId]?.annotation?.bounds);
+  const isNode = (strokeId: string | null): strokeId is string => isNodeObject(input.boardState, strokeId);
   const thisId = isNode(input.primarySelectionId)
     ? input.primarySelectionId
     : input.selectionIds.find((strokeId) => isNode(strokeId)) ?? null;
