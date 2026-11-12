@@ -1,24 +1,24 @@
 import type { Metadata } from "next";
 import { PilotInfoPage } from "../../../src/features/pilot/PilotInfoPage";
 
-export const metadata: Metadata = { title: "Meet overlay privacy" };
+export const metadata: Metadata = { title: "Pilot privacy" };
 
 export default function PilotPrivacyPage() {
   return (
-    <PilotInfoPage title="Meet overlay preview privacy" summary="What the Airboard Chrome extension processes while it places diagrams on your outgoing Meet camera.">
+    <PilotInfoPage title="Pilot privacy" summary="What Airboard processes during the pilot. The full notice is the Airboard privacy notice.">
       <section>
-        <h2>Account and installation</h2>
-        <p>Airboard processes your account identity, organization, installation version, settings, affirmative consent record, entitlement, and content-free readiness counters to connect and operate the extension. The extension receives a revocable installation credential—not your password or identity-provider access token.</p>
+        <h2>Camera, microphone and voice</h2>
+        <p>Camera frames are processed live in your browser to track your hands and to show you behind the board. Microphone audio is streamed through the Airboard API to Deepgram for transcription while Airo's voice is on, and only when your microphone picks up sound; silence is not sent. Your microphone can also pick up other people in the room or from your speakers. When Airboard's built-in rules can't finish a command meant for Airo, the command text and a summary of the board can be sent to OpenAI to interpret it. Airboard does not store raw camera frames or microphone audio.</p>
+        <p>In Google Meet you present the Airboard tab yourself, so the audience sees exactly that tab. Airboard does not join, read or record the meeting.</p>
       </section>
       <section>
-        <h2>Camera, microphone, and board content</h2>
-        <p>After confirmation, camera frames are processed live for the camera composite and gesture alignment. Microphone audio is processed only while Airo is enabled and can be streamed through the Airboard API to Deepgram for transcription. When deterministic parsing cannot safely finish a command, bounded command text and board context can be sent to OpenAI for interpretation. Airboard does not store raw camera frames or microphone audio.</p>
-        <p>Diagram state is rendered in a private Airboard frame and transferred as image frames to the Meet compositor. Account controls, logs, meeting URLs, and browser history are not added to the outgoing video.</p>
+        <h2>Boards and account</h2>
+        <p>Airboard stores your Google sign-in identity, workspace, settings and the boards you create, including images you add to them. Deleting a board erases it straight away.</p>
       </section>
       <section>
         <h2>Diagnostics and choices</h2>
-        <p>Readiness diagnostics contain capability state, extension version, error codes, timestamps, and WebRTC counters such as encoded frames and outbound bytes. Content-free voice traces contain stage, outcome, timing, and action-type metadata and expire after at most 14 days. These records exclude raw media, meeting URLs, transcripts, commands, and board labels.</p>
-        <p>You can disable overlay, camera, or Airo from the popup; revoke the installation from Airboard; remove Meet site access in Chrome; or uninstall the extension.</p>
+        <p>Content-free voice diagnostics (stage, outcome and timing, no audio, transcripts or board labels) expire within 14 days. Content-free product analytics are kept for 90 days, and support diagnostics you create for seven days. You can turn the camera or microphone off in Settings → Preferences, block them in your browser, and in Settings → Privacy &amp; data request a data export or schedule account deletion (you can cancel for seven days).</p>
+        <p>Read the full <a href="/privacy">Airboard privacy notice</a>.</p>
       </section>
     </PilotInfoPage>
   );
