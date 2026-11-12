@@ -4,7 +4,7 @@ import { test } from "node:test";
 import {
   getConnectorRoutePoints,
   getRouteMidpoint,
-} from "../dist/drawing-engine/src/connectorGeometry.js";
+} from "../src/connectorGeometry.ts";
 
 test("route offsets separate reciprocal connector bodies and label anchors", () => {
   const forward = {

@@ -39,7 +39,6 @@ export type PalmPresentationEstimate = {
 const WRIST = 0;
 const INDEX_MCP = 5;
 const MIDDLE_MCP = 9;
-const RING_MCP = 13;
 const PINKY_MCP = 17;
 
 const FINGERS: readonly [mcp: number, pip: number, tip: number][] = [

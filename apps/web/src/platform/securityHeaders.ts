@@ -11,11 +11,7 @@ import { INTERACTIVE_EMBED_HOSTS } from "../features/board/scenePlaybackOverlayG
  * Docs/Security Headers.md explains each source.
  */
 
-/** The private renderer the Chrome extension frames inside Google Meet. */
-export const MEET_OVERLAY_ENGINE_PATH = "/meet/overlay-engine";
-const MEET_ORIGIN = "https://meet.google.com";
 const GITHUB_API_ORIGIN = "https://api.github.com";
-const CHROME_EXTENSION_ID_PATTERN = /^[a-p]{32}$/;
 
 export type SecurityHeaderOptions = {
   pathname: string;
@@ -27,8 +23,6 @@ export type SecurityHeaderOptions = {
   apiUrl: string;
   /** NEXT_PUBLIC_SUPABASE_URL, when sign-in is configured. */
   supabaseUrl?: string | undefined;
-  /** NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_ID: the extension allowed to frame the overlay engine. */
-  chromeExtensionId?: string | undefined;
 };
 
 export function createCspNonce(): string {
@@ -37,23 +31,17 @@ export function createCspNonce(): string {
   return btoa(String.fromCharCode(...bytes));
 }
 
-export function isMeetOverlayEnginePath(pathname: string): boolean {
-  return pathname === MEET_OVERLAY_ENGINE_PATH || pathname === `${MEET_OVERLAY_ENGINE_PATH}/`;
-}
-
 /** The headers for one response, by page type. */
 export function securityHeaders(options: SecurityHeaderOptions): Record<string, string> {
-  const overlayEngine = isMeetOverlayEnginePath(options.pathname);
   const headers: Record<string, string> = {
     "Content-Security-Policy": contentSecurityPolicy(options),
     "X-Content-Type-Options": "nosniff",
     // The share page keeps its token out of every Referer header.
     "Referrer-Policy": isSharePath(options.pathname) ? "no-referrer" : "strict-origin-when-cross-origin",
-    "Permissions-Policy": permissionsPolicy(overlayEngine),
+    "Permissions-Policy": permissionsPolicy(),
+    // No page may be framed (frame-ancestors 'none' says the same to newer browsers).
+    "X-Frame-Options": "DENY",
   };
-  // The overlay engine is framed by the extension inside Meet; frame-ancestors
-  // alone governs it there. Every other page refuses to be framed at all.
-  if (!overlayEngine) headers["X-Frame-Options"] = "DENY";
   // Browsers ignore HSTS over plain HTTP, but a dev server on https://localhost
   // would pin localhost for every other project, so send it only in production.
   if (!options.development) headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains";
@@ -91,7 +79,7 @@ export function contentSecurityPolicy(options: SecurityHeaderOptions): string {
     ["object-src", ["'none'"]],
     ["base-uri", ["'self'"]],
     ["form-action", ["'self'"]],
-    ["frame-ancestors", frameAncestors(options)],
+    ["frame-ancestors", ["'none'"]],
   ];
   return directives
     .map(([name, sources]) => {
@@ -102,29 +90,12 @@ export function contentSecurityPolicy(options: SecurityHeaderOptions): string {
 }
 
 /**
- * The overlay engine is nested two deep: Meet's page frames the extension's
- * engine.html (chrome-extension://<id>), which frames this page. frame-ancestors
- * checks every ancestor, so both must be listed.
- */
-function frameAncestors(options: SecurityHeaderOptions): string[] {
-  if (!isMeetOverlayEnginePath(options.pathname)) return ["'none'"];
-  const extensions: string[] = [];
-  const id = options.chromeExtensionId?.trim() ?? "";
-  if (CHROME_EXTENSION_ID_PATTERN.test(id)) extensions.push(`chrome-extension://${id}`);
-  // An unpacked build's ID depends on its folder. The renderer accepts one only
-  // outside production, and only with the relay nonce (extensionRelayTrust.ts).
-  if (options.development) extensions.push("chrome-extension:");
-  return extensions.length ? [MEET_ORIGIN, ...extensions] : ["'none'"];
-}
-
-/**
- * Camera, microphone and screen capture for the app's own pages; the overlay
- * engine gets none, since Meet's page captures and relays the media to it.
+ * Camera, microphone and screen capture for the app's own pages only.
  * autoplay, fullscreen, encrypted-media and picture-in-picture keep their
  * defaults so allowlisted embeds can still use what their iframe allows.
  */
-function permissionsPolicy(overlayEngine: boolean): string {
-  const capture = overlayEngine ? "()" : "(self)";
+function permissionsPolicy(): string {
+  const capture = "(self)";
   return [
     `camera=${capture}`,
     `microphone=${capture}`,

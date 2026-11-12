@@ -23,22 +23,30 @@ export const WORKSPACE_SECTIONS = [
 export const WORKSPACE_ADMIN_SECTIONS = [
   ["members", "Members"],
   ["policies", "Policies"],
-  ["identity-directory", "SSO & SCIM"],
   ["audit-logs", "Audit log"],
 ] as const;
 
-// Old Administration links, from before admin moved into Settings.
+// Old Administration links, from before admin moved into Settings. SSO & SCIM
+// (identity-directory) was removed on 12 Nov 2026; its links land on Workspace.
 const ADMIN_SECTION_MOVES: Record<string, string> = {
   overview: "workspace",
   installations: "workspace",
   members: "members",
   policies: "policies",
-  "identity-directory": "identity-directory",
   "audit-logs": "audit-logs",
 };
 
 export function movedAdminSection(section: string): string {
   return ADMIN_SECTION_MOVES[section] ?? "workspace";
+}
+
+/** Settings pages that no longer exist, and where their old links now land. */
+const REMOVED_SETTINGS_SECTIONS: Record<string, string> = {
+  "identity-directory": "workspace",
+};
+
+export function removedSettingsSection(section: string): string | null {
+  return REMOVED_SETTINGS_SECTIONS[section] ?? null;
 }
 
 export function isWorkspaceAdminSection(section: string): boolean {

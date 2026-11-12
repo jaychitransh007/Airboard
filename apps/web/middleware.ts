@@ -15,7 +15,6 @@ export function middleware(request: NextRequest) {
     development: process.env.NODE_ENV === "development",
     apiUrl: process.env.NEXT_PUBLIC_AIRBOARD_API_URL?.trim() || "http://127.0.0.1:4000",
     supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
-    chromeExtensionId: process.env.NEXT_PUBLIC_AIRBOARD_CHROME_EXTENSION_ID,
   });
 
   // Temporary (307) so an alias can be re-enabled without browsers holding a

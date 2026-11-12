@@ -4,7 +4,7 @@ import { test } from "node:test";
 import {
   findAnnotationObjectAtPoint,
   strokeIntersectsCircle,
-} from "../dist/drawing-engine/src/hitTest.js";
+} from "../src/hitTest.ts";
 
 const rectangleStroke = {
   id: "rect-1",

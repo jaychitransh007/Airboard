@@ -1,6 +1,5 @@
 import {
   canJoinBoard,
-  applyBoardEvent,
   canStartBoard,
   createInitialBoardState,
   reduceBoardEvents,
@@ -250,19 +249,6 @@ export class SupabaseSessionStore implements SessionStore {
     return mapSession(row);
   }
 
-  async endSession(sessionId: string): Promise<BoardSession> {
-    const now = new Date().toISOString();
-    const row = await this.updateSingle<BoardSessionRow>(
-      "board_sessions",
-      {
-        status: "ended",
-        updated_at: now,
-      },
-      { column: "id", value: sessionId },
-    );
-    return mapSession(row);
-  }
-
   async setParticipantDrawing(sessionId: string, allow: boolean): Promise<BoardSession> {
     const row = await this.updateSingle<BoardSessionRow>(
       "board_sessions",
@@ -280,10 +266,6 @@ export class SupabaseSessionStore implements SessionStore {
       { column: "id", value: sessionId },
     );
     return mapSession(row);
-  }
-
-  async appendEvent(sessionId: string, event: BoardEvent): Promise<BoardEvent> {
-    return (await this.appendEvents(sessionId, [event]))[0]!;
   }
 
   async appendEvents(sessionId: string, incoming: BoardEvent[]): Promise<BoardEvent[]> {

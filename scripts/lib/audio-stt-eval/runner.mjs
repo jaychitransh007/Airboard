@@ -257,28 +257,22 @@ function validateScenario(scenario) {
       `Audio/STT scenario ${scenario.id} has an invalid evaluationClass.`,
     );
   }
-  const meetSurface = isMeetSurface(scenario.surface);
+  // The Meet bridge replay went with the Chrome extension (12 Nov 2026), so a
+  // scenario on a Meet surface, or one claiming Meet bridge transport, has no
+  // production path to replay through. Meet calls now present the standalone
+  // board's tab, whose audio is the direct path.
   if (
-    meetSurface &&
-    (scenario.transport !== "meet-bridge" ||
-      scenario.adapter !== "meet-bridge-replay")
+    isMeetSurface(scenario.surface) ||
+    scenario.transport === "meet-bridge" ||
+    scenario.adapter === "meet-bridge-replay"
   ) {
     throw new Error(
-      `Audio/STT scenario ${scenario.id} claims a Meet surface without the production Meet bridge replay transport.`,
-    );
-  }
-  if (
-    !meetSurface &&
-    (scenario.transport === "meet-bridge" ||
-      scenario.adapter === "meet-bridge-replay")
-  ) {
-    throw new Error(
-      `Audio/STT scenario ${scenario.id} claims Meet bridge transport on a non-Meet surface.`,
+      `Audio/STT scenario ${scenario.id} claims a Meet surface or Meet bridge transport, which can no longer be replayed (the Meet bridge was removed).`,
     );
   }
   if (
     scenario.transport !== undefined &&
-    !["direct", "meet-bridge"].includes(scenario.transport)
+    scenario.transport !== "direct"
   ) {
     throw new Error(
       `Audio/STT scenario ${scenario.id} has an invalid transport.`,

@@ -24,16 +24,16 @@ test("signed tokens round-trip bounded, purpose-scoped claims", () => {
 
 test("purpose mismatch, secret mismatch and tampering fail closed", () => {
   const token = issueSignedToken(SECRET, {
-    purpose: "installation_link",
+    purpose: "join",
     sub: "profile-1",
-    installationId: "install-1",
+    sessionId: "session-1",
     ttlSeconds: 60,
   });
-  assert.equal(verifySignedToken(SECRET, token, "installation"), null);
-  assert.equal(verifySignedToken("different-secret", token, "installation_link"), null);
+  assert.equal(verifySignedToken(SECRET, token, "realtime"), null);
+  assert.equal(verifySignedToken("different-secret", token, "join"), null);
   const [payload, signature] = token.split(".");
-  assert.equal(verifySignedToken(SECRET, `${payload}x.${signature}`, "installation_link"), null);
-  assert.equal(verifySignedToken(SECRET, `${payload}.${signature}.extra`, "installation_link"), null);
+  assert.equal(verifySignedToken(SECRET, `${payload}x.${signature}`, "join"), null);
+  assert.equal(verifySignedToken(SECRET, `${payload}.${signature}.extra`, "join"), null);
 });
 
 test("bearer parsing is case-insensitive and rejects ambiguous input", () => {
@@ -44,15 +44,13 @@ test("bearer parsing is case-insensitive and rejects ambiguous input", () => {
   assert.equal(bearerToken({}), null);
 });
 
-test("installation credentials support a ninety-day sliding window", () => {
+test("signed capabilities never outlive seven days", () => {
   const token = issueSignedToken(SECRET, {
-    purpose: "installation",
+    purpose: "realtime_refresh",
     sub: "profile-1",
-    organizationId: "org-1",
-    installationId: "install-1",
     ttlSeconds: 90 * 24 * 60 * 60,
   });
-  const claims = verifySignedToken(SECRET, token, "installation");
+  const claims = verifySignedToken(SECRET, token, "realtime_refresh");
   assert.ok(claims);
-  assert.ok((claims.exp - claims.iat) >= 89 * 24 * 60 * 60);
+  assert.equal(claims.exp - claims.iat, 7 * 24 * 60 * 60);
 });

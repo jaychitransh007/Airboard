@@ -43,7 +43,7 @@ ink.
 
 ## Hide the diagram
 
-Use the overflow menu, press `Shift+H`, say a supported hide/show command, or
+Choose the eye icon (**Hide diagram**) at the bottom left of the board, press `Shift+H`, say a supported hide/show command, or
 use the thumb–middle-finger snap gesture. Hiding removes the diagram and scrim
 while leaving the screen or camera source running.
 

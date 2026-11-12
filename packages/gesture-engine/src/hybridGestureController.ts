@@ -450,20 +450,6 @@ export function normalizeControlPoint(
   };
 }
 
-/** Maps a normalized camera point directly to a compact-zone canvas position. */
-export function mapControlZonePointToCanvas(
-  point: Vector2D,
-  config: Pick<
-    HybridGestureControllerConfig,
-    "canvasWidth" | "canvasHeight" | "controlZone" | "mirrorX"
-  >,
-): Vector2D {
-  return controlPointToCanvas(
-    normalizeControlPoint(point, config.controlZone, config.mirrorX),
-    config,
-  );
-}
-
 function resolveConfig(options: HybridGestureControllerOptions): HybridGestureControllerConfig {
   const controlZone = { ...defaultControlZone, ...options.controlZone };
   const config: HybridGestureControllerConfig = {

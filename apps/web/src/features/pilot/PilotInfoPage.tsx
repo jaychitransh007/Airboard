@@ -23,19 +23,20 @@ export function PilotInfoPage({
             <a href="/pilot/support">Support</a>
             <a href="/pilot/privacy">Privacy</a>
             <a href="/pilot/terms">Terms</a>
+            <a href="/pilot/draft-opt-out">Leave</a>
           </nav>
         </header>
         <div className="pilot-info-content">
-          <p className="pilot-info-kicker">Google Meet public-draft evaluation</p>
+          <p className="pilot-info-kicker">Airboard controlled pilot</p>
           <h1>{title}</h1>
           <p className="pilot-info-summary">{summary}</p>
           <div className="pilot-info-notice">
-            This page applies to the non-production Airboard Pilot and designated draft testers. It
-            is not a production service commitment.
+            This page is for people in the Airboard controlled pilot. The pilot is a pre-release
+            service, not a production service commitment.
           </div>
           {children}
           <footer>
-            <span>Last updated: July 16, 2026</span>
+            <span>Last updated: November 12, 2026</span>
             <a href={`mailto:${PILOT_CONTACT}`}>{PILOT_CONTACT}</a>
           </footer>
         </div>

@@ -171,7 +171,7 @@ test("keeps append order while bounding events per turn and total turns", () => 
   assert.equal(buffer.get("voice-turn-0002").events[0].sequence, 1);
 });
 
-test("exposes same-origin append and local diagnostic retrieval routes", async (t) => {
+test("accepts same-origin trace appends and redacts speech before storing them", async (t) => {
   const server = Fastify({ logger: false });
   const buffer = new VoiceTraceBuffer();
   registerVoiceTraceRoutes(
@@ -207,20 +207,8 @@ test("exposes same-origin append and local diagnostic retrieval routes", async (
     sequence: 1,
   });
 
-  const diagnostic = await server.inject({
-    method: "GET",
-    url: "/voice/trace/voice-turn-1234",
-    headers: { origin: "http://localhost:3000" },
-  });
-  assert.equal(diagnostic.statusCode, 200);
-  assert.equal(diagnostic.json().events[0].stage, "stt_final");
-  assert.equal(diagnostic.json().events[0].data.transcript, "[CONTENT_REDACTED]");
-  assert.equal(diagnostic.json().droppedEvents, 0);
-
-  const missing = await server.inject({
-    method: "GET",
-    url: "/voice/trace/voice-turn-9999",
-    headers: { origin: "http://localhost:3000" },
-  });
-  assert.equal(missing.statusCode, 404);
+  const stored = buffer.get("voice-turn-1234");
+  assert.equal(stored.events[0].stage, "stt_final");
+  assert.equal(stored.events[0].data.transcript, "[CONTENT_REDACTED]");
+  assert.equal(stored.droppedEvents, 0);
 });

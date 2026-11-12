@@ -42,7 +42,8 @@ export type Vector2D = {
   y: number;
 };
 
-export type MarkerInputMode = "hand_marker" | "physical_marker";
+/** The hand marker is the only marker input mode. */
+export type MarkerInputMode = "hand_marker";
 
 export type MarkerInputSource = "hand_gesture" | "physical_marker" | "pointer";
 
@@ -177,7 +178,6 @@ export type FrictionDiagnostics = {
   repositionCount: number;
   strokePointCount: number;
   frameTimeMs: number;
-  inputMode?: MarkerInputMode;
   inputSource?: MarkerInputSource;
   trackingSource?: MarkerTipSource;
   gripConfidence?: number;
@@ -189,114 +189,6 @@ export type FrictionDiagnostics = {
   shaftVectorX?: number;
   shaftVectorY?: number;
   fallbackToHandGesture?: boolean;
-};
-
-export type MarkerGripFeatures = {
-  thumbIndexDistance: number;
-  thumbMiddleDistance: number;
-  indexCurl: number;
-  middleCurl: number;
-  ringCurl: number;
-  pinkyCurl: number;
-  palmOrientation: number;
-  handScale: number;
-  gripStability: number;
-  thumbIndexProximityScore: number;
-  fingerCurlScore: number;
-  shaftDirectionScore: number;
-  handednessScore: number;
-};
-
-export type MarkerGripResult = {
-  detected: boolean;
-  confidence: number;
-  handedness: Handedness;
-  handednessConfidence: number;
-  gripCenter: CursorPoint;
-  handScale: number;
-  shaftVector: Vector2D;
-  stability: number;
-  features: MarkerGripFeatures;
-};
-
-export type MarkerTipCalibration = {
-  gripToTipOffsetNorm: Vector2D;
-  gripToTipOffsetPx?: Vector2D;
-  handScaleAtCalibration: number;
-  markerLengthEstimatePx?: number;
-  confidence: number;
-  updatedAt: string;
-};
-
-export type MarkerTipEstimate = {
-  point: CursorPoint;
-  source: MarkerTipSource;
-  confidence: number;
-  rawPoint?: CursorPoint;
-  smoothedPoint?: CursorPoint;
-};
-
-export type PhysicalMarkerModeConfig = {
-  camera: {
-    width: number;
-    height: number;
-    frameRate: number;
-  };
-  grip: {
-    markerHand: Handedness | "either";
-    minMarkerGripConfidence: number;
-    minHandednessConfidence: number;
-    stabilityWindowMs: number;
-    maxGripFeatureJitter: number;
-  };
-  tip: {
-    minMarkerTipConfidence: number;
-    markerLengthHandScaleMultiplier: number;
-    maxTipJumpHandScaleMultiplier: number;
-    calibrationEnabled: boolean;
-  };
-  contact: {
-    readyThreshold: number;
-    writingThreshold: number;
-    lostThreshold: number;
-    activationDurationMs: number;
-    lossGraceMs: number;
-  };
-  motion: {
-    maxWritingSpeedPxPerSec: number;
-    maxAccelerationPxPerSec2: number;
-    repositionSpeedPxPerSec: number;
-  };
-  friction: Partial<VirtualSurfaceFrictionConfig>;
-  coloredTip: {
-    enabled: boolean;
-    targetHue?: number;
-    tolerance?: number;
-  };
-  debug: {
-    enabled: boolean;
-  };
-  fallbackToHandGesture: boolean;
-};
-
-export type MarkerUserProfile = {
-  id: string;
-  userId?: string;
-  inputTopLeft?: CursorPoint;
-  inputBottomRight?: CursorPoint;
-  boardWidth?: number;
-  boardHeight?: number;
-  mirrorLocalPreview: boolean;
-  tipCalibration?: MarkerTipCalibration;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type PhysicalMarkerDetection = {
-  classifierOutput: GestureClassifierOutput;
-  grip: MarkerGripResult;
-  tip: MarkerTipEstimate;
-  contactScore: number;
 };
 
 export type VirtualSurfaceFrictionConfig = {
@@ -389,61 +281,6 @@ export const defaultVirtualSurfaceFrictionConfig: VirtualSurfaceFrictionConfig =
   showRawHandCursorInDebug: false,
   showVirtualMarkerCursor: true,
   showContactAnimation: true,
-};
-
-export const markerModeFrictionConfig: Partial<VirtualSurfaceFrictionConfig> = {
-  staticFrictionRadiusPx: 5,
-  gainSlow: 0.07,
-  gainNormal: 0.14,
-  gainFast: 0.24,
-  maxWritingSpeedPxPerSec: 800,
-  maxAccelerationPxPerSec2: 2200,
-  repositionSpeedPxPerSec: 1100,
-  activationDurationMs: 180,
-  lowConfidenceGraceMs: 100,
-  contactReadyThreshold: 0.72,
-  contactLostThreshold: 0.55,
-};
-
-export const defaultPhysicalMarkerModeConfig: PhysicalMarkerModeConfig = {
-  camera: {
-    width: 1280,
-    height: 720,
-    frameRate: 30,
-  },
-  grip: {
-    markerHand: "right",
-    minMarkerGripConfidence: 0.72,
-    minHandednessConfidence: 0.65,
-    stabilityWindowMs: 240,
-    maxGripFeatureJitter: 0.4,
-  },
-  tip: {
-    minMarkerTipConfidence: 0.7,
-    markerLengthHandScaleMultiplier: 0.68,
-    maxTipJumpHandScaleMultiplier: 2.4,
-    calibrationEnabled: true,
-  },
-  contact: {
-    readyThreshold: 0.72,
-    writingThreshold: 0.78,
-    lostThreshold: 0.55,
-    activationDurationMs: 180,
-    lossGraceMs: 100,
-  },
-  motion: {
-    maxWritingSpeedPxPerSec: 800,
-    maxAccelerationPxPerSec2: 2200,
-    repositionSpeedPxPerSec: 1100,
-  },
-  friction: markerModeFrictionConfig,
-  coloredTip: {
-    enabled: false,
-  },
-  debug: {
-    enabled: false,
-  },
-  fallbackToHandGesture: true,
 };
 
 export const frictionPresets: Record<

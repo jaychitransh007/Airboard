@@ -1,5 +1,5 @@
 import { clamp, distance } from "./math.ts";
-import type { DetectedHand, HandLandmark } from "./types.ts";
+import type { HandLandmark } from "./types.ts";
 
 export type GrabFinger = "index" | "middle" | "ring" | "pinky";
 
@@ -127,13 +127,6 @@ export function grabStrengthFromLandmarks(
   landmarks: GrabStrengthLandmarks,
 ): number {
   return estimateGrabStrength(landmarks).strength;
-}
-
-/** Convenience wrapper for the gesture engine's MediaPipe-compatible hand. */
-export function grabStrengthFromHand(
-  hand: Pick<DetectedHand, "landmarks"> | null | undefined,
-): number {
-  return hand ? grabStrengthFromLandmarks(hand.landmarks) : 0;
 }
 
 function estimateFingerCurl(

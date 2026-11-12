@@ -12,7 +12,6 @@ import type {
   DrawingElement,
   MindMapNodeElement,
   RichTextDocument,
-  ShapeElement,
   ShapeKind,
   ShapeStyle,
   Stroke,

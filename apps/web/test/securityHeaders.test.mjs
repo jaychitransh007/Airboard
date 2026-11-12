@@ -1,18 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  createCspNonce,
-  isMeetOverlayEnginePath,
-  securityHeaders,
-} from "../src/platform/securityHeaders.ts";
+import { createCspNonce, securityHeaders } from "../src/platform/securityHeaders.ts";
 
-const EXTENSION_ID = "abcdefghijklmnopabcdefghijklmnop";
 const PRODUCTION = {
   nonce: "bm9uY2Utdmx1ZS0xMjM0NQ==",
   development: false,
   apiUrl: "https://api.airboard.test",
   supabaseUrl: "https://project.supabase.co",
-  chromeExtensionId: EXTENSION_ID,
 };
 
 function directives(headers) {
@@ -84,43 +78,22 @@ test("the share page sends no referrer", () => {
   );
 });
 
-test("only the extension inside Meet may frame the overlay engine", () => {
-  const headers = securityHeaders({ ...PRODUCTION, pathname: "/meet/overlay-engine" });
-  const csp = directives(headers);
-  assert.deepEqual(csp["frame-ancestors"], [
-    "https://meet.google.com",
-    `chrome-extension://${EXTENSION_ID}`,
-  ]);
-  assert.equal("X-Frame-Options" in headers, false);
-  assert.match(headers["Permissions-Policy"], /^camera=\(\), microphone=\(\), display-capture=\(\), /);
-  // Its release handshake and the legacy Meet add-on pages are not framed by the extension.
-  for (const pathname of [
-    "/meet/overlay-engine/compatibility",
-    "/meet/main-stage",
-    "/meet/side-panel",
-    "/meet/overlay-engine-x",
-  ]) {
-    const other = securityHeaders({ ...PRODUCTION, pathname });
-    assert.deepEqual(directives(other)["frame-ancestors"], ["'none'"], pathname);
-    assert.equal(other["X-Frame-Options"], "DENY", pathname);
+test("no page may be framed, including the retired Meet paths", () => {
+  for (const pathname of ["/meet/overlay-engine", "/meet/main-stage", "/meet/side-panel", "/"]) {
+    const headers = securityHeaders({ ...PRODUCTION, pathname });
+    assert.deepEqual(directives(headers)["frame-ancestors"], ["'none'"], pathname);
+    assert.equal(headers["X-Frame-Options"], "DENY", pathname);
+    assert.match(headers["Permissions-Policy"], /^camera=\(self\), microphone=\(self\), display-capture=\(self\), /);
   }
 });
 
-test("a production build without a valid extension ID lets nothing frame the overlay engine", () => {
-  for (const chromeExtensionId of [undefined, "", "not-an-extension-id"]) {
-    const csp = directives(securityHeaders({ ...PRODUCTION, chromeExtensionId, pathname: "/meet/overlay-engine" }));
-    assert.deepEqual(csp["frame-ancestors"], ["'none'"]);
-  }
-});
-
-test("development allows eval and unpacked extensions, and sends no HSTS", () => {
+test("development allows eval and sends no HSTS", () => {
   const headers = securityHeaders({
     ...PRODUCTION,
     development: true,
     apiUrl: "http://127.0.0.1:4600",
     supabaseUrl: "",
-    chromeExtensionId: undefined,
-    pathname: "/meet/overlay-engine",
+    pathname: "/",
   });
   const csp = directives(headers);
   assert.ok(csp["script-src"].includes("'unsafe-eval'"));
@@ -130,7 +103,7 @@ test("development allows eval and unpacked extensions, and sends no HSTS", () =>
     "ws://127.0.0.1:4600",
     "https://api.github.com",
   ]);
-  assert.deepEqual(csp["frame-ancestors"], ["https://meet.google.com", "chrome-extension:"]);
+  assert.deepEqual(csp["frame-ancestors"], ["'none'"]);
   assert.equal("Strict-Transport-Security" in headers, false);
 });
 
@@ -144,6 +117,4 @@ test("nonces are fresh and in the form Next.js reads back", () => {
   const first = createCspNonce();
   assert.match(first, /^[A-Za-z0-9+/]{22}==$/);
   assert.notEqual(first, createCspNonce());
-  assert.equal(isMeetOverlayEnginePath("/meet/overlay-engine/"), true);
-  assert.equal(isMeetOverlayEnginePath("/meet/overlay-engine/compatibility"), false);
 });

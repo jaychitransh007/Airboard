@@ -3,8 +3,7 @@ import type { ApiConfig } from "../config";
 import { VoiceTraceBuffer } from "./buffer";
 import { clientKey, configuredApiTokenAllowed, originAllowed } from "../security";
 import { createSharedRateLimiter } from "../sharedRateLimit";
-import { computeVoiceMetrics } from "./metrics";
-import { parseVoiceTraceAppend, parseVoiceTurnId } from "./protocol";
+import { parseVoiceTraceAppend } from "./protocol";
 import { redactDiagnosticData, redactVoiceTraceContent } from "./redaction";
 import type { AuthService } from "../auth";
 
@@ -14,7 +13,6 @@ export function registerVoiceTraceRoutes(
   buffer = new VoiceTraceBuffer(),
   auth?: AuthService,
 ): VoiceTraceBuffer {
-  const ownersByTurn = new Map<string, string>();
   const traceLimiter = createSharedRateLimiter({
     bucket: "voice_trace",
     windowMs: 60_000,
@@ -28,7 +26,7 @@ export function registerVoiceTraceRoutes(
       return reply.code(403).send({ error: "ORIGIN_NOT_ALLOWED" });
     }
     const context = auth
-      ? await auth.authenticate(request, { allowInstallation: true })
+      ? await auth.authenticate(request)
       : null;
     if (!(await diagnosticAccessAllowed(request, config, auth, context))) {
       return reply.code(401).send({ error: "AUTH_REQUIRED" });
@@ -46,16 +44,6 @@ export function registerVoiceTraceRoutes(
     const parsed = parseVoiceTraceAppend(request.body);
     if (!parsed.ok) {
       return reply.code(400).send({ error: parsed.error.code, message: parsed.error.message });
-    }
-    const ownerKey = context?.organizationId ?? "local-development";
-    const existingOwner = ownersByTurn.get(parsed.value.voiceTurnId);
-    if (existingOwner && existingOwner !== ownerKey) {
-      return reply.code(404).send({ error: "VOICE_TRACE_NOT_FOUND" });
-    }
-    ownersByTurn.set(parsed.value.voiceTurnId, ownerKey);
-    if (ownersByTurn.size > 256) {
-      const oldest = ownersByTurn.keys().next().value as string | undefined;
-      if (oldest) ownersByTurn.delete(oldest);
     }
     const sanitizedData = redactVoiceTraceContent(parsed.value.data);
     const event = buffer.append({
@@ -92,51 +80,6 @@ export function registerVoiceTraceRoutes(
       sequence: event.sequence,
     });
   });
-
-  // The product's headline voice metrics, aggregated from the trace buffer.
-  // Same origin gate as the raw traces; returns definitions with the numbers
-  // so a dashboard (or a human) never has to guess what "success" means.
-  server.get("/voice/metrics", async (request, reply) => {
-    if (!originAllowed(request.headers.origin, config.allowedOrigins)) {
-      return reply.code(403).send({ error: "ORIGIN_NOT_ALLOWED" });
-    }
-    const context = auth ? await auth.authenticate(request) : null;
-    if (!(await diagnosticAccessAllowed(request, config, auth, context))) {
-      return reply.code(401).send({ error: "AUTH_REQUIRED" });
-    }
-    const ownerKey = context?.organizationId ?? "local-development";
-    return computeVoiceMetrics(
-      buffer
-        .snapshotTurns()
-        .filter((turn) => !auth || ownersByTurn.get(turn.voiceTurnId) === ownerKey),
-    );
-  });
-
-  server.get<{ Params: { voiceTurnId: string } }>(
-    "/voice/trace/:voiceTurnId",
-    async (request, reply) => {
-      if (!originAllowed(request.headers.origin, config.allowedOrigins)) {
-        return reply.code(403).send({ error: "ORIGIN_NOT_ALLOWED" });
-      }
-      const context = auth ? await auth.authenticate(request) : null;
-      if (!(await diagnosticAccessAllowed(request, config, auth, context))) {
-        return reply.code(401).send({ error: "AUTH_REQUIRED" });
-      }
-      const voiceTurnId = parseVoiceTurnId(request.params.voiceTurnId);
-      if (!voiceTurnId) {
-        return reply.code(400).send({ error: "INVALID_VOICE_TURN_ID" });
-      }
-      const ownerKey = context?.organizationId ?? "local-development";
-      if (auth && ownersByTurn.get(voiceTurnId) !== ownerKey) {
-        return reply.code(404).send({ error: "VOICE_TRACE_NOT_FOUND" });
-      }
-      const snapshot = buffer.get(voiceTurnId);
-      if (!snapshot) {
-        return reply.code(404).send({ error: "VOICE_TRACE_NOT_FOUND" });
-      }
-      return snapshot;
-    },
-  );
 
   return buffer;
 }

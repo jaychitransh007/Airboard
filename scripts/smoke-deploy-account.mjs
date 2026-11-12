@@ -3,8 +3,8 @@ import { createRequire } from "node:module";
 
 // Signed-in deploy smoke for a live API. A throwaway account is created with
 // the Supabase admin key, walks the entitlement, board save, version-conflict,
-// export and delete journey, and is then removed (organizations, profile and
-// auth user) whether or not the journey passed.
+// reload, data-export and permanent-delete journey, and is then removed
+// (organizations, profile and auth user) whether or not the journey passed.
 
 const require = createRequire(new URL("../apps/api/package.json", import.meta.url));
 const { createClient } = require("@supabase/supabase-js");
@@ -92,6 +92,8 @@ async function journey(results) {
   const reloaded = (await call(`/boards/${board.id}`)).body.board;
   assert.equal(reloaded.latest_version, 2);
   assert.equal(reloaded.latest_state.camera.zoom, 1.5);
+  // The Airboards home page lists it.
+  assert.ok((await call("/boards?preview=1")).body.boards.some((item) => item.id === board.id));
   results.boardPersistence = "verified";
 
   const exportRequest = (await call("/privacy/data-requests", {
@@ -104,9 +106,15 @@ async function journey(results) {
   await call(`/privacy/data-requests/${exportRequest.id}`, { method: "DELETE" });
   results.dataExport = "request accepted; completion needs the lifecycle job";
 
-  await call(`/boards/${board.id}`, { method: "DELETE" });
-  assert.ok((await call("/boards?scope=trash")).body.boards.some((item) => item.id === board.id));
-  results.boardDelete = "verified";
+  // Deleting a board is permanent (there is no Trash and no restore), so
+  // afterwards it is gone from its own route, from the list and from a
+  // second delete.
+  await call(`/boards/${board.id}`, { method: "DELETE", expectStatus: 204 });
+  const gone = await call(`/boards/${board.id}`, { expectStatus: 404 });
+  assert.equal(gone.body.error, "BOARD_NOT_FOUND");
+  assert.ok(!(await call("/boards?preview=1")).body.boards.some((item) => item.id === board.id));
+  await call(`/boards/${board.id}`, { method: "DELETE", expectStatus: 404 });
+  results.boardDelete = "permanent, verified gone";
 }
 
 async function removeAccount(admin, authUserId) {

@@ -36,7 +36,7 @@ export function SettingsPage({ section }: { section: string }) {
     await auth.refreshAccount(); setSaved("Defaults saved to your account.");
   };
 
-  // Members, policies, SSO and audit have nothing to manage in a workspace of one.
+  // Members, policies and audit have nothing to manage in a workspace of one.
   const isAdmin = auth.account?.organization.kind !== "personal" && ["owner", "admin"].includes(auth.account?.organization.role ?? "");
   const workspaceSections = isAdmin ? [...WORKSPACE_SECTIONS, ...WORKSPACE_ADMIN_SECTIONS] : WORKSPACE_SECTIONS;
   const known = [...SETTINGS_SECTIONS, ...WORKSPACE_SECTIONS, ...WORKSPACE_ADMIN_SECTIONS].some(([id]) => id === section);

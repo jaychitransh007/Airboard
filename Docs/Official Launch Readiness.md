@@ -3,7 +3,7 @@
 > **Status:** Active source of truth for commercial release decisions
 > **Last updated:** 25 July 2026
 > **Current honest label:** Controlled production pilot
-> **Current public channels:** Standalone web pilot; Google Meet private preview; desktop development preview
+> **Current public channels:** Standalone web pilot, including Google Meet by presenting the Airboard tab (the Chrome extension, Meet add-on and Electron desktop app were removed on 12 November 2026)
 > **Not supported channels:** Zoom and Microsoft Teams product integrations
 > **Payment status:** Checkout is environment-gated and must be described as unavailable until the paid-GA gate passes
 
@@ -16,17 +16,15 @@ This plan separates an implemented capability from an operationally and legally 
 | Controlled pilot | Invited or self-signing users may evaluate the standalone web product; preview channels are explicitly labeled; no SLA or certification claim | `pnpm launch:check -- --scope=controlled-pilot` passes |
 | Standalone GA | Publicly supported standalone web product on a tested desktop-browser matrix, with approved legal documents, support, monitoring and recovery | `pnpm launch:check -- --scope=standalone-ga` passes |
 | Paid GA | Standalone GA plus an approved paid offer and proven live Stripe lifecycle | `pnpm launch:check:paid` passes |
-| Chrome public | Standalone GA plus reviewed Chrome Web Store distribution and receiver-side Google Meet evidence | `pnpm launch:check -- --scope=chrome-public` passes |
-| Desktop public | Standalone GA plus signed/notarized installers, updates, OS matrix and rollback | `pnpm launch:check -- --scope=desktop-public` passes |
 
-Zoom and Microsoft Teams require their own implementation, identity, client-matrix, store-review, privacy and operational gates. They are outside every current release scope.
+The Chrome public and Desktop public stages, and their `chrome-public` and `desktop-public` launch-check scopes, were removed with the Chrome extension and the Electron app on 12 November 2026. Zoom and Microsoft Teams require their own implementation, identity, client-matrix, store-review, privacy and operational gates. They are outside every current release scope.
 
 ## Market truth by journey
 
 ### 1. Discovery
 
 - Say: Airboard has a persistent standalone web workspace with pointer and typed input. Voice, gesture and screen capture depend on browser/device capability.
-- Say: the Chrome Google Meet camera overlay is a private preview; the Electron overlay is a development preview.
+- Say: Airboard works in Google Meet by presenting the Airboard tab, with nothing to install; slides or another app can be shown behind the board from the web app.
 - Say: Zoom and Microsoft Teams are planned or design-partner discovery only, not usable integrations.
 - Do not say: generally available, certified, compliant, always available, unlimited, enterprise-ready, or covered by an SLA.
 - The `/status` marketing page is a placeholder disclosure, not live monitoring.
@@ -54,8 +52,8 @@ Zoom and Microsoft Teams require their own implementation, identity, client-matr
 
 ### 5. Integrations
 
-- Google Meet: private Chrome-extension preview with explicit media disclosure, revocable installation credential, private rendering engine and outgoing-camera verification.
-- Desktop: local development/preview shell; no public signed installer or automatic-update claim.
+- Google Meet: present the Airboard tab (**Present now → A tab**); nothing is installed. The Chrome extension and the Meet add-on were removed on 12 November 2026.
+- Desktop: no desktop app. **Show a screen behind the board** in the web app covers drawing over other apps; the Electron app was removed on 12 November 2026.
 - Zoom: no usable channel.
 - Microsoft Teams: no usable channel.
 - Google Workspace/Meet add-on work recorded in historical feasibility documents does not change the current public distribution statement.
@@ -78,8 +76,8 @@ Zoom and Microsoft Teams require their own implementation, identity, client-matr
 | Data | Captured/stored | Current enforced retention |
 | --- | --- | --- |
 | Identity and profile | email, display name, provider identity, locale, timezone, preferences | account lifetime; removed by executed account deletion |
-| Organization and access | organization, membership, role, invitations, policy, directory configuration | organization/account lifetime; provider and directory obligations need contract review |
-| Boards | title, description, latest state, versions, visibility, share tokens as hashes | active until deletion; deletion is immediate and permanent |
+| Organization and access | organization, membership, role, invitations, policy (SSO and SCIM directory configuration is no longer written since 12 November 2026) | organization/account lifetime; provider and directory obligations need contract review |
+| Boards | title, description, latest state, visibility, share tokens as hashes (saves no longer write version copies since 12 November 2026) | active until deletion; deletion is immediate and permanent |
 | Media | live camera frames and microphone audio | not stored by Airboard |
 | Voice processing | Deepgram receives live audio; OpenAI may receive bounded command text and board context on semantic fallback | provider handling per final vendor terms; Airboard content-free traces expire within 14 days |
 | Product analytics | allowlisted event, timestamp, bounded content-free properties | 90 days |
@@ -120,8 +118,7 @@ The owner must supply or coordinate:
 - backup/restore and incident-response exercises;
 - public monitoring, alert routing, on-call ownership and status publishing;
 - accessibility and promised browser/device matrix testing;
-- Chrome Web Store review and real two-account receiver evidence;
-- desktop signing/notarization/update infrastructure;
+- real two-account evidence of presenting the Airboard tab in Google Meet;
 - staffed support hours and escalation ownership.
 
 Record proof in `ops/launch-evidence.json`. A gate is complete only when its status is `verified` and its evidence field points to an immutable report, deployment, dashboard, ticket or repository artifact.

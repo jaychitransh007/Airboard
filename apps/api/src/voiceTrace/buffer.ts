@@ -6,6 +6,10 @@ type StoredTrace = {
   events: VoiceTraceEvent[];
 };
 
+/**
+ * Recent voice turns on this instance. Its per-turn counter numbers the
+ * events stored in voice_trace_events.
+ */
 export class VoiceTraceBuffer {
   private readonly traces = new Map<string, StoredTrace>();
   private readonly maxTurns: number;
@@ -40,15 +44,6 @@ export class VoiceTraceBuffer {
       stored.droppedEvents += 1;
     }
     return event;
-  }
-
-  /** Every buffered turn, for aggregation. Insertion (≈recency) order. */
-  snapshotTurns(): VoiceTraceSnapshot[] {
-    return [...this.traces.entries()].map(([voiceTurnId, stored]) => ({
-      voiceTurnId,
-      events: stored.events.map((event) => structuredClone(event)),
-      droppedEvents: stored.droppedEvents,
-    }));
   }
 
   get(voiceTurnId: string): VoiceTraceSnapshot | null {

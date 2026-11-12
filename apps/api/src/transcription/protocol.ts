@@ -24,9 +24,9 @@ export type TranscriptionProtocolResult<T> =
   | { ok: false; error: TranscriptionProtocolError };
 
 /**
- * Parses the provider-neutral client control protocol. The canonical message
- * names are transcription.*, while the compact aliases keep older clients
- * from breaking during migration to the realtime gateway.
+ * Parses the provider-neutral client control protocol: transcription.start,
+ * transcription.configure, transcription.stop and transcription.abort, with
+ * their fields at the top level of the message.
  */
 export function parseTranscriptionControlMessage(
   input: string,
@@ -42,13 +42,13 @@ export function parseTranscriptionControlMessage(
     return protocolError("INVALID_MESSAGE", "A transcription message type is required.");
   }
 
-  if (decoded.type === "transcription.stop" || decoded.type === "stop") {
+  if (decoded.type === "transcription.stop") {
     return { ok: true, value: { type: "transcription.stop" } };
   }
-  if (decoded.type === "transcription.abort" || decoded.type === "abort") {
+  if (decoded.type === "transcription.abort") {
     return { ok: true, value: { type: "transcription.abort" } };
   }
-  if (decoded.type === "transcription.configure" || decoded.type === "configure") {
+  if (decoded.type === "transcription.configure") {
     const keytermsResult = parseKeyterms(decoded.keyterms);
     if (!keytermsResult.ok) {
       return keytermsResult;
@@ -68,12 +68,11 @@ export function parseTranscriptionControlMessage(
     };
   }
 
-  if (decoded.type !== "transcription.start" && decoded.type !== "start") {
+  if (decoded.type !== "transcription.start") {
     return protocolError("UNKNOWN_MESSAGE", `Unsupported message type: ${decoded.type}`);
   }
 
-  const legacyConfig = isRecord(decoded.config) ? decoded.config : {};
-  const sampleRate = decoded.sampleRate ?? legacyConfig.sampleRateHz ?? legacyConfig.sampleRate;
+  const sampleRate = decoded.sampleRate;
   if (
     typeof sampleRate !== "number" ||
     !Number.isInteger(sampleRate) ||
@@ -85,17 +84,17 @@ export function parseTranscriptionControlMessage(
     );
   }
 
-  const language = optionalTrimmedString(decoded.language ?? legacyConfig.language);
+  const language = optionalTrimmedString(decoded.language);
   if (language === null) {
     return protocolError("INVALID_LANGUAGE", "language must be a non-empty language tag.");
   }
 
-  const model = optionalTrimmedString(decoded.model ?? legacyConfig.model);
+  const model = optionalTrimmedString(decoded.model);
   if (model === null) {
     return protocolError("INVALID_MODEL", "model must be a non-empty string.");
   }
 
-  const keytermsResult = parseKeyterms(decoded.keyterms ?? legacyConfig.keyterms);
+  const keytermsResult = parseKeyterms(decoded.keyterms);
   if (!keytermsResult.ok) {
     return keytermsResult;
   }

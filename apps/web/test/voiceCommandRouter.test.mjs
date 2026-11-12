@@ -174,33 +174,6 @@ test("scoped grace is long enough for grab-release-speak", () => {
   assert.equal(decisions[0].command, "delete selected");
 });
 
-test("INVARIANT: a gate-claimed transcript can never route again externally", () => {
-  const { router } = makeRouter();
-  router.openGate({ mode: "ptt" });
-  const transcript = "Airo, add a circle here";
-  const gated = router.routeGatedOnly(transcript);
-  assert.ok(gated);
-  // Simulate the browser-fallback session's internal wake router firing for
-  // the SAME transcript — the router must refuse the duplicate.
-  const duplicate = router.acceptExternalWakeCommand({
-    transcript,
-    command: "add a circle here",
-    wakePhrase: "Airo",
-  });
-  assert.equal(duplicate, null);
-});
-
-test("external wake commands for unclaimed transcripts route normally", () => {
-  const { router } = makeRouter();
-  const decision = router.acceptExternalWakeCommand({
-    transcript: "Airo, add a circle here",
-    command: "add a circle here",
-    wakePhrase: "Airo",
-  });
-  assert.ok(decision);
-  assert.equal(decision.channel, "wake");
-});
-
 test("closing a gate that is not open is a no-op; snapshot reflects open state", () => {
   const { router } = makeRouter();
   router.closeGate("ptt");
@@ -213,7 +186,7 @@ test("closing a gate that is not open is a no-op; snapshot reflects open state",
   assert.equal(router.snapshot.open, false);
 });
 
-test("reset drops gates, claims, and wake carryover", () => {
+test("reset drops gates and wake carryover", () => {
   const { router } = makeRouter();
   router.handleFinalTranscript("Airo"); // arms carryover
   router.openGate({ mode: "ptt" });
@@ -452,23 +425,6 @@ test("answer window expires and is closed by a wake command", () => {
   router.openAnswerWindow();
   router.closeAnswerWindow();
   assert.equal(router.windows.answerOpen, false);
-});
-
-test("browser path: routeGatedOnly serves the windows and dedups the session's own wake routing", () => {
-  const { router, tick } = makeRouter();
-  // The session wake-routed a command; the router opened a follow-up window.
-  assert.ok(router.acceptExternalWakeCommand({ transcript: "Airo add a user", command: "add a user", wakePhrase: "Airo" }));
-  tick(2_000);
-  const followUp = router.routeGatedOnly("connect it to the API");
-  assert.equal(followUp?.channel, "follow-up");
-  // If the session's own carryover also fires for the same transcript, it is refused.
-  assert.equal(
-    router.acceptExternalWakeCommand({ transcript: "connect it to the API", command: "connect it to the API", wakePhrase: "Airo" }),
-    null,
-  );
-  // Wake-bearing transcripts are left to the session's wake router.
-  tick(500);
-  assert.equal(router.routeGatedOnly("Airo, add a cache"), null);
 });
 
 test("a gate-claimed turn drops a stale bare-wake carryover", () => {

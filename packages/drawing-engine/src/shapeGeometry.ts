@@ -332,32 +332,6 @@ export function catalogShapeIntersectsCircle(
   return Math.hypot(shapeCenter.x - center.x, shapeCenter.y - center.y) <= safeRadius;
 }
 
-/** Finds a connector anchor on the rotated shape silhouette. */
-export function pointOnCatalogShapeBoundary(
-  kind: CatalogShapeKind,
-  transform: CatalogShapeTransform,
-  toward: AnnotationPoint,
-): AnnotationPoint {
-  const bounds = normalizedBounds(transform);
-  const center = boundsCenter(bounds);
-  const dx = toward.x - center.x;
-  const dy = toward.y - center.y;
-  if (dx === 0 && dy === 0) return rotatePoint({ x: bounds.x + bounds.width, y: center.y }, center, transform.rotation ?? 0);
-
-  // Binary search on a ray is robust across every catalog silhouette and
-  // ensures connector anchoring uses exactly the same contains test as hits.
-  const length = Math.hypot(dx, dy);
-  const farScale = (Math.hypot(bounds.width, bounds.height) * 2 + length) / length;
-  let inside = center;
-  let outside = { x: center.x + dx * farScale, y: center.y + dy * farScale };
-  for (let index = 0; index < 48; index += 1) {
-    const midpoint = { x: (inside.x + outside.x) / 2, y: (inside.y + outside.y) / 2 };
-    if (catalogShapeContainsPoint(kind, transform, midpoint)) inside = midpoint;
-    else outside = midpoint;
-  }
-  return inside;
-}
-
 function drawShapeBody(
   context: CanvasRenderingContext2D,
   kind: CatalogShapeKind,

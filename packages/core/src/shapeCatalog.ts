@@ -88,8 +88,15 @@ export type CatalogShapeKind =
   | (typeof AIRBOARD_EXTRA_SHAPE_KINDS)[number];
 
 type AssertNoShapeKindDrift<T extends never> = T;
-type _MissingCatalogShapeKinds = AssertNoShapeKindDrift<Exclude<ShapeKind, CatalogShapeKind>>;
-type _UnknownCatalogShapeKinds = AssertNoShapeKindDrift<Exclude<CatalogShapeKind, ShapeKind>>;
+/**
+ * Compile-time check: fails to typecheck when a ShapeKind is missing from the
+ * catalog or the catalog lists an unknown kind. Exported only so the
+ * unused-locals check counts it as used; nothing imports it.
+ */
+export type ShapeKindCatalogDriftCheck = [
+  missing: AssertNoShapeKindDrift<Exclude<ShapeKind, CatalogShapeKind>>,
+  unknown: AssertNoShapeKindDrift<Exclude<CatalogShapeKind, ShapeKind>>,
+];
 
 export type ShapeCatalogCategory = "basic" | "flowchart" | "advanced" | "airboard";
 

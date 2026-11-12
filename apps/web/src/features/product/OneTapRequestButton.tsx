@@ -9,7 +9,7 @@ import { pilotExtensionRequest, pilotExtensionStorageKey, type SupportRequestBod
  * Files a support request in one tap and remembers, per browser, that this
  * person already asked, so the button reads as done when they come back.
  */
-export function OneTapRequestButton({
+function OneTapRequestButton({
   request,
   storageKey,
   label,

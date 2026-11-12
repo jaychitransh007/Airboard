@@ -10,7 +10,7 @@ import {
   createInitialBoardState,
   createRichTextDocument,
   richTextToPlainText,
-} from "../dist/index.js";
+} from "../src/index.ts";
 
 let eventCounter = 0;
 const context = {
@@ -183,7 +183,7 @@ test("grouping v2 shapes draws a section around them, as the toolbar does", () =
 });
 
 test("v2 shapes resize and change shape, and v2 connectors change line style, all undoably", async () => {
-  const core = await import("../dist/index.js");
+  const core = await import("../src/index.ts");
   const board = "scene-edit";
   const ctx = { boardSessionId: board, actorParticipantId: "p", userId: "u" };
   let state = core.createInitialBoardState(board);

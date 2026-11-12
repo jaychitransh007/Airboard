@@ -232,11 +232,16 @@ async function validateAssets(
       assetIds.add(asset.id);
     }
     if (mediaKind === "audio" && asset.sttEvaluation) {
-      const meetSurface = isMeetSurface(asset.surface);
-      const expectedTransport = meetSurface ? "meet-bridge" : "direct";
-      if (asset.sttEvaluation.transport !== expectedTransport) {
+      // The Meet surfaces and the meet-bridge transport went with the Chrome
+      // extension and Meet add-on (removed 12 Nov 2026). Meet is now joined by
+      // presenting the standalone board's tab, so record on standalone.
+      if (isMeetSurface(asset.surface)) {
         failures.push(
-          `audio asset ${asset.id ?? "unknown"} on ${meetSurface ? "a Meet" : "a non-Meet"} surface must declare sttEvaluation.transport=${expectedTransport}`,
+          `audio asset ${asset.id ?? "unknown"} uses the removed Meet surface ${asset.surface}; record it on the standalone surface`,
+        );
+      } else if (asset.sttEvaluation.transport !== "direct") {
+        failures.push(
+          `audio asset ${asset.id ?? "unknown"} must declare sttEvaluation.transport=direct`,
         );
       }
     }
@@ -400,12 +405,12 @@ function validateReleaseCoverage(
         `audio asset ${asset.id} lacks an expected production processingPath`,
       );
     }
-    const expectedTransport = isMeetSurface(asset.surface)
-      ? "meet-bridge"
-      : "direct";
-    if (asset.sttEvaluation?.transport !== expectedTransport) {
+    if (
+      !isMeetSurface(asset.surface) &&
+      asset.sttEvaluation?.transport !== "direct"
+    ) {
       failures.push(
-        `audio asset ${asset.id} must use ${expectedTransport} transport for surface ${asset.surface}`,
+        `audio asset ${asset.id} must use direct transport for surface ${asset.surface}`,
       );
     }
     if (

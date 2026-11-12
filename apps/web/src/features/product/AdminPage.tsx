@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { airboardApi } from "../../platform/api";
-import { AIRBOARD_API_URL } from "../../platform/config";
 import { useAirboardAuth } from "../../platform/auth";
 import { FormStatus } from "./FormStatus";
 
@@ -10,8 +9,7 @@ import { FormStatus } from "./FormStatus";
 export function WorkspaceAdminSection({ section }: { section: string }) {
   if (section === "members") return <MembersAdmin />;
   if (section === "policies") return <PoliciesAdmin />;
-  if (section === "audit-logs") return <AuditAdmin />;
-  return <IdentityDirectoryAdmin />;
+  return <AuditAdmin />;
 }
 
 type Organization = { organization_id: string; organizations: { name?: string } | null };
@@ -138,19 +136,6 @@ function ShareLinksAdmin() {
       ) : <p>No working view-only links.</p>}
     </section>
   );
-}
-
-function IdentityDirectoryAdmin() {
-  const auth = useAirboardAuth();
-  const [metadataUrl, setMetadataUrl] = useState(""); const [domains, setDomains] = useState(""); const [tokenName, setTokenName] = useState("Microsoft Entra provisioning"); const [tokens, setTokens] = useState<Array<Record<string, unknown>>>([]); const [revealed, setRevealed] = useState<string | null>(null); const [message, setMessage] = useState<string | null>(null);
-  const reload = async () => { if (!auth.accessToken) return; const [identity, tokenResult] = await Promise.all([airboardApi<{ identityProvider: Record<string, unknown> | null }>("/organization/identity-provider", { accessToken: auth.accessToken }), airboardApi<{ tokens: Array<Record<string, unknown>> }>("/organization/scim-tokens", { accessToken: auth.accessToken })]); if (identity.identityProvider) { setMetadataUrl(String(identity.identityProvider.metadata_url ?? "")); setDomains(Array.isArray(identity.identityProvider.domains) ? identity.identityProvider.domains.join(", ") : ""); } setTokens(tokenResult.tokens); };
-  // reload only reads the current token, so the token is the trigger.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { void reload(); }, [auth.accessToken]);
-  const saveIdentity = async () => { if (!auth.accessToken) return; await airboardApi("/organization/identity-provider", { method: "PATCH", accessToken: auth.accessToken, body: JSON.stringify({ protocol: "saml", metadataUrl, domains: domains.split(",").map((item) => item.trim()), enforced: false }) }); setMessage("Identity configuration saved. Operator activation is required before enforcement to prevent lockout."); await reload(); };
-  const createToken = async () => { if (!auth.accessToken) return; const result = await airboardApi<{ token: string }>("/organization/scim-tokens", { method: "POST", accessToken: auth.accessToken, body: JSON.stringify({ name: tokenName }) }); setRevealed(result.token); await reload(); };
-  const revoke = async (id: string) => { if (!auth.accessToken) return; await airboardApi(`/organization/scim-tokens/${id}`, { method: "DELETE", accessToken: auth.accessToken }); await reload(); };
-  return <div><section className="app-page-heading"><p className="eyebrow">Enterprise identity</p><h1>SSO and directory provisioning</h1><p>Store a verified IdP configuration and provision directory users through an organization-scoped SCIM 2.0 endpoint.</p></section><div className="policy-panel"><h2>SAML identity provider</h2><label>Metadata URL<input type="url" value={metadataUrl} onChange={(event) => setMetadataUrl(event.target.value)} placeholder="https://idp.example.com/metadata" /></label><label>Verified email domains<input value={domains} onChange={(event) => setDomains(event.target.value)} placeholder="example.com, subsidiary.com" /></label><button className="button button-primary" onClick={() => void saveIdentity()}>Save SSO configuration</button><FormStatus message={message} /><h2>SCIM tokens</h2><p>Base URL: <code>{AIRBOARD_API_URL}/scim/v2</code></p><div className="invite-row"><input value={tokenName} onChange={(event) => setTokenName(event.target.value)} aria-label="New SCIM token name" /><button onClick={() => void createToken()}>Create token</button></div>{revealed ? <div className="privacy-card"><strong>Copy this token now. It will not be shown again.</strong><code>{revealed}</code></div> : null}<div className="data-table" role="table" aria-label="SCIM tokens"><div className="table-head" role="row"><span role="columnheader">Token</span><span role="columnheader">Last used</span><span role="columnheader">Action</span></div>{tokens.map((token) => <div key={String(token.id)} role="row"><span role="cell"><strong>{String(token.name)}</strong><small>{String(token.token_prefix)}…</small></span><span role="cell">{token.last_used_at ? new Date(String(token.last_used_at)).toLocaleString() : "Never"}</span><span role="cell">{token.status === "active" ? <button onClick={() => void revoke(String(token.id))}>Revoke</button> : "Revoked"}</span></div>)}</div></div></div>;
 }
 
 function AuditAdmin() { const auth = useAirboardAuth(); const [events, setEvents] = useState<Record<string, unknown>[]>([]); useEffect(() => { if (auth.accessToken) void airboardApi<{ events: Record<string, unknown>[] }>("/organization/audit", { accessToken: auth.accessToken }).then((result) => setEvents(result.events)); }, [auth.accessToken]); return <div><section className="app-page-heading"><p className="eyebrow">Recorded activity</p><h1>Audit log</h1><p>Administrative, security, consent, installation, billing and data-control actions retained for 365 days. Personal fields are anonymized when an account is deleted.</p></section><div className="data-table audit" role="table" aria-label="Audit events"><div className="table-head" role="row"><span role="columnheader">Action</span><span role="columnheader">Target</span><span role="columnheader">Time</span></div>{events.length ? events.map((event) => <div key={String(event.id)} role="row"><span role="cell"><strong>{String(event.action)}</strong><small>Request {String(event.request_id ?? "—")}</small></span><span role="cell">{String(event.target_type ?? "—")}</span><span role="cell">{new Date(String(event.occurred_at)).toLocaleString()}</span></div>) : <div role="row"><span role="cell">No audit events yet.</span></div>}</div></div>; }

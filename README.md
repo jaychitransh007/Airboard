@@ -1,146 +1,98 @@
 # Airboard
 
-Intent-driven diagram canvas for meetings, with typed, voice, pointer, and hand-gesture control.
+A meeting whiteboard you run with your voice and hands. Say “Airo, …” or hold
+an open palm and speak, point at shapes, and close your hand to move them;
+the mouse and keyboard work too. In Google Meet you present the Airboard tab,
+with nothing to install.
 
-## Current Product Slice
+## What is live
 
-The current prototype is **Intent Canvas**: users describe a diagram change and it is applied instantly — by voice, gesture, or typed command — with no confirmation step. A finalized voice turn executes automatically. The Airo panel on the right shows the live transcript, current system action, recent board-tool activity and an optional typed composer; while Airo listens it shrinks to a strip in the corner. Undo is the safety net: use the ••• menu, `Cmd/Ctrl+Z`, or say “Airo, undo”. To edit an existing element, grab it (or select it) and say what you want (e.g. "Airo, rename this to Payments"). Pointer and camera gestures are used for placement, selection, and precise object manipulation rather than mid-air freehand drawing.
+- **Standalone web app:** a controlled production pilot on Cloud Run, with
+  Google sign-in. The home page lists your Airboards; a board opens with voice
+  and camera already on (after the browser's one-time permission prompt).
+- **Google Meet:** present the Airboard tab (**Present now → A tab**).
+- **Screen behind the board:** **Show a screen behind the board** in the
+  board's **•••** menu puts slides or another app behind the diagram.
 
-See [Intent Canvas Implementation Notes](Docs/Intent%20Canvas%20Implementation%20Notes.md) for the supported commands, interaction model, test path, and current browser/hardware limits.
+Current revisions, rollback steps and open items are in
+[Docs/Project Status.md](Docs/Project%20Status.md); every change and deploy is
+in [Docs/Release Readiness Backlog.md](Docs/Release%20Readiness%20Backlog.md).
+User-facing behaviour is documented in the Help Center sources under
+[Docs/help](Docs/help).
 
-## Local Development
+### How a board works
 
-The first implementation is local-first:
+- Changes apply at once; there is no confirm step. Undo is the safety net:
+  the **Undo** arrow at the bottom left of the board, `Cmd/Ctrl+Z`, or
+  “Airo, undo”. **Redo** and **Hide diagram** (also `Shift+H`) sit beside it.
+- **Share** in the top bar opens Share with people (live link), Export PDF,
+  Export PNG and Copy image.
+- The Airo panel starts hidden as a tab on the board's right edge; it shows
+  what Airo heard and did, and has a box for typing a command.
+- Airo's results, misses and questions also show on the board itself, with
+  quiet sounds (Board settings → Appearance turns them off).
+- Deleting a board is permanent; there is no Trash.
 
-1. Install dependencies with `pnpm install`.
-2. Start local Supabase with `pnpm supabase:start`.
-3. Reset and seed local data with `pnpm supabase:reset`.
-4. Run the web app with `pnpm dev:web`.
-5. Run the API/WebSocket service with `pnpm dev:api`.
+### How voice commands are understood
 
-The local slice focuses on proving the Intent Canvas interaction before meeting-platform integration.
+A finalized transcript addressed to Airo (wake word, open palm, a follow-up
+within a few seconds, or hold-to-edit) goes first to fast phrase rules for
+short commands, and otherwise to an AI planner (OpenAI `gpt-5.6-luna`) that
+returns a typed plan. The plan is checked and applied as one undoable change;
+Airo makes a best guess rather than asking, and applies the steps it can match.
+Meeting talk not addressed to Airo never changes the board. Details:
+[Docs/Voice Agent Architecture and Observability.md](Docs/Voice%20Agent%20Architecture%20and%20Observability.md).
 
-## Screen and camera composition
+## Repository layout
 
-On the standalone surface, **Show a screen behind the board** in the ••• menu lets the user choose a screen or window as the live background. Airboard renders a light global dim plus local dark-glass plates behind diagram clusters, keeping slides readable without sacrificing neon contrast. There is no separate presentation wizard or clean-output mode: the regular canvas is the only standalone mode. Source selection is automatic—selected screen first, otherwise active camera, otherwise dark canvas. The selected screen is never uploaded by this flow, capture ends when the user stops it or the source ends, and studio recording uses the same unmirrored full-frame composition.
+| Path | What it is |
+| --- | --- |
+| `apps/web` | Next.js web app: marketing pages, Help Center, the signed-in app and the board |
+| `apps/api` | Fastify API on Cloud Run: boards, live sessions, voice transcription (Deepgram), the AI planner (OpenAI), accounts and admin |
+| `packages/core` | Board model, commands, phrase rules and the plan contract shared by web and API |
+| `packages/drawing-engine` | Canvas rendering and hit-testing |
+| `packages/gesture-engine` | Hand-pose and gesture recognition |
+| `packages/realtime-client` | Live-board WebSocket client |
+| `supabase` | Database migrations and local config |
+| `infra/cloud-run` | Docker images and `release.sh` (build, migrate, stage, promote) |
+| `scripts`, `evals` | Evaluation runners, datasets, launch checks and smoke tests |
 
-Camera mode uses one fixed compositing contract everywhere: camera video at the bottom, a full-frame dark transparent scrim above it, and the diagram canvas on top. The visible video, scrim, hand landmarks, two-hand navigation, and hybrid controller share the same centered `object-fit: cover` geometry, so a cropped 16:9 camera remains aligned at every canvas aspect ratio. Airboard does not segment or redraw the presenter above diagram ink.
+The Chrome Meet extension, the unpublished Meet add-on and the Electron
+desktop app were removed from the codebase on 12 Nov 2026.
 
-A visual thumb–middle-finger snap hides or restores the diagram and scrim while leaving the camera or selected screen running. The same local action is available from the overflow menu, with `Shift+H`, and through “hide canvas” / “bring the diagram back” voice commands. Hidden diagrams suspend board-editing gestures and commands. Saved canvases can be renamed inline or from their action menu and moved to recoverable Trash; deletion saves the latest board state first.
+## Local development
 
-This browser flow is an audience-facing composite rather than an operating-system overlay. For the literal desktop experience, Airboard now also includes a native Electron shell in `apps/desktop`. It opens the same live board as a transparent, frameless, always-on-top window and passes mouse events through to arbitrary apps underneath.
-
-## Native desktop overlay
-
-Start the Airboard web surface and desktop shell in separate terminals:
-
-```sh
-pnpm dev:web
-pnpm dev:desktop
-```
-
-The native overlay starts in broadcast-safe click-through mode on the display containing the pointer. Use the Airboard tray/menu-bar item to change displays or quit. `Cmd/Ctrl+Shift+O` temporarily turns pointer control on so you can enable hands or Airo, type a command, undo, or change the dark-overlay strength; **Return to click-through** removes the setup HUD and gives mouse focus back to the app underneath. `Cmd/Ctrl+Shift+H` shows or hides Airboard.
-
-The desktop shell defaults to `http://127.0.0.1:3000`. Point it at a deployed Airboard web origin with `AIRBOARD_DESKTOP_URL=https://your-airboard-host pnpm dev:desktop`. The renderer bridge is sandboxed and exposes only overlay state, click-through, and hide operations.
-
-## Meet camera overlay
-
-Version 0.8.0 of the Meet extension removes the dedicated Airboard canvas from Meet. On meeting-code URLs the extension mounts a private 1280×720 engine offscreen, enables the neon overlay plus gesture-camera and Airo microphone inputs by default after affirmative media confirmation, and composites only the transparent diagram plane onto the outgoing Meet camera. If Meet already has a camera sender when setup finishes, Airboard upgrades that sender in place—no camera restart is required. Opening the legacy Meet add-on side panel closes it; opening an activity created by an older revision ends it. Settings, account controls, and six-step readiness diagnostics belong in the extension popup and standalone Airboard page rather than in the audience surface.
-
-The main-world hook still tracks the composited output through `RTCRtpSender` and reads outbound WebRTC stats. A remote participant must confirm the receiver-side image; use the evidence checklist in [Docs/Meet Camera Composite Verification.md](Docs/Meet%20Camera%20Composite%20Verification.md).
-
-## Realtime Voice
-
-Airo now sends microphone audio to the Airboard API over a provider-neutral WebSocket instead of relying on Chrome's opaque speech-recognition model. The first provider adapter uses Deepgram Flux. Provider credentials remain in the API process, partial transcripts update the UI as speech arrives, and only a provider-finalized turn can reach the deterministic diagram-command parser.
-
-Airboard supplies a focused vocabulary of complete phrases such as `Airo add a circle here` and `connect User to API`, rather than relying only on isolated words. If a finalized transcript is still unparsable, Airboard reports the rejection and the user simply repeats the command; it never silently executes a corrected guess.
-
-For local use, start the API with a Deepgram key in its environment:
-
-```sh
-DEEPGRAM_API_KEY=your_key pnpm dev:api
-```
-
-Then run `pnpm dev:web` and open `http://localhost:3000`. The web app discovers voice availability through `GET /transcription/config`; if the key is missing, it clearly disables Airo while leaving typed commands available.
-
-The model is selected per new voice session. Change the default and allowlist without changing frontend code:
-
-```sh
-AIRBOARD_TRANSCRIPTION_MODEL=flux-general-en \
-AIRBOARD_TRANSCRIPTION_ALLOWED_MODELS=flux-general-en,flux-general-multi \
-DEEPGRAM_API_KEY=your_key \
-pnpm dev:api
-```
-
-The Intent Canvas sidebar also lets a tester switch among the server-approved models. A model switch closes the old stream safely and, when Airo is active, opens a fresh session automatically with the selected model. Chrome speech remains available only as an explicit development fallback by setting `NEXT_PUBLIC_AIRBOARD_SPEECH_FALLBACK=browser` before starting the web app.
-
-The gateway rejects missing/unapproved browser origins and bounds concurrent streams, session duration, audio throughput, and queued audio. The default API bind is loopback-only. Production exposure still requires the product's authenticated user/session boundary in front of `/transcription/ws`; origin checks and rate limits are not a substitute for authentication.
-
-## Semantic Command Interpretation
-
-Airboard separates transcription from command understanding. Every typed command and finalized, wake-routed voice command first goes through the local deterministic diagram parser. Commands it already understands take the zero-network fast path, preserving the lowest latency.
-
-Any explicitly activated, non-empty command that the deterministic parser cannot safely finish—or parses but cannot ground against the current board—is eligible for semantic planning. This includes acoustic fragments such as `add a q`, named edits, branching, incomplete phrases, ambiguous references, and narrative diagram requests. Activation failures, empty commands, and unsupported counts never reach the model.
-
-The browser sends the transcript plus bounded graph context to `POST /intent/resolve`: visible labels, node types and spatial ordinals, selection state, geometry, directed edges, pointer availability, current-board vocabulary, and any pending clarification. Instance labels are never persisted as authoritative type aliases, and internal board IDs are never exposed to the model.
-
-The graph, selection, and pointer are snapshotted when interpretation starts. If the board or selection changes before the model responds, Airboard rejects the stale plan and asks for the command again instead of grounding it against different objects. Clarifications are bound to that board snapshot, expire after two minutes, and are cleared with the board.
-
-The OpenAI Responses adapter requires one strict `propose_diagram_plan` function call. Its versioned typed actions cover create, connect, labelled decision branches, rename, delete, duplicate, move, align, distribute, layout, group, select, undo, and cancel. References can target the current selection, pointer, visible label, node type plus ordinal, or a same-plan handle. Model output is validated against the shared contract and then grounded against a rolling shadow board. The model cannot mutate the board directly. A valid plan is applied immediately as one atomic, single-undo transaction — including multi-action and destructive plans (Undo reverts them). Invalid, unsafe, oversized, timed-out, or stale results fail closed.
-
-Clarifications are conversational. For example, `connect the decision to user one and user two with yes and…` produces a focused question instead of guessing, and the next Airo turn completes the pending request.
-
-The first server adapter uses the OpenAI Responses API. It uses `gpt-5.6-luna`, the only allowed model, with reasoning effort `none` on OpenAI's priority tier (`AIRBOARD_INTENT_SERVICE_TIER`), which cut the slowest 5% of answers from about 4 s to 2.4 s. On 2026-11-05 Luna planned 34 of the 38 real-command cases correctly, against 26 for `gpt-5.4-mini`, and changed the board for 3 of 60 meeting-talk cases, against 10. The default model and its allowlist are runtime configuration, so other models can still be evaluated without code changes. Intent Canvas also exposes a separate **Intent model** selector; changing it affects the next unclear command immediately and does not restart the microphone stream:
+Use Node 22 (see `.nvmrc`) and pnpm 11.
 
 ```sh
-AIRBOARD_INTENT_PROVIDER=openai \
-AIRBOARD_INTENT_MODEL=gpt-5.6-luna \
-AIRBOARD_INTENT_ALLOWED_MODELS=gpt-5.6-luna \
-AIRBOARD_INTENT_REASONING_EFFORT=none \
-AIRBOARD_INTENT_TIMEOUT_MS=5000 \
-AIRBOARD_INTENT_API_KEY=your_server_side_key \
-pnpm dev:api
+pnpm install
+pnpm supabase:start      # local Supabase on ports 56321–56324
+pnpm supabase:reset      # apply migrations and seed data
+pnpm dev:api             # API on http://127.0.0.1:4000
+pnpm dev:web             # web on http://localhost:3000
 ```
 
-`AIRBOARD_INTENT_API_KEY` is preferred; `OPENAI_API_KEY` is accepted as a fallback. Both are API-process variables and must never use the `NEXT_PUBLIC_` prefix. `GET /intent/config` exposes only availability, provider, default model, and allowed models. `POST /intent/resolve` accepts an optional allowlisted model with the transcript and sanitized context; it never returns a credential. The API also enforces the configured origin allowlist, timeout, transcript bound, and concurrent-request limit.
+Without `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` the API uses an
+in-memory store. Voice needs `DEEPGRAM_API_KEY` and the AI planner needs
+`AIRBOARD_INTENT_API_KEY` in the API's environment; without them the board
+says voice or the planner is unavailable and typed commands still work.
+`.env.example` lists every variable.
 
-Provider failures remain distinct from language-understanding failures. Quota, authentication, rate limits, model availability, timeouts, malformed output, and network failures use separate stable error codes. Successful calls return response/model IDs, OpenAI `x-request-id`, the supplied client request ID, provider processing time, total latency, and token usage. Airboard follows OpenAI's recommendation to retain request IDs for troubleshooting.
+Local Supabase ports: API `56321`, Postgres `56322`, Studio `56323`,
+Mailpit `56324`.
 
-If no supported semantic provider/key is configured, `GET /intent/config` reports `available: false` and the client simply skips semantic fallback. Canonical typed commands and canonical Airo commands continue through the deterministic parser; only natural-language recovery is unavailable. Deepgram and OpenAI keys serve different roles: Deepgram enables realtime transcription, while the semantic key enables LLM-assisted interpretation of finalized text.
-
-### Voice diagnostics and privacy
-
-Every finalized command gets a `voiceTurnId` that links capture metadata, final STT text, wake classification, parser/grounding outcome, semantic input/output or failure, clarification, preview, final action, undo, and terminal outcome. Browser stages are appended with `POST /voice/trace`; a bounded local trace can be inspected with `GET /voice/trace/:voiceTurnId` using an allowed Origin header. Semantic server logs carry the same ID and provider request metadata.
-
-Raw microphone audio is never stored or accepted by the trace API. Trace payloads are size/depth bounded and reject audio blobs, credentials, tokens, secrets, and passwords. Authenticated deployments store sanitized, organization-scoped voice trace events and hard-delete them within 14 days; local API runs without Supabase retain only a bounded in-memory diagnostic buffer. Trace access, export, deletion, and auditing follow the authenticated commercial control-plane policies.
-
-### Voice semantic evaluation
-
-With the API running, replay the versioned regression corpus:
+## Checks
 
 ```sh
-pnpm eval:voice
+pnpm typecheck
+pnpm lint
+pnpm test                                   # unit tests in every package
+pnpm --filter @airboard/web exec playwright test   # browser tests
+pnpm test:scripts                           # eval and tooling tests
+pnpm eval:false-accepts                     # meeting talk must not change the board
+pnpm launch:check:deployed                  # production launch gate
 ```
 
-The corpus covers condition blocks, named rename, complete and truncated branches, a literal `No` clarification answer, `q`→queue repair, and a multi-node narrative. The runner forwards multi-turn clarification context, reports each typed plan, pass rate, and p50/p95 latency, and exits non-zero on regression. Use `pnpm eval:voice -- --help` for model, endpoint, case, and timeout options.
-
-## Local Supabase Ports
-
-Airboard uses a separate local Supabase port range so it can run beside other local projects:
-
-- API: `http://127.0.0.1:56321`
-- Postgres: `postgresql://postgres:postgres@127.0.0.1:56322/postgres`
-- Studio: `http://127.0.0.1:56323`
-- Mailpit: `http://127.0.0.1:56324`
-
-The API uses Supabase persistence when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are present. Without those variables, it falls back to the in-memory local store.
-
-## Commercial platform
-
-Airboard now includes the public acquisition site, Supabase-backed account and tenant bootstrap, invitation acceptance, a one-month pilot that starts when the first board opens, persistent/versioned boards, Stripe checkout/webhook/portal integration, organization administration, installation health, SAML/OIDC configuration, SCIM 2.0 provisioning, privacy requests, support intake, consent records, content-free product events, audit logs, request tracing and lifecycle jobs.
-
-The implemented routes, data contract, environment variables, acceptance test and honest external launch gates are documented in [Commercial Platform Runbook](Docs/Commercial%20Platform%20Runbook.md). Run the complete local control-plane journey with a local API and Supabase stack using:
-
-```sh
-pnpm smoke:commercial
-```
+The commercial and deploy smoke tests (`pnpm smoke:commercial`,
+`pnpm smoke:deploy`) and the operator runbook are described in
+[Docs/Commercial Platform Runbook.md](Docs/Commercial%20Platform%20Runbook.md).

@@ -4,8 +4,6 @@ export type AirboardTokenPurpose =
   | "development_access"
   | "realtime"
   | "join"
-  | "installation_link"
-  | "installation"
   /** Opens one voice-transcription socket; lives a minute, so it can sit in a URL. */
   | "transcription"
   /**
@@ -24,7 +22,6 @@ export type AirboardSignedToken = {
   organizationId?: string;
   sessionId?: string;
   participantId?: string;
-  installationId?: string;
 };
 
 export function issueSignedToken(
@@ -33,12 +30,8 @@ export function issueSignedToken(
 ): string {
   const now = Math.floor(Date.now() / 1_000);
   const { ttlSeconds, ...claims } = input;
-  // Browser installations are revocable server-side and need a sliding
-  // credential that survives ordinary use. Other signed capabilities remain
-  // deliberately short-lived.
-  const maxTtlSeconds = input.purpose === "installation"
-    ? 90 * 24 * 60 * 60
-    : 7 * 24 * 60 * 60;
+  // Signed capabilities are deliberately short-lived.
+  const maxTtlSeconds = 7 * 24 * 60 * 60;
   const payload: AirboardSignedToken = {
     v: 1,
     ...claims,

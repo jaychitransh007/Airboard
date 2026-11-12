@@ -3,14 +3,12 @@ import test from "node:test";
 
 import {
   findAnnotationObjectAtPoint,
-  findBoardObjectAtPoint,
   findSceneElementAtPoint,
   strokeIntersectsCircle,
 } from "../src/hitTest.ts";
 import {
   drawStroke,
   drawShapeElement,
-  orderSceneShapesForRender,
   richTextPlainText,
 } from "../src/renderer.ts";
 
@@ -27,10 +25,6 @@ test("scene shape hit testing follows geometry, rotation, visibility, and z-orde
   assert.equal(findSceneElementAtPoint(state, { x: 4, y: 4 }).id, "lower");
   assert.equal(findSceneElementAtPoint(state, { x: 170, y: 60 }).id, "rotated");
   assert.equal(findSceneElementAtPoint(state, { x: 125, y: 5 }), null);
-  assert.deepEqual(findBoardObjectAtPoint(state, { x: 50, y: 60 }), {
-    source: "element",
-    element: upper,
-  });
 });
 
 test("legacy annotations carrying shapeKind use catalog render geometry for hits", () => {
@@ -68,10 +62,8 @@ test("legacy annotations carrying shapeKind use catalog render geometry for hits
   assert.ok(context.calls.filter(([method]) => method === "lineTo").length >= 9);
 });
 
-test("shape renderer respects z-index and paints rich text on rotated shapes", () => {
-  const first = shapeElement("first", "star", 10, { x: 0, y: 0, width: 100, height: 100, rotation: 0 });
+test("shape renderer paints rich text on rotated shapes", () => {
   const second = shapeElement("second", "database", -2, { x: 0, y: 0, width: 100, height: 100, rotation: 15 });
-  assert.deepEqual(orderSceneShapesForRender([first, second]).map(({ id }) => id), ["second", "first"]);
 
   const context = recordingContext();
   drawShapeElement(context, second);

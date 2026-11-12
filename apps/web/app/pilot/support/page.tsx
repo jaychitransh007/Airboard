@@ -1,25 +1,24 @@
 import type { Metadata } from "next";
 import { PILOT_CONTACT, PilotInfoPage } from "../../../src/features/pilot/PilotInfoPage";
 
-export const metadata: Metadata = { title: "Meet overlay support" };
+export const metadata: Metadata = { title: "Pilot support" };
 
 export default function PilotSupportPage() {
-  const subject = encodeURIComponent("Airboard Meet overlay support request");
+  const subject = encodeURIComponent("Airboard pilot support request");
   return (
-    <PilotInfoPage title="Meet overlay support" summary="Report the failed readiness check—not the meeting conversation.">
+    <PilotInfoPage title="Pilot support" summary="Tell us what went wrong on the board, not what was said in the meeting.">
       <section>
         <h2>Before reporting</h2>
         <ol>
-          <li>Confirm the extension popup reports version 0.8.0.</li>
-          <li>Confirm Account connected and Media confirmed are complete.</li>
-          <li>Open or refresh a meeting-code URL and turn the Meet camera on.</li>
-          <li>Use Refresh status and note the first incomplete readiness check and visible error code.</li>
+          <li>Check the <a href="/help">Help Center</a>, especially Troubleshooting and Error codes.</li>
+          <li>If Airo isn't hearing or seeing you, check that the browser allows the camera and microphone for Airboard, then reload the board.</li>
+          <li>Note the time, what you did, and any message or error code Airboard showed on the board or in the Airo panel.</li>
         </ol>
       </section>
       <section>
         <h2>Request support</h2>
-        <p>Email <a href={`mailto:${PILOT_CONTACT}?subject=${subject}`}>{PILOT_CONTACT}</a> with the extension version, Chrome and OS versions, approximate time, first failed check, and error code.</p>
-        <p>Do not send passwords, authorization codes, meeting links, recordings, private board content, access tokens, API keys, or confidential customer data.</p>
+        <p>Signed in, use the <a href="/support">support form</a> (Help Center → Contact support), or email <a href={`mailto:${PILOT_CONTACT}?subject=${subject}`}>{PILOT_CONTACT}</a> with your browser and operating system, the approximate time, what happened and any error code. Create a support diagnostic in Settings → Privacy &amp; data and include its ID.</p>
+        <p>Do not send passwords, authorization codes, meeting links, recordings, private board content, access tokens, API keys or confidential customer data.</p>
       </section>
     </PilotInfoPage>
   );

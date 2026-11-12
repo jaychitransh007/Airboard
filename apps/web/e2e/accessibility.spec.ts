@@ -24,7 +24,6 @@ const PAGES = [
   "/login",
   "/signup",
   "/pricing",
-  "/use-cases/product-teams",
   "/integrations",
   "/status",
   "/support",

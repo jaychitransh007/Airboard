@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -21,6 +21,16 @@ const { registerControlPlaneRoutes } = await import("../src/controlPlaneRoutes.t
 const { accountEntitlement } = await import("../src/auth.ts");
 const { SupabaseSessionStore } = await import("../src/supabaseSessionStore.ts");
 
+// Tables a migration dropped. The fake answers a query on one the way
+// PostgREST does once the table is gone, and records it.
+const MIGRATIONS = new URL("../../../supabase/migrations/", import.meta.url);
+const DROPPED_TABLES = new Set(
+  readdirSync(MIGRATIONS)
+    .filter((name) => name.endsWith(".sql"))
+    .flatMap((name) => [...readFileSync(new URL(name, MIGRATIONS), "utf8")
+      .matchAll(/^drop table if exists public\.([a-z_]+)/gm)].map((match) => match[1])),
+);
+
 /**
  * Minimal in-memory stand-in for the supabase-js query builder: just the
  * filters, writes, and storage calls the control plane uses. `fail(table, op)`
@@ -33,6 +43,7 @@ function createFakeSupabase(tables, options = {}) {
     storageCalls,
     storageError: null,
     fail: options.fail ?? (() => null),
+    droppedTableQueries: [],
     from(table) {
       return new FakeQuery(fakeClient, table);
     },
@@ -177,6 +188,14 @@ class FakeQuery {
   }
 
   execute() {
+    if (DROPPED_TABLES.has(this.table)) {
+      this.client.droppedTableQueries.push(`${this.op} ${this.table}`);
+      return {
+        data: null,
+        error: { code: "PGRST205", message: `Could not find the table 'public.${this.table}' in the schema cache` },
+        count: null,
+      };
+    }
     const failure = this.client.fail(this.table, this.op);
     if (failure) return { data: null, error: failure, count: null };
     const rows = (this.client.tables[this.table] ??= []);
@@ -291,8 +310,6 @@ async function buildApp(t, client, overrides = {}) {
       cronSecret: CRON_SECRET,
       email: { from: "Airboard <test@airboard.test>" },
       stripe: { enabled: false },
-      chromeExtensionCompatibleVersions: [],
-      chromeExtensionEnabled: false,
       ...overrides,
     },
     fakeAuth(client),
@@ -326,17 +343,13 @@ function patchBoard(server, payload) {
 }
 
 test("board state saves are compare-and-swap on latest_version", async (t) => {
-  const client = createFakeSupabase({ boards: [boardRow()], board_versions: [] });
+  const client = createFakeSupabase({ boards: [boardRow()] });
   const server = await buildApp(t, client);
 
   const saved = await patchBoard(server, { version: 4, state: { nodes: ["tab-a"] } });
   assert.equal(saved.statusCode, 200, saved.body);
   assert.equal(saved.json().board.latest_version, 4);
   assert.deepEqual(client.tables.boards[0].latest_state, { nodes: ["tab-a"] });
-  assert.deepEqual(
-    client.tables.board_versions.map((row) => [row.version, row.state]),
-    [[4, { nodes: ["tab-a"] }]],
-  );
 
   // A second tab still on version 3 also proposes 4 and must not overwrite.
   const stale = await patchBoard(server, { version: 4, state: { nodes: ["tab-b"] } });
@@ -347,12 +360,11 @@ test("board state saves are compare-and-swap on latest_version", async (t) => {
   assert.equal(ahead.statusCode, 409);
   assert.equal(ahead.json().latestVersion, 4);
   assert.deepEqual(client.tables.boards[0].latest_state, { nodes: ["tab-a"] });
-  assert.equal(client.tables.board_versions.length, 1, "rejected writes create no history");
 
   const next = await patchBoard(server, { version: 5, state: { nodes: ["tab-b rebased"] } });
   assert.equal(next.statusCode, 200, next.body);
   assert.equal(next.json().board.latest_version, 5);
-  assert.deepEqual(client.tables.board_versions.map((row) => row.version), [4, 5]);
+  assert.deepEqual(client.droppedTableQueries, [], "a save keeps no copy of the board");
 });
 
 test("another member's private board is invisible; organization boards stay shared", async (t) => {
@@ -363,7 +375,6 @@ test("another member's private board is invisible; organization boards stay shar
       boardRow({ owner_profile_id: OTHER }),
       boardRow({ id: SHARED, owner_profile_id: OTHER, visibility: "organization", title: "Team map" }),
     ],
-    board_versions: [],
     audit_events: [],
   });
   const server = await buildApp(t, client);
@@ -379,11 +390,9 @@ test("another member's private board is invisible; organization boards stay shar
   assert.equal(client.tables.boards[0].title, "Board");
   assert.equal(client.tables.boards[0].deleted_at, null);
 
-  // A board deleted before Trash was removed stays out of every list.
+  // A board deleted before Trash was removed stays out of the list.
   client.tables.boards[0].deleted_at = "2026-11-02T00:00:00.000Z";
-  for (const url of ["/boards", "/boards?scope=trash"]) {
-    assert.ok(!(await as("GET", url)).json().boards.some((board) => board.id === BOARD), url);
-  }
+  assert.ok(!(await as("GET", "/boards")).json().boards.some((board) => board.id === BOARD));
 
   assert.equal((await as("GET", `/boards/${SHARED}`)).statusCode, 200);
   assert.equal((await as("PATCH", `/boards/${SHARED}`, { title: "Team map v2" })).statusCode, 200);
@@ -397,7 +406,6 @@ test("only a board's owner changes who can open it", async (t) => {
       boardRow(),
       boardRow({ id: SHARED, owner_profile_id: OTHER, visibility: "organization" }),
     ],
-    board_versions: [],
     audit_events: [],
   });
   const server = await buildApp(t, client);
@@ -415,14 +423,13 @@ test("only a board's owner changes who can open it", async (t) => {
 });
 
 test("metadata-only board patches need no version and missing boards stay 404", async (t) => {
-  const client = createFakeSupabase({ boards: [boardRow()], board_versions: [], audit_events: [] });
+  const client = createFakeSupabase({ boards: [boardRow()], audit_events: [] });
   const server = await buildApp(t, client);
 
-  const renamed = await patchBoard(server, { title: "Renamed", archived: true });
+  const renamed = await patchBoard(server, { title: "Renamed" });
   assert.equal(renamed.statusCode, 200, renamed.body);
   assert.equal(client.tables.boards[0].title, "Renamed");
   assert.equal(client.tables.boards[0].latest_version, 3);
-  assert.ok(client.tables.boards[0].archived_at);
 
   assert.equal((await patchBoard(server, { state: { nodes: [] } })).json().error, "BOARD_VERSION_REQUIRED");
 
@@ -430,17 +437,6 @@ test("metadata-only board patches need no version and missing boards stay 404", 
   const missing = await patchBoard(server, { version: 4, state: { nodes: [] } });
   assert.equal(missing.statusCode, 404);
   assert.equal(missing.json().error, "BOARD_NOT_FOUND");
-});
-
-test("a failed history write is a distinct 500 that reports the saved version", async (t) => {
-  const client = createFakeSupabase(
-    { boards: [boardRow()], board_versions: [] },
-    { fail: (table) => (table === "board_versions" ? { code: "XX000", message: "boom" } : null) },
-  );
-  const server = await buildApp(t, client);
-  const response = await patchBoard(server, { version: 4, state: { nodes: ["saved"] } });
-  assert.equal(response.statusCode, 500);
-  assert.deepEqual(response.json(), { error: "BOARD_VERSION_HISTORY_FAILED", latestVersion: 4 });
 });
 
 const DAY = 86_400_000;
@@ -505,7 +501,7 @@ test("a storage failure keeps expired boards for the next lifecycle run", async 
   client.storageError = { statusCode: "500", message: "storage unavailable" };
   const server = await buildApp(t, client);
   const response = await runLifecycle(server);
-  // A failed step fails the run so Cloud Scheduler logs an error and alerts.
+  // A failed step fails the run so Cloud Scheduler logs an error.
   assert.equal(response.statusCode, 500, response.body);
   assert.equal(response.json().error, "LIFECYCLE_STEP_FAILED");
   assert.equal(response.json().failures, 1);
@@ -587,6 +583,36 @@ test("account deletion erases a personal workspace's objects before deleting the
   assert.deepEqual(client.deletedAuthUsers, ["auth-user"]);
   assert.equal(client.tables.organizations.length, 0);
   assert.equal(client.tables.profiles.length, 0);
+  assert.deepEqual(client.droppedTableQueries, [], "erasure touches no dropped table");
+});
+
+test("a data export completes without the dropped tables", async (t) => {
+  assert.ok(DROPPED_TABLES.has("platform_installations"), "the drop migration is found");
+  const tables = lifecycleTables();
+  tables.profiles = [{ id: PROFILE, auth_user_id: "auth-user", email: "owner@airboard.test" }];
+  tables.consent_records = [{ profile_id: PROFILE, consent_type: "terms", document_version: "1", granted: true, source: "web" }];
+  tables.data_requests.push({
+    id: "request-export",
+    request_type: "export",
+    organization_id: ORG,
+    profile_id: PROFILE,
+    status: "queued",
+    execute_after: new Date(Date.now() - DAY).toISOString(),
+    requested_at: new Date(Date.now() - 2 * DAY).toISOString(),
+  });
+  const client = createFakeSupabase(tables);
+  const server = await buildApp(t, client);
+
+  const response = await runLifecycle(server);
+  assert.equal(response.statusCode, 200, response.body);
+  assert.deepEqual(response.json().dataRequests, { completed: 1, failed: 0, storageFailures: 0 });
+  const [request] = client.tables.data_requests;
+  assert.equal(request.status, "completed");
+  assert.equal(request.result.schemaVersion, 3);
+  assert.equal(request.result.profile.email, "owner@airboard.test");
+  assert.equal(request.result.consents.length, 1);
+  assert.equal("installations" in request.result, false);
+  assert.deepEqual(client.droppedTableQueries, []);
 });
 
 function deletionRequest(overrides = {}) {
@@ -628,7 +654,7 @@ test("account deletion removes every personal workspace left without a member an
   const server = await buildApp(t, client);
 
   const failed = await runLifecycle(server);
-  assert.equal(failed.statusCode, 500, "a failed erasure alerts");
+  assert.equal(failed.statusCode, 500, "a failed erasure fails the run");
   assert.deepEqual(failed.json().dataRequests, { completed: 0, failed: 1, storageFailures: 0 });
   assert.equal(client.tables.data_requests[0].status, "queued", "it is retried, not abandoned");
   assert.equal(client.tables.data_requests[0].attempts, 1);
@@ -839,7 +865,7 @@ test("view-only links refuse other people's boards, expired or unknown links and
   assert.equal((await server.inject({ method: "GET", url: `/shared-boards/${token}` })).statusCode, 404, "an expired link");
   client.tables.board_shares[0].expires_at = null;
   client.tables.boards[0].deleted_at = new Date().toISOString();
-  assert.equal((await server.inject({ method: "GET", url: `/shared-boards/${token}` })).statusCode, 404, "a board in Trash");
+  assert.equal((await server.inject({ method: "GET", url: `/shared-boards/${token}` })).statusCode, 404, "a board deleted before Trash was removed");
 });
 
 test("a board holds at most 20 live view-only links", async (t) => {
@@ -908,7 +934,6 @@ test("team members save and permanently delete a shared board", async (t) => {
   const OTHER = "99999999-9999-4999-8999-999999999999";
   const client = createFakeSupabase({
     boards: [boardRow({ owner_profile_id: OTHER, visibility: "organization" })],
-    board_versions: [],
     audit_events: [],
     board_assets: [{ id: "asset-1", organization_id: ORG, board_id: BOARD, storage_path: `${ORG}/${BOARD}/photo.png` }],
   });
@@ -1054,7 +1079,6 @@ test("the development sign-in trusts only the connection's real loopback address
 test("Viewer and Billing members open boards but cannot change or share them", async (t) => {
   const tables = shareTables();
   tables.boards[0].visibility = "organization";
-  tables.board_versions = [];
   const client = createFakeSupabase(tables);
   const server = await buildApp(t, client, { appUrl: "https://app.airboard.test", trustedProxyHops: 0 });
   const before = JSON.stringify(client.tables.boards);

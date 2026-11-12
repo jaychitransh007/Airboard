@@ -6,7 +6,7 @@ import {
   applyDiagramCommand,
   applyDiagramUndo,
   createInitialBoardState,
-} from "../../packages/core/dist/index.js";
+} from "../../packages/core/src/index.ts";
 import {
   canonicalizeBoardDelta,
   canonicalizeBoardEvents,

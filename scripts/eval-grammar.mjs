@@ -36,7 +36,7 @@ const MEETING_NEGATIVES_FIXTURE = resolve(
  * The fast scene phrase rules (packages/core/src/sceneIntent.ts) run before
  * every other path and apply at once, so they carry their own contract:
  * `expected: null` means "hand off", anything else must match those fields
- * exactly. Gap 5 of Docs/Hands-free Gap Audit.md is the origin of most rows.
+ * exactly. Gap 5 of Docs/archive/Hands-free Gap Audit.md is the origin of most rows.
  */
 const contextualIt = { kind: "contextual", pronoun: "it" };
 const SCENE_INTENT_CASES = [

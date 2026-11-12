@@ -93,21 +93,6 @@ function hiddenSceneMemberIds(state: BoardState): Set<string> {
   return hidden;
 }
 
-export type BoardObjectHit =
-  | { source: "element"; element: BoardSceneElement }
-  | { source: "stroke"; stroke: Stroke };
-
-/** Unified lookup for callers migrating from annotation IDs to scene IDs. */
-export function findBoardObjectAtPoint(
-  state: BoardState,
-  point: Pick<StrokePoint, "x" | "y">,
-): BoardObjectHit | null {
-  const element = findSceneElementAtPoint(state, point);
-  if (element) return { source: "element", element };
-  const stroke = findAnnotationObjectAtPoint(state, point);
-  return stroke ? { source: "stroke", stroke } : null;
-}
-
 export function strokeIntersectsCircle(
   stroke: Stroke,
   center: Pick<StrokePoint, "x" | "y">,

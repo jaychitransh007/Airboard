@@ -45,12 +45,7 @@ One `voiceTurnId` correlates these append-only stages:
 
 The API adds `semantic.server.requested`, `semantic.server.completed`, and `semantic.server.failed`, including provider/model, bounded redacted input, typed output, OpenAI response/request IDs, client request ID, processing time, total latency, and usage.
 
-Use an allowed Origin header to inspect a local trace:
-
-```sh
-curl -H 'Origin: http://localhost:3000' \
-  http://127.0.0.1:4000/voice/trace/<voiceTurnId>
-```
+Traces are stored, content-free, in the `voice_trace_events` table (14-day retention); to follow one turn, filter that table or the API logs by `voiceTurnId`. There is no read endpoint.
 
 ## Failure taxonomy
 

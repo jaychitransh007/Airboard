@@ -7,55 +7,28 @@ const source = await readFile(
   "utf8",
 );
 
-test("PR and release share every blocking offline correctness gate", () => {
-  const helper = source.match(
-    /function offlineCoreReleaseGateSteps\(\) \{(?<body>[\s\S]*?)\n\}/u,
-  )?.groups?.body;
-  assert.ok(helper, "offline release gate helper must exist");
-
+test("the PR tier runs every blocking offline correctness gate", () => {
+  const prSuite = suiteBody("pr");
   for (const gate of [
     "deterministic-contract-matrix",
     "deterministic-positive-corpus",
     "grounded-ambient-negatives",
+    "semantic-ambient-negative-replay",
     "provider-event-replay",
     "seeded-evaluator-faults",
   ]) {
-    assert.match(helper, new RegExp(`"${gate}"`, "u"));
-  }
-
-  const prSuite = suiteBody("pr", "canary");
-  const releaseSuite = suiteBody("release", null);
-  assert.match(prSuite, /\.\.\.offlineCoreReleaseGateSteps\(\)/u);
-  assert.match(releaseSuite, /\.\.\.offlineCoreReleaseGateSteps\(\)/u);
-});
-
-test("nightly and release evaluate direct and Meet audio transport", () => {
-  for (const body of [
-    suiteBody("nightly", "device"),
-    suiteBody("release", null),
-  ]) {
-    assert.match(
-      body,
-      /"--adapter",\s*"live-websocket",\s*"--adapter",\s*"meet-bridge-replay"/u,
-    );
-    assert.match(body, /"--model",\s*candidateSemanticModel/u);
-    assert.match(body, /"--frame-delay-ms",\s*"0"/u);
+    assert.match(prSuite, new RegExp(`"${gate}"`, "u"));
   }
 });
 
-test("canary runs the full approximately-30 semantic set and a bounded live STT sample", () => {
-  const body = suiteBody("canary", "nightly");
-  const semanticStep = body.match(
-    /"live-semantic-canary"(?<step>[\s\S]*?)requiredEnvironment/u,
-  )?.groups?.step;
-  assert.ok(semanticStep, "live semantic canary step must exist");
-  assert.doesNotMatch(semanticStep, /"--case"/u);
-  assert.match(
-    body,
-    /"live-audio-canary"[\s\S]*?"--adapter",\s*"live-websocket",\s*"--adapter",\s*"meet-bridge-replay"/u,
-  );
-  assert.match(body, /"--max-scenarios",\s*"30"/u);
-  assert.match(body, /"--require-assets"/u);
+test("only the offline PR tier remains", () => {
+  const tiers = [
+    ...source
+      .slice(source.indexOf("const suites = {"))
+      .matchAll(/^ {2}(?<name>[a-z]+): \[/gmu),
+  ].map(({ groups }) => groups.name);
+  assert.deepEqual(tiers, ["pr"]);
+  assert.doesNotMatch(source, /live-websocket|requiredEnvironment/u);
 });
 
 test("PR browser journeys execute the direct touchpad and stylus evidence", () => {
@@ -65,13 +38,11 @@ test("PR browser journeys execute the direct touchpad and stylus evidence", () =
   );
 });
 
-function suiteBody(name, nextName) {
+function suiteBody(name) {
   const startMarker = `  ${name}: [`;
   const start = source.indexOf(startMarker);
   assert.notEqual(start, -1, `${name} suite must exist`);
-  const end = nextName
-    ? source.indexOf(`  ${nextName}: [`, start + startMarker.length)
-    : source.indexOf("\n  ],\n};", start + startMarker.length);
+  const end = source.indexOf("\n  ],\n", start + startMarker.length);
   assert.notEqual(end, -1, `${name} suite must have a closing boundary`);
   return source.slice(start, end);
 }

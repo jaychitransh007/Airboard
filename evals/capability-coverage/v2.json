@@ -46,20 +46,12 @@
       }
     },
     "surfaces": {
-      "reason": "The production Surface union is type-only. Values here cover every routable board surface; Meet values remain private-preview surfaces rather than a public availability claim.",
-      "productionTypeUnion": {
-        "path": "apps/web/src/features/board/AirboardPrototype.tsx",
-        "typeName": "Surface"
-      },
+      "reason": "The standalone web board is the only board surface. The Meet add-on, the Chrome extension's headless overlay engine and the Electron desktop app were removed on 12 Nov 2026; Google Meet is supported by presenting the browser tab, which runs this same surface. With a single surface there is no production Surface type union to read.",
       "values": [
-        "standalone",
-        "meet-side-panel",
-        "meet-main-stage"
+        "standalone"
       ],
       "availability": {
-        "standalone": "controlled_pilot",
-        "meet-side-panel": "private_preview",
-        "meet-main-stage": "private_preview"
+        "standalone": "controlled_pilot"
       }
     }
   },
@@ -578,7 +570,7 @@
         "grounding",
         "final_state"
       ],
-      "rationale": "Mounted production handlers move a node by primary mouse input, reject a non-primary drag, classify touchpad and pen streams, commit through BoardEvents, and assert terminal geometry/source attribution."
+      "rationale": "Mounted production handlers move a node by primary mouse input, reject a non-primary drag, zoom around the cursor on a touchpad pinch and pan on a two-finger scroll without changing the board, attribute a pen marker stroke to stylus, and assert terminal geometry, view, and source attribution."
     },
     {
       "evidenceId": "browser:apps/web/e2e/directInputChannels.spec.ts#pointer, touchpad, and stylus streams ground to attributed final state",
@@ -696,59 +688,6 @@
         "negative"
       ],
       "rationale": "The standalone surface fails closed without a browser grant."
-    },
-    {
-      "evidenceId": "browser:apps/web/e2e/mediaOwnership.spec.ts#delegated main stage restores gesture and voice entry points without auto-starting capture",
-      "capabilities": [
-        "surface:meet-main-stage"
-      ],
-      "facets": [
-        "positive",
-        "grounding"
-      ],
-      "rationale": "The mounted delegated main-stage route exposes the intended controls without violating media-start policy."
-    },
-    {
-      "evidenceId": "browser:apps/web/e2e/mediaOwnership.spec.ts#undelegated main stage offers the companion window instead of media buttons",
-      "capabilities": [
-        "surface:meet-main-stage"
-      ],
-      "facets": [
-        "negative"
-      ],
-      "rationale": "The undelegated main-stage route removes invalid embedded media controls."
-    },
-    {
-      "evidenceId": "browser:apps/web/e2e/meetMediaBridge.spec.ts#hidden diagram restores raw Meet camera and resumes the compositor without recapturing",
-      "capabilities": [
-        "surface:meet-main-stage"
-      ],
-      "facets": [
-        "final_state"
-      ],
-      "rationale": "The mounted bridge reaches and recovers the final main-stage compositor state."
-    },
-    {
-      "evidenceId": "browser:apps/web/e2e/mediaOwnership.spec.ts#delegated side panel stays compact and points at the shared board",
-      "capabilities": [
-        "surface:meet-side-panel"
-      ],
-      "facets": [
-        "positive",
-        "grounding",
-        "final_state"
-      ],
-      "rationale": "The mounted delegated side panel resolves to its compact shared-board UI."
-    },
-    {
-      "evidenceId": "browser:apps/web/e2e/mediaOwnership.spec.ts#undelegated side panel stays compact and routes media to the companion window",
-      "capabilities": [
-        "surface:meet-side-panel"
-      ],
-      "facets": [
-        "negative"
-      ],
-      "rationale": "The undelegated side panel fails over instead of exposing invalid capture."
     },
     {
       "evidenceId": "test:packages/core/test/semanticPlan.test.mjs#plans hold a two-minute narration and the new edit actions",

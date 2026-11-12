@@ -2,9 +2,6 @@ packages:
   - "apps/*"
   - "packages/*"
 allowBuilds:
-  # electron-builder brings it in for Squirrel.Windows; the desktop app ships
-  # an NSIS installer instead, so its 7-Zip setup script isn't needed.
-  electron-winstaller: false
   esbuild: true
   sharp: true
 # Next.js still bundles PostCSS 8.4.31, which has published advisories; the
@@ -15,8 +12,6 @@ overrides:
   # (libvips/libheif/librsvg CVEs in sharp, URI-parsing advisories in fast-uri).
   "sharp": "^0.35.5"
   "fast-uri": "^3.1.7"
-  # Pulled in only by Electron's download helper (desktop app tooling).
-  "undici": "^7.30.1"
-  # Node's types follow the Node 22 runtime; without this @types/ws resolves
-  # to the Node 24 types Electron brings in.
+  # Node's types follow the Node 22 runtime; @types/ws asks for any
+  # @types/node, so pin it to the 22 line the apps declare.
   "@types/ws>@types/node": "^22.20.5"

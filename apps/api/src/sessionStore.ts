@@ -162,6 +162,10 @@ export class InMemorySessionStore implements SessionStore {
     return record.session;
   }
 
+  /**
+   * Test helper: ends a session in place. Production ends sessions through
+   * DELETE /me/sessions/:sessionId, which updates board_sessions directly.
+   */
   endSession(sessionId: string): BoardSession {
     const record = this.requireSession(sessionId);
     const now = new Date().toISOString();
@@ -184,10 +188,6 @@ export class InMemorySessionStore implements SessionStore {
     const now = new Date().toISOString();
     record.session = { ...record.session, joinLinksResetAt: now, updatedAt: now };
     return record.session;
-  }
-
-  appendEvent(sessionId: string, event: BoardEvent): BoardEvent {
-    return this.appendEvents(sessionId, [event])[0]!;
   }
 
   appendEvents(sessionId: string, incoming: BoardEvent[]): BoardEvent[] {

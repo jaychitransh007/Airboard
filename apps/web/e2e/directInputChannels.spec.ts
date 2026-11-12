@@ -7,6 +7,7 @@ type CanonicalBoard = {
       status: string;
       legacyStrokeId?: string;
       metadata?: { lastInputSource?: string };
+      points?: Array<{ inputSource?: string }>;
     }
   >;
   strokes: Record<
@@ -52,7 +53,12 @@ async function inputSources(page: Page): Promise<string[]> {
       .filter(
         ({ status, legacyStrokeId }) => status === "active" && !legacyStrokeId,
       )
-      .map(({ metadata }) => metadata?.lastInputSource ?? "");
+      .map(
+        ({ metadata, points }) =>
+          metadata?.lastInputSource ??
+          points?.find(({ inputSource }) => inputSource)?.inputSource ??
+          "",
+      );
     const strokeSources = Object.values(board.strokes)
       .filter(({ status }) => status === "committed")
       .map(
@@ -66,6 +72,20 @@ async function inputSources(page: Page): Promise<string[]> {
       .filter(Boolean)
       .sort();
   });
+}
+
+async function viewport(
+  page: Page,
+): Promise<{ x: number; y: number; scale: number }> {
+  return page.evaluate(() =>
+    (
+      window as never as {
+        __airboardTestHooks: {
+          getViewport(): { x: number; y: number; scale: number };
+        };
+      }
+    ).__airboardTestHooks.getViewport(),
+  );
 }
 
 async function drawPenStroke(
@@ -164,18 +184,39 @@ test("pointer, touchpad, and stylus streams ground to attributed final state", a
   await page.keyboard.press("q");
   expect((await objectPositions(page))[0]).toEqual(movedPointerPosition);
 
-  await page.getByRole("button", { name: "More board actions" }).click();
+  // Touchpad: a pinch (ctrl + wheel) zooms around the cursor and a
+  // two-finger scroll pans. Both move only the view, never the board.
+  const anchor = { x: 240, y: 260 };
+  const pinchBox = (await canvas.boundingBox())!;
+  await page.mouse.move(pinchBox.x + anchor.x, pinchBox.y + anchor.y);
+  const beforePinch = await viewport(page);
+  await page.keyboard.down("Control");
+  await page.mouse.wheel(0, -240);
+  await page.keyboard.up("Control");
+  await expect
+    .poll(async () => (await viewport(page)).scale)
+    .toBeGreaterThan(beforePinch.scale);
+  const afterPinch = await viewport(page);
+  const boardPointUnderCursor = (view: { x: number; y: number; scale: number }) => ({
+    x: (anchor.x - view.x) / view.scale,
+    y: (anchor.y - view.y) / view.scale,
+  });
+  expect(boardPointUnderCursor(afterPinch).x).toBeCloseTo(
+    boardPointUnderCursor(beforePinch).x,
+    0,
+  );
+  expect(boardPointUnderCursor(afterPinch).y).toBeCloseTo(
+    boardPointUnderCursor(beforePinch).y,
+    0,
+  );
+  await page.mouse.wheel(120, 80);
+  await expect
+    .poll(async () => Math.abs((await viewport(page)).x - afterPinch.x))
+    .toBeGreaterThan(1);
+  expect(await objectPositions(page)).toEqual([movedPointerPosition]);
 
-  await page.getByRole("menuitem", { name: "Board settings" }).click();
-  await page.locator("#input-mode").selectOption("touchpad");
-  await expect(
-    page.getByText("Touchpad Writing - most reliable. Press and drag to draw."),
-  ).toBeVisible();
-  await page.mouse.move(box!.x + 120, box!.y + 140);
-  await page.mouse.down();
-  await page.mouse.move(box!.x + 210, box!.y + 190, { steps: 6 });
-  await page.mouse.up();
-  await expect.poll(() => inputSources(page)).toContain("touchpad");
+  await canvas.focus();
+  await page.keyboard.press("m");
 
   await drawPenStroke(
     page,
@@ -185,13 +226,9 @@ test("pointer, touchpad, and stylus streams ground to attributed final state", a
       [420, 200],
       [440, 210],
     ] satisfies Array<[number, number]>).map(
-      ([x, y]): [number, number] => [box!.x + x, box!.y + y],
+      ([x, y]): [number, number] => [pinchBox.x + x, pinchBox.y + y],
     ),
   );
 
-  await expect.poll(() => inputSources(page)).toEqual([
-    "pointer",
-    "stylus",
-    "touchpad",
-  ]);
+  await expect.poll(() => inputSources(page)).toEqual(["pointer", "stylus"]);
 });

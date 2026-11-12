@@ -11,7 +11,7 @@ import {
   AIRBOARD_SEMANTIC_PLAN_TOOL_NAME,
   AIRBOARD_SEMANTIC_TRANSCRIPTION_KEYTERMS,
   parseSemanticPlan,
-} from "../dist/index.js";
+} from "../src/index.ts";
 
 const ref = (label) => ({ kind: "visible_label", label, occurrence: null });
 const resolved = (actions) => ({
@@ -383,7 +383,7 @@ test("the tool schema asks for as many targets as the validator needs (RGB-041)"
 });
 
 test("plans hold a two-minute narration and the new edit actions", async () => {
-  const core = await import("../dist/index.js");
+  const core = await import("../src/index.ts");
   assert.equal(core.AIRBOARD_SEMANTIC_PLAN_MAX_ACTIONS, 40);
   assert.equal(core.AIRBOARD_SEMANTIC_PLAN_MAX_DIAGRAM_COMMANDS, 150);
   const creates = Array.from({ length: 40 }, (_, index) => ({
@@ -432,7 +432,7 @@ test("plans hold a two-minute narration and the new edit actions", async () => {
 });
 
 test("a spoken name suggests a node type and catalogue shape", async () => {
-  const { inferSemanticNodeForLabel } = await import("../dist/index.js");
+  const { inferSemanticNodeForLabel } = await import("../src/index.ts");
   assert.deepEqual(inferSemanticNodeForLabel("Orders Cache"), { nodeType: "database", shape: "horizontal-cylinder" });
   assert.deepEqual(inferSemanticNodeForLabel("Load Balancer"), { nodeType: "service", shape: "hexagon" });
   assert.deepEqual(inferSemanticNodeForLabel("CDN"), { nodeType: "custom", shape: "cloud" });

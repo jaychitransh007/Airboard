@@ -91,8 +91,8 @@ Hold one open palm still, away from the dock and from shapes, without sideways
 motion, for about 0.4 seconds to open push-to-talk. Lower or relax it when
 finished.
 
-Camera motion does not trigger Undo. Use the board menu (**•••**), press
-`Cmd/Ctrl+Z`, or say “Airo, undo.”
+Camera motion does not trigger Undo. Choose the **Undo** arrow at the bottom
+left of the board, press `Cmd/Ctrl+Z`, or say “Airo, undo.”
 
 ## Pan, zoom, and hide
 
@@ -112,7 +112,8 @@ doesn't interrupt it, and pan and zoom never start during a carry.
 If hand tracking hits an error, the camera is unplugged, or another app takes
 it, Airboard restarts the camera and hand tracking on its own after a few
 seconds. Your open-palm voice gesture works again once hands are back. If it
-can't restart after several tries, select **Enable hands** to try again.
+can't restart after several tries, switch to another tab and back, or reload
+the board.
 
 ## If a gesture conflicts
 

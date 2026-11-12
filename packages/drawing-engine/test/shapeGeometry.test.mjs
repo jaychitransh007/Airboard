@@ -9,7 +9,6 @@ import {
   catalogShapeContainsPoint,
   catalogShapeIntersectsCircle,
   drawCatalogShape,
-  pointOnCatalogShapeBoundary,
 } from "../src/shapeGeometry.ts";
 
 const bounds = { x: 10, y: 20, width: 140, height: 100 };
@@ -51,14 +50,10 @@ test("concave and curved shapes do not expose transparent bounding-box corners",
   );
 });
 
-test("hit testing and connector anchors honor shape rotation", () => {
+test("hit testing honors shape rotation", () => {
   const transform = { x: 0, y: 0, width: 100, height: 40, rotation: 90 };
   assert.equal(catalogShapeContainsPoint("square", transform, { x: 50, y: 50 }), true);
   assert.equal(catalogShapeContainsPoint("square", transform, { x: 20, y: 20 }), false);
-
-  const anchor = pointOnCatalogShapeBoundary("square", transform, { x: 50, y: 200 });
-  assert.ok(Math.abs(anchor.x - 50) < 0.001);
-  assert.ok(Math.abs(anchor.y - 70) < 0.001);
 });
 
 test("advanced entries have distinct original glyph command streams", () => {

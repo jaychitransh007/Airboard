@@ -77,8 +77,6 @@ const PUBLIC_PAGES: Array<{ path: string; siteTitle?: boolean }> = [
   { path: "/accessibility" },
   { path: "/privacy" },
   { path: "/integrations" },
-  { path: "/integrations/google-meet" },
-  { path: "/use-cases/product-teams" },
   { path: "/status" },
   { path: "/support" },
   { path: "/contact-sales" },
@@ -156,7 +154,6 @@ const SIGNED_IN_PAGES = [
   "/app/settings/members",
   "/app/settings/policies",
   "/app/settings/audit-logs",
-  "/app/settings/identity-directory",
 ];
 
 for (const path of SIGNED_IN_PAGES) {
@@ -325,9 +322,10 @@ test("at 320px the profile menu reaches every page, and Settings every section",
   await expect(page).toHaveTitle("Preferences · Settings · Airboard");
   await expect(menu).toBeHidden();
   const settings = page.getByRole("navigation", { name: "Settings" });
-  for (const name of ["Profile", "Sessions", "Workspace", "Members", "Policies", "SSO & SCIM", "Audit log"]) {
+  for (const name of ["Profile", "Sessions", "Workspace", "Members", "Policies", "Audit log"]) {
     await expect(settings.getByRole("link", { name, exact: true })).toBeAttached();
   }
+  await expect(settings.getByRole("link", { name: "SSO & SCIM" })).toHaveCount(0);
   await settings.getByRole("link", { name: "Members", exact: true }).click();
   await expect(page).toHaveTitle("Members · Settings · Airboard");
 });
@@ -340,8 +338,10 @@ test("old addresses land on the home page, the Help Center or Settings", async (
   }
   await page.goto("/app/integrations");
   await expect(page).toHaveURL(/\/help\/integrations\/google-meet$/, { timeout: 30_000 });
-  await page.goto("/app/admin/overview");
-  await expect(page).toHaveURL(/\/app\/settings\/workspace$/, { timeout: 30_000 });
+  for (const path of ["/app/admin/overview", "/app/admin/identity-directory", "/app/settings/identity-directory"]) {
+    await page.goto(path);
+    await expect(page, path).toHaveURL(/\/app\/settings\/workspace$/, { timeout: 30_000 });
+  }
 });
 
 test("at 320px the public pages keep their main navigation", async ({ page }) => {
@@ -592,7 +592,7 @@ test("with reduced motion, nothing on the page animates", async ({ page }) => {
           return `${(animation as CSSAnimation).animationName ?? "transition"} on ${target?.tagName.toLowerCase()}.${target?.className}`;
         }),
     );
-  for (const path of ["/", "/demo", "/help", "/?testStandalone=1"]) {
+  for (const path of ["/", "/help", "/?testStandalone=1"]) {
     await page.goto(path);
     await page.waitForLoadState("networkidle");
     expect(await moving(), `animations on ${path}`).toEqual([]);

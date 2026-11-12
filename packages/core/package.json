@@ -12,7 +12,6 @@
     "./semantic-plan": "./src/semanticPlan.ts"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test"
   }

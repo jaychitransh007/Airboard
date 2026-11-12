@@ -1,17 +1,5 @@
 import type { SemanticPlan } from "@airboard/core/semantic-plan";
 
-export const SEMANTIC_INTENT_STATUSES = ["resolved", "clarification", "unsupported"] as const;
-
-export const SEMANTIC_INTENT_ISSUE_CODES = [
-  "none",
-  "ambiguous",
-  "missing_context",
-  "multiple_commands",
-  "plan_too_large",
-  "not_board_command",
-  "unsupported_operation",
-] as const;
-
 export type SemanticIntentObjectSummary = {
   label: string;
   nodeType: string;

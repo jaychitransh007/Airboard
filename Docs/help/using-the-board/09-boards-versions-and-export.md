@@ -6,11 +6,12 @@ categoryLabel: Using the board
 order: 9
 status: shipped
 audiences: ["everyone"]
-lastVerified: 2026-11-11
+lastVerified: 2026-11-12
 sources: ["apps/web/src/features/product/AirboardsHome.tsx", "apps/web/src/features/board/boardExport.ts", "packages/core/src/boardPreview.ts", "apps/web/src/features/board/boardLifecycle.ts", "apps/web/src/features/board/ShareDialog.tsx", "apps/web/src/features/board/ViewLinksSection.tsx", "apps/web/src/features/share/SharedBoardView.tsx", "apps/web/src/features/product/LiveBoardJoin.tsx", "apps/web/src/features/product/ViewOnlyBoard.tsx", "apps/api/src/controlPlaneRoutes.ts", "apps/api/src/boardShareRoutes.ts", "apps/api/src/server.ts"]
 ---
 
-Airboard stores persistent boards and versioned board state in your workspace.
+Airboard stores persistent boards in your workspace and keeps each board's
+latest state.
 Camera and microphone media are not saved with a board.
 
 ## Find a board
@@ -31,9 +32,11 @@ retry before navigating away.
 
 ## Versions
 
-Saved board records include a latest version. Treat version history as a board
-recovery aid, not as a substitute for checking the current visible state before
-a presentation.
+Each save gets a version number, so a save from an older copy of the board
+can't overwrite newer changes. If the board changed in another tab or on
+another device, Airboard says so and doesn't save over it. Airboard keeps only
+the latest state: there is no version history to restore from. To keep a copy
+of the board as it is now, export it as a PNG or PDF.
 
 ## Share a board
 
