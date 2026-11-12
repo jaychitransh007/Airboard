@@ -31,6 +31,7 @@
 
 Newest first; the [change log](Release%20Readiness%20Backlog.md#change-log) has every deploy with its evidence and rollback target.
 
+- Data change (12 Nov, no deploy): the 5 production boards holding old-format shapes (26 shapes) were converted to the newer shapes with `scripts/convert-legacy-boards.mjs`; no board holds old-format shapes now. Backups and a restore script are kept off the repo.
 - `launch-f5e326e` (both, 12 Nov): Airo draws only the newer shapes, with bold arrows and labels clear of shapes; board file split begun (10,310 lines); stylesheet tidied.
 - `launch-3a5c7ab` (both, 12 Nov): refactoring steps 1–3; operator token header-only, CI trimmed, test safety net. No user-facing change.
 - `launch-9d5bd39` (both, 12 Nov): Touchpad Writing removed; then migration `20261112120000` dropped the nine unused tables.

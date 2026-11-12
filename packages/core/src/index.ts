@@ -15,3 +15,4 @@ export * from "./semanticPlan.ts";
 export * from "./shapeCatalog.ts";
 export * from "./tableOperations.ts";
 export * from "./types.ts";
+export * from "./legacyStrokeMigration.ts";

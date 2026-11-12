@@ -232,7 +232,9 @@ function sceneNode(element: BoardSceneElement, groupIds: string[]): BoardDiagram
     name,
     kind,
     objectType: element.kind,
-    role: SCENE_MARK_KINDS.has(element.kind) ? "mark" : "shape",
+    // A pointer or highlight converted from a legacy stroke is a shape named
+    // by its legacy type; it stays a mark, as it was.
+    role: SCENE_MARK_KINDS.has(element.kind) || LEGACY_MARK_TYPES.has(kind) ? "mark" : "shape",
     bounds: transformBounds(element),
     model: "scene",
     groupIds,
