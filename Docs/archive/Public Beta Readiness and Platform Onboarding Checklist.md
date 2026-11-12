@@ -2,7 +2,7 @@
 
 > **Status:** Historical implementation and feasibility record
 > **Last updated:** 2026-07-25
-> **Current launch authority:** [`Official Launch Readiness.md`](<Official Launch Readiness.md>)
+> **Current launch authority:** [`Official Launch Readiness.md`](<../Official Launch Readiness.md>)
 > **Important:** Statuses below reflect the plan as recorded during the July 2026 feasibility work and are not a current product-support or completion claim.
 
 ## How this checklist must be used
@@ -82,7 +82,7 @@ Goal: prove what Airboard can reliably do inside each real meeting client before
 - [x] **[DONE 2026-07-14] PF-001 — Define the platform support matrix.**
   - Acceptance: Matrix covers provider, operating system, desktop/web/mobile client, organizer/participant/guest role, side panel/stage surface, camera, microphone, screen sharing, reconnect, breakout rooms, and fallback behavior.
   - Acceptance: All required dimensions are defined, with current evidence separated from candidate, excluded, partial, and not-built support.
-  - Evidence: [`Platform Support Matrix.md`](<Platform Support Matrix.md>) records the release channels, OS/client combinations, role mappings, meeting surfaces, media capabilities, lifecycle requirements, breakout behavior, fallbacks, and real-client evidence schema.
+  - Evidence: [`Platform Support Matrix.md`](<../Platform Support Matrix.md>) records the release channels, OS/client combinations, role mappings, meeting surfaces, media capabilities, lifecycle requirements, breakout behavior, fallbacks, and real-client evidence schema.
   - Notes: No provider-client support was promoted by this task. PF-002–PF-004 must replace candidate entries with real-client results before PF-006 approves the public promise.
 - [ ] **[BLOCKED] PF-002 — Run a Google Meet real-client feasibility spike.**
   - Acceptance: Side panel, main stage, identity, media permissions, WebSocket behavior, activity start/join, external participants, and fallback behavior are tested in supported browsers and clients.

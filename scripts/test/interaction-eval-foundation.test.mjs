@@ -22,12 +22,7 @@ import {
   runInteractionCorpus,
   validateInteractionCorpus,
 } from "../lib/interaction-eval-corpus.mjs";
-import {
-  emitHtmlReport,
-  emitJsonReport,
-  emitJunitReport,
-  emitMarkdownReport,
-} from "../lib/interaction-eval-reporters.mjs";
+import { emitJsonReport } from "../lib/interaction-eval-reporters.mjs";
 import {
   executeInteractionEvalCase,
 } from "../lib/interaction-eval-production-executor.mjs";
@@ -619,7 +614,7 @@ test("corpus runner converts executor observations and errors to result records"
   assert.equal(report.results[1].evidenceProvenance.class, "executor-error");
 });
 
-test("JSON, JUnit, and Markdown emitters summarize the same results", () => {
+test("the JSON report summarizes results and marks undeclared evidence diagnostic", () => {
   const results = [
     {
       schemaVersion: "interaction-eval-result.v1",
@@ -658,20 +653,11 @@ test("JSON, JUnit, and Markdown emitters summarize the same results", () => {
   ];
   const options = { generatedAt: "2026-07-30T12:00:00.000Z" };
   const json = JSON.parse(emitJsonReport(results, options));
-  const junit = emitJunitReport(results, options);
-  const markdown = emitMarkdownReport(results, options);
-  const html = emitHtmlReport(results, options);
 
   assert.equal(json.summary.total, 2);
   assert.equal(json.summary.failed, 1);
-  assert.match(junit, /tests="2" failures="1"/);
-  assert.match(junit, /A &amp; B/);
-  assert.match(junit, /Failure &lt;case&gt;/);
-  assert.match(markdown, /Passed \*\*1\/2\*\* \(50\.0%\)/);
-  assert.match(markdown, /## Failures/);
-  assert.match(markdown, /outside tolerance/);
-  assert.match(markdown, /unspecified · diagnostic only/);
-  assert.match(html, /1\/2 passed/);
-  assert.match(html, /Failure &lt;case&gt;/);
-  assert.match(html, /unspecified · diagnostic only/);
+  assert.equal(json.generatedAt, "2026-07-30T12:00:00.000Z");
+  assert.equal(json.results[1].title, "Failure <case>");
+  assert.equal(json.results[1].evidenceProvenance.class, "unspecified");
+  assert.equal(json.results[1].evidenceProvenance.releaseEligible, false);
 });

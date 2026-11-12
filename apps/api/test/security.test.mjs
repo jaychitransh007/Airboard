@@ -16,7 +16,7 @@ test("rate limiter enforces a sliding window per key", () => {
   assert.equal(limiter.allow("a", t0 + 60_001, ), true);
 });
 
-test("no configured token means open access; configured token gates both transports", () => {
+test("no configured token means open access; a configured token is read only from the Authorization header", () => {
   assert.equal(apiTokenAllowed({ headers: {} }, undefined), true);
   assert.equal(apiTokenAllowed({ headers: {} }, "secret"), false);
   assert.equal(
@@ -27,8 +27,9 @@ test("no configured token means open access; configured token gates both transpo
     apiTokenAllowed({ headers: { authorization: "Bearer wrong" } }, "secret"),
     false,
   );
-  // WebSocket upgrades cannot carry headers from browsers: query param form.
-  assert.equal(apiTokenAllowed({ headers: {}, query: { token: "secret" } }, "secret"), true);
+  // The operator token is never read from the URL (Threat Model I-5).
+  assert.equal(apiTokenAllowed({ headers: {}, query: { token: "secret" } }, "secret"), false);
+  assert.equal(apiTokenAllowed({ headers: {}, query: { access_token: "secret" } }, "secret"), false);
   assert.equal(apiTokenAllowed({ headers: {}, query: { token: "nope" } }, "secret"), false);
 });
 

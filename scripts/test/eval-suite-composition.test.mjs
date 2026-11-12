@@ -1,48 +1,36 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import test from "node:test";
 
-const source = await readFile(
-  new URL("../run-eval-suite.mjs", import.meta.url),
-  "utf8",
-);
+import { prSteps } from "../run-eval-suite.mjs";
 
-test("the PR tier runs every blocking offline correctness gate", () => {
-  const prSuite = suiteBody("pr");
+const root = new URL("../../", import.meta.url);
+
+test("the PR tier runs every blocking offline safety gate", () => {
+  const ids = prSteps.map(({ id }) => id);
   for (const gate of [
+    "capability-coverage",
+    "dataset-policy",
+    "landmark-replay",
     "deterministic-contract-matrix",
     "deterministic-positive-corpus",
     "grounded-ambient-negatives",
     "semantic-ambient-negative-replay",
     "provider-event-replay",
     "seeded-evaluator-faults",
+    "canonical-interactions",
   ]) {
-    assert.match(prSuite, new RegExp(`"${gate}"`, "u"));
+    assert.ok(ids.includes(gate), `${gate} must stay in eval:pr`);
+  }
+  assert.equal(new Set(ids).size, ids.length, "step ids are unique");
+});
+
+test("the PR tier runs only eval CLIs, never a second test run", () => {
+  for (const step of prSteps) {
+    const [script, ...args] = step.args;
+    assert.ok(!step.args.includes("--test"), `${step.id} must not re-run node --test`);
+    assert.match(script, /^scripts\/[\w-]+\.mjs$/u, `${step.id} runs a script CLI`);
+    assert.ok(existsSync(new URL(script, root)), `${script} exists`);
+    assert.ok(!args.includes("--live"), `${step.id} stays offline`);
   }
 });
-
-test("only the offline PR tier remains", () => {
-  const tiers = [
-    ...source
-      .slice(source.indexOf("const suites = {"))
-      .matchAll(/^ {2}(?<name>[a-z]+): \[/gmu),
-  ].map(({ groups }) => groups.name);
-  assert.deepEqual(tiers, ["pr"]);
-  assert.doesNotMatch(source, /live-websocket|requiredEnvironment/u);
-});
-
-test("PR browser journeys execute the direct touchpad and stylus evidence", () => {
-  assert.match(
-    source,
-    /const coreBrowserFiles = \[[\s\S]*?"e2e\/directInputChannels\.spec\.ts"/u,
-  );
-});
-
-function suiteBody(name) {
-  const startMarker = `  ${name}: [`;
-  const start = source.indexOf(startMarker);
-  assert.notEqual(start, -1, `${name} suite must exist`);
-  const end = source.indexOf("\n  ],\n", start + startMarker.length);
-  assert.notEqual(end, -1, `${name} suite must have a closing boundary`);
-  return source.slice(start, end);
-}

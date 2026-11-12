@@ -1,7 +1,7 @@
 # Airboard gesture interaction audit
 
-> **Status:** Implemented gesture vocabulary and product-gap source of truth
-> **Last reviewed:** 30 July 2026
+> **Status:** Engineering reference for the gesture vocabulary and its product gaps. User-facing gesture behaviour is owned by the help article `Docs/help/using-the-board/06-gestures.md`.
+> **Last fully reviewed:** 30 July 2026; edited since (last on 12 November 2026) without a full re-review, so check details against the code and help.
 > **Primary audiences:** Corporate employees, content creators, and online tutors
 
 Airboard uses gesture context, not pose alone. A closed hand has a different

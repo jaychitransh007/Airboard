@@ -320,33 +320,32 @@ async function streamLiveGatewayScenario({
 }
 
 /**
- * The gateway socket URL for a signed-in evaluation: the sign-in token is
- * traded for a one-minute voice ticket first, as the app does, so it never
- * goes in a URL.
+ * The gateway socket URL for an evaluation run. Whichever credential the run
+ * holds (a sign-in token, else the operator API token) is sent as a Bearer
+ * header to trade for a one-minute voice ticket first, as the app does, so no
+ * token ever goes in a URL. With no credential (local development) the socket
+ * is opened without a ticket.
  */
 async function authorizedLiveGatewaySocketUrl({ url, apiBaseUrl, accessToken, apiToken, fetchImpl }) {
-  if (!accessToken) return buildLiveGatewaySocketUrl(url, apiBaseUrl, null, apiToken);
-  const ticketUrl = new URL(buildLiveGatewaySocketUrl(url, apiBaseUrl, null, null));
+  const credential = accessToken || apiToken;
+  if (!credential) return buildLiveGatewaySocketUrl(url, apiBaseUrl, null);
+  const ticketUrl = new URL(buildLiveGatewaySocketUrl(url, apiBaseUrl, null));
   ticketUrl.protocol = ticketUrl.protocol === "wss:" ? "https:" : "http:";
   ticketUrl.pathname = "/transcription/ticket";
   ticketUrl.search = "";
   const response = await fetchImpl(ticketUrl.toString(), {
     method: "POST",
-    headers: { authorization: `Bearer ${accessToken}` },
+    headers: { authorization: `Bearer ${credential}` },
   });
   const body = await response.json().catch(() => null);
   if (!response.ok || typeof body?.ticket !== "string") {
     throw new Error(`Voice ticket request failed (${response.status}): ${body?.error ?? "no ticket"}`);
   }
-  return buildLiveGatewaySocketUrl(url, apiBaseUrl, body.ticket, apiToken);
+  return buildLiveGatewaySocketUrl(url, apiBaseUrl, body.ticket);
 }
 
-export function buildLiveGatewaySocketUrl(
-  explicitUrl,
-  apiBaseUrl,
-  ticket,
-  apiToken,
-) {
+/** The socket URL carries only a short-lived voice ticket, never a token. */
+export function buildLiveGatewaySocketUrl(explicitUrl, apiBaseUrl, ticket) {
   let value;
   if (typeof explicitUrl === "string" && explicitUrl.trim()) {
     value = explicitUrl.trim();
@@ -361,11 +360,11 @@ export function buildLiveGatewaySocketUrl(
   if (!["ws:", "wss:"].includes(parsed.protocol)) {
     throw new Error("Live STT evaluation URL must use ws:// or wss://.");
   }
+  for (const name of ["token", "access_token"]) {
+    parsed.searchParams.delete(name);
+  }
   if (ticket) {
     parsed.searchParams.set("ticket", ticket);
-  }
-  if (apiToken) {
-    parsed.searchParams.set("token", apiToken);
   }
   return parsed.toString();
 }

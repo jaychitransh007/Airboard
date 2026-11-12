@@ -1358,146 +1358,15 @@ async function writeEvaluationReports(report) {
   if (!root) return;
   const outputDirectory = resolve(root, "gesture");
   await mkdir(outputDirectory, { recursive: true });
-  await Promise.all([
-    writeFile(
-      resolve(outputDirectory, "gesture-results.json"),
-      `${JSON.stringify(report, null, 2)}\n`,
-    ),
-    writeFile(
-      resolve(outputDirectory, "gesture-results.xml"),
-      gestureJunit(report),
-    ),
-    writeFile(
-      resolve(outputDirectory, "gesture-results.md"),
-      gestureMarkdown(report),
-    ),
-    writeFile(
-      resolve(outputDirectory, "gesture-results.html"),
-      gestureHtml(report),
-    ),
-  ]);
-  console.log(`Reports: ${outputDirectory}`);
-}
-
-function gestureJunit(report) {
-  const lines = [
-    '<?xml version="1.0" encoding="UTF-8"?>',
-    `<testsuite name="Airboard gesture replay" tests="${report.results.length + report.gateFailures.length}" failures="${report.summary.failedAssets + report.gateFailures.length}" skipped="${report.summary.unevaluatedAssets + (report.summary.delegatedBrowserAssets ?? 0)}">`,
-  ];
-  for (const result of report.results) {
-    lines.push(
-      `  <testcase classname="gesture-replay" name="${xml(result.id)}">`,
-    );
-    if (result.status === "failed") {
-      lines.push(
-        `    <failure message="gesture quality gate">${xml(result.problems.join("; "))}</failure>`,
-      );
-    } else if (result.status === "unevaluated_reference") {
-      lines.push(
-        '    <skipped message="Raw media remains in restricted storage and requires browser/device replay"/>',
-      );
-    } else if (result.status === "delegated_browser_replay") {
-      lines.push(
-        '    <skipped message="Evidence is owned by the recorded-video browser replay"/>',
-      );
-    }
-    lines.push("  </testcase>");
-  }
-  report.gateFailures.forEach((failure, index) => {
-    lines.push(
-      `  <testcase classname="gesture-replay.release-gate" name="aggregate-${index + 1}"><failure message="quality gate">${xml(failure)}</failure></testcase>`,
-    );
-  });
-  lines.push(
-    `  <system-out>${xml(JSON.stringify({ confusionMatrices: report.confusionMatrices }, null, 2))}</system-out>`,
-  );
-  lines.push("</testsuite>");
-  return `${lines.join("\n")}\n`;
-}
-
-function gestureMarkdown(report) {
-  const lines = [
-    "# Airboard gesture replay evaluation",
-    "",
-    `Dataset: \`${report.datasetHash}\`  `,
-    `Replay: \`${report.replay}\``,
-    "",
-    `Precision: **${(report.metrics.precision * 100).toFixed(2)}%**; recall: **${(report.metrics.recall * 100).toFixed(2)}%**; duplicate rate: **${(report.metrics.duplicateRate * 100).toFixed(2)}%**; critical false triggers: **${report.metrics.criticalFalseTriggerCount}**.`,
-    "",
-    "## Gate failures",
-    "",
-    ...(report.gateFailures.length
-      ? report.gateFailures.map((failure) => `- ${failure}`)
-      : ["- None"]),
-    "",
-    "| Status | Asset | Precision | Recall | Duplicates |",
-    "| --- | --- | ---: | ---: | ---: |",
-    ...report.results.map(
-      (result) =>
-        `| ${result.status.toUpperCase()} | ${result.id} | ${result.precision.toFixed(3)} | ${result.recall.toFixed(3)} | ${result.duplicateActionCount} |`,
-    ),
-  ];
-  appendGestureConfusionMarkdown(lines, report.confusionMatrices);
-  return `${lines.join("\n")}\n`;
-}
-
-function gestureHtml(report) {
-  const rows = report.results
-    .map(
-      (result) =>
-        `<tr><td>${xml(result.status.toUpperCase())}</td><td>${xml(result.id)}</td><td>${result.precision.toFixed(3)}</td><td>${result.recall.toFixed(3)}</td><td>${result.duplicateActionCount}</td></tr>`,
-    )
-    .join("");
-  const confusion = renderGestureConfusionHtml(report.confusionMatrices);
-  return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Airboard gesture evaluation</title><style>body{font:15px/1.5 system-ui,sans-serif;max-width:1100px;margin:40px auto;padding:0 20px}table{border-collapse:collapse;width:100%}th,td{padding:9px;border-bottom:1px solid #ddd;text-align:left}</style></head>
-<body><h1>Airboard gesture replay evaluation</h1><p>Precision ${(report.metrics.precision * 100).toFixed(2)}%; recall ${(report.metrics.recall * 100).toFixed(2)}%; duplicates ${(report.metrics.duplicateRate * 100).toFixed(2)}%; critical false triggers ${report.metrics.criticalFalseTriggerCount}.</p><p>Dataset <code>${xml(report.datasetHash)}</code>.</p><h2>Gate failures</h2><ul>${(report.gateFailures.length ? report.gateFailures : ["None"]).map((failure) => `<li>${xml(failure)}</li>`).join("")}</ul>${confusion}<table><thead><tr><th>Status</th><th>Asset</th><th>Precision</th><th>Recall</th><th>Duplicates</th></tr></thead><tbody>${rows}</tbody></table></body></html>
-`;
-}
-
-function appendGestureConfusionMarkdown(lines, matrices) {
-  for (const [name, matrix] of Object.entries(matrices ?? {})) {
-    if (!Array.isArray(matrix?.labels) || !matrix.matrix) continue;
-    lines.push(
-      "",
-      `## Confusion matrix: ${name}`,
-      "",
-      `| Expected \\ Actual | ${matrix.labels.join(" | ")} |`,
-      `| --- | ${matrix.labels.map(() => "---:").join(" | ")} |`,
-    );
-    for (const expected of matrix.labels) {
-      lines.push(
-        `| ${expected} | ${matrix.labels
-          .map((actual) => matrix.matrix[expected]?.[actual] ?? 0)
-          .join(" | ")} |`,
-      );
-    }
-  }
-}
-
-function renderGestureConfusionHtml(matrices) {
-  return Object.entries(matrices ?? {})
-    .filter(([, matrix]) => Array.isArray(matrix?.labels) && matrix.matrix)
-    .map(
-      ([name, matrix]) =>
-        `<section><h2>Confusion matrix: ${xml(name)}</h2><table><thead><tr><th>Expected \\ Actual</th>${matrix.labels.map((label) => `<th>${xml(label)}</th>`).join("")}</tr></thead><tbody>${matrix.labels.map((expected) => `<tr><th>${xml(expected)}</th>${matrix.labels.map((actual) => `<td>${matrix.matrix[expected]?.[actual] ?? 0}</td>`).join("")}</tr>`).join("")}</tbody></table></section>`,
-    )
-    .join("");
+  const path = resolve(outputDirectory, "gesture-results.json");
+  await writeFile(path, `${JSON.stringify(report, null, 2)}\n`);
+  console.log(`Report: ${path}`);
 }
 
 function percentile(values, proportion) {
   if (values.length === 0) return null;
   const sorted = [...values].sort((left, right) => left - right);
   return sorted[Math.max(0, Math.ceil(sorted.length * proportion) - 1)];
-}
-
-function xml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;");
 }
 
 function parseArguments(args) {

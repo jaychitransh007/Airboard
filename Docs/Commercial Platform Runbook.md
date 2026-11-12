@@ -5,10 +5,10 @@ This document describes the implemented customer journey, its operating data, an
 ## Customer journey now implemented
 
 1. **Discover** — public pages identify the standalone web product as a controlled pilot, Google Meet (by presenting the Airboard tab) as part of it, and Zoom/Teams as unavailable. Contact-sales submissions are stored as deduplicated leads with a spam honeypot.
-2. **Create an account** — email magic-link, Google and Microsoft authentication use Supabase Auth. The database bootstrap creates a profile, personal organization, owner membership, default workspace, policy, trial eligibility and pending entitlement. An invitation can add the same identity to another organization without duplicating the user.
+2. **Create an account** — the pilot signs people in with Google through Supabase Auth. The email-link form and a Microsoft button appear only when `/auth/config` reports them, and the pilot enables neither. The database bootstrap creates a profile, personal organization, owner membership, default workspace, policy, trial eligibility and pending entitlement. An invitation can add the same identity to another organization without duplicating the user.
 3. **Onboard** — the product records role, company-size band, primary use case and target platform. It stores no board content, transcript or meeting title in analytics. Organization switching is explicit and remembered as the user's default tenant.
 4. **Reach first value** — the one-month (30-day) pilot is not consumed at signup. It activates after a successful standalone canvas preflight.
-5. **Use Airboard** — users create persistent boards (each save is compare-and-swap on a version number; no history copies are kept); open recent and shared views; start live sessions; use typed, pointer, gesture or Airo input; and show a selected screen behind the board. A failed background save reports a non-blocking warning and preserves the working canvas.
+5. **Use Airboard** — users create persistent boards (each save is compare-and-swap on a version number; no history copies are kept); open them from the one Airboards home page (`/app`); start live sessions; use typed, pointer, gesture or Airo input; and show a selected screen behind the board. A failed background save reports a non-blocking warning and preserves the working canvas.
 6. **Use it in Meet** — the presenter shares the Airboard tab (**Present now → A tab**); nothing is installed. The Chrome extension, the Meet add-on and the Electron desktop app were removed on 12 Nov 2026.
 7. **Buy and manage** — the billing page checks a secret-free commercial capability response. Unless Stripe checkout, prices and signed webhook processing are all configured, prices are labeled proposals, checkout stays unavailable and users enter a managed evaluation path. When enabled, signed idempotent webhooks update customers, subscriptions and entitlements and Stripe remains the payment system of record.
 8. **Administer** — owners/admins manage members, invitations, organization policy, usage and audit events. SSO and SCIM were removed on 12 Nov 2026; migration `20261112120000_drop_unused_tables` drops their tables.
@@ -77,12 +77,12 @@ Commercial providers:
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PERSONAL_PRICE_ID`, `STRIPE_TEAM_PRICE_ID`
 - `RESEND_API_KEY`, `AIRBOARD_EMAIL_FROM`
 
-Sign-in email (Supabase Auth SMTP):
+Sign-in email (Supabase Auth SMTP), only if email sign-in is enabled:
 
-Supabase's built-in mailer delivers only to members of the project's team and
+The pilot signs in with Google only and sends no sign-in email, so it needs none of this. If email sign-in is turned on later: Supabase's built-in mailer delivers only to members of the project's team and
 is capped at 2 messages an hour, so a stranger's sign-up link fails with
-`Email address not authorized`. Production needs custom SMTP before anyone
-outside the team can sign in. One Resend account can serve both this and the
+`Email address not authorized`. Email sign-in then needs custom SMTP before anyone
+outside the team can use it. One Resend account can serve both this and the
 lifecycle email above.
 
 1. In Resend, add a sending domain you control (for example
@@ -120,16 +120,35 @@ Optional live intelligence:
 - `DEEPGRAM_API_KEY` for Airo transcription
 - `AIRBOARD_INTENT_API_KEY` (or `OPENAI_API_KEY`) for bounded semantic recovery
 
-## External launch gates
+## Release
 
-The repository cannot complete these without the relevant account owner, credentials or independent party:
+1. **Check:** run the checks CI runs (`pnpm docs:check`, `pnpm build`, `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm test:scripts`, `pnpm audit --prod`, `pnpm eval:pr`, `pnpm --filter @airboard/web e2e`). Commit the change.
+2. **Migrate:** `DRY_RUN=1 infra/cloud-run/release.sh migrate` lists pending migrations, and `infra/cloud-run/release.sh migrate` applies them. Do this before staging an API that needs them; `stage api` refuses while any are pending.
+3. **Build:** `infra/cloud-run/release.sh build` builds both images for the commit.
+4. **Stage:** `infra/cloud-run/release.sh stage api` and `… stage web` create revisions with no traffic, each on its own tagged URL.
+5. **Smoke the tagged URLs:**
+   - `/ready` passes, including `boardFanOut`.
+   - Signed-out calls get 401.
+   - The pages return 200.
+6. **Promote:** `infra/cloud-run/release.sh promote api` and `… promote web`. Then check production `/ready`, the error logs and `pnpm launch:check:deployed`.
 
-- create/approve production Stripe products, tax policy, refund policy and webhook endpoint;
-- verify the sending domain and lifecycle templates in Resend;
-- configure Supabase production OAuth redirect URIs and Google/Microsoft provider credentials;
-- confirm presenting the Airboard tab in Google Meet with two real accounts/devices; complete a marketplace approval process before describing Zoom or Teams as generally available;
-- counsel approval for terms, privacy notice, DPA, subprocessors, trial/renewal language and deletion obligations;
-- independent penetration test, dependency/container scanning, backup-restore exercise, incident response exercise and accessibility audit;
-- production alert routing, on-call ownership, status-provider integration, support SLA and CRM routing.
+`DRY_RUN=1` prints a step's commands without running them.
 
-Until these gates are signed off, the honest release label is a controlled production pilot. Use [`Official Launch Readiness.md`](<Official Launch Readiness.md>) and `pnpm launch:check` for the current decision.
+Two things that have caught releases out:
+- **Help articles:** a help article may cite only files the web image copies (see `infra/cloud-run/web.Dockerfile`). The help generator checks every cited file during the web build.
+- **Airo's prompt or plan schema:** a change to either makes the recorded meeting-talk answers stale. Re-record them with `node --env-file-if-exists=.env scripts/eval-semantic-negatives.mjs --record`, and run the voice-intent eval against a local API.
+
+## Rollback
+
+Roll back only to the release named in [Project Status](<Project Status.md#roll-back-to>), and never take the API below the rollback floor stated there: a migration that drops tables makes older APIs fail. Promote the API first unless Project Status says otherwise:
+
+```
+AIRBOARD_RELEASE=launch-<hash> infra/cloud-run/release.sh promote api
+AIRBOARD_RELEASE=launch-<hash> infra/cloud-run/release.sh promote web
+```
+
+Migrations are not rolled back. Then check production `/ready`, the error logs and `pnpm launch:check:deployed`, and record the rollback in the change log.
+
+## Launch gates
+
+What is left before each launch stage is listed once, in [Project Status](<Project Status.md#what-is-left>), and checked by `pnpm launch:check` against the gate ledger [`ops/launch-evidence.json`](../ops/launch-evidence.json). Until the standalone-GA gates pass, the honest release label is a controlled production pilot; [Official Launch Readiness](<Official Launch Readiness.md>) sets what each stage may promise.

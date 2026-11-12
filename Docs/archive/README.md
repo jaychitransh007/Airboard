@@ -22,3 +22,5 @@ for decisions and fixes over time see the change log in
 | Hands-free Gap Audit | The 2026-11-11 audit of hands-free meeting gaps; all twelve were closed by RGB-049 |
 | Help Documentation Plan | The plan for the Help Center, superseded by the shipped articles in `Docs/help` and `scripts/generate-help-content.mjs` |
 | Supabase Move to Mumbai Plan | The record of the 2026-11-05 move to the Mumbai Supabase project; the read-only switch steps live in Incident and Breach Exercise |
+| Touchpad Writing Mode Implementation Notes | The pointer-only writing mode, removed on 2026-11-12 (`launch-9d5bd39`); the gesture canvas is the only board mode |
+| Official Launch Readiness July 2026 Launch Pass | What the July 2026 launch pass implemented, moved out of Official Launch Readiness on 2026-11-12 |
