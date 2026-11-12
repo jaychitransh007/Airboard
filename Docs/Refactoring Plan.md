@@ -1,6 +1,6 @@
 # Refactoring plan: need and scope
 
-> **Date:** 12 November 2026, on `codex/production-readiness` at `27886a2` (PR #51 open to `main`).
+> **Date:** 12 November 2026, on `codex/production-readiness` at `27886a2` (PR #51 has since merged to `main`).
 > **Method:** seven analysts each measured one item in today's code and defined its need and scope. A cross-checker then verified the key claims and set one order across all seven. The analysts' full findings are in the appendix; the cross-checker's corrections are folded into the summary below.
 > **Rule for everything here:** no refactor changes behaviour unless it says so. Each phase ships on its own, passes the full test suite, and can be reverted alone.
 
@@ -24,7 +24,7 @@ The removals on 11–12 November already shrank three of these items: the board 
 
 ## Recommended order
 
-0. **Merge PR #51 to `main` first.** `main` still has the old eval workflows and is 11 commits behind; every refactor should start from a `main` that matches production.
+0. **Merge PR #51 to `main` first.** Done: it merged on 12 November, so `main` now matches production.
 1. **Remove the operator token from URLs** (~1 day). Security work, small, and it touches the eval harness before the eval trim does.
 2. **Trim eval and CI** (~1.5 days) **and the first docs pass** (~0.75 day), in parallel. The trim decides once what replaces the text-matching build checks, so the code refactors don't each have to work around them.
 3. **One shared safety net** (~4 days), replacing three separate "phase 0"s:
