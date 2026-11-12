@@ -3,9 +3,8 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 import {
-  applyDiagramCommand as applyCommand,
+  applyDiagramCommand,
   applyDiagramUndo,
-  applyLegacyDiagramFixture,
   createInitialBoardState,
 } from "../../packages/core/src/index.ts";
 import {
@@ -30,14 +29,8 @@ import {
 
 const CREATED_AT = "2026-07-30T00:00:00.000Z";
 
-// The canonical form was defined on legacy annotation strokes (boards saved
-// before Airo drew v2 shapes), which these tests build. A v2 board projects
-// into the same form: see "a v2 board canonicalizes like its legacy twin".
-const applyDiagramCommand = (state, command, commandContext) =>
-  command.type === "node.create" || command.type === "nodes.connect"
-    ? applyLegacyDiagramFixture(state, command, commandContext)
-    : applyCommand(state, command, commandContext);
-
+// Boards are built as v2 scene elements; the harness projects them into the
+// corpus's canonical annotation nodes and edges.
 function context(createdAt = CREATED_AT) {
   let eventNumber = 0;
   return {
@@ -138,7 +131,7 @@ test("canonical BoardState uses logical IDs/timestamps and sorted nodes/edges", 
     canonical.edges.map(({ id }) => id),
     ["edge:node:alpha->node:zeta:calls"],
   );
-  assert.match(canonical.nodes[0].createdAt, /^@time:\d+$/);
+  assert.match(canonical.elements["generated-uuid-a"].createdAt, /^@time:\d+$/);
   assert.equal(
     canonical.edges[0].annotation.snappedStartStrokeId,
     "node:alpha",
@@ -149,40 +142,37 @@ test("canonical BoardState uses logical IDs/timestamps and sorted nodes/edges", 
   });
   assert.deepEqual(
     canonicalEvents.map(({ type }) => type),
-    ["stroke.started", "stroke.committed"],
+    ["element.created"],
   );
   assert.equal(
-    canonicalEvents[1].strokeId,
+    canonicalEvents[0].element.id,
     "edge:node:alpha->node:zeta:calls",
   );
   assert.match(canonicalEvents[0].id, /^event:\d+$/);
 });
 
-test("a v2 board canonicalizes like its legacy twin, and a v2 commit counts as a stroke commit", () => {
-  const build = (apply) => {
-    let state = createInitialBoardState("physical-board-7d91");
-    state = apply(state, { type: "node.create", nodeId: "generated-uuid-z", nodeType: "service", label: "Zeta", center: { x: 500, y: 200 }, source: "voice" }, context()).state;
-    state = apply(state, { type: "node.create", nodeId: "generated-uuid-a", nodeType: "decision", label: "Alpha", center: { x: 200, y: 200 }, source: "voice" }, context()).state;
-    return apply(state, { type: "nodes.connect", connectorId: "generated-edge-uuid", fromId: "generated-uuid-a", toId: "generated-uuid-z", label: "calls", source: "voice" }, context("2026-07-30T00:00:01.000Z"));
-  };
-  const legacy = build(applyLegacyDiagramFixture);
-  const scene = build(applyCommand);
-  assert.deepEqual(scene.state.strokes, {});
-  const pick = (canonical) => ({
-    nodes: canonical.nodes.map(({ id, status, annotation }) => ({
-      id, status, type: annotation.type, nodeType: annotation.nodeType, label: annotation.label, bounds: annotation.bounds,
-    })),
-    edges: canonical.edges.map(({ id, annotation }) => ({
-      id, label: annotation.label, from: annotation.snappedStartStrokeId, to: annotation.snappedEndStrokeId,
-    })),
-  });
-  assert.deepEqual(pick(canonicalizeBoardState(scene.state)), pick(canonicalizeBoardState(legacy.state)));
-  assert.deepEqual(pick(canonicalizeBoardState(scene.state)).edges, [
-    { id: "edge:node:alpha->node:zeta:calls", label: "calls", from: "node:alpha", to: "node:zeta" },
-  ]);
+test("a v2 board canonicalizes to nodes and edges, and a v2 commit counts as one object.created", () => {
+  let state = createInitialBoardState("physical-board-7d91");
+  state = applyDiagramCommand(state, { type: "node.create", nodeId: "generated-uuid-z", nodeType: "service", label: "Zeta", center: { x: 500, y: 200 }, source: "voice" }, context()).state;
+  state = applyDiagramCommand(state, { type: "node.create", nodeId: "generated-uuid-a", nodeType: "decision", label: "Alpha", center: { x: 200, y: 200 }, source: "voice" }, context()).state;
+  const scene = applyDiagramCommand(state, { type: "nodes.connect", connectorId: "generated-edge-uuid", fromId: "generated-uuid-a", toId: "generated-uuid-z", label: "calls", source: "voice" }, context("2026-07-30T00:00:01.000Z"));
+  assert.equal("strokes" in scene.state, false);
+  const canonical = canonicalizeBoardState(scene.state);
+  assert.equal("strokes" in canonical, false);
+  assert.deepEqual(
+    canonical.nodes.map(({ id, status, annotation }) => ({ id, status, type: annotation.type, nodeType: annotation.nodeType, label: annotation.label })),
+    [
+      { id: "node:alpha", status: "committed", type: "flow_node", nodeType: "decision", label: "Alpha" },
+      { id: "node:zeta", status: "committed", type: "flow_node", nodeType: "service", label: "Zeta" },
+    ],
+  );
+  assert.deepEqual(
+    canonical.edges.map(({ id, annotation }) => ({ id, label: annotation.label, from: annotation.snappedStartStrokeId, to: annotation.snappedEndStrokeId })),
+    [{ id: "edge:node:alpha->node:zeta:calls", label: "calls", from: "node:alpha", to: "node:zeta" }],
+  );
   const once = checkExactOnce(
     { finalBoardState: scene.state, events: scene.events },
-    [{ id: "edge-committed", match: { type: "stroke.committed", strokeId: "generated-edge-uuid" }, count: 1 }],
+    [{ id: "edge-created", match: { type: "object.created", objectId: "generated-edge-uuid" }, count: 1 }],
   );
   assert.equal(once.pass, true, JSON.stringify(once.checks));
 });
@@ -196,9 +186,9 @@ test("geometry comparison tolerates small drift but reports larger drift", () =>
     { x: 200, y: 200 },
   );
   const withinTolerance = structuredClone(created.state);
-  withinTolerance.strokes["node:checkout"].annotation.bounds.x += 0.4;
+  withinTolerance.elements["node:checkout"].transform.x += 0.4;
   const outsideTolerance = structuredClone(created.state);
-  outsideTolerance.strokes["node:checkout"].annotation.bounds.x += 0.6;
+  outsideTolerance.elements["node:checkout"].transform.x += 0.6;
 
   assert.equal(
     compareBoardStates(withinTolerance, created.state, {
@@ -239,9 +229,9 @@ test("canonical BoardState delta reports semantic additions and BoardEvent order
   assert.equal(delta.nodes.added[0].id, "node:checkout-api");
   assert.deepEqual(
     delta.events.map(({ type }) => type),
-    ["stroke.started", "stroke.committed"],
+    ["element.created"],
   );
-  assert.equal(delta.events[1].strokeId, "node:checkout-api");
+  assert.equal(delta.events[0].element.id, "node:checkout-api");
 });
 
 test("case evaluator checks board/non-board state, exact-once, forbidden mutations, and undo", () => {
@@ -299,9 +289,8 @@ test("case evaluator checks board/non-board state, exact-once, forbidden mutatio
         {
           id: "rename-once",
           match: {
-            type: "stroke.label_updated",
-            strokeId: "node:checkout",
-            label: "Payments",
+            type: "element.patched",
+            elementId: "node:checkout",
           },
         },
       ],
@@ -536,9 +525,9 @@ test("exact-once and forbidden mutation checks expose actionable failures", () =
     boardSessionId: "board:primary",
     actorParticipantId: "participant:owner",
     createdAt: CREATED_AT,
-    type: "stroke.label_updated",
-    strokeId: "node:checkout",
-    label: "Payments",
+    type: "element.patched",
+    elementId: "node:checkout",
+    patches: [{ op: "field.set", path: ["content"], value: { type: "doc", blocks: [] } }],
   };
   const exactOnce = checkExactOnce(
     { events: [event, { ...event, id: "event:rename-retry" }] },
@@ -546,8 +535,8 @@ test("exact-once and forbidden mutation checks expose actionable failures", () =
       {
         id: "rename-once",
         match: {
-          type: "stroke.label_updated",
-          strokeId: "node:checkout",
+          type: "element.patched",
+          elementId: "node:checkout",
         },
       },
     ],

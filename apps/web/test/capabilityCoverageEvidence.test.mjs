@@ -272,7 +272,6 @@ function groundingContext(boardState) {
     canvasHeight: 600,
     selectionIds: [],
     primarySelectionId: null,
-    hoverStrokeId: null,
     strokeColor: "#111111",
   };
 }

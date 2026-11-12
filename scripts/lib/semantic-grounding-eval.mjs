@@ -1,12 +1,10 @@
 import {
   AIRBOARD_SEMANTIC_PLAN_MAX_DIAGRAM_COMMANDS,
-  applyBoardEvent,
   applyDiagramCommand,
   applyDiagramUndo,
-  applyLegacyDiagramFixture,
   boardDiagramGraph,
   createInitialBoardState,
-  isSceneOnlyElement,
+  isActiveElement,
 } from "../../packages/core/src/index.ts";
 import { commitCommandTurn } from "../../apps/web/src/features/board/commandTurnCoordinator.ts";
 import { resolveSemanticPlanAction } from "../../apps/web/src/features/board/intentPipeline.ts";
@@ -31,16 +29,9 @@ const FIXED_TIME = "2026-07-30T00:00:00.000Z";
  * Recreate the board snapshot sent to the semantic provider. The resulting
  * state is reduced through the production DiagramCommand implementation, so
  * grounding tests exercise the same objects as the application: v2 shapes
- * and connectors, as Airo and the typed grammar draw them now. A context with
- * a hand-drawn line pulled off its shapes (seedGeometry) describes a board
- * saved before Airo drew v2 shapes, so it is seeded as legacy strokes: only
- * legacy lines can come loose.
+ * and connectors, as Airo and the typed grammar draw them now.
  */
 export function seedBoardFromSemanticContext(semanticContext) {
-  const legacyBoard = semanticContext.edges.some(
-    (edge) => edge.seedGeometry?.start && edge.seedGeometry?.end,
-  );
-  const applySeed = legacyBoard ? applyLegacyDiagramFixture : applyDiagramCommand;
   let state = createInitialBoardState(BOARD_ID);
   const objectIds = [];
   const objectIdBySummaryKey = new Map();
@@ -52,7 +43,7 @@ export function seedBoardFromSemanticContext(semanticContext) {
       y: 140 + Math.floor(index / 4) * 150,
     });
     const size = sizeValue(object.size, { width: 160, height: 92 });
-    state = applySeed(
+    state = applyDiagramCommand(
       state,
       {
         type: "node.create",
@@ -81,7 +72,7 @@ export function seedBoardFromSemanticContext(semanticContext) {
         `Semantic eval context edge ${index + 1} references an object absent from context.objects`,
       );
     }
-    state = applySeed(
+    state = applyDiagramCommand(
       state,
       {
         type: "nodes.connect",
@@ -93,34 +84,6 @@ export function seedBoardFromSemanticContext(semanticContext) {
       },
       deterministicCommandContext(`seed-edge-${index + 1}`),
     ).state;
-    if (edge.seedGeometry?.start && edge.seedGeometry?.end) {
-      const connectorId = `seed-edge-${index + 1}`;
-      const current = state.strokes[connectorId];
-      const annotation = {
-        ...current.annotation,
-        start: { ...edge.seedGeometry.start },
-        end: { ...edge.seedGeometry.end },
-      };
-      if (edge.seedGeometry.snappedStart === false) {
-        delete annotation.snappedStartStrokeId;
-      }
-      if (edge.seedGeometry.snappedEnd === false) {
-        delete annotation.snappedEndStrokeId;
-      }
-      state = applyBoardEvent(state, {
-        id: `seed-edge-geometry-${index + 1}`,
-        boardSessionId: BOARD_ID,
-        actorParticipantId: PARTICIPANT_ID,
-        createdAt: FIXED_TIME,
-        type: "stroke.annotation_updated",
-        strokeId: connectorId,
-        annotation,
-        points: [
-          { ...annotation.start, t: 1, inputSource: "pointer" },
-          { ...annotation.end, t: 2, inputSource: "pointer" },
-        ],
-      });
-    }
   }
 
   const selectedIds = [];
@@ -271,13 +234,6 @@ export function evaluateGroundedSemanticPlan(plan, semanticContext) {
   const canvasHeight =
     finitePositive(semanticContext.canvasHeight) ?? 600;
   const viewOrigin = pointValue(semanticContext.viewOrigin, { x: 0, y: 0 });
-  const hoverStrokeId = semanticContext.hoverObject
-    ? findSummaryId(
-        semanticContext.hoverObject,
-        semanticContext.objects,
-        seeded.objectIds,
-      )
-    : null;
   let previewState = initialState;
   const referenceSelectionIds = [...initialSelectionIds];
   const referencePrimarySelectionId =
@@ -308,7 +264,6 @@ export function evaluateGroundedSemanticPlan(plan, semanticContext) {
         autoCreateCenters,
         selectionIds: referenceSelectionIds,
         primarySelectionId: referencePrimarySelectionId,
-        hoverStrokeId,
         strokeColor: "#111111",
       },
       planHandles,
@@ -370,7 +325,7 @@ export function evaluateGroundedSemanticPlan(plan, semanticContext) {
     }
     if (resolved.selectionAfter) {
       workingSelectionIds = resolved.selectionAfter.filter(
-        (id) => previewState.strokes[id]?.status === "committed" || isSceneOnlyElement(previewState, id),
+        (id) => isActiveElement(previewState, id),
       );
       workingPrimarySelectionId =
         workingSelectionIds[workingSelectionIds.length - 1] ?? null;

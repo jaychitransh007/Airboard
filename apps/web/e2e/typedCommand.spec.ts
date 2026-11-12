@@ -6,7 +6,6 @@ type ElementTextView = {
   id: string;
   kind: string;
   status: string;
-  legacyStrokeId?: string;
   content?: { blocks: Array<{ runs: Array<{ text: string }> }> };
   label?: { blocks: Array<{ runs: Array<{ text: string }> }> };
   start?: { binding?: { elementId: string } };
@@ -115,36 +114,13 @@ test("recipient narrative adds both dataset inputs atomically and repairs the ob
   const readEdges = () =>
     page.evaluate(() => {
       const state = (window as unknown as AirboardTestWindow).__airboardTestHooks.getCanonicalBoardState();
-      const labels = Object.fromEntries(
-        Object.entries(state.strokes)
-          .filter(
-            ([, stroke]) =>
-              stroke.status === "committed" &&
-              stroke.annotation &&
-              stroke.annotation.type !== "connector" &&
-              stroke.annotation.type !== "arrow",
-          )
-          .map(([id, stroke]) => [id, stroke.annotation?.label ?? ""]),
-      );
-      const legacyEdges = Object.values(state.strokes)
-        .filter(
-          (stroke) =>
-            stroke.status === "committed" &&
-            (stroke.annotation?.type === "connector" ||
-              stroke.annotation?.type === "arrow"),
-        )
-        .map((stroke) => ({
-          from: labels[stroke.annotation?.snappedStartStrokeId ?? ""],
-          to: labels[stroke.annotation?.snappedEndStrokeId ?? ""],
-          label: stroke.annotation?.label,
-        }));
       const plain = (document?: {
         blocks: Array<{ runs: Array<{ text: string }> }>;
       }) => document?.blocks
         .map((block) => block.runs.map((run) => run.text).join(""))
         .join("\n") ?? "";
       const scene = (Object.values(state.elements) as unknown as ElementTextView[]).filter(
-        (element) => element.status === "active" && !element.legacyStrokeId,
+        (element) => element.status === "active",
       );
       const sceneLabels = Object.fromEntries(
         scene
@@ -163,7 +139,7 @@ test("recipient narrative adds both dataset inputs atomically and repairs the ob
           to: sceneLabels[element.end!.binding!.elementId],
           label: plain(element.label) || undefined,
         }));
-      return [...legacyEdges, ...sceneEdges]
+      return sceneEdges
         .sort((left, right) => String(left.from).localeCompare(String(right.from)));
     });
 
@@ -228,21 +204,15 @@ test("recipient narrative adds both dataset inputs atomically and repairs the ob
   const finalState = await page.evaluate(() =>
     (window as unknown as AirboardTestWindow).__airboardTestHooks.getCanonicalBoardState(),
   );
-  const legacySchemaData = Object.values(finalState.strokes).some(
-      (stroke) =>
-        stroke.status === "committed" &&
-        stroke.annotation?.label === "Schema Data",
-    );
   const sceneSchemaData = (Object.values(finalState.elements) as unknown as ElementTextView[]).some(
     (element) =>
       element.status === "active" &&
-      !element.legacyStrokeId &&
       element.content?.blocks
         .flatMap((block) => block.runs)
         .map((run) => run.text)
         .join("") === "Schema Data",
   );
-  expect(legacySchemaData || sceneSchemaData).toBe(false);
+  expect(sceneSchemaData).toBe(false);
 });
 
 test("section membership round-trips with scene undo and redo", async ({ page }) => {
@@ -261,7 +231,7 @@ test("section membership round-trips with scene undo and redo", async ({ page })
 
   const membership = () => page.evaluate(() => {
     const state = (window as unknown as AirboardTestWindow).__airboardTestHooks.getCanonicalBoardState();
-    const elements = Object.values(state.elements).filter((element) => !element.legacyStrokeId);
+    const elements = Object.values(state.elements);
     const section = elements.find((element) => element.kind === "section");
     const members = elements.filter((element) => element.kind === "shape");
     return {

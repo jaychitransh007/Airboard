@@ -1,27 +1,23 @@
 import {
   isSceneNodeElement,
-  isSceneOnlyElement,
   richTextToPlainText,
   sceneElementNodeType,
   shapeCatalogEntry,
+  type AnnotationBounds,
   type BoardSceneElement,
   type BoardState,
-  type StrokeAnnotation,
 } from "@airboard/core";
 
 /**
- * Every object Airo can name on a board. Boards saved before November 2026
- * hold Airo's nodes as legacy annotation strokes; everything made since
- * (Airo, typed commands, the toolbar) is a v2 scene element. Airo has to see
- * both, or it draws a second "API" beside the one already there (RGB-039).
+ * Every object Airo can name on a board, whoever made it (Airo, typed
+ * commands, the toolbar, the hand). Airo has to see them all, or it draws a
+ * second "API" beside the one already there (RGB-039).
  */
 export type SemanticBoardNode = {
   id: string;
   label: string;
   nodeType: string;
-  bounds: NonNullable<StrokeAnnotation["bounds"]>;
-  /** "stroke": a legacy node. "scene": a v2 element with no stroke behind it. */
-  world: "stroke" | "scene";
+  bounds: AnnotationBounds;
 };
 
 /** The name a person would use: its text, or for a blank shape its type. */
@@ -50,41 +46,20 @@ function sceneElementOnView(state: BoardState, element: BoardSceneElement): bool
   return !(section?.kind === "section" && section.status === "active" && (!section.visible || section.collapsed));
 }
 
-/** Nameable v2 elements with no stroke behind them, which only the scene commands can change. */
-export function sceneOnlyNodes(state: BoardState): BoardSceneElement[] {
+/** Nameable elements on view (active nodes, not hidden or in a collapsed section). */
+export function nameableNodesOnView(state: BoardState): BoardSceneElement[] {
   return Object.values(state.elements).filter((element) =>
-    isSceneNodeElement(element) && isSceneOnlyElement(state, element.id) && sceneElementOnView(state, element));
+    isSceneNodeElement(element) && sceneElementOnView(state, element));
 }
 
-/** Legacy nodes and v2 nodes together, in reading order (top to bottom, then left to right). */
+/** Every nameable node, in reading order (top to bottom, then left to right). */
 export function semanticBoardNodes(state: BoardState): SemanticBoardNode[] {
-  const legacy = Object.values(state.strokes).flatMap((stroke): SemanticBoardNode[] => {
-    const annotation = stroke.annotation;
-    if (
-      stroke.status !== "committed" ||
-      !annotation?.bounds ||
-      annotation.type === "connector" ||
-      annotation.type === "arrow"
-    ) {
-      return [];
-    }
-    const nodeType = annotation.nodeType ?? annotation.type;
-    return [{
-      id: stroke.id,
-      label: annotation.label?.trim() || nodeType,
-      nodeType,
-      bounds: annotation.bounds,
-      world: "stroke",
-    }];
-  });
-  const scene = sceneOnlyNodes(state).map((element): SemanticBoardNode => ({
+  return nameableNodesOnView(state).map((element): SemanticBoardNode => ({
     id: element.id,
     label: sceneNodeLabel(element),
     nodeType: sceneNodeType(element),
     bounds: { x: element.transform.x, y: element.transform.y, width: element.transform.width, height: element.transform.height },
-    world: "scene",
-  }));
-  return [...legacy, ...scene].sort((left, right) => {
+  })).sort((left, right) => {
     const leftY = left.bounds.y + left.bounds.height / 2;
     const rightY = right.bounds.y + right.bounds.height / 2;
     const leftX = left.bounds.x + left.bounds.width / 2;
@@ -93,18 +68,16 @@ export function semanticBoardNodes(state: BoardState): SemanticBoardNode[] {
   });
 }
 
-/** An object's box, legacy or v2. */
-export function semanticObjectBounds(state: BoardState, id: string): NonNullable<StrokeAnnotation["bounds"]> | null {
-  const legacy = state.strokes[id]?.annotation?.bounds;
-  if (legacy) return legacy;
+/** An object's box. */
+export function semanticObjectBounds(state: BoardState, id: string): AnnotationBounds | null {
   const element = state.elements[id];
   if (!element || element.status !== "active") return null;
   return { x: element.transform.x, y: element.transform.y, width: element.transform.width, height: element.transform.height };
 }
 
-/** The topmost v2 node under a point, for "the one I'm pointing at". */
+/** The topmost node under a point, for "the one I'm pointing at". */
 export function sceneNodeAtPoint(state: BoardState, point: { x: number; y: number }): BoardSceneElement | null {
-  return sceneOnlyNodes(state)
+  return nameableNodesOnView(state)
     .filter(({ transform }) =>
       point.x >= transform.x && point.x <= transform.x + transform.width &&
       point.y >= transform.y && point.y <= transform.y + transform.height)

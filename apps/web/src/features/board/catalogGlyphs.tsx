@@ -3,7 +3,7 @@ import {
   type AirboardNodeVisualKind,
   type AnnotationNodeType,
 } from "@airboard/core";
-import type { ObjectDockTool } from "./gestureAnnotationMode";
+import type { ObjectDockTool } from "./placementGhost";
 
 /**
  * Miniature shape previews for the catalog: the flyout shows the actual

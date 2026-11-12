@@ -3,10 +3,10 @@ import test from "node:test";
 
 import {
   applyDiagramCommand,
-  applyLegacyDiagramFixture,
   boardDiagramGraph,
   createInitialBoardState,
   richTextToPlainText,
+  upgradeLegacyBoardState,
 } from "@airboard/core";
 import { parseIntentCanvasCommand } from "../src/features/board/intentCanvasParser.ts";
 import { resolveIntentOperation } from "../src/features/board/intentPipeline.ts";
@@ -16,8 +16,8 @@ import {
   legacyToolForCreationTool,
 } from "../src/features/board/creationToolCatalog.ts";
 
-// Shape-merge phase 1: the older typed grammar draws v2 shapes only, and its
-// edits reach v2 shapes as well as the legacy nodes on older boards.
+// The older typed grammar draws v2 shapes only, and its edits reach every
+// shape, including those of an older board converted when it was opened.
 
 const BOARD = "typed-grammar-board";
 const commandContext = { boardSessionId: BOARD, actorParticipantId: "p", userId: "u" };
@@ -30,7 +30,6 @@ function context(boardState, overrides = {}) {
     canvasHeight: 800,
     selectionIds: [],
     primarySelectionId: null,
-    hoverStrokeId: null,
     strokeColor: "#111827",
     ...overrides,
   };
@@ -52,16 +51,16 @@ function typed(boardState, text, overrides) {
 const labelled = (state) =>
   Object.fromEntries(boardDiagramGraph(state).nodes.map((node) => [node.name, node]));
 
-test("the typed grammar draws v2 shapes and v2 arrows, never strokes", () => {
+test("the typed grammar draws v2 shapes and v2 arrows, and the board has no strokes key", () => {
   let { state } = typed(createInitialBoardState(BOARD), "add a database named Orders");
   ({ state } = typed(state, "add a service named Checkout"));
   ({ state } = typed(state, "connect Checkout to Orders"));
-  assert.deepEqual(state.strokes, {});
+  assert.equal("strokes" in state, false);
   const nodes = labelled(state);
   assert.equal(nodes.Orders.kind, "database");
-  assert.equal(nodes.Orders.model, "scene");
+  assert.equal(nodes.Orders.objectType, "shape");
   const [edge] = boardDiagramGraph(state).edges;
-  assert.deepEqual([edge.from, edge.to, edge.attached, edge.model], [nodes.Checkout.id, nodes.Orders.id, true, "scene"]);
+  assert.deepEqual([edge.from, edge.to, edge.attached], [nodes.Checkout.id, nodes.Orders.id, true]);
 });
 
 test("typed edits by name reach v2 shapes", () => {
@@ -92,20 +91,31 @@ test("typed edits on the selection reach v2 shapes, and select all includes them
   assert.deepEqual([...all.resolution.selectionAfter].sort(), Object.keys(added.state.elements).sort());
   const copied = typed(added.state, "duplicate selected", selection);
   assert.equal(Object.values(copied.state.elements).filter((element) => element.kind === "shape").length, 3);
-  assert.deepEqual(copied.state.strokes, {});
+  assert.equal("strokes" in copied.state, false);
 });
 
-test("the typed grammar still edits the legacy nodes of an older board", () => {
-  let state = applyLegacyDiagramFixture(createInitialBoardState(BOARD), {
-    type: "node.create", nodeId: "old", nodeType: "service", label: "Old API", center: { x: 300, y: 300 },
-  }, commandContext).state;
+test("the typed grammar edits the nodes of an older board converted on open", () => {
+  // A board saved before the shape merge, as it is stored: one Airo node.
+  let state = upgradeLegacyBoardState({
+    ...createInitialBoardState(BOARD),
+    strokes: {
+      old: {
+        id: "old", boardId: BOARD, userId: "u", color: "#0f172a", thickness: 3,
+        status: "committed", points: [{ x: 300, y: 300, t: 0 }], createdAt: "2026-01-01T00:00:00.000Z",
+        annotation: {
+          type: "flow_node", source: "voice", confidence: 1, nodeType: "service", label: "Old API",
+          bounds: { x: 220, y: 260, width: 160, height: 80 },
+        },
+      },
+    },
+  });
+  assert.equal("strokes" in state, false);
   ({ state } = typed(state, "rename Old API to Legacy API"));
-  assert.equal(state.strokes.old.annotation.label, "Legacy API");
+  assert.equal(richTextToPlainText(state.elements.old.content), "Legacy API");
   ({ state } = typed(state, "add a database named Store"));
   ({ state } = typed(state, "connect Legacy API to Store"));
-  const connector = Object.values(state.elements).find((element) => element.kind === "connector" && !element.legacyStrokeId);
-  assert.equal(connector.start.binding.elementId, "old", "a v2 arrow from the legacy node");
-  assert.equal(Object.keys(state.strokes).length, 1, "no new stroke");
+  const connector = Object.values(state.elements).find((element) => element.kind === "connector");
+  assert.equal(connector.start.binding.elementId, "old", "a v2 arrow from the converted node");
   assert.equal(richTextToPlainText(connector.label), "");
 });
 

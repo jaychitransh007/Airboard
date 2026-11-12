@@ -14,7 +14,7 @@ export type HandPointingSnapshot = {
   /** Board-space point under the hand, or null when no hand is tracked. */
   boardPoint: { x: number; y: number } | null;
   /**
-   * Distinct shape ids (legacy stroke ids or v2 scene element ids) the hand
+   * Distinct scene element ids the hand
    * pointed at during the last `HAND_POINTING_WINDOW_MS`, oldest first, most
    * recent last.
    */

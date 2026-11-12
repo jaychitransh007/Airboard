@@ -4,18 +4,17 @@ import { test } from "node:test";
 import {
   applyDiagramCommand,
   applyDiagramUndo,
-  applyLegacyDiagramFixture,
   boardDiagramGraph,
   createInitialBoardState,
   isBoardSceneElement,
+  nodeVisualDefaultSize,
   richTextToPlainText,
   sceneElementNodeType,
 } from "../src/index.ts";
 
 /**
- * Shape-merge phase 1: the diagram verbs Airo's plans and the typed grammar
- * use create v2 scene elements only, and edit v2 elements and legacy strokes
- * alike.
+ * The diagram verbs Airo's plans and the typed grammar use create and edit
+ * v2 scene elements (shape-merge phases 1 and 3).
  */
 
 let counter = 0;
@@ -33,7 +32,7 @@ const node = (state, nodeId, nodeType, center, extra = {}) =>
 const connect = (state, connectorId, fromId, toId, label) =>
   run(state, { type: "nodes.connect", connectorId, fromId, toId, ...(label ? { label } : {}), source: "voice" }).state;
 
-test("node.create draws a v2 shape of the node type's catalogue shape, with no stroke", () => {
+test("node.create draws a v2 shape of the node type's catalogue shape", () => {
   const result = run(createInitialBoardState("board-1"), {
     type: "node.create",
     nodeId: "check",
@@ -44,25 +43,22 @@ test("node.create draws a v2 shape of the node type's catalogue shape, with no s
     style: { strokeColor: "#111827" },
   });
   assert.deepEqual(result.events.map((event) => event.type), ["element.created"]);
-  assert.deepEqual(result.state.strokes, {});
+  assert.equal("strokes" in result.state, false);
   const shape = result.state.elements.check;
   assert.ok(isBoardSceneElement(shape));
   assert.equal(shape.kind, "shape");
   assert.equal(shape.shapeKind, "diamond");
-  assert.equal(shape.legacyStrokeId, undefined);
   assert.equal(richTextToPlainText(shape.content), "Paid?");
   assert.equal(shape.style.fill, "#f8fafc", "a new node has the colours Airo's legacy nodes had");
   assert.equal(shape.style.stroke, "#111827");
   assert.equal(shape.style.strokeWidth, 3);
   assert.deepEqual(shape.metadata, { source: "voice", nodeType: "decision", nodeShape: "diamond" });
   assert.equal(sceneElementNodeType(shape), "decision");
-  // The same box a legacy decision had, so layouts and placement are unchanged.
-  const legacy = applyLegacyDiagramFixture(createInitialBoardState("board-1"), {
-    type: "node.create", nodeId: "check", nodeType: "decision", label: "Paid?", center: { x: 300, y: 200 },
-  }, context()).state.strokes.check.annotation.bounds;
+  // The node type's default box around the centre, so layouts and placement are unchanged.
+  const size = nodeVisualDefaultSize("decision");
   assert.deepEqual(
     { x: shape.transform.x, y: shape.transform.y, width: shape.transform.width, height: shape.transform.height },
-    legacy,
+    { x: 300 - size.width / 2, y: 200 - size.height / 2, width: size.width, height: size.height },
   );
   // Undo takes it away again.
   assert.equal(applyDiagramUndo(result.state, result).state.elements.check.status, "deleted");
@@ -137,16 +133,6 @@ test("parallel and two-way arrows between the same objects take separate lanes",
     ["first", "back", "third"].map((id) => state.elements[id].routeOffset),
     [undefined, 72, -72],
   );
-  // A lane counts legacy arrows too, on a board that holds both.
-  let mixed = applyLegacyDiagramFixture(createInitialBoardState("board-1"), {
-    type: "node.create", nodeId: "a", nodeType: "service", center: { x: 100, y: 100 },
-  }, context()).state;
-  mixed = applyLegacyDiagramFixture(mixed, { type: "node.create", nodeId: "b", nodeType: "service", center: { x: 500, y: 100 } }, context()).state;
-  mixed = applyLegacyDiagramFixture(mixed, { type: "nodes.connect", connectorId: "old", fromId: "a", toId: "b" }, context()).state;
-  mixed = connect(mixed, "new", "b", "a");
-  assert.equal(mixed.strokes.new, undefined);
-  assert.equal(mixed.elements.new.routeOffset, 72);
-  assert.equal(mixed.elements.new.start.binding.elementId, "b", "a v2 arrow binds to a legacy node's mirror");
 });
 
 test("grouping and duplicating v2 objects make v2 sections and copies", () => {
@@ -158,18 +144,14 @@ test("grouping and duplicating v2 objects make v2 sections and copies", () => {
   assert.equal(grouped.state.elements.g.kind, "section");
   assert.deepEqual(grouped.state.elements.g.memberIds, ["api", "db"]);
   assert.deepEqual(boardDiagramGraph(grouped.state).groups.map((group) => group.label), ["Backend"]);
-  assert.deepEqual(grouped.state.strokes, {});
 
   const copied = run(state, { type: "objects.duplicate", objectIds: ["api"], idMap: { api: "api-2" }, offset: { x: 0, y: 200 } });
   assert.equal(copied.state.elements["api-2"].kind, "shape");
   assert.equal(copied.state.elements["api-2"].transform.y, state.elements.api.transform.y + 200);
-  assert.deepEqual(copied.state.strokes, {});
 });
 
-test("the edit verbs take v2 ids and legacy ids in one command", () => {
-  let state = applyLegacyDiagramFixture(createInitialBoardState("board-1"), {
-    type: "node.create", nodeId: "old", nodeType: "service", label: "Old", center: { x: 100, y: 100 },
-  }, context()).state;
+test("the edit verbs move, restyle, rename and delete with their connectors, undoably", () => {
+  let state = node(createInitialBoardState("board-1"), "old", "service", { x: 100, y: 100 }, { label: "Old" });
   state = node(state, "new", "service", { x: 400, y: 100 });
   state = connect(state, "c", "old", "new");
 
@@ -178,7 +160,7 @@ test("the edit verbs take v2 ids and legacy ids in one command", () => {
   const byName = Object.fromEntries(graph.nodes.map((entry) => [entry.name, entry.bounds]));
   assert.equal(byName.Old.x, 0);
   assert.equal(byName.Old.y, 300);
-  assert.equal(byName.new.x, state.elements.new.transform.x - state.strokes.old.annotation.bounds.x);
+  assert.equal(byName.new.x, state.elements.new.transform.x - state.elements.old.transform.x);
   assert.equal(graph.edges[0].attached, true, "the arrow follows both ends");
   assert.deepEqual(projectionOf(applyDiagramUndo(moved.state, moved).state), projectionOf(state));
 
@@ -190,7 +172,7 @@ test("the edit verbs take v2 ids and legacy ids in one command", () => {
   assert.equal(richTextToPlainText(renamed.state.elements.new.content), "Fresh");
 
   const deleted = run(state, { type: "objects.delete", objectIds: ["old", "new"] });
-  assert.equal(deleted.state.strokes.old.status, "deleted");
+  assert.equal(deleted.state.elements.old.status, "deleted");
   assert.equal(deleted.state.elements.new.status, "deleted");
   assert.equal(deleted.state.elements.c.status, "deleted", "the arrow goes with its shapes");
   const restored = applyDiagramUndo(deleted.state, deleted).state;
@@ -199,6 +181,69 @@ test("the edit verbs take v2 ids and legacy ids in one command", () => {
   const lineOnly = run(state, { type: "objects.delete", objectIds: ["c"], cascadeConnectors: false });
   assert.equal(lineOnly.state.elements.c.status, "deleted");
   assert.equal(lineOnly.state.elements.new.status, "active");
+});
+
+test("deleting a node cascades to its arrows, and undo restores both", () => {
+  let state = node(createInitialBoardState("board-1"), "a", "service", { x: 100, y: 100 });
+  state = node(state, "b", "service", { x: 400, y: 100 });
+  state = node(state, "c", "service", { x: 700, y: 100 });
+  state = connect(state, "ab", "a", "b");
+  state = connect(state, "bc", "b", "c");
+  const deleted = run(state, { type: "objects.delete", objectIds: ["b"] });
+  assert.deepEqual(
+    ["a", "b", "c", "ab", "bc"].map((id) => deleted.state.elements[id].status),
+    ["active", "deleted", "active", "deleted", "deleted"],
+  );
+  const restored = applyDiagramUndo(deleted.state, deleted).state;
+  assert.deepEqual(
+    ["a", "b", "c", "ab", "bc"].map((id) => restored.elements[id].status),
+    ["active", "active", "active", "active", "active"],
+  );
+  assert.deepEqual(projectionOf(restored), projectionOf(state));
+});
+
+test("objects.move skips missing selection ids, and a connector alone is not moved", () => {
+  let state = node(createInitialBoardState("board-1"), "one", "service", { x: 100, y: 100 });
+  state = node(state, "two", "service", { x: 400, y: 100 });
+  state = connect(state, "edge", "one", "two");
+  const before = structuredClone(state.elements.one.transform);
+
+  const moved = run(state, { type: "objects.move", objectIds: ["one", "ghost-that-was-deleted"], delta: { x: 30, y: 20 } });
+  assert.equal(moved.state.elements.one.transform.x, before.x + 30);
+  assert.equal(moved.state.elements.one.transform.y, before.y + 20);
+  assert.equal(boardDiagramGraph(moved.state).edges[0].attached, true, "its arrow follows");
+
+  // A connector follows its objects; on its own it has nothing to move.
+  assert.throws(
+    () => run(state, { type: "objects.move", objectIds: ["edge"], delta: { x: 0, y: 120 } }),
+    /no movable objects/,
+  );
+  assert.throws(
+    () => run(state, { type: "objects.move", objectIds: ["one"], delta: { x: 1, y: 1 }, to: { x: 0, y: 0 } }),
+    /exactly one of delta or to/,
+  );
+});
+
+test("connection.reverse, object.resize and connector.restyle act on v2 elements, undoably", () => {
+  let state = node(createInitialBoardState("board-1"), "api", "api", { x: 100, y: 100 });
+  state = node(state, "db", "database", { x: 400, y: 100 });
+  state = connect(state, "c", "api", "db", "reads");
+
+  const reversed = run(state, { type: "connection.reverse", connectorId: "c", label: "writes" });
+  assert.equal(reversed.state.elements.c.start.binding.elementId, "db");
+  assert.equal(reversed.state.elements.c.end.binding.elementId, "api");
+  assert.equal(richTextToPlainText(reversed.state.elements.c.label), "writes");
+  assert.equal(applyDiagramUndo(reversed.state, reversed).state.elements.c.start.binding.elementId, "api");
+
+  const resized = run(state, { type: "object.resize", objectId: "api", bounds: { x: 300, y: 200, width: -200, height: 120 } });
+  const { x, y, width, height } = resized.state.elements.api.transform;
+  assert.deepEqual({ x, y, width, height }, { x: 100, y: 200, width: 200, height: 120 }, "a negative width is normalised");
+  assert.equal(boardDiagramGraph(resized.state).edges[0].attached, true, "the arrow follows the new box");
+  assert.deepEqual(applyDiagramUndo(resized.state, resized).state.elements.api.transform, state.elements.api.transform);
+
+  const dashed = run(state, { type: "connector.restyle", connectorId: "c", lineStyle: "dashed" });
+  assert.equal(dashed.state.elements.c.style.strokeStyle, "dashed");
+  assert.equal(applyDiagramUndo(dashed.state, dashed).state.elements.c.style.strokeStyle, "solid");
 });
 
 function projectionOf(state) {

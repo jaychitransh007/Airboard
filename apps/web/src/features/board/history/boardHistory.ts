@@ -7,19 +7,10 @@ import { OWNER_USER_ID, PARTICIPANT_ID } from "../engine/boardTypes.ts";
 
 export type UndoAction =
   | {
-      type: "stroke";
-      strokeId: string;
-    }
-  | {
-      type: "erase";
-      strokeIds: string[];
-    }
-  | {
       type: "diagram";
       undoEvents: BoardEvent[];
       /** The forward events, kept so an undone Airo change can be redone. */
       redoEvents?: BoardEvent[];
-      selectionBefore: string[];
       originatingInteractionId?: string;
     }
   | {

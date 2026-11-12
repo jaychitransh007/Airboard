@@ -75,7 +75,7 @@ const edge = (from: string, to: string, label = "") => ({ from, to, label });
 test("golden journey: typed, Airo, undo/redo, voice, hand and peer edits give the recorded board", async ({
   page,
 }) => {
-  const api = await signIn(page, { boards: [{ title: "Golden journey", state: { elements: {}, strokes: {} } }] });
+  const api = await signIn(page, { boards: [{ title: "Golden journey", state: { elements: {} } }] });
   const airo = await standInForAiro(page);
   await page.goto(`/app/boards/${api.boardId("Golden journey")}`);
   await expect(page.getByTestId("share-board")).toBeVisible({ timeout: 30_000 });
@@ -171,10 +171,9 @@ async function shapeCentre(page: Page, label: string) {
   return summary.positions[index]!;
 }
 
-// Recorded on 12 November 2026 at 3082af5. Airo's new shapes are still legacy
-// annotations today, so its Ledger keeps the legacy default fill (#f8fafc)
-// while typed shapes are white; shape-merge phase 1 is the intended change
-// that re-records that line.
+// Recorded on 12 November 2026 at 3082af5. Airo's Ledger has its node type's
+// default fill (#f8fafc) while typed shapes are white. The shape merge must
+// not change these fingerprints.
 const GOLDEN: Record<
   "typedShapes" | "typedEdits" | "airoPlan" | "voiceRename" | "handMove" | "handPlaced" | "peerEdit" | "final",
   BoardFingerprint

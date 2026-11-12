@@ -31,7 +31,7 @@ async function run(page: Page, command: string) {
 
 /** The persisted part of a board: what a save must carry. */
 function content(state: BoardState) {
-  return { sceneVersion: state.sceneVersion, elements: state.elements, strokes: state.strokes };
+  return { sceneVersion: state.sceneVersion, elements: state.elements };
 }
 
 async function liveContent(page: Page) {
@@ -68,7 +68,7 @@ async function expectSaved(page: Page, api: StandInControlPlane, path: string, m
 }
 
 test("every mutation path schedules a save of the live board", async ({ page }) => {
-  const api = await signIn(page, { boards: [{ title: "Saves", state: { elements: {}, strokes: {} } }] });
+  const api = await signIn(page, { boards: [{ title: "Saves", state: { elements: {} } }] });
   const airo = await standInForAiro(page);
   await page.goto(`/app/boards/${api.boardId("Saves")}`);
   await expect(page.getByTestId("share-board")).toBeVisible({ timeout: 30_000 });
@@ -117,7 +117,7 @@ test("every mutation path schedules a save of the live board", async ({ page }) 
     withHooks(page, (hooks) => {
       const state = hooks.getCanonicalBoardState();
       const shape = Object.values(state.elements).find(
-        (element) => element.kind === "shape" && element.status === "active" && !element.legacyStrokeId,
+        (element) => element.kind === "shape" && element.status === "active",
       )!;
       hooks.emitRemoteBoardEvent({
         id: "event:saves-peer-recolour",
@@ -134,8 +134,8 @@ test("every mutation path schedules a save of the live board", async ({ page }) 
 
   await expectSaved(page, api, "delete", () => run(page, "delete Gateway"));
 
-  // Since shape-merge phase 1 nothing in this journey makes a legacy stroke.
-  expect(api.saves.every((save) => Object.keys((save.state as BoardState).strokes ?? {}).length === 0)).toBe(true);
+  // Since shape-merge phase 3 no save carries a strokes key at all.
+  expect(api.saves.every((save) => !("strokes" in (save.state as object)))).toBe(true);
 
   // Selecting changes nothing that is saved, so it sends no save.
   const savesBefore = api.saves.length;
@@ -151,7 +151,7 @@ test("a live-session resync replaces the board, and the board is saved", async (
   // non-owner tab resyncs, so the session start is answered as an editor's,
   // and the catch-up keeps reporting more to fetch until the tab gives up
   // paging and asks for the state.
-  const api = await signIn(page, { boards: [{ title: "Resync", state: { elements: {}, strokes: {} } }] });
+  const api = await signIn(page, { boards: [{ title: "Resync", state: { elements: {} } }] });
   await page.route("**/sessions/start", async (route) => {
     const response = await route.fetch();
     const body = await response.json();

@@ -1,4 +1,10 @@
-import { BOARD_SCENE_VERSION, boardPreview, type BoardState } from "@airboard/core";
+import {
+  BOARD_SCENE_VERSION,
+  boardPreview,
+  upgradeLegacyBoardState,
+  type BoardState,
+  type LegacyBoardStateInput,
+} from "@airboard/core";
 import { AIRBOARD_API_URL } from "../../platform/config.ts";
 
 /** A board opened through a view-only link: content only, no members or cursors. */
@@ -25,15 +31,21 @@ export async function fetchSharedBoard(token: string, fetcher: typeof fetch = fe
   };
 }
 
+/** The shared board in the current model: a board saved before the shape merge is converted on read. */
 export function sharedBoardState(value: unknown): BoardState {
-  const candidate = isRecord(value) ? (value as Partial<BoardState>) : {};
+  const candidate = isRecord(value) ? value : {};
+  const upgraded = upgradeLegacyBoardState({
+    boardId: "shared",
+    elements: isRecord(candidate.elements) ? (candidate.elements as BoardState["elements"]) : {},
+    ...(isRecord(candidate.strokes) ? { strokes: candidate.strokes as NonNullable<LegacyBoardStateInput["strokes"]> } : {}),
+    eraseActions: isRecord(candidate.eraseActions) ? (candidate.eraseActions as BoardState["eraseActions"]) : {},
+  });
   return {
     boardId: "shared",
     sceneVersion: BOARD_SCENE_VERSION,
-    elements: isRecord(candidate.elements) ? (candidate.elements as BoardState["elements"]) : {},
-    strokes: isRecord(candidate.strokes) ? (candidate.strokes as BoardState["strokes"]) : {},
+    elements: upgraded.elements,
     activeStrokes: {},
-    eraseActions: isRecord(candidate.eraseActions) ? (candidate.eraseActions as BoardState["eraseActions"]) : {},
+    eraseActions: upgraded.eraseActions,
     participants: {},
     cursors: {},
     lastSequence: 0,
@@ -51,13 +63,6 @@ export function sharedBoardBounds(state: BoardState): Bounds | null {
     if (![x, y, width, height].every(Number.isFinite)) continue;
     xs.push(x, x + width);
     ys.push(y, y + height);
-  }
-  for (const stroke of Object.values(state.strokes)) {
-    if (stroke.status === "deleted") continue;
-    for (const point of stroke.points) {
-      xs.push(point.x);
-      ys.push(point.y);
-    }
   }
   if (!xs.length) return null;
   const left = Math.min(...xs);

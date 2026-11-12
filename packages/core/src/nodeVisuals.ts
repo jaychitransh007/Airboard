@@ -88,69 +88,6 @@ export function pointOnNodeBoundary(
   return rectangleBoundary(bounds, toward);
 }
 
-export function nodeVisualContainsPoint(
-  bounds: AnnotationBounds,
-  nodeType: AnnotationNodeType | undefined,
-  point: AnnotationPoint,
-  padding = 0,
-): boolean {
-  const expanded = {
-    x: bounds.x - padding,
-    y: bounds.y - padding,
-    width: bounds.width + padding * 2,
-    height: bounds.height + padding * 2,
-  };
-  const center = boundsCenter(expanded);
-  const dx = point.x - center.x;
-  const dy = point.y - center.y;
-  const radiusX = expanded.width / 2;
-  const radiusY = expanded.height / 2;
-  const kind = nodeType ? nodeVisualKind(nodeType) : "box";
-  if (kind === "actor") {
-    return pointInPolygon(point, actorBoundaryPolygon(expanded));
-  }
-  if (kind === "ellipse") {
-    return (
-      radiusX > 0 &&
-      radiusY > 0 &&
-      (dx * dx) / (radiusX * radiusX) + (dy * dy) / (radiusY * radiusY) <= 1
-    );
-  }
-  if (kind === "decision") {
-    return (
-      radiusX > 0 &&
-      radiusY > 0 &&
-      Math.abs(dx) / radiusX + Math.abs(dy) / radiusY <= 1
-    );
-  }
-  if (kind === "io") {
-    const skew = Math.min(expanded.width * 0.18, 26);
-    return pointInPolygon(point, [
-      { x: expanded.x + skew, y: expanded.y },
-      { x: expanded.x + expanded.width, y: expanded.y },
-      { x: expanded.x + expanded.width - skew, y: expanded.y + expanded.height },
-      { x: expanded.x, y: expanded.y + expanded.height },
-    ]);
-  }
-  if (kind === "terminator") {
-    const radius = Math.min(expanded.height / 2, expanded.width / 2);
-    const leftCenter = { x: expanded.x + radius, y: center.y };
-    const rightCenter = { x: expanded.x + expanded.width - radius, y: center.y };
-    return (
-      (point.x >= leftCenter.x && point.x <= rightCenter.x &&
-        point.y >= expanded.y && point.y <= expanded.y + expanded.height) ||
-      Math.hypot(point.x - leftCenter.x, point.y - leftCenter.y) <= radius ||
-      Math.hypot(point.x - rightCenter.x, point.y - rightCenter.y) <= radius
-    );
-  }
-  return (
-    point.x >= expanded.x &&
-    point.x <= expanded.x + expanded.width &&
-    point.y >= expanded.y &&
-    point.y <= expanded.y + expanded.height
-  );
-}
-
 function boundsCenter(bounds: AnnotationBounds): AnnotationPoint {
   return {
     x: bounds.x + bounds.width / 2,
@@ -235,21 +172,6 @@ function segmentIntersection(
     denominator;
   if (t < 0 || t > 1 || u < 0 || u > 1) return null;
   return { x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) };
-}
-
-function pointInPolygon(point: AnnotationPoint, polygon: readonly AnnotationPoint[]): boolean {
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
-    const a = polygon[i]!;
-    const b = polygon[j]!;
-    if (
-      (a.y > point.y) !== (b.y > point.y) &&
-      point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x
-    ) {
-      inside = !inside;
-    }
-  }
-  return inside;
 }
 
 function actorBoundaryPolygon(bounds: AnnotationBounds): AnnotationPoint[] {

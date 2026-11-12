@@ -1,6 +1,5 @@
 import { pointOnNodeBoundary } from "./nodeVisuals.ts";
 import {
-  boardSceneElementFromLegacyStroke,
   createBoardSceneElement,
   createRichTextDocument,
   DEFAULT_SHAPE_STYLE,
@@ -19,12 +18,10 @@ import type {
 } from "./types.ts";
 
 /**
- * Board objects come in two kinds. Boards saved before Airo drew v2 shapes
- * hold legacy annotation strokes, mirrored into scene elements under the same
- * id. Everything made now (typed commands, the toolbar, the hand and Airo)
- * is a v2 scene element with no stroke behind it. These helpers let a diagram
- * command plan create and change v2 elements, and keep v2 connectors attached
- * to anything that moves or goes, legacy or v2.
+ * The diagram verbs' work on v2 scene elements: everything on a board (typed
+ * commands, the toolbar, the hand and Airo all make them). These helpers let
+ * a diagram command plan create and change elements, and keep connectors
+ * attached to anything that moves or goes.
  */
 
 /** Element kinds a plan can name, connect, rename, move and delete. */
@@ -50,10 +47,9 @@ export function isSceneNodeElement(element: BoardSceneElement | undefined): elem
   return Boolean(element && element.status === "active" && SCENE_NODE_KINDS.has(element.kind));
 }
 
-/** A v2 element with no legacy stroke behind it; legacy commands can't reach it. */
-export function isSceneOnlyElement(state: BoardState, id: string): boolean {
-  const element = state.elements[id];
-  return Boolean(element && element.status === "active" && !element.legacyStrokeId && !state.strokes[id]);
+/** True when the id names an element that is on the board (not deleted). */
+export function isActiveElement(state: BoardState, id: string): boolean {
+  return state.elements[id]?.status === "active";
 }
 
 export function sceneElementCenter(element: BoardSceneElement): AnnotationPoint {
@@ -108,7 +104,7 @@ export const CONNECTOR_LANE_SPACING = 72;
 /**
  * The lane for a new arrow between two objects: the first takes the direct
  * route, later ones alternate either side of it, so parallel and two-way
- * arrows never draw on top of each other. Counts arrows of both models.
+ * arrows never draw on top of each other.
  */
 export function sceneConnectorRouteOffset(
   state: BoardState,
@@ -118,19 +114,11 @@ export function sceneConnectorRouteOffset(
 ): number {
   const joins = (start: string | undefined, end: string | undefined) =>
     (start === fromId && end === toId) || (start === toId && end === fromId);
-  const sceneCount = Object.values(state.elements).filter((element) =>
+  const siblingCount = Object.values(state.elements).filter((element) =>
     element.id !== excludedConnectorId &&
     element.kind === "connector" &&
     element.status === "active" &&
-    !element.legacyStrokeId &&
-    !state.strokes[element.id] &&
     joins(element.start.binding?.elementId, element.end.binding?.elementId)).length;
-  const legacyCount = Object.values(state.strokes).filter((stroke) =>
-    stroke.id !== excludedConnectorId &&
-    stroke.status !== "deleted" &&
-    (stroke.annotation?.type === "connector" || stroke.annotation?.type === "arrow") &&
-    joins(stroke.annotation.snappedStartStrokeId, stroke.annotation.snappedEndStrokeId)).length;
-  const siblingCount = sceneCount + legacyCount;
   if (siblingCount === 0) return 0;
   const lane = Math.ceil(siblingCount / 2);
   return (siblingCount % 2 === 1 ? 1 : -1) * lane * CONNECTOR_LANE_SPACING;
@@ -152,23 +140,10 @@ function activeNode(state: BoardState, id: string): BoardSceneElement {
   return element;
 }
 
-/**
- * An object an arrow can end at, for its geometry: a v2 node, or a legacy node
- * through its scene mirror (or, on a snapshot that has no mirror, its stroke).
- */
+/** An object an arrow can end at. */
 function connectableNode(state: BoardState, id: string): BoardSceneElement | undefined {
   const element = state.elements[id];
-  if (isSceneNodeElement(element)) return element;
-  const stroke = state.strokes[id];
-  if (
-    stroke?.status === "committed" &&
-    stroke.annotation?.bounds &&
-    stroke.annotation.type !== "connector" &&
-    stroke.annotation.type !== "arrow"
-  ) {
-    return boardSceneElementFromLegacyStroke(stroke);
-  }
-  return undefined;
+  return isSceneNodeElement(element) ? element : undefined;
 }
 
 function activeConnector(state: BoardState, id: string): ConnectorElement {
@@ -186,24 +161,22 @@ function nextZIndex(state: BoardState): number {
   ) + 1;
 }
 
-/** Active v2 connectors (not legacy mirrors) attached to any of the ids. */
+/** Active connectors attached to any of the ids. */
 export function sceneConnectorsAttachedTo(state: BoardState, ids: ReadonlySet<string>): ConnectorElement[] {
   return Object.values(state.elements).filter((element): element is ConnectorElement =>
     element.kind === "connector" &&
     element.status === "active" &&
-    !element.legacyStrokeId &&
     Boolean(
       (element.start.binding && ids.has(element.start.binding.elementId)) ||
       (element.end.binding && ids.has(element.end.binding.elementId)),
     ));
 }
 
-/** Active v2 connectors from one element to another, in that direction. */
+/** Active connectors from one element to another, in that direction. */
 export function sceneConnectorsBetween(state: BoardState, fromId: string, toId: string): ConnectorElement[] {
   return Object.values(state.elements).filter((element): element is ConnectorElement =>
     element.kind === "connector" &&
     element.status === "active" &&
-    !element.legacyStrokeId &&
     element.start.binding?.elementId === fromId &&
     element.end.binding?.elementId === toId);
 }
@@ -216,8 +189,7 @@ export type SceneConnectorStyle = {
 };
 
 /**
- * Draws a v2 arrow from one object to another (either may be a legacy node's
- * mirror). Its ends meet each object's outline, and a second arrow between
+ * Draws a v2 arrow from one object to another. Its ends meet each object's outline, and a second arrow between
  * the same two objects takes its own lane.
  */
 export function connectElements(
@@ -239,7 +211,7 @@ export function connectElements(
   const start = anchorToward(from, sceneElementCenter(to));
   const end = anchorToward(to, sceneElementCenter(from));
   const id = sink.objectId(input.connectorId);
-  if (sink.state.elements[id] || sink.state.strokes[id]) throw new Error(`Board object already exists: ${id}`);
+  if (sink.state.elements[id]) throw new Error(`Board object already exists: ${id}`);
   const routeOffset = sceneConnectorRouteOffset(sink.state, from.id, to.id);
   const connector = createBoardSceneElement({
     id,
@@ -279,7 +251,7 @@ export function createShapeElement(
   },
 ): string {
   const id = sink.objectId(input.shapeId);
-  if (sink.state.elements[id] || sink.state.strokes[id]) throw new Error(`Board object already exists: ${id}`);
+  if (sink.state.elements[id]) throw new Error(`Board object already exists: ${id}`);
   const shape = createBoardSceneElement({
     id,
     boardId: sink.boardSessionId,
@@ -416,7 +388,6 @@ export function duplicateElements(
     copy.createdAt = sink.createdAt;
     copy.updatedAt = sink.createdAt;
     copy.revision = 1;
-    delete copy.legacyStrokeId;
     if (sink.userId) copy.creatorId = sink.userId;
     // A copied mind-map node starts its own map rather than claiming the original's links.
     if (copy.kind === "mind_map_node") {
@@ -433,8 +404,7 @@ export function groupElements(
   input: { sectionId?: string; memberIds: readonly string[]; label?: string },
 ): string {
   const members = [...new Set(input.memberIds)].map((id) => {
-    // A section can't own a legacy node: the stroke, not the element, decides where that is.
-    if (!isSceneOnlyElement(sink.state, id)) throw new Error(`Not a v2 board object: ${id}`);
+    if (!isActiveElement(sink.state, id)) throw new Error(`Not a v2 board object: ${id}`);
     return activeNode(sink.state, id);
   });
   if (members.length === 0) throw new Error("A group needs at least one object.");
@@ -472,7 +442,7 @@ export function groupElements(
 }
 
 /**
- * Re-route v2 connectors attached to objects that just moved, legacy or v2:
+ * Re-route connectors attached to objects that just moved:
  * connectors are drawn from their stored end points, not their bindings.
  */
 export function refreshAttachedConnectors(sink: SceneEventSink, movedIds: readonly string[]): void {

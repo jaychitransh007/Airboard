@@ -1,7 +1,6 @@
 import {
   applyBoardEvent,
   applyDiagramCommand,
-  applyLegacyDiagramFixture,
   applyDiagramUndo,
   createInitialBoardState,
   parseSemanticPlan,
@@ -198,10 +197,6 @@ function executeVoiceInteraction(
         canvasHeight: finitePositive(evalCase.initial?.viewport?.height) ?? 600,
         selectionIds,
         primarySelectionId: selectionIds.at(-1) ?? null,
-        hoverStrokeId:
-          typeof evalCase.initial?.hoverStrokeId === "string"
-            ? evalCase.initial.hoverStrokeId
-            : null,
         strokeColor: "#111111",
       });
       if ("error" in resolution) {
@@ -239,7 +234,7 @@ function executeVoiceInteraction(
         }
       } else if (resolution.commands.length === 0) {
         selectionIds = (resolution.selectionAfter ?? selectionIds).filter(
-          (strokeId) => boardState.strokes[strokeId]?.status === "committed",
+          (elementId) => boardState.elements[elementId]?.status === "active",
         );
         nonBoardState = {
           ...nonBoardState,
@@ -675,17 +670,17 @@ function pointerFrom(evalCase) {
 }
 
 /**
- * The corpus describes starting boards as annotation nodes and edges: boards
- * saved before Airo drew v2 shapes. They are seeded as those legacy strokes,
- * so every case keeps exercising edits of legacy content; what a case
- * creates is v2, and the harness projects both into one canonical form.
+ * The corpus describes starting boards as annotation nodes and edges. They are
+ * seeded as v2 scene elements through the production diagram commands, with
+ * the corpus ids, so every case edits the same model Airo and the grammar make.
+ * An edge's explicit start/end overrides its endpoint points afterwards.
  */
 function seedProjectedBoard(projected = {}) {
   let state = createInitialBoardState(projected.boardId ?? "board:primary");
   for (const [index, node] of (projected.nodes ?? []).entries()) {
     const annotation = node.annotation ?? {};
     const bounds = annotation.bounds;
-    state = applyLegacyDiagramFixture(
+    state = applyDiagramCommand(
       state,
       {
         type: "node.create",
@@ -705,7 +700,7 @@ function seedProjectedBoard(projected = {}) {
     if (!annotation.snappedStartStrokeId || !annotation.snappedEndStrokeId) {
       continue;
     }
-    state = applyLegacyDiagramFixture(
+    state = applyDiagramCommand(
       state,
       {
         type: "nodes.connect",
@@ -717,25 +712,17 @@ function seedProjectedBoard(projected = {}) {
       },
       commandContext("seed-edge", index),
     ).state;
-    if (annotation.start && annotation.end) {
-      const current = state.strokes[edge.id];
-      const nextAnnotation = {
-        ...current.annotation,
-        ...annotation,
-        start: { ...annotation.start },
-        end: { ...annotation.end },
-      };
+    if (annotation.start && annotation.end && state.elements[edge.id]) {
       state = applyBoardEvent(state, {
         id: `event:seed-edge-geometry:${index}`,
         boardSessionId: state.boardId,
         actorParticipantId: "participant:eval",
         createdAt: "2026-07-30T00:00:00.000Z",
-        type: "stroke.annotation_updated",
-        strokeId: edge.id,
-        annotation: nextAnnotation,
-        points: [
-          { ...nextAnnotation.start, t: 1, inputSource: "pointer" },
-          { ...nextAnnotation.end, t: 2, inputSource: "pointer" },
+        type: "element.patched",
+        elementId: edge.id,
+        patches: [
+          { op: "field.set", path: ["start", "point"], value: { x: annotation.start.x, y: annotation.start.y } },
+          { op: "field.set", path: ["end", "point"], value: { x: annotation.end.x, y: annotation.end.y } },
         ],
       });
     }

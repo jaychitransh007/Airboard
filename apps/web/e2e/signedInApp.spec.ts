@@ -76,12 +76,11 @@ test("a command that changes the diagram in one batch, and its undo, are saved",
   const savedLedger = () => {
     const state = api.saves.at(-1)?.state as {
       elements?: Record<string, { status: string }>;
-      strokes?: Record<string, { status: string }>;
     } | undefined;
-    const items = [...Object.values(state?.elements ?? {}), ...Object.values(state?.strokes ?? {})];
+    const items = Object.values(state?.elements ?? {});
     const ledger = items.filter((item) => JSON.stringify(item).includes('"Ledger"'));
     if (!ledger.length) return null;
-    return ledger.some((item) => item.status === "active" || item.status === "committed") ? "on the board" : "removed";
+    return ledger.some((item) => item.status === "active") ? "on the board" : "removed";
   };
 
   // Stand in for the Airo model, so the command takes the same path a real

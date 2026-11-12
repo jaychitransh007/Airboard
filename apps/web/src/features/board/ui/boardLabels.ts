@@ -3,7 +3,7 @@
  * verbatim out of AirboardPrototype.tsx (board split, phase 1).
  */
 import type { BoardSceneElement, BoardSceneIntent, BoardState } from "@airboard/core";
-import type { ObjectDockTool } from "../gestureAnnotationMode.ts";
+import type { ObjectDockTool } from "../placementGhost.ts";
 import { sceneNodeLabel } from "../semanticBoardObjects.ts";
 import {
   OBJECT_DOCK,
@@ -17,12 +17,10 @@ export function liveLinkDropped(status: string): boolean {
 }
 
 /**
- * The name of a board target id for the scoped voice pill: a legacy stroke's
- * label, or a v2 scene element's text (or its kind when blank).
+ * The name of a board target id for the scoped voice pill: the element's
+ * text, or its kind when blank.
  */
 export function boardTargetLabel(state: BoardState, targetId: string): string {
-  const strokeLabel = state.strokes[targetId]?.annotation?.label?.trim();
-  if (strokeLabel) return strokeLabel;
   const element = state.elements[targetId];
   return element?.status === "active" ? sceneNodeLabel(element) : "";
 }

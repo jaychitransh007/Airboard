@@ -1,32 +1,56 @@
-import { boardDiagramGraph, type BoardDiagramGraph } from "./boardDiagramGraph.ts";
+import { applyBoardEvent, reduceBoardEvents } from "./boardReducer.ts";
+import {
+  boardDiagramGraph,
+  type BoardDiagramEdge,
+  type BoardDiagramGroup,
+  type BoardDiagramNode,
+} from "./boardDiagramGraph.ts";
+import { DEFAULT_CONNECTOR_ATTACHMENT_TOLERANCE } from "./diagramCommands.ts";
+import { pointOnNodeBoundary } from "./nodeVisuals.ts";
 import { createRichTextDocument, DEFAULT_SHAPE_STYLE, shapeKindForNodeType } from "./sceneElements.ts";
 import { isBoardSceneElement, SHAPE_KINDS } from "./sceneValidation.ts";
 import { BOARD_SCENE_VERSION } from "./types.ts";
 import type {
   AnnotationBounds,
+  AnnotationNodeType,
   AnnotationPoint,
+  AnnotationSource,
   BoardElementTransform,
+  BoardEvent,
   BoardJsonValue,
   BoardSceneElement,
   BoardState,
   ConnectorElement,
   DrawingElement,
+  EraseAction,
   SectionElement,
   ShapeElement,
   ShapeKind,
   StickyElement,
   Stroke,
-  StrokeAnnotation,
+  StrokePoint,
   TextElement,
 } from "./types.ts";
 
 /**
- * One-off conversion of saved boards from the legacy stroke model to v2
- * scene elements (shape-merge phase 2, run once over production with the
- * owner's approval; see Docs/Refactoring Plan.md).
+ * The legacy annotation-stroke model, and the only code that still reads it.
+ *
+ * Until November 2026 Airo drew diagrams as annotation strokes
+ * (`BoardState.strokes`, written by the `stroke.*` events), mirrored into
+ * scene elements carrying `legacyStrokeId`. Shape-merge phase 2 converted
+ * every saved production board once (scripts/convert-legacy-boards.mjs);
+ * phase 3 removed the model from the board. What is left reads it:
+ *
+ * - convertLegacyBoardState: the conversion (also the documented tool for a
+ *   board restored from a backup taken before phase 2);
+ * - upgradeLegacyBoardState: converts a board as it is loaded, so a saved
+ *   legacy board still opens with every shape;
+ * - replayBoardEvents: reduces stored board_events rows, converting any
+ *   retired stroke.* or erase.committed rows (the API's live-session state);
+ * - LEGACY_BOARD_EVENT_TYPES: the retired event types the API refuses.
  *
  * Every committed or deleted stroke in `state.strokes` becomes the v2
- * element it stands for, under the same id, and leaves `strokes`:
+ * element it stands for, under the same id:
  *
  * - a diagram node (flow_node, rectangle, ellipse; the 13 node types) becomes
  *   a shape of the catalogue kind Airo draws for that node type now, with the
@@ -43,12 +67,12 @@ import type {
  *   sectionId points at it);
  * - ink: plain marker strokes and the annotation types drawn as ink
  *   (freehand, cross_mark, a highlight with no box) become v2 drawing
- *   elements with the same points, colour, width and opacity. The board
- *   already draws v2 drawings (freehand drawing has committed them since
- *   before phase 1), and phase 3 drops `strokes` altogether, so nothing is
- *   left behind in the legacy model.
+ *   elements with the same points, colour, width and opacity.
  *
- * The scene "mirror" the reducer kept for each stroke (an element with
+ * A stroke still being drawn (status "active") is dropped. The output has no
+ * `strokes` key.
+ *
+ * The scene "mirror" the old reducer kept for each stroke (an element with
  * `legacyStrokeId`, or under the stroke's id) is replaced by the converted
  * element, so nothing is drawn twice. A mirror whose stroke is gone was
  * already drawn as a v2 element; it only loses its `legacyStrokeId`.
@@ -57,27 +81,76 @@ import type {
  * drew all strokes first), sections lowest, then connectors, then the rest,
  * each in stroke order, as the legacy painter ordered them.
  *
- * The function is pure and idempotent: a board with no legacy data comes
- * back unchanged (`changed: false`), and converting a converted board again
- * changes nothing.
+ * The conversion is pure, deterministic (no clock, no random ids) and
+ * idempotent: a board with no legacy data comes back unchanged apart from
+ * defaults (`changed: false`), and converting a converted board again changes
+ * nothing.
  */
+
+type LegacyAnnotationObjectType =
+  | "pointer"
+  | "ellipse"
+  | "arrow"
+  | "highlight"
+  | "rectangle"
+  | "flow_node"
+  | "connector"
+  | "text_label"
+  | "sticky_note"
+  | "cross_mark"
+  | "freehand";
+
+/** What a legacy annotation stroke stood for (the old `StrokeAnnotation`). */
+type LegacyStrokeAnnotation = {
+  type: LegacyAnnotationObjectType;
+  source: AnnotationSource;
+  confidence?: number;
+  bounds?: AnnotationBounds;
+  start?: AnnotationPoint;
+  end?: AnnotationPoint;
+  label?: string;
+  nodeType?: AnnotationNodeType;
+  /** Catalog-backed shape identity; older clients continue to use nodeType. */
+  shapeKind?: ShapeKind;
+  snappedStartStrokeId?: string;
+  snappedEndStrokeId?: string;
+  /** Signed board-space lane displacement for parallel or reciprocal connectors. */
+  routeOffset?: number;
+  /** Connector line pattern; absent means solid. */
+  lineStyle?: "dashed" | "dotted";
+  fillColor?: string;
+  strokeColor?: string;
+  opacity?: number;
+  /** Group membership: a group container lists its members, each member names its group. */
+  groupId?: string;
+  groupMemberStrokeIds?: string[];
+};
+
+type LegacyStroke = Stroke & { annotation?: LegacyStrokeAnnotation };
+
+/** A scene element as saved by the old reducer: a mirror carries its stroke's id. */
+type LegacyElement = BoardSceneElement & { legacyStrokeId?: string };
 
 /** A saved board as stored: any part may be missing on very old rows. */
 export type LegacyBoardStateInput =
-  Partial<Omit<BoardState, "strokes" | "elements">> & {
+  Partial<Omit<BoardState, "elements" | "activeStrokes">> & {
     boardId?: string;
-    strokes?: Record<string, Stroke>;
-    elements?: Record<string, BoardSceneElement>;
+    strokes?: Record<string, LegacyStroke>;
+    activeStrokes?: Record<string, Stroke>;
+    elements?: Record<string, LegacyElement>;
   };
 
 export type LegacyBoardConversion = {
+  /** The board in the current model: no `strokes`, no mirrors. */
   state: BoardState;
-  /** False when the board held no legacy data; `state` then equals the input. */
+  /** False when the board held no legacy data; `state` then equals the input with its defaults filled. */
   changed: boolean;
   /** Committed strokes with an annotation that were converted (the count the migration is approved for). */
   annotationStrokeIds: string[];
   /** Every stroke converted, annotation or ink, committed or deleted. */
   convertedStrokeIds: string[];
+  /** Strokes left out: still being drawn when the board was saved. */
+  droppedStrokeIds: string[];
   /** Ids of the elements the conversion wrote (the same ids as the strokes). */
   addedElementIds: string[];
   /** Mirror elements replaced by the converted element of the same id. */
@@ -85,6 +158,52 @@ export type LegacyBoardConversion = {
   /** Mirrors whose stroke was gone, kept as v2 elements without legacyStrokeId. */
   orphanMirrorIds: string[];
 };
+
+type LegacyEnvelope = {
+  id: string;
+  boardSessionId: string;
+  actorParticipantId: string;
+  sequence?: number;
+  createdAt: string;
+};
+
+/** The retired events of the legacy model, as stored in board_events. */
+export type LegacyBoardEvent = LegacyEnvelope & (
+  | { type: "stroke.started"; stroke: LegacyStroke }
+  | { type: "stroke.point_added"; strokeId: string; point: StrokePoint }
+  | {
+    type: "stroke.committed";
+    strokeId: string;
+    points?: StrokePoint[];
+    discard?: boolean;
+    cleanupApplied?: boolean;
+    lineSnapApplied?: boolean;
+    frictionProfile?: Stroke["frictionProfile"];
+  }
+  | { type: "stroke.label_updated"; strokeId: string; label: string }
+  | { type: "stroke.annotation_updated"; strokeId: string; annotation: LegacyStrokeAnnotation; points: StrokePoint[] }
+  | { type: "erase.committed"; eraseAction: EraseAction }
+  | { type: "stroke.deleted"; strokeIds: string[] }
+  | { type: "stroke.restored"; strokeIds: string[] }
+);
+
+/** The retired event types: stored rows still replay; the API refuses new ones. */
+export const LEGACY_BOARD_EVENT_TYPES: readonly LegacyBoardEvent["type"][] = [
+  "stroke.started",
+  "stroke.point_added",
+  "stroke.committed",
+  "stroke.label_updated",
+  "stroke.annotation_updated",
+  "stroke.deleted",
+  "stroke.restored",
+  "erase.committed",
+];
+
+const LEGACY_EVENT_TYPE_SET = new Set<string>(LEGACY_BOARD_EVENT_TYPES);
+
+export function isLegacyBoardEventType(type: unknown): type is LegacyBoardEvent["type"] {
+  return typeof type === "string" && LEGACY_EVENT_TYPE_SET.has(type);
+}
 
 /** The weight Airo's connectors are drawn in (diagramCommands AIRO_CONNECTOR_THICKNESS). */
 const AIRO_CONNECTOR_THICKNESS: ConnectorElement["style"]["thickness"] = "thick";
@@ -99,17 +218,17 @@ const NODE_ANNOTATION_TYPES = new Set<string>(["flow_node", "rectangle", "ellips
 /** Annotation types the legacy painter drew as ink along the stroke's points. */
 const INK_ANNOTATION_TYPES = new Set<string>(["freehand", "cross_mark"]);
 
-export function isLegacyEdgeAnnotation(annotation: StrokeAnnotation | undefined): boolean {
+function isLegacyEdgeAnnotation(annotation: LegacyStrokeAnnotation | undefined): boolean {
   return annotation?.type === "connector" || annotation?.type === "arrow";
 }
 
-function isLegacyGroupAnnotation(annotation: StrokeAnnotation | undefined): boolean {
+function isLegacyGroupAnnotation(annotation: LegacyStrokeAnnotation | undefined): boolean {
   return Boolean(annotation?.bounds) && !isLegacyEdgeAnnotation(annotation) &&
     (annotation?.groupMemberStrokeIds?.length ?? 0) > 0;
 }
 
-/** Strokes the conversion rewrites: committed or deleted (an in-progress stroke is left alone). */
-function isConvertibleStroke(stroke: Stroke | undefined): stroke is Stroke {
+/** Strokes the conversion rewrites: committed or deleted (an in-progress stroke is dropped). */
+function isConvertibleStroke(stroke: LegacyStroke | undefined): stroke is LegacyStroke {
   return Boolean(stroke && typeof stroke === "object" && (stroke.status === "committed" || stroke.status === "deleted"));
 }
 
@@ -127,30 +246,51 @@ export function boardHasLegacyData(state: LegacyBoardStateInput): boolean {
 }
 
 export function convertLegacyBoardState(input: LegacyBoardStateInput): LegacyBoardConversion {
+  return convertBoard(input);
+}
+
+/**
+ * The board in the current model, whatever it was saved in: a legacy board is
+ * converted (convertLegacyBoardState), any `strokes` key is dropped and
+ * missing parts are filled. Called wherever a saved or served board is read;
+ * it writes nothing, and a converted board compares equal to itself next time
+ * (the conversion is deterministic), so opening a board never saves it.
+ */
+export function upgradeLegacyBoardState(input: LegacyBoardStateInput): BoardState {
+  return convertBoard(input).state;
+}
+
+function convertBoard(
+  input: LegacyBoardStateInput,
+  /** Mirror revisions replayBoardEvents tracked without keeping the mirrors. */
+  mirrorRevisions?: ReadonlyMap<string, number>,
+): LegacyBoardConversion {
   const strokes = input.strokes ?? {};
   const sourceElements = input.elements ?? {};
   const boardId = input.boardId ?? Object.values(strokes)[0]?.boardId ?? "";
   const converting = Object.values(strokes).filter(isConvertibleStroke);
   const convertingIds = new Set(converting.map((stroke) => stroke.id));
+  const droppedStrokeIds = Object.keys(strokes).filter((id) => !convertingIds.has(id));
 
+  const { strokes: _strokes, ...rest } = input;
   const base: BoardState = {
-    ...(input as BoardState),
+    ...(rest as BoardState),
     boardId,
     sceneVersion: BOARD_SCENE_VERSION,
     elements: sourceElements,
-    strokes,
     activeStrokes: input.activeStrokes ?? {},
     eraseActions: input.eraseActions ?? {},
     participants: input.participants ?? {},
     cursors: input.cursors ?? {},
     lastSequence: Number.isSafeInteger(input.lastSequence) ? Number(input.lastSequence) : 0,
   };
-  if (!boardHasLegacyData(input)) {
+  if (!boardHasLegacyData(input) && droppedStrokeIds.length === 0) {
     return {
       state: base,
       changed: false,
       annotationStrokeIds: [],
       convertedStrokeIds: [],
+      droppedStrokeIds: [],
       addedElementIds: [],
       replacedMirrorIds: [],
       orphanMirrorIds: [],
@@ -170,8 +310,8 @@ export function convertLegacyBoardState(input: LegacyBoardStateInput): LegacyBoa
     if (mirroredStrokeId) {
       // Its stroke is gone (or still being drawn): the board already shows
       // this element as v2, so it only drops the bridge field.
-      const { legacyStrokeId: _bridge, ...rest } = element;
-      kept[id] = rest as BoardSceneElement;
+      const { legacyStrokeId: _bridge, ...element2 } = element;
+      kept[id] = element2 as BoardSceneElement;
       orphanMirrorIds.push(id);
       continue;
     }
@@ -182,18 +322,18 @@ export function convertLegacyBoardState(input: LegacyBoardStateInput): LegacyBoa
   // under nodes; sections go lowest so they never cover their members.
   const groups = converting.filter((stroke) => isLegacyGroupAnnotation(stroke.annotation));
   const edges = converting.filter((stroke) => isLegacyEdgeAnnotation(stroke.annotation));
-  const rest = converting.filter((stroke) => !groups.includes(stroke) && !edges.includes(stroke));
-  const ordered = [...groups, ...edges, ...rest];
+  const others = converting.filter((stroke) => !groups.includes(stroke) && !edges.includes(stroke));
+  const ordered = [...groups, ...edges, ...others];
   const keptZ = Object.values(kept).map((element) => element.zIndex).filter(Number.isFinite);
   const firstZ = keptZ.length > 0 ? Math.min(...keptZ) - ordered.length : 0;
 
   const converted: Record<string, BoardSceneElement> = {};
   ordered.forEach((stroke, index) => {
-    const mirror = sourceElements[stroke.id];
+    const mirrorRevision = mirrorRevisions?.get(stroke.id) ?? sourceElements[stroke.id]?.revision;
     converted[stroke.id] = convertStroke(stroke, {
       boardId: stroke.boardId || boardId,
       zIndex: firstZ + index,
-      revision: Math.max(0, Number.isSafeInteger(mirror?.revision) ? Number(mirror?.revision) : 0) + 1,
+      revision: Math.max(0, Number.isSafeInteger(mirrorRevision) ? Number(mirrorRevision) : 0) + 1,
     });
   });
 
@@ -211,16 +351,14 @@ export function convertLegacyBoardState(input: LegacyBoardStateInput): LegacyBoa
     }
   }
 
-  const remainingStrokes = Object.fromEntries(
-    Object.entries(strokes).filter(([id]) => !convertingIds.has(id)),
-  );
   return {
-    state: { ...base, elements, strokes: remainingStrokes },
+    state: { ...base, elements },
     changed: true,
     annotationStrokeIds: converting
       .filter((stroke) => stroke.status === "committed" && stroke.annotation)
       .map((stroke) => stroke.id),
     convertedStrokeIds: ordered.map((stroke) => stroke.id),
+    droppedStrokeIds,
     addedElementIds: Object.keys(converted),
     replacedMirrorIds,
     orphanMirrorIds,
@@ -229,7 +367,7 @@ export function convertLegacyBoardState(input: LegacyBoardStateInput): LegacyBoa
 
 type ConvertOptions = { boardId: string; zIndex: number; revision: number };
 
-function convertStroke(stroke: Stroke, options: ConvertOptions): BoardSceneElement {
+function convertStroke(stroke: LegacyStroke, options: ConvertOptions): BoardSceneElement {
   const annotation = stroke.annotation;
   if (annotation && isLegacyEdgeAnnotation(annotation)) return convertEdge(stroke, annotation, options);
   if (annotation?.bounds) {
@@ -248,7 +386,7 @@ function convertStroke(stroke: Stroke, options: ConvertOptions): BoardSceneEleme
   return convertInk(stroke, options);
 }
 
-function shared(stroke: Stroke, options: ConvertOptions, transform: BoardElementTransform) {
+function shared(stroke: LegacyStroke, options: ConvertOptions, transform: BoardElementTransform) {
   return {
     id: stroke.id,
     boardId: options.boardId,
@@ -265,7 +403,7 @@ function shared(stroke: Stroke, options: ConvertOptions, transform: BoardElement
 }
 
 /** Where the legacy object came from, kept on the element (the old mirror dropped it). */
-function provenance(annotation: StrokeAnnotation | undefined, extra: Record<string, BoardJsonValue> = {}): Record<string, BoardJsonValue> {
+function provenance(annotation: LegacyStrokeAnnotation | undefined, extra: Record<string, BoardJsonValue> = {}): Record<string, BoardJsonValue> {
   const metadata: Record<string, BoardJsonValue> = { ...extra, convertedFrom: "legacy_stroke" };
   if (annotation?.source) metadata.source = annotation.source;
   if (typeof annotation?.confidence === "number" && Number.isFinite(annotation.confidence)) {
@@ -303,7 +441,7 @@ function opacityOf(value: number | undefined, fallback: number): number {
 }
 
 /** The catalogue shape the legacy painter's outline matches. */
-function legacyNodeShapeKind(annotation: StrokeAnnotation): ShapeKind {
+function legacyNodeShapeKind(annotation: LegacyStrokeAnnotation): ShapeKind {
   const catalogue = catalogShapeKind(annotation.shapeKind);
   if (catalogue) return catalogue;
   if (annotation.type === "ellipse" || annotation.type === "pointer") return "ellipse";
@@ -313,8 +451,8 @@ function legacyNodeShapeKind(annotation: StrokeAnnotation): ShapeKind {
 }
 
 function convertShape(
-  stroke: Stroke,
-  annotation: StrokeAnnotation,
+  stroke: LegacyStroke,
+  annotation: LegacyStrokeAnnotation,
   bounds: AnnotationBounds,
   options: ConvertOptions,
 ): ShapeElement {
@@ -348,8 +486,8 @@ function convertShape(
 }
 
 function convertSticky(
-  stroke: Stroke,
-  annotation: StrokeAnnotation,
+  stroke: LegacyStroke,
+  annotation: LegacyStrokeAnnotation,
   bounds: AnnotationBounds,
   options: ConvertOptions,
 ): StickyElement {
@@ -367,8 +505,8 @@ function convertSticky(
 }
 
 function convertText(
-  stroke: Stroke,
-  annotation: StrokeAnnotation,
+  stroke: LegacyStroke,
+  annotation: LegacyStrokeAnnotation,
   bounds: AnnotationBounds,
   options: ConvertOptions,
 ): TextElement {
@@ -389,8 +527,8 @@ function convertText(
 }
 
 function convertGroup(
-  stroke: Stroke,
-  annotation: StrokeAnnotation,
+  stroke: LegacyStroke,
+  annotation: LegacyStrokeAnnotation,
   bounds: AnnotationBounds,
   options: ConvertOptions,
 ): SectionElement {
@@ -415,7 +553,7 @@ function pointOf(point: { x: number; y: number } | undefined): AnnotationPoint |
   return point && Number.isFinite(point.x) && Number.isFinite(point.y) ? { x: point.x, y: point.y } : undefined;
 }
 
-function convertEdge(stroke: Stroke, annotation: StrokeAnnotation, options: ConvertOptions): ConnectorElement {
+function convertEdge(stroke: LegacyStroke, annotation: LegacyStrokeAnnotation, options: ConvertOptions): ConnectorElement {
   const start = pointOf(annotation.start) ?? pointOf(stroke.points[0]) ?? { x: 0, y: 0 };
   const end = pointOf(annotation.end) ?? pointOf(stroke.points.at(-1)) ?? start;
   const connector: ConnectorElement = {
@@ -457,7 +595,7 @@ function convertEdge(stroke: Stroke, annotation: StrokeAnnotation, options: Conv
   return connector;
 }
 
-function convertInk(stroke: Stroke, options: ConvertOptions): DrawingElement {
+function convertInk(stroke: LegacyStroke, options: ConvertOptions): DrawingElement {
   const annotation = stroke.annotation;
   const points = Array.isArray(stroke.points) ? stroke.points : [];
   const xs = points.map((point) => point.x);
@@ -489,6 +627,7 @@ function convertInk(stroke: Stroke, options: ConvertOptions): DrawingElement {
   };
 }
 
+
 /** What PATCH /boards/:id accepts (apps/api controlPlaneRoutes.ts): at most this many JSON characters. */
 export const MAX_SAVED_BOARD_STATE_CHARS = 2_000_000;
 
@@ -498,24 +637,25 @@ export const MAX_SAVED_BOARD_STATE_CHARS = 2_000_000;
  * data left, and every connector binding and section member present.
  * Returns the problems found (empty when it passes).
  */
-export function validateConvertedBoardState(state: BoardState): string[] {
+export function validateConvertedBoardState(state: LegacyBoardStateInput): string[] {
   const problems: string[] = [];
   const size = JSON.stringify(state).length;
   if (size > MAX_SAVED_BOARD_STATE_CHARS) problems.push(`state is ${size} characters; the API accepts ${MAX_SAVED_BOARD_STATE_CHARS}`);
   if (state.sceneVersion !== BOARD_SCENE_VERSION) problems.push(`sceneVersion is ${String(state.sceneVersion)}`);
-  for (const [id, element] of Object.entries(state.elements ?? {})) {
+  const elements = state.elements ?? {};
+  for (const [id, element] of Object.entries(elements)) {
     if (!isBoardSceneElement(element)) problems.push(`element ${id} is not a valid scene element`);
     else if (element.id !== id) problems.push(`element ${id} has id ${element.id}`);
     if (element?.legacyStrokeId) problems.push(`element ${id} still mirrors stroke ${element.legacyStrokeId}`);
     if (element?.kind === "connector") {
       for (const end of [element.start, element.end]) {
         const target = end.binding?.elementId;
-        if (target && !state.elements[target]) problems.push(`connector ${id} is bound to missing ${target}`);
+        if (target && !elements[target]) problems.push(`connector ${id} is bound to missing ${target}`);
       }
     }
     if (element?.kind === "section") {
       for (const memberId of element.memberIds) {
-        if (!state.elements[memberId]) problems.push(`section ${id} lists missing member ${memberId}`);
+        if (!elements[memberId]) problems.push(`section ${id} lists missing member ${memberId}`);
       }
     }
   }
@@ -528,10 +668,19 @@ export function validateConvertedBoardState(state: BoardState): string[] {
 /** Legacy kinds the v2 element names differently; everything else keeps its kind. */
 const CONVERTED_KIND: Readonly<Record<string, string>> = { text_label: "text" };
 
+/** `model: "stroke"` marks an item read from a legacy stroke; v2 items leave it out. */
+type LegacyGraphNode = BoardDiagramNode & { model?: "stroke" };
+type LegacyGraphEdge = Omit<BoardDiagramEdge, "geometry"> & {
+  model?: "stroke";
+  geometry: { routeOffset?: number };
+};
+type LegacyGraphGroup = BoardDiagramGroup & { model?: "stroke" };
+type LegacyGraph = { nodes: LegacyGraphNode[]; edges: LegacyGraphEdge[]; groups: LegacyGraphGroup[] };
+
 /**
  * Differences between the diagram a board showed before conversion and after
- * it, as boardDiagramGraph sees them, ignoring the model fields (model,
- * objectType, edge geometry, a group's container kind). Expected changes are
+ * it, as boardDiagramGraph sees them, ignoring the fields that name the
+ * model (objectType, edge geometry, a group's container kind). Expected changes are
  * not differences: a text label is now named "text"; ink marks (freehand,
  * cross_mark) become v2 drawings, which the graph does not list; a section
  * leaves out members that no longer exist; an orphan mirror now shows as the
@@ -539,22 +688,13 @@ const CONVERTED_KIND: Readonly<Record<string, string>> = { text_label: "text" };
  * diagram is the same).
  */
 export function legacyConversionGraphDiff(before: LegacyBoardStateInput, after: BoardState): string[] {
-  const normalizedBefore: BoardState = {
-    boardId: before.boardId ?? after.boardId,
-    sceneVersion: BOARD_SCENE_VERSION,
-    elements: before.elements ?? {},
-    strokes: before.strokes ?? {},
-    activeStrokes: before.activeStrokes ?? {},
-    eraseActions: before.eraseActions ?? {},
-    participants: before.participants ?? {},
-    cursors: before.cursors ?? {},
-    lastSequence: 0,
-  };
-  const left = boardDiagramGraph(normalizedBefore);
+  const strokes = before.strokes ?? {};
+  const beforeElements = before.elements ?? {};
+  const left = legacyDiagramGraph(before);
   const right = boardDiagramGraph(after);
   const orphanMirrors = new Set(
-    Object.values(normalizedBefore.elements)
-      .filter((element) => element.legacyStrokeId && !normalizedBefore.strokes[element.legacyStrokeId] && !normalizedBefore.strokes[element.id])
+    Object.values(beforeElements)
+      .filter((element) => element.legacyStrokeId && !strokes[element.legacyStrokeId] && !strokes[element.id])
       .map((element) => element.id),
   );
   const problems: string[] = [];
@@ -566,7 +706,7 @@ export function legacyConversionGraphDiff(before: LegacyBoardStateInput, after: 
     what: string,
     beforeItems: readonly T[],
     afterItems: readonly T[],
-    view: (item: T, graph: BoardDiagramGraph) => Record<string, unknown>,
+    view: (item: T) => Record<string, unknown>,
     expectedGone: (item: T) => boolean,
     expectedNew: (item: T) => boolean,
   ) => {
@@ -577,8 +717,8 @@ export function legacyConversionGraphDiff(before: LegacyBoardStateInput, after: 
         if (!expectedGone(item)) problems.push(`${what} ${item.id} is gone`);
         continue;
       }
-      const was = JSON.stringify(view(item, left));
-      const now = JSON.stringify(view(next, right));
+      const was = JSON.stringify(view(item));
+      const now = JSON.stringify(view(next));
       if (was !== now) problems.push(`${what} ${item.id} changed: ${was} -> ${now}`);
     }
     const beforeIds = new Set(beforeItems.map((item) => item.id));
@@ -588,7 +728,7 @@ export function legacyConversionGraphDiff(before: LegacyBoardStateInput, after: 
   };
 
   const existsAfter = (id: string) => Boolean(after.elements[id]);
-  compare(
+  compare<LegacyGraphNode>(
     "node",
     left.nodes,
     right.nodes,
@@ -604,7 +744,7 @@ export function legacyConversionGraphDiff(before: LegacyBoardStateInput, after: 
     (node) => node.model === "stroke" && INK_ANNOTATION_TYPES.has(node.objectType) && after.elements[node.id]?.kind === "drawing",
     (node) => orphanMirrors.has(node.id),
   );
-  compare(
+  compare<LegacyGraphEdge>(
     "edge",
     left.edges,
     right.edges,
@@ -620,7 +760,7 @@ export function legacyConversionGraphDiff(before: LegacyBoardStateInput, after: 
     () => false,
     (edge) => orphanMirrors.has(edge.id),
   );
-  compare(
+  compare<LegacyGraphGroup>(
     "group",
     left.groups,
     right.groups,
@@ -633,4 +773,371 @@ export function legacyConversionGraphDiff(before: LegacyBoardStateInput, after: 
     (group) => orphanMirrors.has(group.id),
   );
   return problems;
+}
+
+const LEGACY_MARK_TYPES = new Set<string>(["highlight", "pointer", "text_label", "cross_mark", "freehand"]);
+
+/**
+ * The diagram a legacy board showed, as boardDiagramGraph read it before
+ * phase 3: legacy nodes, edges and groups from the committed annotation
+ * strokes (in stroke order), then the v2 elements that are no mirror (in
+ * element order), every object once.
+ */
+function legacyDiagramGraph(input: LegacyBoardStateInput): LegacyGraph {
+  const strokes = input.strokes ?? {};
+  const elements = input.elements ?? {};
+  const committed = Object.values(strokes).filter((stroke) => stroke?.status === "committed" && stroke.annotation);
+  // The v2 part of the board: everything but the mirrors (and elements under a stroke's id).
+  const sceneOnly = Object.fromEntries(
+    Object.entries(elements).filter(([id, element]) => !element.legacyStrokeId && !strokes[id]),
+  ) as Record<string, BoardSceneElement>;
+  const scene = boardDiagramGraph({
+    boardId: input.boardId ?? "",
+    sceneVersion: BOARD_SCENE_VERSION,
+    elements: sceneOnly,
+    activeStrokes: {},
+    eraseActions: {},
+    participants: {},
+    cursors: {},
+    lastSequence: 0,
+  });
+
+  const groups: LegacyGraphGroup[] = [...committed.flatMap(legacyGroup), ...scene.groups];
+  const groupIdsByMember = new Map<string, string[]>();
+  for (const group of groups) {
+    for (const memberId of group.memberIds) {
+      const ids = groupIdsByMember.get(memberId) ?? [];
+      if (!ids.includes(group.id)) ids.push(group.id);
+      groupIdsByMember.set(memberId, ids);
+    }
+  }
+  const groupIdsOf = (id: string, sectionId?: string): string[] => {
+    const ids = [...(groupIdsByMember.get(id) ?? [])];
+    if (sectionId && !ids.includes(sectionId) && groups.some((group) => group.id === sectionId)) ids.push(sectionId);
+    return ids;
+  };
+
+  const nodes: LegacyGraphNode[] = [
+    ...committed.flatMap((stroke) => legacyNode(stroke, groupIdsOf(stroke.id))),
+    ...scene.nodes.map((node) => ({ ...node, groupIds: groupIdsOf(node.id, sceneOnly[node.id]?.sectionId) })),
+  ];
+  const edges: LegacyGraphEdge[] = [
+    ...committed.flatMap((stroke) => legacyEdge(input, stroke)),
+    // A v2 arrow may end at a legacy node: attached when it lies on the stroke's box.
+    ...scene.edges.map((edge) => {
+      const geometry = edge.geometry;
+      return {
+        ...edge,
+        attached: Boolean(
+          edge.from && edge.to &&
+          sceneEndpointAttached(input, edge.from, geometry.start) &&
+          sceneEndpointAttached(input, edge.to, geometry.end),
+        ),
+      };
+    }),
+  ];
+  return { nodes, edges, groups };
+}
+
+function isLegacyGroup(stroke: LegacyStroke): boolean {
+  return (stroke.annotation?.groupMemberStrokeIds?.length ?? 0) > 0;
+}
+
+function legacyNode(stroke: LegacyStroke, groupIds: string[]): LegacyGraphNode[] {
+  const annotation = stroke.annotation;
+  if (!annotation?.bounds || isLegacyEdgeAnnotation(annotation) || isLegacyGroup(stroke)) return [];
+  const kind = annotation.nodeType ?? annotation.type;
+  return [{
+    id: stroke.id,
+    label: annotation.label ?? null,
+    name: annotation.label?.trim() || kind,
+    kind,
+    objectType: annotation.type,
+    role: LEGACY_MARK_TYPES.has(annotation.type) ? "mark" : "shape",
+    bounds: { ...annotation.bounds },
+    model: "stroke",
+    groupIds,
+  }];
+}
+
+function legacyGroup(stroke: LegacyStroke): LegacyGraphGroup[] {
+  const annotation = stroke.annotation;
+  if (!annotation?.bounds || isLegacyEdgeAnnotation(annotation) || !isLegacyGroup(stroke)) return [];
+  return [{
+    id: stroke.id,
+    label: annotation.label ?? null,
+    kind: annotation.nodeType ?? annotation.type,
+    objectType: annotation.type,
+    bounds: { ...annotation.bounds },
+    memberIds: [...(annotation.groupMemberStrokeIds ?? [])],
+    model: "stroke",
+  }];
+}
+
+function legacyEdge(input: LegacyBoardStateInput, stroke: LegacyStroke): LegacyGraphEdge[] {
+  const annotation = stroke.annotation;
+  if (!annotation || !isLegacyEdgeAnnotation(annotation)) return [];
+  return [{
+    id: stroke.id,
+    from: annotation.snappedStartStrokeId ?? null,
+    to: annotation.snappedEndStrokeId ?? null,
+    label: annotation.label ?? null,
+    directed: true,
+    lineStyle: annotation.lineStyle ?? "solid",
+    attached: connectorGeometryMatchesBindings(input, annotation),
+    model: "stroke",
+    geometry: annotation.routeOffset !== undefined ? { routeOffset: annotation.routeOffset } : {},
+  }];
+}
+
+/** A legacy end is attached when it lies where its node's outline is. */
+function connectorEndpointMatchesBinding(
+  input: LegacyBoardStateInput,
+  annotation: LegacyStrokeAnnotation,
+  endpoint: "start" | "end",
+): boolean {
+  const boundId = endpoint === "start" ? annotation.snappedStartStrokeId : annotation.snappedEndStrokeId;
+  const point = endpoint === "start" ? annotation.start : annotation.end;
+  if (!boundId || !point) return false;
+  const stroke: LegacyStroke | undefined = input.strokes?.[boundId] ?? input.activeStrokes?.[boundId];
+  const bounds = stroke?.annotation?.bounds;
+  if (!stroke || stroke.status === "deleted" || !bounds) return false;
+  const expected = pointOnNodeBoundary(bounds, stroke.annotation?.nodeType, point);
+  return Math.hypot(point.x - expected.x, point.y - expected.y) <= DEFAULT_CONNECTOR_ATTACHMENT_TOLERANCE;
+}
+
+/** True only when a legacy connector's bindings and drawn ends agree. */
+function connectorGeometryMatchesBindings(input: LegacyBoardStateInput, annotation: LegacyStrokeAnnotation): boolean {
+  if (
+    !annotation.snappedStartStrokeId ||
+    !annotation.snappedEndStrokeId ||
+    !annotation.start ||
+    !annotation.end ||
+    !isLegacyEdgeAnnotation(annotation)
+  ) {
+    return false;
+  }
+  return connectorEndpointMatchesBinding(input, annotation, "start") &&
+    connectorEndpointMatchesBinding(input, annotation, "end");
+}
+
+/** A v2 arrow's end is attached when it lies on or inside its object's box (legacy or v2). */
+function sceneEndpointAttached(input: LegacyBoardStateInput, id: string, point: AnnotationPoint): boolean {
+  const stroke = input.strokes?.[id];
+  const element = input.elements?.[id];
+  const bounds = stroke
+    ? stroke.status === "committed" ? stroke.annotation?.bounds : undefined
+    : element?.status === "active"
+      ? { x: element.transform.x, y: element.transform.y, width: element.transform.width, height: element.transform.height }
+      : undefined;
+  if (!bounds) return false;
+  const tolerance = DEFAULT_CONNECTOR_ATTACHMENT_TOLERANCE;
+  return point.x >= bounds.x - tolerance && point.x <= bounds.x + bounds.width + tolerance &&
+    point.y >= bounds.y - tolerance && point.y <= bounds.y + bounds.height + tolerance;
+}
+
+/**
+ * Reduces stored board_events rows into the board they make. Rows in the
+ * current model go through the reducer as they are; a log that still holds
+ * retired stroke.* or erase.committed rows (a live session older than shape
+ * phase 3) is replayed as the old reducer read it, and the strokes it built
+ * are converted at the end (convertLegacyBoardState), so every shape survives
+ * as the v2 element it stood for. They are converted earlier when a later
+ * element.patched, element.deleted or element.restored row names one (a
+ * phase-3 tab editing a converted shape), so that edit is applied to the
+ * element rather than dropped. Strokes still being drawn when the log ends
+ * are left out.
+ */
+export function replayBoardEvents(initial: BoardState, events: readonly unknown[]): BoardState {
+  const rows = events as readonly (BoardEvent | LegacyBoardEvent)[];
+  if (!rows.some((event) => isLegacyBoardEventType(event?.type))) {
+    return reduceBoardEvents(initial, rows as readonly BoardEvent[]);
+  }
+  const legacy = new LegacyStrokeReplay((initial as LegacyBoardStateInput).strokes ?? {});
+  let state = initial;
+  for (const event of rows) {
+    // A current tab edits a converted shape by its stroke id: the strokes so
+    // far become elements first, so the edit lands on them (and is not
+    // undone when the log is converted at the end).
+    if (legacy.referencesStroke(event)) {
+      state = convertBoard({ ...state, strokes: legacy.strokes }, legacy.mirrorRevisions).state;
+      legacy.retireAll();
+    }
+    // A retired row falls into the reducer's default case: lastSequence advances.
+    state = applyBoardEvent(state, event as BoardEvent);
+    state = legacy.apply(state, event);
+  }
+  return convertBoard({ ...state, strokes: legacy.strokes }, legacy.mirrorRevisions).state;
+}
+
+/**
+ * The stroke half of the pre-phase-3 reducer (boardReducer.ts at
+ * launch-f5e326e), ported verbatim. It keeps the strokes privately; the
+ * scene mirrors the old reducer kept are not rebuilt, only their revisions,
+ * so the converted elements carry the revisions they would have had.
+ */
+class LegacyStrokeReplay {
+  strokes: Record<string, LegacyStroke>;
+  private active: Record<string, LegacyStroke> = {};
+  readonly mirrorRevisions = new Map<string, number>();
+  private readonly mirrorStatus = new Map<string, "active" | "deleted">();
+
+  constructor(strokes: Record<string, LegacyStroke>) {
+    this.strokes = strokes;
+  }
+
+  /** True for a current-model element row that names a stroke this replay still holds. */
+  referencesStroke(event: BoardEvent | LegacyBoardEvent): boolean {
+    if (event?.type !== "element.patched" && event?.type !== "element.deleted" && event?.type !== "element.restored") {
+      return false;
+    }
+    return typeof event.elementId === "string" && Object.hasOwn(this.strokes, event.elementId);
+  }
+
+  /**
+   * Forgets the strokes once they were converted into elements: later rows
+   * reach those elements through the reducer (a retired stroke row naming
+   * one still deletes or restores it, as markElementsStatus runs on elements).
+   */
+  retireAll(): void {
+    for (const id of Object.keys(this.strokes)) {
+      this.mirrorRevisions.delete(id);
+      this.mirrorStatus.delete(id);
+    }
+    this.strokes = {};
+  }
+
+  apply(state: BoardState, event: BoardEvent | LegacyBoardEvent): BoardState {
+    switch (event.type) {
+      case "stroke.started":
+        this.active = { ...this.active, [event.stroke.id]: event.stroke };
+        return state;
+
+      case "stroke.point_added": {
+        const stroke = this.active[event.strokeId];
+        if (stroke) this.active = { ...this.active, [event.strokeId]: appendPoint(stroke, event.point) };
+        return state;
+      }
+
+      case "stroke.committed": {
+        const stroke = this.active[event.strokeId];
+        if (!stroke) return state;
+        const { [event.strokeId]: _removed, ...remaining } = this.active;
+        this.active = remaining;
+        if (event.discard) return state;
+        const committed: LegacyStroke = {
+          ...stroke,
+          points: event.points && event.points.length > 0 ? event.points : stroke.points,
+          status: "committed",
+          updatedAt: event.createdAt,
+          committedAt: event.createdAt,
+        };
+        if (event.cleanupApplied !== undefined) committed.cleanupApplied = event.cleanupApplied;
+        if (event.lineSnapApplied !== undefined) committed.lineSnapApplied = event.lineSnapApplied;
+        if (event.frictionProfile) committed.frictionProfile = event.frictionProfile;
+        this.strokes = { ...this.strokes, [event.strokeId]: committed };
+        const previous = this.mirrorRevisions.get(event.strokeId) ?? state.elements[event.strokeId]?.revision ?? 0;
+        this.mirrorRevisions.set(event.strokeId, previous + 1);
+        this.mirrorStatus.set(event.strokeId, "active");
+        return state;
+      }
+
+      case "stroke.label_updated":
+      case "stroke.annotation_updated": {
+        const id = event.strokeId;
+        const stroke = this.strokes[id] ?? this.active[id];
+        if (!stroke?.annotation) return state;
+        const updated: LegacyStroke = event.type === "stroke.label_updated"
+          ? { ...stroke, annotation: { ...stroke.annotation, label: event.label }, updatedAt: event.createdAt }
+          : { ...stroke, annotation: event.annotation, points: event.points, updatedAt: event.createdAt };
+        if (this.active[id]) {
+          this.active = { ...this.active, [id]: updated };
+          return state;
+        }
+        this.strokes = { ...this.strokes, [id]: updated };
+        this.bumpMirror(id);
+        return state;
+      }
+
+      case "erase.committed": {
+        const { eraseAction } = event;
+        this.setStrokeStatus(eraseAction.affectedStrokeIds, "deleted", event.createdAt);
+        return {
+          ...state,
+          eraseActions: { ...state.eraseActions, [eraseAction.id]: eraseAction },
+          elements: markElementsStatus(state.elements, eraseAction.affectedStrokeIds, "deleted", event.createdAt),
+        };
+      }
+
+      case "stroke.deleted":
+      case "stroke.restored": {
+        const status = event.type === "stroke.deleted" ? "deleted" : "active";
+        this.setStrokeStatus(event.strokeIds, status, event.createdAt);
+        return { ...state, elements: markElementsStatus(state.elements, event.strokeIds, status, event.createdAt) };
+      }
+
+      case "board.cleared":
+        this.setStrokeStatus(Object.keys(this.strokes), "deleted", event.createdAt);
+        for (const id of this.mirrorStatus.keys()) this.flipMirror(id, "deleted");
+        this.active = {};
+        return state;
+
+      case "element.deleted":
+      case "element.restored":
+        // The old reducer flipped a mirror like any element.
+        this.flipMirror(event.elementId, event.type === "element.deleted" ? "deleted" : "active");
+        return state;
+
+      default:
+        return state;
+    }
+  }
+
+  /** Deletes or restores strokes (only those that exist), flipping their mirrors as the old reducer did. */
+  private setStrokeStatus(ids: readonly string[], status: "active" | "deleted", updatedAt: string): void {
+    const next = { ...this.strokes };
+    for (const id of new Set(ids)) {
+      const stroke = next[id];
+      if (!stroke) continue;
+      next[id] = { ...stroke, status: status === "deleted" ? "deleted" : "committed", updatedAt };
+      this.flipMirror(id, status);
+    }
+    this.strokes = next;
+  }
+
+  private flipMirror(id: string, status: "active" | "deleted"): void {
+    const current = this.mirrorStatus.get(id);
+    if (current === undefined || current === status) return;
+    this.mirrorStatus.set(id, status);
+    this.bumpMirror(id);
+  }
+
+  private bumpMirror(id: string): void {
+    const revision = this.mirrorRevisions.get(id);
+    if (revision !== undefined) this.mirrorRevisions.set(id, revision + 1);
+  }
+}
+
+function appendPoint(stroke: LegacyStroke, point: StrokePoint): LegacyStroke {
+  // A non-finite timestamp would make toISOString throw and crash the replay.
+  const updatedAt = Number.isFinite(point.t) ? new Date(point.t).toISOString() : stroke.updatedAt;
+  return { ...stroke, points: [...stroke.points, point], updatedAt };
+}
+
+function markElementsStatus(
+  elements: Record<string, BoardSceneElement>,
+  ids: readonly string[],
+  status: BoardSceneElement["status"],
+  updatedAt: string,
+): Record<string, BoardSceneElement> {
+  const targets = new Set(ids);
+  let changed = false;
+  const next = Object.fromEntries(
+    Object.entries(elements).map(([id, element]) => {
+      if (!targets.has(id) || element.status === status) return [id, element];
+      changed = true;
+      return [id, { ...element, status, updatedAt, revision: element.revision + 1 } as BoardSceneElement];
+    }),
+  );
+  return changed ? next : elements;
 }

@@ -105,7 +105,6 @@ type CanonicalElement = {
   kind: string;
   status: string;
   zIndex: number;
-  legacyStrokeId?: string;
   shapeKind?: string;
   pathKind?: string;
   transform: { x: number; y: number; width: number; height: number };
@@ -119,7 +118,7 @@ async function activeSceneElements(page: Page): Promise<CanonicalElement[]> {
     return Object.values(state.elements);
   });
   return (elements as CanonicalElement[])
-    .filter((element) => element.status === "active" && !element.legacyStrokeId)
+    .filter((element) => element.status === "active")
     .sort((a, b) => a.zIndex - b.zIndex);
 }
 
@@ -562,13 +561,12 @@ test("air hover and one close-drag-release pinch carry a recent shape onto the b
     return {
       shapes: Object.values(state.elements)
         .flatMap((element) =>
-          element.status === "active" && !element.legacyStrokeId && element.kind === "shape" ? [element.shapeKind] : [],
+          element.status === "active" && element.kind === "shape" ? [element.shapeKind] : [],
         ),
-      legacyStrokeCount: Object.values(state.strokes)
-        .filter((stroke) => stroke.status === "committed").length,
+      hasStrokesKey: "strokes" in state,
     };
   });
-  expect(canonical).toEqual({ shapes: ["square"], legacyStrokeCount: 0 });
+  expect(canonical).toEqual({ shapes: ["square"], hasStrokesKey: false });
 });
 
 test("a hand-placed shape keeps the tool armed, can be grabbed again, and the dock disarms it", async ({
@@ -868,13 +866,12 @@ test("air pinch carry places a v2-only curved connector canonically", async ({ p
     return {
       connectors: Object.values(state.elements)
         .flatMap((element) =>
-          element.status === "active" && !element.legacyStrokeId && element.kind === "connector" ? [element.pathKind] : [],
+          element.status === "active" && element.kind === "connector" ? [element.pathKind] : [],
         ),
-      legacyStrokeCount: Object.values(state.strokes)
-        .filter((stroke) => stroke.status === "committed").length,
+      hasStrokesKey: "strokes" in state,
     };
   });
-  expect(canonical).toEqual({ connectors: ["curved"], legacyStrokeCount: 0 });
+  expect(canonical).toEqual({ connectors: ["curved"], hasStrokesKey: false });
 });
 
 test("pointer drag-and-drop places a shape from the new Shape popover", async ({ page }) => {
@@ -906,11 +903,10 @@ test("pointer drag-and-drop places a shape from the new Shape popover", async ({
     return {
       shapes: Object.values(state.elements)
         .flatMap((element) =>
-          element.status === "active" && !element.legacyStrokeId && element.kind === "shape" ? [element.shapeKind] : [],
+          element.status === "active" && element.kind === "shape" ? [element.shapeKind] : [],
         ),
-      legacyStrokeCount: Object.values(state.strokes)
-        .filter((stroke) => stroke.status === "committed").length,
+      hasStrokesKey: "strokes" in state,
     };
   });
-  expect(canonical).toEqual({ shapes: ["square"], legacyStrokeCount: 0 });
+  expect(canonical).toEqual({ shapes: ["square"], hasStrokesKey: false });
 });

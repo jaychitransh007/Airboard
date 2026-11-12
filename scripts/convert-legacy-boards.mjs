@@ -281,6 +281,7 @@ export function planConversions(boards) {
       elementsAdded: conversion.addedElementIds.length,
       mirrorsReplaced: conversion.replacedMirrorIds.length,
       orphanMirrors: conversion.orphanMirrorIds.length,
+      droppedInProgress: conversion.droppedStrokeIds.length,
       problems,
       diagramChanges,
       ok: conversion.changed && problems.length === 0 && diagramChanges.length === 0,
@@ -297,6 +298,7 @@ function summaryRow(plan) {
     strokes: `${plan.strokesBefore}->${plan.strokesAfter}`,
     added: plan.elementsAdded,
     mirrors: plan.mirrorsReplaced,
+    dropped: plan.droppedInProgress,
     live: plan.openSessions.length === 0
       ? "-"
       : `${plan.openSessions.length}${plan.openSessions.some((session) => session.recently_active) ? " (in use)" : ""}`,

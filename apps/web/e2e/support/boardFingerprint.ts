@@ -1,11 +1,10 @@
-import type { BoardSceneElement, BoardState, RichTextDocument, Stroke } from "@airboard/core";
+import type { BoardSceneElement, BoardState, RichTextDocument } from "@airboard/core";
 
 /**
  * A model-independent picture of a diagram: what a person sees, not how it is
- * stored. Legacy annotation strokes and v2 scene elements that look the same
- * give the same fingerprint, and ids, revisions, timestamps and exact
- * coordinates are left out. The board-file split and the shape-model merge
- * must keep a journey's fingerprint identical.
+ * stored: ids, revisions, timestamps and exact coordinates are left out. The
+ * board-file split and the shape-model merge must keep a journey's fingerprint
+ * identical.
  */
 export type BoardFingerprint = {
   /** Shapes, stickies and text, sorted by label then kind. */
@@ -43,15 +42,6 @@ function colour(value: unknown): string | null {
   return typeof value === "string" && value ? value.toLowerCase() : null;
 }
 
-function isLegacyConnector(stroke: Stroke): boolean {
-  return stroke.annotation?.type === "connector" || stroke.annotation?.type === "arrow";
-}
-
-/** True for a legacy rectangle that only frames a group. */
-function isLegacyGroupFrame(stroke: Stroke): boolean {
-  return Boolean(stroke.annotation?.groupMemberStrokeIds?.length);
-}
-
 function sceneNodeText(element: BoardSceneElement): string | null {
   switch (element.kind) {
     case "shape":
@@ -75,45 +65,13 @@ function sceneNodeFill(element: BoardSceneElement): string | null {
   return null;
 }
 
-function legacyNodeKind(stroke: Stroke): string {
-  const annotation = stroke.annotation!;
-  if (annotation.type === "sticky_note") return "sticky";
-  if (annotation.type === "text_label") return "text";
-  return annotation.shapeKind ?? annotation.nodeType ?? annotation.type;
-}
-
 export function boardFingerprint(state: BoardState): BoardFingerprint {
   const nodes: NodeRecord[] = [];
   const edges: BoardFingerprint["edges"] = [];
   const groups: Array<{ label: string; memberIds: string[] }> = [];
   let looseConnectors = 0;
 
-  const strokes = Object.values(state.strokes).filter(
-    (stroke) => stroke.status === "committed" && stroke.annotation,
-  );
-  const legacyConnectors: Stroke[] = [];
-  for (const stroke of strokes) {
-    const annotation = stroke.annotation!;
-    if (isLegacyConnector(stroke)) {
-      legacyConnectors.push(stroke);
-    } else if (isLegacyGroupFrame(stroke)) {
-      groups.push({ label: annotation.label ?? "", memberIds: [...annotation.groupMemberStrokeIds!] });
-    } else if (annotation.type !== "freehand" && annotation.type !== "pointer" && annotation.type !== "highlight") {
-      nodes.push({
-        id: stroke.id,
-        label: annotation.label ?? "",
-        kind: legacyNodeKind(stroke),
-        fill: colour(annotation.fillColor),
-        box: annotation.bounds ?? null,
-        group: null,
-      });
-    }
-  }
-
-  // Legacy strokes have a mirror element (legacyStrokeId); only the stroke counts.
-  const elements = Object.values(state.elements).filter(
-    (element) => element.status === "active" && !element.legacyStrokeId,
-  );
+  const elements = Object.values(state.elements).filter((element) => element.status === "active");
   const sceneConnectors: Extract<BoardSceneElement, { kind: "connector" }>[] = [];
   for (const element of elements) {
     if (element.kind === "connector") {
@@ -136,12 +94,6 @@ export function boardFingerprint(state: BoardState): BoardFingerprint {
   }
 
   const labelOf = new Map(nodes.map((node) => [node.id, node.label]));
-  for (const stroke of legacyConnectors) {
-    const from = labelOf.get(stroke.annotation?.snappedStartStrokeId ?? "");
-    const to = labelOf.get(stroke.annotation?.snappedEndStrokeId ?? "");
-    if (from === undefined || to === undefined) looseConnectors += 1;
-    else edges.push({ from, to, label: stroke.annotation?.label ?? "" });
-  }
   for (const connector of sceneConnectors) {
     const from = labelOf.get(connector.start.binding?.elementId ?? "");
     const to = labelOf.get(connector.end.binding?.elementId ?? "");

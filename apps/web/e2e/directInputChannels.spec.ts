@@ -6,16 +6,7 @@ type CanonicalBoard = {
     string,
     {
       status: string;
-      legacyStrokeId?: string;
       metadata?: { lastInputSource?: string };
-      points?: Array<{ inputSource?: string }>;
-    }
-  >;
-  strokes: Record<
-    string,
-    {
-      status: string;
-      inputSource?: string;
       points?: Array<{ inputSource?: string }>;
     }
   >;
@@ -40,26 +31,14 @@ async function inputSources(page: Page): Promise<string[]> {
     // A narrow view of the board: just the input-source fields read here.
     const board = (window as unknown as AirboardTestWindow).__airboardTestHooks
       .getCanonicalBoardState() as unknown as CanonicalBoard;
-    const sceneSources = Object.values(board.elements)
-      .filter(
-        ({ status, legacyStrokeId }) => status === "active" && !legacyStrokeId,
-      )
+    return Object.values(board.elements)
+      .filter(({ status }) => status === "active")
       .map(
         ({ metadata, points }) =>
           metadata?.lastInputSource ??
           points?.find(({ inputSource }) => inputSource)?.inputSource ??
           "",
-      );
-    const strokeSources = Object.values(board.strokes)
-      .filter(({ status }) => status === "committed")
-      .map(
-        (stroke) =>
-          stroke.inputSource ??
-          stroke.points?.find(({ inputSource }) => inputSource)?.inputSource ??
-          "",
       )
-      .filter(Boolean);
-    return [...sceneSources, ...strokeSources]
       .filter(Boolean)
       .sort();
   });

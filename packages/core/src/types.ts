@@ -38,19 +38,6 @@ export type StrokeTrackingSource =
   | "manual"
   | "fused";
 
-export type AnnotationObjectType =
-  | "pointer"
-  | "ellipse"
-  | "arrow"
-  | "highlight"
-  | "rectangle"
-  | "flow_node"
-  | "connector"
-  | "text_label"
-  | "sticky_note"
-  | "cross_mark"
-  | "freehand";
-
 export type AnnotationNodeType =
   | "process"
   | "service"
@@ -66,6 +53,7 @@ export type AnnotationNodeType =
   | "circle"
   | "custom";
 
+/** Where a diagram command came from; kept on the element's metadata as `source`. */
 export type AnnotationSource = "gesture" | "touchpad" | "marker_prop" | "keyboard" | "voice" | "ai";
 
 export type AnnotationBounds = {
@@ -78,39 +66,6 @@ export type AnnotationBounds = {
 export type AnnotationPoint = {
   x: number;
   y: number;
-};
-
-export type StrokeAnnotation = {
-  type: AnnotationObjectType;
-  source: AnnotationSource;
-  confidence?: number;
-  bounds?: AnnotationBounds;
-  start?: AnnotationPoint;
-  end?: AnnotationPoint;
-  label?: string;
-  nodeType?: AnnotationNodeType;
-  /** Catalog-backed shape identity; older clients continue to use nodeType. */
-  shapeKind?: ShapeKind;
-  snappedStartStrokeId?: string;
-  snappedEndStrokeId?: string;
-  /**
-   * Signed board-space lane displacement for parallel or reciprocal
-   * connectors. The renderer keeps the endpoints attached to their nodes and
-   * offsets the route body so sibling edges and their labels do not collapse
-   * onto one another.
-   */
-  routeOffset?: number;
-  /** Connector line pattern; absent means solid. */
-  lineStyle?: "dashed" | "dotted";
-  fillColor?: string;
-  strokeColor?: string;
-  opacity?: number;
-  /**
-   * Optional semantic grouping metadata. Group containers remain ordinary
-   * rectangle annotations so older renderers can display them unchanged.
-   */
-  groupId?: string;
-  groupMemberStrokeIds?: string[];
 };
 
 export type StrokePoint = {
@@ -134,6 +89,10 @@ export type StrokePoint = {
   trackingSource?: StrokeTrackingSource;
 };
 
+/**
+ * A freehand line while it is being drawn (the board's local `activeStrokes`
+ * preview). Committed ink is a v2 `drawing` element.
+ */
 export type Stroke = {
   id: string;
   boardId: string;
@@ -148,12 +107,12 @@ export type Stroke = {
   frictionProfile?: "stable" | "balanced" | "responsive" | "custom";
   inputSource?: StrokeInputSource;
   trackingSource?: StrokeTrackingSource;
-  annotation?: StrokeAnnotation;
   cleanupApplied?: boolean;
   lineSnapApplied?: boolean;
   committedAt?: string;
 };
 
+/** An eraser pass recorded by older clients; saved boards still carry `eraseActions`, nothing writes it now. */
 export type EraseAction = {
   id: string;
   boardId: string;
@@ -227,8 +186,12 @@ export type CursorState = {
   updatedAt: string;
 };
 
-/** The current serialized scene format. Legacy stroke events remain readable. */
-export const BOARD_SCENE_VERSION = 2 as const;
+/**
+ * The current serialized scene format. 3: the board holds v2 scene elements
+ * only (no `strokes`); stored legacy stroke rows and saved legacy boards are
+ * converted when read (legacyStrokeMigration.ts).
+ */
+export const BOARD_SCENE_VERSION = 3 as const;
 
 export type BoardSceneVersion = typeof BOARD_SCENE_VERSION;
 
@@ -435,8 +398,6 @@ export type BoardElementBase<TKind extends BoardElementKind> = {
   createdAt: string;
   updatedAt: string;
   revision: number;
-  /** Set only when this element was adapted from the v1 stroke model. */
-  legacyStrokeId?: string;
   metadata?: Record<string, BoardJsonValue>;
 };
 
@@ -680,7 +641,6 @@ export type BoardState = {
   boardId: string;
   sceneVersion: BoardSceneVersion;
   elements: Record<string, BoardSceneElement>;
-  strokes: Record<string, Stroke>;
   activeStrokes: Record<string, Stroke>;
   eraseActions: Record<string, EraseAction>;
   participants: Record<string, Participant>;
@@ -695,55 +655,6 @@ type EventEnvelope = {
   actorParticipantId: string;
   sequence?: number;
   createdAt: string;
-};
-
-export type StrokeStartedEvent = EventEnvelope & {
-  type: "stroke.started";
-  stroke: Stroke;
-};
-
-export type StrokePointAddedEvent = EventEnvelope & {
-  type: "stroke.point_added";
-  strokeId: string;
-  point: StrokePoint;
-};
-
-export type StrokeCommittedEvent = EventEnvelope & {
-  type: "stroke.committed";
-  strokeId: string;
-  points?: StrokePoint[];
-  discard?: boolean;
-  cleanupApplied?: boolean;
-  lineSnapApplied?: boolean;
-  frictionProfile?: Stroke["frictionProfile"];
-};
-
-export type StrokeLabelUpdatedEvent = EventEnvelope & {
-  type: "stroke.label_updated";
-  strokeId: string;
-  label: string;
-};
-
-export type StrokeAnnotationUpdatedEvent = EventEnvelope & {
-  type: "stroke.annotation_updated";
-  strokeId: string;
-  annotation: StrokeAnnotation;
-  points: StrokePoint[];
-};
-
-export type EraseCommittedEvent = EventEnvelope & {
-  type: "erase.committed";
-  eraseAction: EraseAction;
-};
-
-export type StrokeDeletedEvent = EventEnvelope & {
-  type: "stroke.deleted";
-  strokeIds: string[];
-};
-
-export type StrokeRestoredEvent = EventEnvelope & {
-  type: "stroke.restored";
-  strokeIds: string[];
 };
 
 export type UndoRequestedEvent = EventEnvelope & {
@@ -807,14 +718,6 @@ export type ElementRestoredEvent = EventEnvelope & {
 };
 
 export type BoardEvent =
-  | StrokeStartedEvent
-  | StrokePointAddedEvent
-  | StrokeCommittedEvent
-  | StrokeLabelUpdatedEvent
-  | StrokeAnnotationUpdatedEvent
-  | EraseCommittedEvent
-  | StrokeDeletedEvent
-  | StrokeRestoredEvent
   | UndoRequestedEvent
   | RedoRequestedEvent
   | BoardClearedEvent

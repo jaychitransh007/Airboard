@@ -3,12 +3,10 @@ import type {
   BoardState,
   CursorState,
   Stroke,
-  StrokeAnnotation,
   StrokePoint,
   AirboardNodeVisualKind,
   ShapeElement,
   RichTextDocument,
-  CatalogShapeKind,
   BoardSceneElement,
   ConnectorElement,
   DrawingElement,
@@ -25,8 +23,6 @@ import type {
   RichTextMark,
   RichTextBlock,
 } from "@airboard/core";
-import { isCatalogShapeKind, nodeVisualKind } from "@airboard/core";
-import { getConnectorRoutePoints, getRouteMidpoint } from "./connectorGeometry.ts";
 import { adaptFillForDarkBoard, adaptInkForDarkBoard } from "./neonInk.ts";
 import {
   catalogShapeHasIconGlyph,
@@ -42,20 +38,6 @@ import {
   sceneConnectorLabelLayoutOnBoard,
   type SceneConnectorLabelLayout,
 } from "./sceneConnectorGeometry.ts";
-
-export type AnnotationRenderObject = {
-  annotation: StrokeAnnotation;
-  points: StrokePoint[];
-  color: string;
-  thickness: number;
-  previewKind?: "add" | "change" | "delete";
-};
-
-export type BoardAlignmentGuide = {
-  axis: "x" | "y";
-  position: number;
-  kind?: "object" | "grid";
-};
 
 export type BoardRenderView = {
   /** Screen offset of the board origin, in CSS pixels. */
@@ -92,21 +74,20 @@ export type BoardRenderOptions = {
    */
   theme?: BoardRenderTheme;
   /**
-   * Viewport transform (pan/zoom). Content — strokes, overlays, ghosts,
+   * Viewport transform (pan/zoom). Content — elements, overlays, ghosts and
    * guides, cursors — is drawn in board coordinates and mapped through this
    * uniformly; the background always fills the physical canvas.
    */
   view?: BoardRenderView;
   showDeleted?: boolean;
-  selectedStrokeId?: string | null;
-  selectedStrokeIds?: readonly string[];
-  hoverStrokeId?: string | null;
   selectedElementId?: string | null;
   selectedElementIds?: readonly string[];
   hoverElementId?: string | null;
-  ghostAnnotation?: AnnotationRenderObject | null;
-  ghostAnnotations?: readonly AnnotationRenderObject[];
-  alignmentGuides?: readonly BoardAlignmentGuide[];
+  /**
+   * A provisional element drawn translucently, such as the placement preview
+   * of a shape that is about to be created. It is never part of the board.
+   */
+  ghostElement?: BoardSceneElement | null;
   /** Suppress collaboration cursors in audience-facing renders. */
   hideCursors?: boolean;
   /** Draw local dark glass behind diagram clusters without dimming the full underlay. */
@@ -225,7 +206,7 @@ export function renderBoard(
   }
 
   try {
-    renderBoardContent(target, state, options, width, height);
+    renderBoardContent(target, state, options);
   } finally {
     inkTransform = identityInk;
     fillTransform = identityInk;
@@ -240,8 +221,6 @@ function renderBoardContent(
   context: CanvasRenderingContext2D,
   state: BoardState,
   options: BoardRenderOptions,
-  width: number,
-  height: number,
 ): void {
   if (options.view) {
     context.save();
@@ -253,13 +232,6 @@ function renderBoardContent(
       options.view.x,
       options.view.y,
     );
-  }
-
-  for (const stroke of orderCommittedStrokesForRender(Object.values(state.strokes))) {
-    if (stroke.status === "deleted" && !options.showDeleted) {
-      continue;
-    }
-    drawStroke(context, stroke, stroke.status === "deleted" ? 0.12 : 1);
   }
 
   for (const element of sceneElementsForRender(state, options.showDeleted ?? false)) {
@@ -278,36 +250,13 @@ function renderBoardContent(
     drawStroke(context, stroke, 1);
   }
 
-  const hoverStroke =
-    options.hoverStrokeId && options.hoverStrokeId !== options.selectedStrokeId
-      ? state.strokes[options.hoverStrokeId]
-      : undefined;
-  if (hoverStroke?.annotation && hoverStroke.status === "committed") {
-    drawAnnotationOverlay(context, hoverStroke.annotation, "hover");
-  }
-
-  const selectedStroke = options.selectedStrokeId ? state.strokes[options.selectedStrokeId] : undefined;
-  for (const selectedId of options.selectedStrokeIds ?? []) {
-    if (selectedId === options.selectedStrokeId) {
-      continue;
-    }
-    const additionalSelection = state.strokes[selectedId];
-    if (additionalSelection?.annotation && additionalSelection.status === "committed") {
-      drawAnnotationOverlay(context, additionalSelection.annotation, "multi-selected");
-    }
-  }
-  if (selectedStroke?.annotation && selectedStroke.status === "committed") {
-    drawAnnotationOverlay(context, selectedStroke.annotation, "selected");
-  }
-
   const hoverElement = options.hoverElementId
     ? state.elements?.[options.hoverElementId]
     : undefined;
   if (
     hoverElement &&
     hoverElement.status === "active" &&
-    hoverElement.visible &&
-    !(hoverElement.legacyStrokeId && state.strokes[hoverElement.legacyStrokeId])
+    hoverElement.visible
   ) {
     drawSceneElementOverlay(context, hoverElement, "hover");
   }
@@ -317,8 +266,7 @@ function renderBoardContent(
     if (
       element &&
       element.status === "active" &&
-      element.visible &&
-      !(element.legacyStrokeId && state.strokes[element.legacyStrokeId])
+      element.visible
     ) {
       drawSceneElementOverlay(context, element, "multi-selected");
     }
@@ -329,21 +277,13 @@ function renderBoardContent(
   if (
     selectedElement &&
     selectedElement.status === "active" &&
-    selectedElement.visible &&
-    !(selectedElement.legacyStrokeId && state.strokes[selectedElement.legacyStrokeId])
+    selectedElement.visible
   ) {
     drawSceneElementOverlay(context, selectedElement, "selected");
   }
 
-  if (options.ghostAnnotation) {
-    drawGhostAnnotation(context, options.ghostAnnotation);
-  }
-  for (const ghost of options.ghostAnnotations ?? []) {
-    drawGhostAnnotation(context, ghost);
-  }
-
-  if (options.alignmentGuides?.length) {
-    drawAlignmentGuides(context, options.alignmentGuides, width, height);
+  if (options.ghostElement) {
+    drawGhostElement(context, options.ghostElement, state.elements);
   }
 
   if (!options.hideCursors) {
@@ -354,30 +294,6 @@ function renderBoardContent(
   if (options.view) {
     context.restore();
   }
-}
-
-/**
- * Semantic connectors belong behind diagram nodes. Plans normally create all
- * nodes before their connectors, so relying on object insertion order paints
- * connector ink and labels over node bodies. A stable partition keeps the
- * relative order within each layer while moving only committed connectors to
- * the back.
- */
-export function orderCommittedStrokesForRender(strokes: readonly Stroke[]): Stroke[] {
-  const connectors: Stroke[] = [];
-  const remainder: Stroke[] = [];
-  for (const stroke of strokes) {
-    const annotationType = stroke.annotation?.type;
-    if (
-      stroke.status === "committed" &&
-      (annotationType === "connector" || annotationType === "arrow")
-    ) {
-      connectors.push(stroke);
-    } else {
-      remainder.push(stroke);
-    }
-  }
-  return [...connectors, ...remainder];
 }
 
 /** Stable z-order for every canonical scene element. */
@@ -391,8 +307,9 @@ export function orderSceneElementsForRender(
 }
 
 /**
- * Returns the canonical objects that should actually be painted. Compatibility
- * mirrors are excluded while their v1 source stroke remains available.
+ * Returns the scene elements that should actually be painted: visible, not
+ * inside a hidden or collapsed section, and active unless deleted ones are
+ * requested.
  */
 export function sceneElementsForRender(
   state: BoardState,
@@ -432,19 +349,9 @@ export function sceneElementsForRender(
     (element) =>
       element.visible &&
       !hiddenMemberIds.has(element.id) &&
-      (showDeleted || element.status !== "deleted") &&
-      !(element.legacyStrokeId && state.strokes[element.legacyStrokeId]),
+      (showDeleted || element.status !== "deleted"),
   );
 }
-
-const CONTRAST_PLATE_ANNOTATIONS = new Set<StrokeAnnotation["type"]>([
-  "ellipse",
-  "rectangle",
-  "flow_node",
-  "text_label",
-  "sticky_note",
-  "freehand",
-]);
 
 function platesTouch(a: ContrastPlate, b: ContrastPlate, gap: number): boolean {
   return !(
@@ -477,35 +384,12 @@ export function calculateContrastPlates(
   const mergeGap = Math.max(0, options.mergeGap ?? 18);
   const plates: ContrastPlate[] = [];
 
-  for (const stroke of Object.values(state.strokes)) {
-    const annotation = stroke.annotation;
-    const bounds = annotation?.bounds;
-    if (
-      stroke.status !== "committed" ||
-      !annotation ||
-      !bounds ||
-      !CONTRAST_PLATE_ANNOTATIONS.has(annotation.type) ||
-      annotation.groupMemberStrokeIds?.length ||
-      bounds.width <= 0 ||
-      bounds.height <= 0
-    ) {
-      continue;
-    }
-    plates.push({
-      x: bounds.x - padding,
-      y: bounds.y - padding,
-      width: bounds.width + padding * 2,
-      height: bounds.height + padding * 2,
-    });
-  }
-
   for (const element of Object.values(state.elements ?? {})) {
     if (
       element.kind === "drawing" ||
       element.kind === "connector" ||
       element.status !== "active" ||
       !element.visible ||
-      (element.legacyStrokeId !== undefined && state.strokes[element.legacyStrokeId] !== undefined) ||
       element.transform.width <= 0 ||
       element.transform.height <= 0
     ) {
@@ -563,41 +447,12 @@ function drawContrastPlates(
   context.restore();
 }
 
-function drawAlignmentGuides(
-  context: CanvasRenderingContext2D,
-  guides: readonly BoardAlignmentGuide[],
-  width: number,
-  height: number,
-): void {
-  context.save();
-  context.lineWidth = 1;
-  context.setLineDash([5, 5]);
-  for (const guide of guides) {
-    context.beginPath();
-    context.strokeStyle = guide.kind === "grid" ? "rgba(14, 116, 144, 0.45)" : "rgba(124, 58, 237, 0.62)";
-    if (guide.axis === "x") {
-      context.moveTo(guide.position, 0);
-      context.lineTo(guide.position, height);
-    } else {
-      context.moveTo(0, guide.position);
-      context.lineTo(width, guide.position);
-    }
-    context.stroke();
-  }
-  context.restore();
-}
-
 export function drawStroke(
   context: CanvasRenderingContext2D,
   stroke: Stroke,
   alpha = 1,
 ): void {
-  if (stroke.points.length === 0 && !stroke.annotation) {
-    return;
-  }
-
-  if (stroke.annotation) {
-    drawAnnotationStroke(context, stroke, alpha);
+  if (stroke.points.length === 0) {
     return;
   }
 
@@ -1792,191 +1647,6 @@ function codeTokenColor(token: string, dark: boolean): string {
   return dark ? "#c4b5fd" : "#6d28d9";
 }
 
-function drawAnnotationStroke(
-  context: CanvasRenderingContext2D,
-  stroke: Stroke,
-  alpha: number,
-): void {
-  const annotation = stroke.annotation;
-  if (!annotation) {
-    return;
-  }
-
-  context.save();
-  context.globalAlpha = alpha * (annotation.opacity ?? 1);
-  context.lineCap = "round";
-  context.lineJoin = "round";
-  context.strokeStyle = themedInk(annotation.strokeColor ?? stroke.color);
-  context.fillStyle = themedFill(annotation.fillColor ?? "transparent");
-  context.lineWidth = stroke.thickness;
-
-  if (annotation.bounds && annotationCatalogShapeKind(annotation)) {
-    drawNodeShape(context, stroke);
-    context.restore();
-    return;
-  }
-
-  if ((annotation.type === "ellipse" || annotation.type === "pointer") && annotation.bounds) {
-    const centerX = annotation.bounds.x + annotation.bounds.width / 2;
-    const centerY = annotation.bounds.y + annotation.bounds.height / 2;
-    context.beginPath();
-    context.ellipse(
-      centerX,
-      centerY,
-      Math.max(annotation.bounds.width / 2, 4),
-      Math.max(annotation.bounds.height / 2, 4),
-      0,
-      0,
-      Math.PI * 2,
-    );
-    if (annotation.fillColor) {
-      context.fill();
-    }
-    context.stroke();
-    drawAnnotationLabel(context, annotation.label, centerX, centerY, annotation.bounds.width);
-    context.restore();
-    return;
-  }
-
-  if (
-    (annotation.type === "rectangle" || annotation.type === "flow_node" || annotation.type === "sticky_note") &&
-    annotation.bounds
-  ) {
-    drawNodeShape(context, stroke);
-    context.restore();
-    return;
-  }
-
-  if (annotation.type === "highlight" && annotation.bounds) {
-    context.globalAlpha = alpha * (annotation.opacity ?? 0.28);
-    context.fillStyle = themedFill(annotation.fillColor ?? "#fde68a");
-    context.strokeStyle = themedInk(annotation.strokeColor ?? "rgba(202, 138, 4, 0.45)");
-    roundRectPath(
-      context,
-      annotation.bounds.x,
-      annotation.bounds.y,
-      annotation.bounds.width,
-      annotation.bounds.height,
-      6,
-    );
-    context.fill();
-    context.stroke();
-    context.restore();
-    return;
-  }
-
-  if (
-    (annotation.type === "arrow" || annotation.type === "connector") &&
-    annotation.start &&
-    annotation.end
-  ) {
-    const routePoints = getConnectorRoutePoints(annotation);
-    drawArrowRoute(context, routePoints, annotation.lineStyle);
-    const label = annotation.label;
-    if (label) {
-      const midpoint = getRouteMidpoint(routePoints) ?? {
-        x: (annotation.start.x + annotation.end.x) / 2,
-        y: (annotation.start.y + annotation.end.y) / 2,
-      };
-      drawAnnotationLabel(
-        context,
-        label,
-        midpoint.x,
-        midpoint.y - 10,
-        Math.max(Math.abs(annotation.end.x - annotation.start.x), 72),
-      );
-    }
-    context.restore();
-    return;
-  }
-
-  drawFreehandFallback(context, stroke);
-  context.restore();
-}
-
-function drawNodeShape(context: CanvasRenderingContext2D, stroke: Stroke): void {
-  const annotation = stroke.annotation;
-  const bounds = annotation?.bounds;
-  if (!annotation || !bounds) {
-    return;
-  }
-
-  context.fillStyle = themedFill(annotation.fillColor ?? "#f8fafc");
-  context.strokeStyle = themedInk(annotation.strokeColor ?? stroke.color);
-  context.lineWidth = stroke.thickness;
-
-  const catalogKind = annotationCatalogShapeKind(annotation);
-  if (catalogKind) {
-    drawCatalogShape(context, catalogKind, bounds, {
-      fill: context.fillStyle as string,
-      stroke: context.strokeStyle as string,
-      strokeWidth: stroke.thickness,
-    });
-    drawAnnotationLabel(
-      context,
-      annotation.label,
-      bounds.x + bounds.width / 2,
-      bounds.y + bounds.height / 2,
-      bounds.width - 20,
-    );
-    return;
-  }
-
-  const visualKind = annotation.nodeType ? nodeVisualKind(annotation.nodeType) : "box";
-  switch (visualKind) {
-    case "database":
-      drawDatabaseShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
-      break;
-    case "decision":
-      drawDiamondShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
-      break;
-    case "terminator":
-      drawStadiumShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
-      break;
-    case "io":
-      drawParallelogramShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
-      break;
-    case "document":
-      drawDocumentShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
-      break;
-    case "note":
-      drawNoteShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
-      break;
-    case "actor":
-      drawActorShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
-      break;
-    case "queue":
-      drawQueueShape(context, bounds.x, bounds.y, bounds.width, bounds.height);
-      break;
-    case "service":
-      drawContainerShape(context, bounds, 8);
-      drawServiceMarker(context, bounds);
-      break;
-    case "api":
-      drawContainerShape(context, bounds, 8);
-      drawApiMarker(context, bounds);
-      break;
-    case "process":
-      drawContainerShape(context, bounds, 2);
-      break;
-    case "ellipse":
-      drawEllipseShape(context, bounds);
-      break;
-    case "box":
-      drawContainerShape(context, bounds, 0);
-      break;
-  }
-
-  const labelPlacement = nodeLabelPlacement(bounds, visualKind);
-  drawAnnotationLabel(
-    context,
-    annotation.label,
-    labelPlacement.centerX,
-    labelPlacement.centerY,
-    labelPlacement.maxWidth,
-  );
-}
-
 export type NodeLabelPlacement = {
   centerX: number;
   centerY: number;
@@ -2019,363 +1689,6 @@ export function nodeLabelPlacement(
   };
 }
 
-function drawContainerShape(
-  context: CanvasRenderingContext2D,
-  bounds: AnnotationBounds,
-  radius: number,
-): void {
-  roundRectPath(context, bounds.x, bounds.y, bounds.width, bounds.height, radius);
-  context.fill();
-  context.stroke();
-}
-
-function drawEllipseShape(
-  context: CanvasRenderingContext2D,
-  bounds: AnnotationBounds,
-): void {
-  context.beginPath();
-  context.ellipse(
-    bounds.x + bounds.width / 2,
-    bounds.y + bounds.height / 2,
-    bounds.width / 2,
-    bounds.height / 2,
-    0,
-    0,
-    Math.PI * 2,
-  );
-  context.fill();
-  context.stroke();
-}
-
-function drawServiceMarker(
-  context: CanvasRenderingContext2D,
-  bounds: AnnotationBounds,
-): void {
-  const x = bounds.x + 18;
-  const y = bounds.y + 18;
-  const radius = Math.min(7, bounds.height * 0.1);
-  context.save();
-  context.fillStyle = "transparent";
-  context.lineWidth = Math.max(1.2, context.lineWidth * 0.6);
-  context.beginPath();
-  context.arc(x, y, radius, 0, Math.PI * 2);
-  context.stroke();
-  for (let index = 0; index < 8; index += 1) {
-    const angle = (Math.PI * 2 * index) / 8;
-    context.beginPath();
-    context.moveTo(x + Math.cos(angle) * (radius + 1), y + Math.sin(angle) * (radius + 1));
-    context.lineTo(x + Math.cos(angle) * (radius + 4), y + Math.sin(angle) * (radius + 4));
-    context.stroke();
-  }
-  context.restore();
-}
-
-function drawApiMarker(
-  context: CanvasRenderingContext2D,
-  bounds: AnnotationBounds,
-): void {
-  const x = bounds.x + 14;
-  const y = bounds.y + 14;
-  context.save();
-  context.lineWidth = Math.max(1.2, context.lineWidth * 0.6);
-  context.beginPath();
-  context.moveTo(x + 5, y);
-  context.lineTo(x, y + 5);
-  context.lineTo(x + 5, y + 10);
-  context.moveTo(x + 11, y);
-  context.lineTo(x + 16, y + 5);
-  context.lineTo(x + 11, y + 10);
-  context.stroke();
-  context.restore();
-}
-
-function drawQueueShape(
-  context: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-): void {
-  const gap = Math.min(8, width * 0.06);
-  const laneHeight = (height - gap) / 2;
-  roundRectPath(context, x, y, width - gap, laneHeight, 4);
-  context.fill();
-  context.stroke();
-  roundRectPath(context, x + gap, y + laneHeight + gap, width - gap, laneHeight, 4);
-  context.fill();
-  context.stroke();
-  context.save();
-  context.lineWidth = Math.max(1.2, context.lineWidth * 0.65);
-  context.beginPath();
-  context.moveTo(x + width - 22, y + laneHeight / 2);
-  context.lineTo(x + width - 8, y + laneHeight / 2);
-  context.lineTo(x + width - 13, y + laneHeight / 2 - 4);
-  context.moveTo(x + width - 8, y + laneHeight / 2);
-  context.lineTo(x + width - 13, y + laneHeight / 2 + 4);
-  context.stroke();
-  context.restore();
-}
-
-function drawActorShape(
-  context: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-): void {
-  const centerX = x + width / 2;
-  const headRadius = Math.min(width * 0.12, height * 0.1);
-  const headY = y + height * 0.18;
-  const shoulderY = y + height * 0.4;
-  const hipY = y + height * 0.62;
-  const footY = y + height * 0.76;
-  context.save();
-  context.fillStyle = themedFill("#f8fafc");
-  context.beginPath();
-  context.arc(centerX, headY, headRadius, 0, Math.PI * 2);
-  context.fill();
-  context.stroke();
-  context.beginPath();
-  context.moveTo(centerX, headY + headRadius);
-  context.lineTo(centerX, hipY);
-  context.moveTo(x + width * 0.22, shoulderY);
-  context.lineTo(x + width * 0.78, shoulderY);
-  context.moveTo(centerX, hipY);
-  context.lineTo(x + width * 0.3, footY);
-  context.moveTo(centerX, hipY);
-  context.lineTo(x + width * 0.7, footY);
-  context.stroke();
-  context.restore();
-}
-
-function drawNoteShape(
-  context: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-): void {
-  const fold = Math.min(width, height) * 0.2;
-  context.beginPath();
-  context.moveTo(x, y);
-  context.lineTo(x + width, y);
-  context.lineTo(x + width, y + height - fold);
-  context.lineTo(x + width - fold, y + height);
-  context.lineTo(x, y + height);
-  context.closePath();
-  context.fill();
-  context.stroke();
-  context.beginPath();
-  context.moveTo(x + width, y + height - fold);
-  context.lineTo(x + width - fold, y + height - fold);
-  context.lineTo(x + width - fold, y + height);
-  context.stroke();
-}
-
-function drawDatabaseShape(
-  context: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-): void {
-  const capHeight = Math.min(16, height * 0.22);
-  context.beginPath();
-  context.ellipse(x + width / 2, y + capHeight, width / 2, capHeight, 0, Math.PI, 0);
-  context.lineTo(x + width, y + height - capHeight);
-  context.ellipse(x + width / 2, y + height - capHeight, width / 2, capHeight, 0, 0, Math.PI);
-  context.closePath();
-  context.fill();
-  context.stroke();
-  context.beginPath();
-  context.ellipse(x + width / 2, y + capHeight, width / 2, capHeight, 0, 0, Math.PI * 2);
-  context.stroke();
-}
-
-/** Flowchart terminator (start/end): a stadium / pill. */
-function drawStadiumShape(
-  context: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-): void {
-  const radius = Math.min(height / 2, width / 2);
-  context.beginPath();
-  context.moveTo(x + radius, y);
-  context.lineTo(x + width - radius, y);
-  context.arc(x + width - radius, y + height / 2, radius, -Math.PI / 2, Math.PI / 2);
-  context.lineTo(x + radius, y + height);
-  context.arc(x + radius, y + height / 2, radius, Math.PI / 2, (3 * Math.PI) / 2);
-  context.closePath();
-  context.fill();
-  context.stroke();
-}
-
-/** Flowchart input/output: a parallelogram. */
-function drawParallelogramShape(
-  context: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-): void {
-  const skew = Math.min(width * 0.18, 26);
-  context.beginPath();
-  context.moveTo(x + skew, y);
-  context.lineTo(x + width, y);
-  context.lineTo(x + width - skew, y + height);
-  context.lineTo(x, y + height);
-  context.closePath();
-  context.fill();
-  context.stroke();
-}
-
-/** Flowchart document: a rectangle with a wave along the bottom edge. */
-function drawDocumentShape(
-  context: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-): void {
-  const wave = Math.min(14, height * 0.18);
-  const bottom = y + height - wave;
-  context.beginPath();
-  context.moveTo(x, y);
-  context.lineTo(x + width, y);
-  context.lineTo(x + width, bottom);
-  context.bezierCurveTo(
-    x + width * 0.72,
-    bottom + wave * 1.6,
-    x + width * 0.28,
-    bottom - wave * 1.2,
-    x,
-    bottom + wave * 0.6,
-  );
-  context.closePath();
-  context.fill();
-  context.stroke();
-}
-
-function drawDiamondShape(
-  context: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-): void {
-  context.beginPath();
-  context.moveTo(x + width / 2, y);
-  context.lineTo(x + width, y + height / 2);
-  context.lineTo(x + width / 2, y + height);
-  context.lineTo(x, y + height / 2);
-  context.closePath();
-  context.fill();
-  context.stroke();
-}
-
-function drawArrowRoute(
-  context: CanvasRenderingContext2D,
-  points: readonly { x: number; y: number }[],
-  lineStyle?: "dashed" | "dotted",
-): void {
-  const start = points[0];
-  const end = points[points.length - 1];
-  if (!start || !end) {
-    return;
-  }
-
-  // Only the line is dashed; a dashed arrowhead reads as a broken one.
-  context.setLineDash(
-    lineStyle === "dashed" ? [10, 7] : lineStyle === "dotted" ? [2, 6] : [],
-  );
-  context.beginPath();
-  context.moveTo(start.x, start.y);
-  for (const point of points.slice(1)) {
-    context.lineTo(point.x, point.y);
-  }
-  context.stroke();
-  context.setLineDash([]);
-
-  // Orient the arrowhead from the last point that is actually distinct from the
-  // end. A straight two-point route uses the start; a route whose endpoints
-  // collapsed onto one node would otherwise have an undefined direction.
-  let reference: { x: number; y: number } | null = null;
-  for (let index = points.length - 2; index >= 0; index -= 1) {
-    const candidate = points[index];
-    if (candidate && (candidate.x !== end.x || candidate.y !== end.y)) {
-      reference = candidate;
-      break;
-    }
-  }
-
-  if (!reference) {
-    // Degenerate zero-length connector: draw a small marker so it stays visible
-    // and selectable instead of silently rendering nothing.
-    context.beginPath();
-    context.arc(end.x, end.y, 3, 0, Math.PI * 2);
-    context.stroke();
-    return;
-  }
-
-  const angle = Math.atan2(end.y - reference.y, end.x - reference.x);
-  const headLength = 14;
-  context.beginPath();
-  context.moveTo(end.x, end.y);
-  context.lineTo(
-    end.x - headLength * Math.cos(angle - Math.PI / 6),
-    end.y - headLength * Math.sin(angle - Math.PI / 6),
-  );
-  context.moveTo(end.x, end.y);
-  context.lineTo(
-    end.x - headLength * Math.cos(angle + Math.PI / 6),
-    end.y - headLength * Math.sin(angle + Math.PI / 6),
-  );
-  context.stroke();
-}
-
-function drawAnnotationLabel(
-  context: CanvasRenderingContext2D,
-  label: string | undefined,
-  centerX: number,
-  centerY: number,
-  maxWidth: number,
-): void {
-  if (!label) {
-    return;
-  }
-
-  context.save();
-  context.globalAlpha = 1;
-  context.fillStyle = themedInk("#111827");
-  context.font = "600 13px Inter, ui-sans-serif, system-ui, sans-serif";
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-  const words = label.split(/\s+/).filter(Boolean);
-  const lines: string[] = [];
-  let currentLine = "";
-  for (const word of words) {
-    const nextLine = currentLine ? `${currentLine} ${word}` : word;
-    if (context.measureText(nextLine).width <= maxWidth || currentLine === "") {
-      currentLine = nextLine;
-    } else {
-      lines.push(currentLine);
-      currentLine = word;
-    }
-  }
-  if (currentLine) {
-    lines.push(currentLine);
-  }
-  const visibleLines = lines.slice(0, 2);
-  const lineHeight = 15;
-  const firstY = centerY - ((visibleLines.length - 1) * lineHeight) / 2;
-  visibleLines.forEach((line, index) => {
-    context.fillText(line, centerX, firstY + index * lineHeight, maxWidth);
-  });
-  context.restore();
-}
-
 function drawWrappedLabel(
   context: CanvasRenderingContext2D,
   label: string,
@@ -2413,19 +1726,6 @@ function drawWrappedLabel(
   context.restore();
 }
 
-function drawFreehandFallback(context: CanvasRenderingContext2D, stroke: Stroke): void {
-  const firstPoint = stroke.points[0];
-  if (!firstPoint) {
-    return;
-  }
-  context.beginPath();
-  context.moveTo(firstPoint.x, firstPoint.y);
-  stroke.points.slice(1).forEach((point) => {
-    context.lineTo(point.x, point.y);
-  });
-  context.stroke();
-}
-
 function roundRectPath(
   context: CanvasRenderingContext2D,
   x: number,
@@ -2448,231 +1748,31 @@ function roundRectPath(
   context.closePath();
 }
 
-function drawGhostAnnotation(
-  context: CanvasRenderingContext2D,
-  ghost: AnnotationRenderObject,
-): void {
-  const stroke = annotationObjectToStroke(ghost);
-  drawAnnotationStroke(context, stroke, ghost.previewKind === "delete" ? 0.16 : 0.42);
-  drawAnnotationOverlay(
-    context,
-    ghost.annotation,
-    ghost.previewKind === "delete" ? "delete-ghost" : "ghost",
-  );
-  if (ghost.previewKind === "delete") {
-    drawDeletePreviewMark(context, ghost.annotation);
-  }
+export type SceneElementOverlayMode = "hover" | "selected" | "multi-selected" | "ghost";
+
+function overlayInk(mode: SceneElementOverlayMode): string {
+  if (mode === "hover") return "rgba(15, 118, 110, 0.42)";
+  if (mode === "ghost") return "rgba(15, 118, 110, 0.55)";
+  return "#0f766e";
 }
 
-function drawDeletePreviewMark(
+/**
+ * Draws a placement preview: the exact element that is about to be created,
+ * translucent, with a dashed outline. The board state is never changed.
+ */
+function drawGhostElement(
   context: CanvasRenderingContext2D,
-  annotation: StrokeAnnotation,
+  element: BoardSceneElement,
+  elements: Readonly<Record<string, BoardSceneElement>> | undefined,
 ): void {
-  context.save();
-  context.strokeStyle = themedInk("rgba(220, 38, 38, 0.82)");
-  context.lineWidth = 2.4;
-  context.setLineDash([8, 6]);
-  context.beginPath();
-  if (annotation.bounds) {
-    const { x, y, width, height } = annotation.bounds;
-    context.moveTo(x, y);
-    context.lineTo(x + width, y + height);
-    context.moveTo(x + width, y);
-    context.lineTo(x, y + height);
-  } else if (annotation.start && annotation.end) {
-    const midpoint = {
-      x: (annotation.start.x + annotation.end.x) / 2,
-      y: (annotation.start.y + annotation.end.y) / 2,
-    };
-    context.moveTo(midpoint.x - 12, midpoint.y - 12);
-    context.lineTo(midpoint.x + 12, midpoint.y + 12);
-    context.moveTo(midpoint.x + 12, midpoint.y - 12);
-    context.lineTo(midpoint.x - 12, midpoint.y + 12);
-  }
-  context.stroke();
-  context.restore();
-}
-
-function drawAnnotationOverlay(
-  context: CanvasRenderingContext2D,
-  annotation: StrokeAnnotation,
-  mode: "hover" | "selected" | "multi-selected" | "ghost" | "delete-ghost",
-): void {
-  context.save();
-  context.lineWidth = mode === "selected" || mode === "multi-selected" ? 1.6 : 1.2;
-  context.strokeStyle = themedInk(
-    mode === "selected" || mode === "multi-selected"
-      ? "#0f766e"
-      : mode === "delete-ghost"
-        ? "rgba(220, 38, 38, 0.72)"
-      : mode === "ghost"
-        ? "rgba(15, 118, 110, 0.55)"
-        : "rgba(15, 118, 110, 0.42)",
-  );
-  context.fillStyle = themedInk("#ffffff");
-  context.setLineDash(mode === "selected" || mode === "multi-selected" ? [5, 4] : [4, 4]);
-
-  if (annotation.bounds) {
-    traceAnnotationSelectionBoundary(context, annotation, 5);
-    context.stroke();
-
-    if (mode === "selected") {
-      drawHandle(context, annotation.bounds.x, annotation.bounds.y);
-      drawHandle(context, annotation.bounds.x + annotation.bounds.width, annotation.bounds.y);
-      drawHandle(context, annotation.bounds.x, annotation.bounds.y + annotation.bounds.height);
-      drawHandle(
-        context,
-        annotation.bounds.x + annotation.bounds.width,
-        annotation.bounds.y + annotation.bounds.height,
-      );
-    }
-    context.restore();
-    return;
-  }
-
-  if (annotation.start && annotation.end) {
-    const routePoints = getConnectorRoutePoints(annotation);
-    const first = routePoints[0];
-    context.beginPath();
-    if (first) {
-      context.moveTo(first.x, first.y);
-      for (const point of routePoints.slice(1)) {
-        context.lineTo(point.x, point.y);
-      }
-    }
-    context.stroke();
-    if (mode === "selected") {
-      drawHandle(context, annotation.start.x, annotation.start.y);
-      drawHandle(context, annotation.end.x, annotation.end.y);
-    }
-  }
-
-  context.restore();
-}
-
-function traceAnnotationSelectionBoundary(
-  context: CanvasRenderingContext2D,
-  annotation: StrokeAnnotation,
-  padding: number,
-): void {
-  const source = annotation.bounds;
-  if (!source) return;
-  const bounds = {
-    x: source.x - padding,
-    y: source.y - padding,
-    width: source.width + padding * 2,
-    height: source.height + padding * 2,
-  };
-  const catalogKind = annotationCatalogShapeKind(annotation);
-  if (catalogKind) {
-    traceCatalogShapeOutline(context, catalogKind, bounds);
-    return;
-  }
-  const kind = annotation.nodeType ? nodeVisualKind(annotation.nodeType) : null;
-  if (kind === "ellipse" || (!kind && annotation.type === "ellipse")) {
-    context.beginPath();
-    context.ellipse(
-      bounds.x + bounds.width / 2,
-      bounds.y + bounds.height / 2,
-      bounds.width / 2,
-      bounds.height / 2,
-      0,
-      0,
-      Math.PI * 2,
-    );
-    return;
-  }
-  if (kind === "decision") {
-    context.beginPath();
-    context.moveTo(bounds.x + bounds.width / 2, bounds.y);
-    context.lineTo(bounds.x + bounds.width, bounds.y + bounds.height / 2);
-    context.lineTo(bounds.x + bounds.width / 2, bounds.y + bounds.height);
-    context.lineTo(bounds.x, bounds.y + bounds.height / 2);
-    context.closePath();
-    return;
-  }
-  if (kind === "terminator") {
-    traceStadiumPath(context, bounds);
-    return;
-  }
-  if (kind === "io") {
-    const skew = Math.min(bounds.width * 0.18, 26);
-    context.beginPath();
-    context.moveTo(bounds.x + skew, bounds.y);
-    context.lineTo(bounds.x + bounds.width, bounds.y);
-    context.lineTo(bounds.x + bounds.width - skew, bounds.y + bounds.height);
-    context.lineTo(bounds.x, bounds.y + bounds.height);
-    context.closePath();
-    return;
-  }
-  if (kind === "document") {
-    traceDocumentPath(context, bounds);
-    return;
-  }
-  if (kind === "note") {
-    const fold = Math.min(bounds.width, bounds.height) * 0.2;
-    context.beginPath();
-    context.moveTo(bounds.x, bounds.y);
-    context.lineTo(bounds.x + bounds.width, bounds.y);
-    context.lineTo(bounds.x + bounds.width, bounds.y + bounds.height - fold);
-    context.lineTo(bounds.x + bounds.width - fold, bounds.y + bounds.height);
-    context.lineTo(bounds.x, bounds.y + bounds.height);
-    context.closePath();
-    return;
-  }
-  if (kind === "actor") {
-    context.beginPath();
-    context.moveTo(bounds.x + bounds.width / 2, bounds.y);
-    context.lineTo(bounds.x + bounds.width * 0.65, bounds.y + bounds.height * 0.22);
-    context.lineTo(bounds.x + bounds.width * 0.82, bounds.y + bounds.height * 0.4);
-    context.lineTo(bounds.x + bounds.width * 0.62, bounds.y + bounds.height * 0.62);
-    context.lineTo(bounds.x + bounds.width * 0.72, bounds.y + bounds.height * 0.78);
-    context.lineTo(bounds.x + bounds.width * 0.28, bounds.y + bounds.height * 0.78);
-    context.lineTo(bounds.x + bounds.width * 0.38, bounds.y + bounds.height * 0.62);
-    context.lineTo(bounds.x + bounds.width * 0.18, bounds.y + bounds.height * 0.4);
-    context.lineTo(bounds.x + bounds.width * 0.35, bounds.y + bounds.height * 0.22);
-    context.closePath();
-    return;
-  }
-  if (kind === "database") {
-    const capHeight = Math.min(16, bounds.height * 0.22);
-    context.beginPath();
-    context.ellipse(
-      bounds.x + bounds.width / 2,
-      bounds.y + capHeight,
-      bounds.width / 2,
-      capHeight,
-      0,
-      Math.PI,
-      0,
-    );
-    context.lineTo(bounds.x + bounds.width, bounds.y + bounds.height - capHeight);
-    context.ellipse(
-      bounds.x + bounds.width / 2,
-      bounds.y + bounds.height - capHeight,
-      bounds.width / 2,
-      capHeight,
-      0,
-      0,
-      Math.PI,
-    );
-    context.closePath();
-    return;
-  }
-  roundRectPath(
-    context,
-    bounds.x,
-    bounds.y,
-    bounds.width,
-    bounds.height,
-    kind === "box" || kind === "process" ? 2 : 8,
-  );
+  drawSceneElement(context, element, 0.42, elements ? { elements } : {});
+  drawSceneElementOverlay(context, element, "ghost");
 }
 
 export function drawSceneElementOverlay(
   context: CanvasRenderingContext2D,
   element: BoardSceneElement,
-  mode: "hover" | "selected" | "multi-selected",
+  mode: SceneElementOverlayMode,
 ): void {
   if (element.kind === "shape") {
     drawShapeElementOverlay(context, element, mode);
@@ -2681,10 +1781,10 @@ export function drawSceneElementOverlay(
 
   const selected = mode === "selected" || mode === "multi-selected";
   context.save();
-  context.strokeStyle = themedInk(mode === "hover" ? "rgba(15, 118, 110, 0.42)" : "#0f766e");
+  context.strokeStyle = themedInk(overlayInk(mode));
   context.fillStyle = themedInk("#ffffff");
-  context.lineWidth = mode === "hover" ? 1.2 : 1.6;
-  context.setLineDash(mode === "hover" ? [4, 4] : [5, 4]);
+  context.lineWidth = selected ? 1.6 : 1.2;
+  context.setLineDash(selected ? [5, 4] : [4, 4]);
 
   if (element.kind === "connector") {
     traceSceneConnector(context, element);
@@ -2701,7 +1801,7 @@ export function drawSceneElementOverlay(
   if (element.kind === "drawing") {
     withElementRotation(context, element.transform, () => {
       context.lineWidth = Math.max(
-        mode === "hover" ? 5 : 7,
+        selected ? 7 : 5,
         element.style.thickness + (selected ? 5 : 3),
       );
       traceSmoothPoints(context, element.points, element.style.straight);
@@ -2749,7 +1849,7 @@ export function drawSceneElementOverlay(
 function drawShapeElementOverlay(
   context: CanvasRenderingContext2D,
   element: ShapeElement,
-  mode: "hover" | "selected" | "multi-selected",
+  mode: SceneElementOverlayMode,
 ): void {
   const padding = 5;
   const { transform } = element;
@@ -2759,10 +1859,11 @@ function drawShapeElementOverlay(
   context.translate(centerX, centerY);
   context.rotate(((transform.rotation ?? 0) * Math.PI) / 180);
   context.translate(-centerX, -centerY);
-  context.strokeStyle = themedInk(mode === "hover" ? "rgba(15, 118, 110, 0.42)" : "#0f766e");
+  const selected = mode === "selected" || mode === "multi-selected";
+  context.strokeStyle = themedInk(overlayInk(mode));
   context.fillStyle = themedInk("#ffffff");
-  context.lineWidth = mode === "hover" ? 1.2 : 1.6;
-  context.setLineDash(mode === "hover" ? [4, 4] : [5, 4]);
+  context.lineWidth = selected ? 1.6 : 1.2;
+  context.setLineDash(selected ? [5, 4] : [4, 4]);
   traceCatalogShapeOutline(context, element.shapeKind, {
     x: transform.x - padding,
     y: transform.y - padding,
@@ -2779,58 +1880,6 @@ function drawShapeElementOverlay(
   context.restore();
 }
 
-function annotationCatalogShapeKind(annotation: StrokeAnnotation): CatalogShapeKind | null {
-  const candidate = annotation.shapeKind;
-  return isCatalogShapeKind(candidate) ? candidate : null;
-}
-
-function traceStadiumPath(
-  context: CanvasRenderingContext2D,
-  bounds: AnnotationBounds,
-): void {
-  const radius = Math.min(bounds.height / 2, bounds.width / 2);
-  context.beginPath();
-  context.moveTo(bounds.x + radius, bounds.y);
-  context.lineTo(bounds.x + bounds.width - radius, bounds.y);
-  context.arc(
-    bounds.x + bounds.width - radius,
-    bounds.y + bounds.height / 2,
-    radius,
-    -Math.PI / 2,
-    Math.PI / 2,
-  );
-  context.lineTo(bounds.x + radius, bounds.y + bounds.height);
-  context.arc(
-    bounds.x + radius,
-    bounds.y + bounds.height / 2,
-    radius,
-    Math.PI / 2,
-    (3 * Math.PI) / 2,
-  );
-  context.closePath();
-}
-
-function traceDocumentPath(
-  context: CanvasRenderingContext2D,
-  bounds: AnnotationBounds,
-): void {
-  const wave = Math.min(14, bounds.height * 0.18);
-  const bottom = bounds.y + bounds.height - wave;
-  context.beginPath();
-  context.moveTo(bounds.x, bounds.y);
-  context.lineTo(bounds.x + bounds.width, bounds.y);
-  context.lineTo(bounds.x + bounds.width, bottom);
-  context.bezierCurveTo(
-    bounds.x + bounds.width * 0.72,
-    bottom + wave * 1.6,
-    bounds.x + bounds.width * 0.28,
-    bottom - wave * 1.2,
-    bounds.x,
-    bottom + wave * 0.6,
-  );
-  context.closePath();
-}
-
 function drawHandle(context: CanvasRenderingContext2D, x: number, y: number): void {
   context.save();
   context.setLineDash([]);
@@ -2842,22 +1891,6 @@ function drawHandle(context: CanvasRenderingContext2D, x: number, y: number): vo
   context.fill();
   context.stroke();
   context.restore();
-}
-
-function annotationObjectToStroke(object: AnnotationRenderObject): Stroke {
-  return {
-    id: "ghost-annotation",
-    boardId: "render-only",
-    userId: "render-only",
-    tool: "marker",
-    color: object.color,
-    thickness: object.thickness,
-    points: object.points,
-    createdAt: "",
-    updatedAt: "",
-    status: "committed",
-    annotation: object.annotation,
-  };
 }
 
 export function drawCursor(context: CanvasRenderingContext2D, cursor: CursorState): void {

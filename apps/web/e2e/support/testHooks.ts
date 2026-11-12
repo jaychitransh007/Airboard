@@ -53,7 +53,7 @@ export type AirboardTestHooks = {
   ): RawLandmarkFrameOutcome;
   /** A live-session peer's event: applied and saved, never re-published. */
   emitRemoteBoardEvent(event: BoardEvent): void;
-  /** The deterministic (legacy annotation) command path, without Airo. */
+  /** The deterministic typed-command path, without Airo. */
   prepareLegacyIntentCommandForEval(instruction: string): "previewed" | "applied" | "no-op" | "rejected";
   openPttGate(): void;
   emitPalmVoiceGestureFrame(frame: PalmVoiceGestureFrame): PalmVoiceGestureEvent;
@@ -104,11 +104,10 @@ export type CatalogGestureState = {
   ghostCenter: { x: number; y: number } | null;
   activeCreationTool: string;
   selectedElementIds: string[];
-  selectedAnnotationIds: string[];
 };
 
 export type BoardSummary = {
-  /** Committed legacy annotations plus active scene elements (not adapters). */
+  /** Active scene elements. */
   objectCount: number;
   labels: string[];
   positions: Array<{ x: number; y: number } | null>;

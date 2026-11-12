@@ -1,5 +1,5 @@
-import { connectorGeometryMatchesBindings, DEFAULT_CONNECTOR_ATTACHMENT_TOLERANCE } from "./diagramCommands.ts";
-import { isSceneNodeElement, isSceneOnlyElement } from "./sceneDiagramCommands.ts";
+import { DEFAULT_CONNECTOR_ATTACHMENT_TOLERANCE } from "./diagramCommands.ts";
+import { isActiveElement, isSceneNodeElement } from "./sceneDiagramCommands.ts";
 import { richTextToPlainText, sceneElementNodeType } from "./sceneElements.ts";
 import { shapeCatalogEntry } from "./shapeCatalog.ts";
 import type {
@@ -10,24 +10,16 @@ import type {
   ConnectorElement,
   ConnectorPathKind,
   SectionElement,
-  Stroke,
 } from "./types.ts";
 
 /**
- * A model-independent view of the diagram on a board.
+ * The diagram on a board, as Airo, the evals and the layout scorer read it:
+ * nodes, edges and groups made of the board's v2 scene elements.
  *
- * A board holds objects in two models: legacy annotation strokes that Airo
- * drew before November 2026 (mirrored into scene elements under the same id)
- * and v2 scene elements, which everything (Airo included) makes now. Evals and the layout scorer
- * read this graph instead of either model, so they keep giving the same
- * answers when an object moves from one model to the other.
- *
- * The graph reads only; it never changes the state. Scene copies of legacy
- * strokes (elements with legacyStrokeId, or sharing a stroke's id) are left
- * out, so every object appears once.
+ * The graph reads only; it never changes the state. (Boards saved in the
+ * legacy annotation-stroke model are converted before they are read; see
+ * legacyStrokeMigration.ts.)
  */
-export type BoardDiagramModel = "stroke" | "scene";
-
 /**
  * "shape": a box the diagram is made of (it counts for spacing and overlap).
  * "mark": text labels, highlights, pointers, crosses and freehand ink.
@@ -36,7 +28,7 @@ export type BoardDiagramNodeRole = "shape" | "mark";
 
 export type BoardDiagramNode = {
   id: string;
-  /** The text written on it, or null when it has none. Legacy labels are passed through unchanged. */
+  /** The text written on it, or null when it has none. */
   label: string | null;
   /** What a person would call it: its text, or for a blank object its type. */
   name: string;
@@ -46,33 +38,23 @@ export type BoardDiagramNode = {
    * other v2 shape is named by its catalogue shape.
    */
   kind: string;
-  /** The object's own type in its model: an annotation type or a scene element kind. */
+  /** The scene element kind. */
   objectType: string;
   role: BoardDiagramNodeRole;
   bounds: AnnotationBounds;
-  model: BoardDiagramModel;
-  /** Groups (legacy group containers or scene sections) that hold this node. */
+  /** Sections that hold this node. */
   groupIds: string[];
 };
 
 /** Enough geometry for a consumer to trace the rendered route of an edge. */
-export type BoardDiagramEdgeGeometry =
-  | {
-    model: "stroke";
-    type: "connector" | "arrow";
-    start?: AnnotationPoint;
-    end?: AnnotationPoint;
-    routeOffset?: number;
-  }
-  | {
-    model: "scene";
-    pathKind: ConnectorPathKind;
-    start: AnnotationPoint;
-    end: AnnotationPoint;
-    controlPoints: AnnotationPoint[];
-    labelPosition: number;
-    routeOffset?: number;
-  };
+export type BoardDiagramEdgeGeometry = {
+  pathKind: ConnectorPathKind;
+  start: AnnotationPoint;
+  end: AnnotationPoint;
+  controlPoints: AnnotationPoint[];
+  labelPosition: number;
+  routeOffset?: number;
+};
 
 export type BoardDiagramEdge = {
   id: string;
@@ -86,30 +68,29 @@ export type BoardDiagramEdge = {
   lineStyle: "solid" | "dashed" | "dotted";
   /** True only when both ends are bound and drawn where their objects are. */
   attached: boolean;
-  model: BoardDiagramModel;
   geometry: BoardDiagramEdgeGeometry;
 };
 
 export type BoardDiagramGroup = {
   id: string;
   label: string | null;
-  /** Diagram type of the container ("rectangle" for a legacy group, "section" for a v2 one). */
+  /** Diagram type of the container: "section". */
   kind: string;
   objectType: string;
   bounds: AnnotationBounds;
   memberIds: string[];
-  model: BoardDiagramModel;
 };
 
 export type BoardDiagramGraph = {
-  /** Legacy nodes in stroke order, then v2 nodes in element order. */
+  /** Nodes in element order. */
   nodes: BoardDiagramNode[];
-  /** Legacy edges in stroke order, then v2 edges in element order. */
+  /** Edges in element order. */
   edges: BoardDiagramEdge[];
   groups: BoardDiagramGroup[];
 };
 
-const LEGACY_MARK_TYPES = new Set<string>(["highlight", "pointer", "text_label", "cross_mark", "freehand"]);
+/** Node types of marks: a shape converted from a legacy pointer or highlight keeps its type. */
+const MARK_NODE_TYPES = new Set<string>(["highlight", "pointer", "text_label", "cross_mark", "freehand"]);
 const SCENE_MARK_KINDS = new Set<string>(["text"]);
 const SCENE_KIND_NAMES: Partial<Record<BoardSceneElement["kind"], string>> = {
   sticky: "Sticky note",
@@ -118,17 +99,11 @@ const SCENE_KIND_NAMES: Partial<Record<BoardSceneElement["kind"], string>> = {
 };
 
 export function boardDiagramGraph(state: BoardState): BoardDiagramGraph {
-  const strokes = Object.values(state.strokes).filter(
-    (stroke) => stroke.status === "committed" && stroke.annotation,
-  );
   const elements = Object.values(state.elements ?? {}).filter(
-    (element) => isSceneOnlyElement(state, element.id) && sceneElementOnView(state, element),
+    (element) => isActiveElement(state, element.id) && sceneElementOnView(state, element),
   );
 
-  const groups: BoardDiagramGroup[] = [
-    ...strokes.flatMap(legacyGroup),
-    ...elements.flatMap((element) => element.kind === "section" ? [sceneGroup(element)] : []),
-  ];
+  const groups: BoardDiagramGroup[] = elements.flatMap((element) => element.kind === "section" ? [sceneGroup(element)] : []);
   const groupIdsByMember = new Map<string, string[]>();
   for (const group of groups) {
     for (const memberId of group.memberIds) {
@@ -143,77 +118,11 @@ export function boardDiagramGraph(state: BoardState): BoardDiagramGraph {
     return ids;
   };
 
-  const nodes: BoardDiagramNode[] = [
-    ...strokes.flatMap((stroke) => legacyNode(stroke, groupIdsOf(stroke.id))),
-    ...elements.flatMap((element) =>
-      isSceneNodeElement(element) ? [sceneNode(element, groupIdsOf(element.id, element.sectionId))] : []),
-  ];
-  const edges: BoardDiagramEdge[] = [
-    ...strokes.flatMap((stroke) => legacyEdge(state, stroke)),
-    ...elements.flatMap((element) => element.kind === "connector" ? [sceneEdge(state, element)] : []),
-  ];
+  const nodes: BoardDiagramNode[] = elements.flatMap((element) =>
+    isSceneNodeElement(element) ? [sceneNode(element, groupIdsOf(element.id, element.sectionId))] : []);
+  const edges: BoardDiagramEdge[] = elements.flatMap((element) =>
+    element.kind === "connector" ? [sceneEdge(state, element)] : []);
   return { nodes, edges, groups };
-}
-
-function isLegacyEdgeType(type: string | undefined): type is "connector" | "arrow" {
-  return type === "connector" || type === "arrow";
-}
-
-function isLegacyGroup(stroke: Stroke): boolean {
-  return (stroke.annotation?.groupMemberStrokeIds?.length ?? 0) > 0;
-}
-
-function legacyNode(stroke: Stroke, groupIds: string[]): BoardDiagramNode[] {
-  const annotation = stroke.annotation;
-  if (!annotation?.bounds || isLegacyEdgeType(annotation.type) || isLegacyGroup(stroke)) return [];
-  const kind = annotation.nodeType ?? annotation.type;
-  return [{
-    id: stroke.id,
-    label: annotation.label ?? null,
-    name: annotation.label?.trim() || kind,
-    kind,
-    objectType: annotation.type,
-    role: LEGACY_MARK_TYPES.has(annotation.type) ? "mark" : "shape",
-    bounds: { ...annotation.bounds },
-    model: "stroke",
-    groupIds,
-  }];
-}
-
-function legacyGroup(stroke: Stroke): BoardDiagramGroup[] {
-  const annotation = stroke.annotation;
-  if (!annotation?.bounds || isLegacyEdgeType(annotation.type) || !isLegacyGroup(stroke)) return [];
-  return [{
-    id: stroke.id,
-    label: annotation.label ?? null,
-    kind: annotation.nodeType ?? annotation.type,
-    objectType: annotation.type,
-    bounds: { ...annotation.bounds },
-    memberIds: [...(annotation.groupMemberStrokeIds ?? [])],
-    model: "stroke",
-  }];
-}
-
-function legacyEdge(state: BoardState, stroke: Stroke): BoardDiagramEdge[] {
-  const annotation = stroke.annotation;
-  if (!annotation || !isLegacyEdgeType(annotation.type)) return [];
-  return [{
-    id: stroke.id,
-    from: annotation.snappedStartStrokeId ?? null,
-    to: annotation.snappedEndStrokeId ?? null,
-    label: annotation.label ?? null,
-    directed: true,
-    lineStyle: annotation.lineStyle ?? "solid",
-    attached: connectorGeometryMatchesBindings(state, annotation),
-    model: "stroke",
-    geometry: {
-      model: "stroke",
-      type: annotation.type,
-      ...(annotation.start ? { start: { ...annotation.start } } : {}),
-      ...(annotation.end ? { end: { ...annotation.end } } : {}),
-      ...(annotation.routeOffset !== undefined ? { routeOffset: annotation.routeOffset } : {}),
-    },
-  }];
 }
 
 function plainLabel(text: string): string | null {
@@ -234,9 +143,8 @@ function sceneNode(element: BoardSceneElement, groupIds: string[]): BoardDiagram
     objectType: element.kind,
     // A pointer or highlight converted from a legacy stroke is a shape named
     // by its legacy type; it stays a mark, as it was.
-    role: SCENE_MARK_KINDS.has(element.kind) || LEGACY_MARK_TYPES.has(kind) ? "mark" : "shape",
+    role: SCENE_MARK_KINDS.has(element.kind) || MARK_NODE_TYPES.has(kind) ? "mark" : "shape",
     bounds: transformBounds(element),
-    model: "scene",
     groupIds,
   };
 }
@@ -249,7 +157,6 @@ function sceneGroup(section: SectionElement): BoardDiagramGroup {
     objectType: "section",
     bounds: transformBounds(section),
     memberIds: [...section.memberIds],
-    model: "scene",
   };
 }
 
@@ -268,9 +175,7 @@ function sceneEdge(state: BoardState, connector: ConnectorElement): BoardDiagram
       sceneEndpointAttached(state, from, connector.start.point) &&
       sceneEndpointAttached(state, to, connector.end.point),
     ),
-    model: "scene",
     geometry: {
-      model: "scene",
       pathKind: connector.pathKind,
       start: { ...connector.start.point },
       end: { ...connector.end.point },
@@ -281,13 +186,10 @@ function sceneEdge(state: BoardState, connector: ConnectorElement): BoardDiagram
   };
 }
 
-/** A scene end is attached when it lies on or inside its object's box (legacy or v2). */
+/** A connector end is attached when it lies on or inside its object's box. */
 function sceneEndpointAttached(state: BoardState, id: string, point: AnnotationPoint): boolean {
-  const stroke = state.strokes[id];
   const element = state.elements?.[id];
-  const bounds = stroke
-    ? stroke.status === "committed" ? stroke.annotation?.bounds : undefined
-    : element?.status === "active" ? transformBounds(element) : undefined;
+  const bounds = element?.status === "active" ? transformBounds(element) : undefined;
   if (!bounds) return false;
   const tolerance = DEFAULT_CONNECTOR_ATTACHMENT_TOLERANCE;
   return point.x >= bounds.x - tolerance && point.x <= bounds.x + bounds.width + tolerance &&

@@ -46,7 +46,7 @@ async function shoot(page: Page, name: string) {
 }
 
 async function drawWithAiro(page: Page, title: string, request: string, actions: SemanticPlanAction[]) {
-  const api = await signIn(page, { boards: [{ title, state: { elements: {}, strokes: {} } }] });
+  const api = await signIn(page, { boards: [{ title, state: { elements: {} } }] });
   const airo = await standInForAiro(page);
   await page.goto(`/app/boards/${api.boardId(title)}`);
   await expect(page.getByTestId("share-board")).toBeVisible({ timeout: 30_000 });

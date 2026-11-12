@@ -7,7 +7,6 @@ import {
 } from "../../core/src/shapeCatalog.ts";
 import {
   catalogShapeContainsPoint,
-  catalogShapeIntersectsCircle,
   drawCatalogShape,
 } from "../src/shapeGeometry.ts";
 
@@ -40,14 +39,6 @@ test("concave and curved shapes do not expose transparent bounding-box corners",
       `${kind} corner should not be hittable`,
     );
   }
-  assert.equal(
-    catalogShapeIntersectsCircle("triangle", { x: 0, y: 0, width: 100, height: 100 }, { x: 2, y: 2 }, 1),
-    false,
-  );
-  assert.equal(
-    catalogShapeIntersectsCircle("triangle", { x: 0, y: 0, width: 100, height: 100 }, { x: 50, y: 2 }, 3),
-    true,
-  );
 });
 
 test("hit testing honors shape rotation", () => {

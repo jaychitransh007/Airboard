@@ -3,31 +3,47 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
+  applyBoardEvent,
   applyDiagramCommand,
-  applyLegacyDiagramFixture,
+  BOARD_SCENE_VERSION,
   boardDiagramGraph,
   boardHasLegacyData,
   convertLegacyBoardState,
+  createBoardSceneElement,
+  createEventEnvelope,
   createInitialBoardState,
-  createStroke,
+  createRichTextDocument,
   isBoardSceneElement,
+  LEGACY_BOARD_EVENT_TYPES,
   legacyAnnotationStrokeIds,
   legacyConversionGraphDiff,
   reduceBoardEvents,
+  replayBoardEvents,
+  upgradeLegacyBoardState,
   validateConvertedBoardState,
 } from "../src/index.ts";
 
 /**
- * The one-off conversion of saved boards from legacy annotation strokes to
- * v2 scene elements (shape-merge phase 2). The diagram a board shows must
- * not change (boardDiagramGraph before equals after, apart from model
- * fields), the result must pass what the API and the board accept, and
- * converting twice must change nothing.
+ * The conversion of saved boards from legacy annotation strokes to v2 scene
+ * elements (shape-merge phase 2, and on load since phase 3), and the replay
+ * of stored legacy event rows. The diagram a board shows must not change
+ * (boardDiagramGraph before equals after, apart from model fields), the
+ * result must pass what the API and the board accept, and converting twice
+ * must change nothing.
+ *
+ * Nothing writes the legacy model any more, so the legacy boards and event
+ * logs below are frozen JSON captured from the pre-phase-3 code
+ * (test/fixtures/): legacy-annotations.board.json (the board the e2e suite
+ * used), legacy-boards.json (every annotation type, a mixed board, a deleted
+ * stroke with an orphan mirror, and the diagram boardDiagramGraph tested in
+ * both models) and legacy-event-replay.json (stored rows, with what the old
+ * reducer made of them, converted).
  */
 
-const FIXTURE = JSON.parse(
-  readFileSync(new URL("../../../apps/web/e2e/fixtures/legacy-annotations.board.json", import.meta.url), "utf8"),
-);
+const readFixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8"));
+const FIXTURE = readFixture("legacy-annotations.board.json");
+const BOARDS = readFixture("legacy-boards.json");
+const REPLAY = readFixture("legacy-event-replay.json");
 
 let counter = 0;
 const context = () => ({
@@ -44,71 +60,14 @@ const NODE_TYPES = [
   "terminator", "io", "document", "note", "circle", "custom",
 ];
 
-/** Commits a hand-made legacy stroke through the reducer, as an older client did (its mirror included). */
-function commitStroke(state, input) {
-  const stroke = createStroke({
-    id: input.id,
-    boardId: state.boardId,
-    userId: "user-1",
-    point: input.points[0],
-    color: input.color ?? "#111827",
-    thickness: input.thickness ?? 3,
-    ...(input.annotation ? { annotation: input.annotation } : {}),
-    createdAt: "2026-10-01T09:00:00.000Z",
-  });
-  const envelope = { boardSessionId: state.boardId, actorParticipantId: "participant-1", createdAt: "2026-10-01T09:00:00.000Z" };
-  return reduceBoardEvents(state, [
-    { ...envelope, id: `event-${++counter}`, type: "stroke.started", stroke },
-    { ...envelope, id: `event-${++counter}`, type: "stroke.committed", strokeId: input.id, points: input.points },
-  ]);
-}
+/** Every legacy annotation type on one board, as they were made (frozen). */
+const everyAnnotationTypeBoard = () => structuredClone(BOARDS.everyAnnotationType);
 
-const point = (x, y, t = 1) => ({ x, y, t });
-const box = (x, y, width, height) => [point(x, y), point(x + width, y), point(x + width, y + height), point(x, y + height), point(x, y)];
-
-/** Every legacy annotation type on one board, built the way they were made. */
-function everyAnnotationTypeBoard() {
-  let state = createInitialBoardState("board-1");
-  NODE_TYPES.forEach((nodeType, index) => {
-    state = applyLegacyDiagramFixture(state, {
-      type: "node.create",
-      nodeId: `node:${nodeType}`,
-      nodeType,
-      label: nodeType[0].toUpperCase() + nodeType.slice(1),
-      center: { x: 120 + (index % 5) * 240, y: 120 + Math.floor(index / 5) * 200 },
-      source: "voice",
-      style: { strokeColor: "#111827" },
-    }, context()).state;
-  });
-  for (const edge of [
-    { connectorId: "edge:writes", fromId: "node:service", toId: "node:database", label: "writes" },
-    { connectorId: "edge:reads", fromId: "node:database", toId: "node:service", label: "reads" },
-    { connectorId: "edge:plain", fromId: "node:user", toId: "node:api" },
-  ]) {
-    state = applyLegacyDiagramFixture(state, { type: "nodes.connect", source: "voice", ...edge }, context()).state;
-  }
-  state = applyDiagramCommand(state, {
-    type: "objects.group", groupId: "group:back", objectIds: ["node:queue", "node:decision"], label: "Back office",
-  }, context()).state;
-  const marks = [
-    { id: "mark:rectangle", points: box(100, 700, 120, 60), annotation: { type: "rectangle", source: "gesture", bounds: { x: 100, y: 700, width: 120, height: 60 }, label: "Box" } },
-    { id: "mark:ellipse", points: box(260, 700, 100, 60), annotation: { type: "ellipse", source: "gesture", bounds: { x: 260, y: 700, width: 100, height: 60 } } },
-    { id: "mark:pointer", points: box(400, 700, 40, 40), annotation: { type: "pointer", source: "gesture", bounds: { x: 400, y: 700, width: 40, height: 40 }, strokeColor: "#ef4444" } },
-    { id: "mark:highlight", thickness: 18, color: "#facc15", points: [point(480, 715), point(680, 715)], annotation: { type: "highlight", source: "gesture", bounds: { x: 480, y: 700, width: 200, height: 30 }, strokeColor: "#facc15", opacity: 0.35 } },
-    { id: "mark:highlight-ink", thickness: 18, color: "#facc15", points: [point(480, 760), point(680, 760)], annotation: { type: "highlight", source: "gesture", opacity: 0.35 } },
-    { id: "mark:cross", points: [point(720, 700), point(760, 740), point(740, 720), point(720, 740), point(760, 700)], annotation: { type: "cross_mark", source: "gesture", bounds: { x: 720, y: 700, width: 40, height: 40 } } },
-    { id: "mark:freehand", points: [point(800, 700), point(820, 730), point(860, 690)], annotation: { type: "freehand", source: "gesture", bounds: { x: 800, y: 690, width: 60, height: 40 } } },
-    { id: "mark:text", points: [point(100, 820), point(320, 860)], annotation: { type: "text_label", source: "keyboard", bounds: { x: 100, y: 820, width: 220, height: 40 }, label: "Legacy diagram", strokeColor: "#111827" } },
-    { id: "mark:sticky", points: [point(360, 820), point(520, 940)], annotation: { type: "sticky_note", source: "gesture", bounds: { x: 360, y: 820, width: 160, height: 120 }, label: "Remember the audit", fillColor: "#fde68a" } },
-    { id: "mark:arrow", points: [point(560, 900), point(760, 860)], annotation: { type: "arrow", source: "gesture", start: { x: 560, y: 900 }, end: { x: 760, y: 860 }, lineStyle: "dashed" } },
-    { id: "mark:cloud", points: box(800, 820, 140, 80), annotation: { type: "flow_node", source: "ai", nodeType: "service", shapeKind: "cloud", bounds: { x: 800, y: 820, width: 140, height: 80 }, label: "CDN" } },
-    { id: "ink:plain", thickness: 4, points: [point(100, 980), point(140, 1000), point(200, 990)] },
-  ];
-  for (const mark of marks) state = commitStroke(state, mark);
-  return state;
-}
-
-/** The diagram by id, without the model fields that are meant to change. */
+/**
+ * The diagram by id, without the model fields that are meant to change. (The
+ * legacy boards' own diagrams, as the pre-phase-3 graph read them, are frozen
+ * in BOARDS.diagramsBefore.)
+ */
 function diagram(state) {
   const graph = boardDiagramGraph(state);
   const round = (value) => Math.round(value * 100) / 100;
@@ -165,9 +124,10 @@ test("the e2e legacy fixture: 21 strokes become 21 v2 elements and the diagram i
   assert.equal(result.annotationStrokeIds.length, 21);
   assert.equal(result.addedElementIds.length, 21);
   assert.equal(result.replacedMirrorIds.length, 21);
-  assert.deepEqual(result.state.strokes, {});
+  assert.deepEqual(result.droppedStrokeIds, []);
+  assert.equal("strokes" in result.state, false, "the converted board has no strokes key");
   assert.equal(Object.keys(result.state.elements).length, 21);
-  assert.deepEqual(diagram(result.state), diagram(FIXTURE));
+  assert.deepEqual(diagram(result.state), BOARDS.diagramsBefore.legacyAnnotations);
   assertConvertedCleanly(FIXTURE, result.state);
 
   const elements = result.state.elements;
@@ -199,7 +159,7 @@ test("every annotation type converts to its v2 element with the same label, box 
   const result = convertLegacyBoardState(before);
   const after = result.state;
   const inkMarks = ["mark:cross", "mark:freehand"];
-  assert.deepEqual(withoutInkMarks(diagram(before), inkMarks), diagram(after));
+  assert.deepEqual(withoutInkMarks(BOARDS.diagramsBefore.everyAnnotationType, inkMarks), diagram(after));
   assertConvertedCleanly(before, after);
 
   const shapeKinds = Object.fromEntries(NODE_TYPES.map((nodeType) => [nodeType, after.elements[`node:${nodeType}`].shapeKind]));
@@ -259,17 +219,8 @@ test("connectors with labels both ways keep their ends, labels, directions and l
 });
 
 test("a mixed legacy and v2 board keeps its v2 objects and joins them to the converted ones", () => {
-  let state = everyAnnotationTypeBoard();
   // v2 objects drawn since phase 1, one arrow bound to a legacy node.
-  state = applyDiagramCommand(state, {
-    type: "node.create", nodeId: "v2:cache", nodeType: "database", label: "Cache", center: { x: 1300, y: 500 },
-  }, context()).state;
-  state = applyDiagramCommand(state, {
-    type: "nodes.connect", connectorId: "v2:to-cache", fromId: "node:service", toId: "v2:cache", label: "caches",
-  }, context()).state;
-  state = applyDiagramCommand(state, {
-    type: "objects.group", groupId: "v2:group", objectIds: ["v2:cache"], label: "Edge",
-  }, context()).state;
+  const state = structuredClone(BOARDS.mixed);
   const v2Before = Object.fromEntries(["v2:cache", "v2:to-cache", "v2:group"].map((id) => [id, state.elements[id]]));
 
   const result = convertLegacyBoardState(state);
@@ -277,7 +228,7 @@ test("a mixed legacy and v2 board keeps its v2 objects and joins them to the con
   for (const [id, element] of Object.entries(v2Before)) {
     assert.deepEqual(after.elements[id], element, `${id} is untouched`);
   }
-  assert.deepEqual(withoutInkMarks(diagram(state), ["mark:cross", "mark:freehand"]), diagram(after));
+  assert.deepEqual(withoutInkMarks(BOARDS.diagramsBefore.mixed, ["mark:cross", "mark:freehand"]), diagram(after));
   assertConvertedCleanly(state, after);
   const minV2 = Math.min(...Object.values(v2Before).map((element) => element.zIndex));
   for (const id of result.addedElementIds) {
@@ -285,9 +236,6 @@ test("a mixed legacy and v2 board keeps its v2 objects and joins them to the con
   }
 
   // Old and new shapes now group together (refused before conversion).
-  assert.throws(() => applyDiagramCommand(state, {
-    type: "objects.group", objectIds: ["node:api", "v2:cache"], label: "Mixed",
-  }, context()));
   const grouped = applyDiagramCommand(after, {
     type: "objects.group", groupId: "group:mixed", objectIds: ["node:api", "v2:cache"], label: "Mixed",
   }, context()).state;
@@ -302,18 +250,13 @@ test("a mixed legacy and v2 board keeps its v2 objects and joins them to the con
 });
 
 test("a deleted stroke becomes a deleted element, an orphan mirror loses its bridge, and a board with no legacy data is left alone", () => {
-  let state = everyAnnotationTypeBoard();
-  state = reduceBoardEvents(state, [{
-    id: "event-delete", type: "stroke.deleted", boardSessionId: "board-1", actorParticipantId: "participant-1",
-    createdAt: "2026-10-02T09:00:00.000Z", strokeIds: ["mark:pointer"],
-  }]);
-  // A mirror whose stroke has gone: the board already draws it as v2.
-  const orphan = { ...structuredClone(state.elements["node:custom"]), id: "orphan:shape", legacyStrokeId: "orphan:shape" };
-  state = { ...state, elements: { ...state.elements, "orphan:shape": orphan } };
+  // mark:pointer was deleted, and orphan:shape is a mirror whose stroke has
+  // gone (the board already draws it as v2).
+  const state = structuredClone(BOARDS.pointerDeleted);
 
   const result = convertLegacyBoardState(state);
   assert.equal(result.state.elements["mark:pointer"].status, "deleted");
-  assert.equal(result.state.strokes["mark:pointer"], undefined);
+  assert.equal("strokes" in result.state, false);
   assert.deepEqual(result.orphanMirrorIds, ["orphan:shape"]);
   assert.equal(result.state.elements["orphan:shape"].legacyStrokeId, undefined);
   assert.deepEqual(legacyConversionGraphDiff(state, result.state), []);
@@ -332,7 +275,7 @@ test("a stored row with missing parts still converts", () => {
   const result = convertLegacyBoardState(v1Row);
   assert.equal(result.addedElementIds.length, 21);
   assert.deepEqual(validateConvertedBoardState(result.state), []);
-  assert.deepEqual(diagram(result.state), diagram(FIXTURE));
+  assert.deepEqual(diagram(result.state), BOARDS.diagramsBefore.legacyAnnotations);
 });
 
 test("validation reports what the API or the board would not accept", () => {
@@ -340,9 +283,154 @@ test("validation reports what the API or the board would not accept", () => {
   const broken = structuredClone(after);
   broken.elements["edge:reply"].end.binding.elementId = "missing";
   broken.elements["node:api"].kind = "unknown";
-  broken.strokes["late"] = { ...FIXTURE.strokes["node:api"], id: "late" };
+  broken.strokes = { late: { ...FIXTURE.strokes["node:api"], id: "late" } };
   const problems = validateConvertedBoardState(broken);
   assert.ok(problems.some((problem) => problem.includes("bound to missing")));
   assert.ok(problems.some((problem) => problem.includes("node:api is not a valid scene element")));
   assert.ok(problems.some((problem) => problem.includes("stroke late is still committed")));
+});
+
+test("a stroke still being drawn when the board was saved is dropped", () => {
+  const before = structuredClone(FIXTURE);
+  before.strokes["ink:unfinished"] = { ...structuredClone(FIXTURE.strokes["node:api"]), id: "ink:unfinished", status: "active" };
+  const result = convertLegacyBoardState(before);
+  assert.deepEqual(result.droppedStrokeIds, ["ink:unfinished"]);
+  assert.equal(result.state.elements["ink:unfinished"], undefined);
+  assert.equal(result.addedElementIds.length, 21);
+  assert.equal("strokes" in result.state, false);
+  // Only an unfinished stroke left: still a change (the key goes).
+  const onlyUnfinished = convertLegacyBoardState({ ...createInitialBoardState("board-1"), strokes: { "ink:unfinished": before.strokes["ink:unfinished"] } });
+  assert.equal(onlyUnfinished.changed, true);
+  assert.deepEqual(onlyUnfinished.droppedStrokeIds, ["ink:unfinished"]);
+  assert.deepEqual(onlyUnfinished.state.elements, {});
+});
+
+/** What should not depend on the model: names, types, boxes, links, labels, groups. */
+function projection(graph) {
+  const byId = (left, right) => left.id.localeCompare(right.id);
+  return {
+    nodes: graph.nodes.map(({ id, label, name, kind, role, bounds, groupIds }) =>
+      ({ id, label, name, kind, role, bounds, groupIds: [...groupIds].sort() })).sort(byId),
+    edges: graph.edges.map(({ id, from, to, label, directed, lineStyle, attached }) =>
+      ({ id, from, to, label, directed, lineStyle, attached })).sort(byId),
+    groups: graph.groups.map(({ id, label, memberIds }) => ({ id, label, memberIds: [...memberIds].sort() })).sort(byId),
+  };
+}
+
+test("the same diagram drawn in either model gives the same graph once converted", () => {
+  // The v2 twin of BOARDS.graphLegacy: the same boxes, labels, arrows and group.
+  const BOXES = {
+    user: { x: 100, y: 100, width: 160, height: 92 },
+    api: { x: 400, y: 100, width: 180, height: 92 },
+    db: { x: 700, y: 100, width: 160, height: 92 },
+  };
+  const LABELS = { user: "Customer", api: "Orders API", db: "Orders DB" };
+  const TYPES = { user: "user", api: "api", db: "database" };
+  let scene = createInitialBoardState("board-1");
+  for (const id of ["user", "api", "db"]) {
+    scene = applyBoardEvent(scene, {
+      ...createEventEnvelope({ boardSessionId: "board-1", actorParticipantId: "participant-1" }),
+      type: "element.created",
+      element: createBoardSceneElement({
+        boardId: "board-1", id, kind: "shape", shapeKind: TYPES[id],
+        transform: { ...BOXES[id], rotation: 0 },
+        content: createRichTextDocument(LABELS[id], `${id}:content`),
+      }),
+    });
+  }
+  scene = applyDiagramCommand(scene, { type: "scene.connect", connectorId: "e1", fromId: "user", toId: "api", label: "places order" }, context()).state;
+  scene = applyDiagramCommand(scene, { type: "scene.connect", connectorId: "e2", fromId: "api", toId: "db", label: "writes" }, context()).state;
+  scene = applyDiagramCommand(scene, { type: "scene.group", sectionId: "g1", memberIds: ["api", "db"], label: "Backend" }, context()).state;
+
+  const legacy = structuredClone(BOARDS.graphLegacy);
+  const converted = convertLegacyBoardState(legacy).state;
+  assert.deepEqual(legacyConversionGraphDiff(legacy, converted), []);
+  assert.deepEqual(projection(boardDiagramGraph(converted)), projection(boardDiagramGraph(scene)));
+});
+
+test("upgradeLegacyBoardState converts on load, drops any strokes key and is idempotent", () => {
+  const upgraded = upgradeLegacyBoardState(structuredClone(FIXTURE));
+  assert.deepEqual(upgraded, convertLegacyBoardState(FIXTURE).state);
+  assert.equal("strokes" in upgraded, false);
+  assert.deepEqual(upgradeLegacyBoardState(upgraded), upgraded, "a second load changes nothing");
+
+  // Orphan mirrors lose their bridge field.
+  const withOrphan = upgradeLegacyBoardState(structuredClone(BOARDS.pointerDeleted));
+  assert.ok(Object.values(withOrphan.elements).every((element) => element.legacyStrokeId === undefined));
+  assert.equal(withOrphan.elements["orphan:shape"].kind, "shape");
+
+  // A v2 board served with the API's compatibility `strokes: {}` loses only that key.
+  const v2 = applyDiagramCommand(createInitialBoardState("board-2"), {
+    type: "node.create", nodeId: "a", nodeType: "api", label: "API", center: { x: 100, y: 100 },
+  }, context()).state;
+  assert.deepEqual(upgradeLegacyBoardState({ strokes: {}, ...v2 }), v2);
+  // Parts missing on very old rows are filled.
+  const sparse = upgradeLegacyBoardState({ boardId: "board-3" });
+  assert.deepEqual(sparse, createInitialBoardState("board-3"));
+});
+
+test("stored legacy event rows replay into the board the old reducer made, converted", () => {
+  assert.equal(LEGACY_BOARD_EVENT_TYPES.length, 8);
+  for (const scenario of REPLAY.scenarios) {
+    const state = replayBoardEvents(scenario.initial, scenario.events);
+    // Captured under scene version 2; the version is the one expected difference.
+    assert.deepEqual(state, { ...scenario.expected, sceneVersion: BOARD_SCENE_VERSION }, scenario.name);
+    assert.equal("strokes" in state, false);
+    assert.equal(state.lastSequence, scenario.events.at(-1).sequence, "lastSequence is preserved");
+    assert.deepEqual(validateConvertedBoardState(state), [], scenario.name);
+  }
+  const [first] = REPLAY.scenarios;
+  const state = replayBoardEvents(first.initial, first.events);
+  // A stroke.deleted naming a v2 element deletes it, as the old reducer did.
+  assert.equal(state.elements["v2:a"].status, "deleted");
+  // Edits, deletes and restores of strokes carry through.
+  assert.equal(state.elements.s1.content.blocks[0].runs[0].text, "Orders API");
+  assert.equal(state.elements.s2.transform.x, 420);
+  assert.equal(state.elements.c1.status, "active");
+  assert.equal(state.elements.ink1.kind, "drawing");
+  assert.equal(state.elements.ink1.status, "deleted");
+  assert.ok(state.eraseActions["erase-1"]);
+  // In-progress and discarded strokes are left out.
+  assert.equal(state.elements["ink-unfinished"], undefined);
+  assert.equal(state.elements["ink-discarded"], undefined);
+  assert.deepEqual(state.activeStrokes, {});
+});
+
+test("a log with no legacy rows replays exactly as the reducer reduces it", () => {
+  const [first] = REPLAY.scenarios;
+  const current = first.events.filter((event) => !LEGACY_BOARD_EVENT_TYPES.includes(event.type));
+  assert.ok(current.length > 0);
+  assert.deepEqual(replayBoardEvents(first.initial, current), reduceBoardEvents(first.initial, current));
+  assert.deepEqual(replayBoardEvents(first.initial, []), first.initial);
+});
+
+test("element rows naming a converted stroke after its stroke rows land on the converted element", () => {
+  const [first] = REPLAY.scenarios;
+  const strokeRows = first.events.filter((event) =>
+    (event.type === "stroke.started" && event.stroke.id === "s1") ||
+    (event.type === "stroke.committed" && event.strokeId === "s1"));
+  assert.equal(strokeRows.length, 2);
+  const last = strokeRows.at(-1);
+  const row = (sequence, extra) => ({ ...last, id: `row-x${sequence}`, sequence: last.sequence + sequence, ...extra });
+  const patch = row(1, {
+    type: "element.patched",
+    elementId: "s1",
+    patches: [{ op: "field.set", path: ["transform", "x"], value: 500 }],
+  });
+  const remove = row(2, { type: "element.deleted", elementId: "s1" });
+  for (const key of ["strokeId", "points", "discard"]) {
+    delete patch[key];
+    delete remove[key];
+  }
+
+  const strokesOnly = replayBoardEvents(first.initial, strokeRows);
+  const patched = replayBoardEvents(first.initial, [...strokeRows, patch]);
+  assert.equal(patched.elements.s1.transform.x, 500, "a later patch is not dropped");
+  assert.deepEqual(patched, reduceBoardEvents(strokesOnly, [patch]));
+
+  const deleted = replayBoardEvents(first.initial, [...strokeRows, patch, remove]);
+  assert.equal(deleted.elements.s1.status, "deleted", "a later delete is not undone");
+  assert.equal(deleted.elements.s1.transform.x, 500);
+  assert.deepEqual(deleted, reduceBoardEvents(strokesOnly, [patch, remove]));
+  assert.deepEqual(validateConvertedBoardState(deleted), []);
 });

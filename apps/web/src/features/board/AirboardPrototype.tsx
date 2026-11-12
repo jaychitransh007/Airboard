@@ -6,8 +6,7 @@ import {
   applyBoardEvent,
   boardPreview,
   createBoardSceneElement,
-  isSceneOnlyElement,
-  createEraseAction,
+  isActiveElement,
   createEventEnvelope,
   createInitialBoardState,
   createRichTextDocument,
@@ -27,7 +26,6 @@ import {
   type CursorState,
   type DiagramCommand,
   type SemanticPlan,
-  type StrokeAnnotation,
   type StrokePoint,
 } from "@airboard/core";
 import { classifyBrowserWakeTranscript } from "./browserSpeech";
@@ -181,12 +179,9 @@ import {
 } from "./semanticIntent";
 import {
   exportCanvasPng,
-  findAnnotationObjectAtPoint,
   findSceneElementAtPoint,
-  findIntersectingStrokeIds,
   renderBoard,
   sceneElementsForRender,
-  type AnnotationRenderObject,
 } from "@airboard/drawing-engine";
 import {
   defaultGestureConfig,
@@ -215,26 +210,14 @@ import { useMenuKeyboard } from "../../platform/menuKeyboard";
 import { useModalFocus } from "../../platform/modalFocus";
 import { copyCanvasImage, downloadCanvasPdf } from "./boardExport";
 import {
-  annotationNeedsLabel,
-  buildAnnotationPoints,
-  createObjectFromPlacement,
-  getBoundConnectorUpdates,
-  getAnnotationLabelAnchor,
   isPlacementTool,
-  resizeBoundsAnnotation,
-  snapAnnotationToBoard,
-  translateAnnotation,
-  updateLineEndpoint,
-  type AlignmentGuide,
-  type AnnotationResizeHandle,
-  type GestureAnnotationResult,
+  placementGhostElement,
   type ObjectDockTool,
-} from "./gestureAnnotationMode";
+} from "./placementGhost";
 import {
   buildGestureMoveTargets,
-  gestureTargetWorld,
+  isHandTargetableSceneElement,
   resolveHandConnectorEnds,
-  resolveResizeHandleForInput,
 } from "./gestureObjectManipulation";
 import {
   HandDwellSelectTracker,
@@ -280,7 +263,6 @@ import {
   CATALOG_DROP_EXIT_PX,
   CATALOG_DROP_MIN_TRAVEL_PX,
   CLARIFICATION_ANSWER_MS,
-  DEICTIC_REFERENCE_PATTERN,
   ERASER_RADIUS,
   EXPORTS_BLOCKED_MESSAGE,
   HAND_CUE_MS,
@@ -575,7 +557,6 @@ export function AirboardPrototype({
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const screenUnderlayStreamRef = useRef<MediaStream | null>(null);
   const screenUnderlayStartInProgressRef = useRef(false);
-  const labelInputRef = useRef<HTMLInputElement | null>(null);
   const intentCommandInputRef = useRef<HTMLTextAreaElement | null>(null);
   const trackerRef = useRef<MediaPipeHandTracker | null>(null);
   // Synchronous guard against a double-start race (state updates lag within a tick).
@@ -639,7 +620,6 @@ export function AirboardPrototype({
   const semanticIntentRequestIdRef = useRef(0);
   const pendingSemanticClarificationRef =
     useRef<PendingSemanticClarification | null>(null);
-  const selectedAnnotationIdsRef = useRef<string[]>([]);
   const voiceCorrectionPendingRef = useRef<{
     heard: string;
     suggested: string;
@@ -734,7 +714,6 @@ export function AirboardPrototype({
    * grab (see settleHandSceneMove); the next hand movement picks it up again.
    */
   const handSceneMoveResumeRef = useRef<string | null>(null);
-  const gesturePathRef = useRef<StrokePoint[]>([]);
   const lastGesturePointerRef = useRef<{ x: number; y: number } | null>(null);
   const lastGesturePointerAtRef = useRef(0);
   /**
@@ -755,11 +734,9 @@ export function AirboardPrototype({
   const undoRedoRef = useRef<{ undo: (count: number) => void; redo: (count: number) => void } | null>(null);
   const executeSceneIntentRef = useRef<((intent: BoardSceneIntent) => SceneIntentExecutionResult) | null>(null);
   const frameBoardBoundsRef = useRef<((bounds: { x: number; y: number; width: number; height: number }) => void) | null>(null);
-  const activeEraseAffectedStrokeIdsRef = useRef<Set<string>>(new Set());
   const undoStackRef = useRef<UndoAction[]>([]);
   const sceneRedoStackRef = useRef<UndoAction[]>([]);
   const objectInteractionRef = useRef<ObjectInteraction | null>(null);
-  const objectInteractionInitialStateRef = useRef<BoardState | null>(null);
   const cameraGrabActiveRef = useRef(false);
   const cameraPlacementActiveRef = useRef(false);
   const cameraPlacementArmedToolRef = useRef<ObjectDockTool | null>(null);
@@ -768,7 +745,7 @@ export function AirboardPrototype({
    * snapshot object is replaced, never mutated, on every manipulation frame,
    * so a voice turn can keep the one it read when speech started and resolve
    * it later with `resolveHandPointing` (./handPointing). `targetIds` holds
-   * legacy stroke ids and v2 scene element ids alike.
+   * scene element ids.
    */
   const handPointingRecorderRef = useRef(new HandPointingRecorder());
   const handPointingSnapshotRef = useRef<HandPointingSnapshot>(
@@ -819,8 +796,6 @@ export function AirboardPrototype({
   const [activeCreationTool, setActiveCreationTool] = useState<CreationToolId>("move");
   const activeCreationToolRef = useRef<CreationToolId>("move");
   const [temporaryHandActive, setTemporaryHandActive] = useState(false);
-  const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
-  const [selectedAnnotationIds, setSelectedAnnotationIds] = useState<string[]>([]);
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   const [selectedElementIds, setSelectedElementIds] = useState<string[]>([]);
   const selectedElementIdsRef = useRef<string[]>([]);
@@ -829,10 +804,10 @@ export function AirboardPrototype({
    * typed commands made (RGB-039). Every snapshot and every staleness check
    * uses this same list, so a selected shape never looks like a change.
    */
-  const currentSemanticSelectionIds = useCallback(() => [
-    ...selectedAnnotationIdsRef.current,
-    ...selectedElementIdsRef.current.filter((id) => isSceneOnlyElement(boardRef.current, id)),
-  ], []);
+  const currentSemanticSelectionIds = useCallback(
+    () => selectedElementIdsRef.current.filter((id) => isActiveElement(boardRef.current, id)),
+    [],
+  );
   const [hoverElementId, setHoverElementId] = useState<string | null>(null);
   const [editingElementId, setEditingElementId] = useState<string | null>(null);
   const [sceneRenderVersion, setSceneRenderVersion] = useState(0);
@@ -849,10 +824,7 @@ export function AirboardPrototype({
   } | null>(null);
   const pendingMediaPointRef = useRef<AnnotationPoint | null>(null);
   const pendingMediaReplaceIdRef = useRef<string | null>(null);
-  const [hoverStrokeId, setHoverStrokeId] = useState<string | null>(null);
-  const [ghostAnnotation, setGhostAnnotation] = useState<AnnotationRenderObject | null>(null);
-  const [ghostAnnotations, setGhostAnnotations] = useState<AnnotationRenderObject[]>([]);
-  const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
+  const [ghostElement, setGhostElement] = useState<BoardSceneElement | null>(null);
   const [objectGestureState, setObjectGestureState] = useState<ObjectGestureState>("hover");
   const [intentCommandText, setIntentCommandText] = useState("");
   const [commandFeedback, setCommandFeedback] = useState(
@@ -1004,8 +976,6 @@ export function AirboardPrototype({
   const [speechRecognitionStatus, setSpeechRecognitionStatus] =
     useState<SpeechRecognitionStatus>("idle");
   const speechRecognitionStatusRef = useRef<SpeechRecognitionStatus>("idle");
-  const [labelDraft, setLabelDraft] = useState("");
-  const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
   const [strokeColor] = useState("#111827");
   const [strokeThickness] = useState(3);
   const [frictionPreset] = useState<FrictionPreset>("balanced");
@@ -1015,9 +985,6 @@ export function AirboardPrototype({
   useEffect(() => {
     if (!titleEditing) setTitleDraft(boardTitle);
   }, [boardTitle, titleEditing]);
-  useEffect(() => {
-    selectedAnnotationIdsRef.current = selectedAnnotationIds;
-  }, [selectedAnnotationIds]);
   useEffect(() => {
     selectedElementIdsRef.current = selectedElementIds;
   }, [selectedElementIds]);
@@ -1032,12 +999,9 @@ export function AirboardPrototype({
     : null;
   // Screen readers can't see the canvas: they hear what is selected, and can
   // read the board's words in a list beside it.
-  const selectedAnnotationStroke = selectedAnnotationId ? boardRef.current.strokes[selectedAnnotationId] : undefined;
   const selectionAnnouncement = selectedSceneElement
     ? `Selected “${sceneElementReferenceLabel(selectedSceneElement)}”.`
-    : selectedAnnotationStroke
-      ? `Selected “${selectedAnnotationStroke.annotation?.label?.trim() || selectedAnnotationStroke.annotation?.type || "drawing"}”.`
-      : "";
+    : "";
   const boardTextForScreenReaders = useMemo(
     () => boardPreview(boardRef.current).text.slice(0, BOARD_TEXT_LIST_LIMIT),
     // sceneRenderVersion is the trigger: the board itself lives in a ref.
@@ -1233,16 +1197,11 @@ export function AirboardPrototype({
       // the canvas itself stays transparent there.
       background: boardTheme === "lightboard" ? "transparent" : "white",
       theme: boardTheme,
-      selectedStrokeId: selectedAnnotationId,
-      selectedStrokeIds: selectedAnnotationIds,
-      hoverStrokeId,
       selectedElementId,
       selectedElementIds,
       hoverElementId,
       resolvedImages: resolvedSceneImagesRef.current,
-      ghostAnnotation,
-      ghostAnnotations,
-      alignmentGuides,
+      ghostElement,
       contrastPlates:
         boardTheme === "lightboard" &&
         localContrastPlatesEnabled &&
@@ -1251,16 +1210,11 @@ export function AirboardPrototype({
           : null,
     });
   }, [
-    alignmentGuides,
     boardTheme,
-    ghostAnnotation,
-    ghostAnnotations,
-    hoverStrokeId,
+    ghostElement,
     hoverElementId,
     localContrastPlatesEnabled,
     screenUnderlayStatus,
-    selectedAnnotationId,
-    selectedAnnotationIds,
     selectedElementId,
     selectedElementIds,
   ]);
@@ -1401,7 +1355,6 @@ export function AirboardPrototype({
     const hash = JSON.stringify({
       sceneVersion: snapshot.sceneVersion,
       elements: snapshot.elements,
-      strokes: snapshot.strokes,
       eraseActions: snapshot.eraseActions,
       clearedAt: snapshot.clearedAt,
     });
@@ -1458,7 +1411,7 @@ export function AirboardPrototype({
   const refreshRealtimeSpeechKeyterms = useCallback(
     (
       state: BoardState = boardRef.current,
-      selectedIds: readonly string[] = selectedAnnotationIdsRef.current,
+      selectedIds: readonly string[] = [],
     ) => {
       const session = speechSessionRef.current;
       if (session && "updateKeyterms" in session) {
@@ -1471,7 +1424,7 @@ export function AirboardPrototype({
   const applyLocalEvent = useCallback(
     (event: BoardEvent) => {
       boardRef.current = applyBoardEvent(boardRef.current, event);
-      if (event.type.startsWith("element.") || event.type.startsWith("stroke.") || event.type === "board.cleared") {
+      if (event.type.startsWith("element.") || event.type === "board.cleared") {
         setSceneRenderVersion((version) => version + 1);
       }
       appendBoundedBoardEvents(boardEventLogRef.current, [event]);
@@ -1496,7 +1449,7 @@ export function AirboardPrototype({
   const applyRemoteEvent = useCallback(
     (event: BoardEvent) => {
       boardRef.current = applyBoardEvent(boardRef.current, event);
-      if (event.type.startsWith("element.") || event.type.startsWith("stroke.") || event.type === "board.cleared") {
+      if (event.type.startsWith("element.") || event.type === "board.cleared") {
         setSceneRenderVersion((version) => version + 1);
       }
       appendBoundedBoardEvents(boardEventLogRef.current, [event]);
@@ -1525,8 +1478,6 @@ export function AirboardPrototype({
       boardRef.current = state;
       sceneRedoStackRef.current = [];
       undoStackRef.current = [];
-      setSelectedAnnotationId(null);
-      setSelectedAnnotationIds([]);
       setSelectedElementId(null);
       setSelectedElementIds([]);
       setEditingElementId(null);
@@ -1549,9 +1500,6 @@ export function AirboardPrototype({
     const activeIds = ids.filter((id) => boardRef.current.elements[id]?.status === "active");
     setSelectedElementIds(activeIds);
     setSelectedElementId(primary && activeIds.includes(primary) ? primary : activeIds.at(-1) ?? null);
-    setSelectedAnnotationId(null);
-    setSelectedAnnotationIds([]);
-    setEditingAnnotationId(null);
   }, []);
 
   const patchSceneElement = useCallback(
@@ -1955,7 +1903,6 @@ export function AirboardPrototype({
       shifted.createdAt = now;
       shifted.updatedAt = now;
       shifted.revision = 1;
-      delete shifted.legacyStrokeId;
       if (shifted.kind === "connector") {
         shifted.start.point = { x: shifted.start.point.x + 24, y: shifted.start.point.y + 24 };
         shifted.end.point = { x: shifted.end.point.x + 24, y: shifted.end.point.y + 24 };
@@ -1994,7 +1941,6 @@ export function AirboardPrototype({
       duplicate.revision = 1;
       duplicate.transform.x += offset.x;
       duplicate.transform.y += offset.y;
-      delete duplicate.legacyStrokeId;
       const created = commitSceneElement(duplicate);
       if (source.kind === "shape" && created.kind === "shape") {
         const start = connectorAnchorPoint(source, "auto", elementCenter(created));
@@ -2594,14 +2540,8 @@ export function AirboardPrototype({
           : { x: 480, y: 320 },
       );
       const reference = voiceReferenceRef.current;
-      // A shape Airo drew (a legacy stroke) also has a hidden scene copy under
-      // the same id; editing that copy changes nothing visible. When "this"
-      // or a name lands on one, resolve to nothing so the command is rejected
-      // here and the legacy grammar or the planner handles it.
-      const targetIds = (target: SceneIntentTarget) => {
-        const ids = resolveSceneIntentTargetIds(boardRef.current, target, selectedElementIdsRef.current, reference);
-        return ids.some((id) => isLegacyStrokeSceneCopy(boardRef.current, id)) ? [] : ids;
-      };
+      const targetIds = (target: SceneIntentTarget) =>
+        resolveSceneIntentTargetIds(boardRef.current, target, selectedElementIdsRef.current, reference);
       // "here": where the hand pointed while speaking; typed commands and
       // speech with no recent pointing land in the middle of the view.
       const pointerPoint = reference?.point ?? center;
@@ -2828,7 +2768,6 @@ export function AirboardPrototype({
           const pointed = (reference?.pointedIds ?? []).filter((id) => boardRef.current.elements[id]?.status === "active");
           const pair = pointed.length >= 2 ? pointed : selectedElementIdsRef.current;
           toIds = pair.filter((id) => id !== fromIds[0]).slice(-1);
-          if (toIds.some((id) => isLegacyStrokeSceneCopy(boardRef.current, id))) toIds = [];
         }
         if (
           (intent.from.kind === "visible_label" && fromIds.length !== 1) ||
@@ -2869,9 +2808,7 @@ export function AirboardPrototype({
 
       if (intent.type === "select_all") {
         const ids = Object.values(boardRef.current.elements)
-          .filter((element) =>
-            element.status === "active" && element.visible && !element.legacyStrokeId,
-          )
+          .filter((element) => element.status === "active" && element.visible)
           .sort((left, right) => left.zIndex - right.zIndex)
           .map(({ id }) => id);
         selectSceneElements(ids);
@@ -3652,8 +3589,6 @@ export function AirboardPrototype({
           boardRef.current = result.initialState;
           sceneRedoStackRef.current = [];
           undoStackRef.current = [];
-          setSelectedAnnotationId(null);
-          setSelectedAnnotationIds([]);
           setSelectedElementId(null);
           setSelectedElementIds([]);
           setEditingElementId(null);
@@ -3741,9 +3676,12 @@ export function AirboardPrototype({
     return point;
   }, []);
 
-  const eraseAt = useCallback(
-    (point: StrokePoint, radius = ERASER_RADIUS): string[] => {
-      const affectedStrokeIds = findIntersectingStrokeIds(boardRef.current, point, radius);
+  /**
+   * Shows the eraser's cursor to everyone on the board, for the dock eraser
+   * and Alt-click erase mode. Erasing drawings is eraseSceneDrawingsAt.
+   */
+  const publishEraserCursor = useCallback(
+    (point: StrokePoint) => {
       const cursor: CursorState = {
         participantId: PARTICIPANT_ID,
         x: point.x,
@@ -3763,34 +3701,6 @@ export function AirboardPrototype({
         type: "cursor.moved",
         cursor,
       });
-
-      if (affectedStrokeIds.length === 0) {
-        return [];
-      }
-
-      const now = new Date().toISOString();
-      const eraseInput: Parameters<typeof createEraseAction>[0] = {
-        id: crypto.randomUUID(),
-        boardId: boardSessionIdRef.current,
-        userId: OWNER_USER_ID,
-        point,
-        radius,
-        affectedStrokeIds,
-        createdAt: now,
-      };
-      if (point.inputSource) {
-        eraseInput.inputSource = point.inputSource;
-      }
-      applyLocalEvent({
-        ...createEventEnvelope({
-          boardSessionId: boardSessionIdRef.current,
-          actorParticipantId: PARTICIPANT_ID,
-          createdAt: now,
-        }),
-        type: "erase.committed",
-        eraseAction: createEraseAction(eraseInput),
-      });
-      return affectedStrokeIds;
     },
     [applyLocalEvent],
   );
@@ -3820,142 +3730,61 @@ export function AirboardPrototype({
     [applyLocalEvent],
   );
 
-  const updateAnnotationObject = useCallback(
-    (strokeId: string, annotation: StrokeAnnotation) => {
-      const points = buildAnnotationPoints(annotation, performance.now());
-      if (points.length === 0) {
-        return;
-      }
-
-      const previousAnnotation = boardRef.current.strokes[strokeId]?.annotation;
-      const connectorUpdates = previousAnnotation
-        ? getBoundConnectorUpdates({
-            boardState: boardRef.current,
-            nodeStrokeId: strokeId,
-            previousAnnotation,
-            nextAnnotation: annotation,
-          })
-        : [];
-
-      applyLocalEvent({
-        ...createEventEnvelope({
-          boardSessionId: boardSessionIdRef.current,
-          actorParticipantId: PARTICIPANT_ID,
-        }),
-        type: "stroke.annotation_updated",
-        strokeId,
-        annotation,
-        points,
-      });
-
-      for (const connectorUpdate of connectorUpdates) {
-        applyLocalEvent({
-          ...createEventEnvelope({
-            boardSessionId: boardSessionIdRef.current,
-            actorParticipantId: PARTICIPANT_ID,
-          }),
-          type: "stroke.annotation_updated",
-          strokeId: connectorUpdate.strokeId,
-          annotation: connectorUpdate.annotation,
-          points: buildAnnotationPoints(connectorUpdate.annotation, performance.now()),
-        });
-      }
+  /**
+   * The creation tool a placement commits: the interaction's own, else the
+   * toolbar's equivalent of the dock tool. Null when it places nothing.
+   */
+  const placementCreationTool = useCallback(
+    (tool: ObjectDockTool, creationTool?: CreationToolId | null): CreationToolId | null => {
+      const resolved = creationTool ?? creationToolForPlacementTool(tool as LegacyPlacementTool);
+      return resolved && isScenePlacementTool(resolved) ? resolved : null;
     },
-    [applyLocalEvent],
+    [],
   );
 
-  const selectAnnotationObject = useCallback((strokeId: string | null) => {
-    setEditingAnnotationId(null);
-    setSelectedAnnotationId(strokeId);
-    setSelectedAnnotationIds(strokeId ? [strokeId] : []);
-    if (!strokeId) {
-      setLabelDraft("");
-      return;
-    }
-
-    const annotation = boardRef.current.strokes[strokeId]?.annotation;
-    setLabelDraft(annotation?.label ?? "");
-  }, []);
-
-  const toggleAnnotationObject = useCallback((strokeId: string) => {
-    setEditingAnnotationId(null);
-    setSelectedAnnotationIds((current) => {
-      const next = current.includes(strokeId)
-        ? current.filter((candidate) => candidate !== strokeId)
-        : [...current, strokeId];
-      const primary = next[next.length - 1] ?? null;
-      setSelectedAnnotationId(primary);
-      setLabelDraft(primary ? (boardRef.current.strokes[primary]?.annotation?.label ?? "") : "");
-      return next;
-    });
-  }, []);
-
-  const createPlacementObject = useCallback(
+  /**
+   * The see-through preview of a placement: the element the placement would
+   * commit at this point (see placementGhostElement).
+   */
+  const updatePlacementGhost = useCallback(
     (
       tool: ObjectDockTool,
       start: AnnotationPoint,
-      end?: AnnotationPoint,
-    ): GestureAnnotationResult | null =>
-      createObjectFromPlacement({
+      end: AnnotationPoint | undefined,
+      options: { creationTool?: CreationToolId | null | undefined; mode?: "drag" | "drop" } = {},
+    ) => {
+      const armed = activeCreationToolRef.current;
+      const creationTool = placementCreationTool(
         tool,
-        start,
-        ...(end ? { end } : {}),
-        boardState: boardRef.current,
-        color: strokeColor,
-        autoSnapConnectors,
-      }),
-    [autoSnapConnectors, strokeColor],
-  );
-
-  const updatePlacementGhost = useCallback(
-    (tool: ObjectDockTool, start: AnnotationPoint, end?: AnnotationPoint) => {
-      const object = createPlacementObject(tool, start, end);
-      const snapped = object?.annotation.bounds
-        ? snapAnnotationToBoard({
-            annotation: object.annotation,
-            boardState: boardRef.current,
-          })
-        : null;
-      const annotation = snapped?.annotation ?? object?.annotation;
-      if (snapped) {
-        setAlignmentGuides(snapped.guides);
-      } else {
-        setAlignmentGuides([]);
-      }
-      setGhostAnnotation(
-        object && annotation
-          ? {
-              annotation,
-              points: buildAnnotationPoints(annotation, performance.now()),
-              color: object.color,
-              thickness: object.thickness,
-            }
+        options.creationTool ??
+          (isScenePlacementTool(armed) && scenePlacementPreviewTool(armed) === tool ? armed : null),
+      );
+      setGhostElement(
+        creationTool
+          ? placementGhostElement({
+              tool: creationTool,
+              start,
+              ...(end ? { end } : {}),
+              state: boardRef.current,
+              boardId: boardSessionIdRef.current,
+              mode: options.mode ?? "drag",
+              creation: {
+                ...(accountUserId ? { creatorId: accountUserId } : {}),
+                stampEmoji: selectedStampEmoji,
+                ...(creationTool === "table" ? { table: pendingTableSizeRef.current } : {}),
+              },
+            })
           : null,
       );
     },
-    [createPlacementObject],
+    [accountUserId, placementCreationTool, selectedStampEmoji],
   );
-
-  const commitActiveEraseInteraction = useCallback(() => {
-    const strokeIds = [...activeEraseAffectedStrokeIdsRef.current];
-    if (strokeIds.length > 0) {
-      undoStackRef.current.push({
-        type: "erase",
-        strokeIds,
-      });
-      sceneRedoStackRef.current = [];
-    }
-    activeEraseAffectedStrokeIdsRef.current = new Set();
-  }, []);
 
   const beginObjectInteraction = useCallback(
     (
       point: AnnotationPoint,
       options: {
         inputSource?: CursorState["inputSource"];
-        preferSelected?: boolean;
-        forcedStrokeId?: string;
-        forcedHandle?: AnnotationResizeHandle;
         /** Grab and move only, even while a placement tool or the eraser is armed. */
         moveOnly?: boolean;
         placementTool?: ObjectDockTool;
@@ -3973,7 +3802,6 @@ export function AirboardPrototype({
     ) => {
       lastGesturePointerRef.current = point;
       lastGesturePointerAtRef.current = Date.now();
-      objectInteractionInitialStateRef.current = null;
       const inputSource = options.inputSource ?? "pointer";
 
       const creationTool = options.moveOnly ? null : options.creationTool ?? (
@@ -4001,8 +3829,10 @@ export function AirboardPrototype({
               ...(creationTool ? { creationTool } : {}),
               start: point,
             };
-        updatePlacementGhost(placementTool, point, point);
-        selectAnnotationObject(null);
+        updatePlacementGhost(placementTool, point, point, {
+          creationTool,
+          mode: options.catalogCarry ? "drop" : "drag",
+        });
         setObjectGestureState("grab");
         return;
       }
@@ -4011,78 +3841,17 @@ export function AirboardPrototype({
         const eraserPoint = makePoint(point.x, point.y);
         eraserPoint.inputSource = inputSource;
         pointerErasingRef.current = true;
-        activeEraseAffectedStrokeIdsRef.current = new Set(eraseAt(eraserPoint, ERASER_RADIUS));
-        selectAnnotationObject(null);
+        publishEraserCursor(eraserPoint);
         setObjectGestureState("erase");
         return;
       }
 
-      const interactionSelectionId =
-        options.forcedHandle && options.forcedStrokeId
-          ? options.forcedStrokeId
-          : selectedAnnotationId;
-      const selectedStroke = interactionSelectionId
-        ? boardRef.current.strokes[interactionSelectionId]
-        : undefined;
-      const handle = resolveResizeHandleForInput(
-        inputSource,
-        options.forcedHandle,
-        selectedStroke?.annotation
-          ? getAnnotationHandleAtPoint(selectedStroke.annotation, point)
-          : null,
-      );
-      if (selectedStroke?.annotation && handle) {
-        objectInteractionInitialStateRef.current = boardRef.current;
-        objectInteractionRef.current = {
-          mode: "resizing",
-          strokeId: selectedStroke.id,
-          handle,
-          initialAnnotation: selectedStroke.annotation,
-        };
-        setObjectGestureState("grab");
-        return;
-      }
-
-      if (options.preferSelected && selectedStroke?.annotation) {
-        objectInteractionInitialStateRef.current = boardRef.current;
-        objectInteractionRef.current = {
-          mode: "moving",
-          strokeId: selectedStroke.id,
-          start: point,
-          initialAnnotation: selectedStroke.annotation,
-        };
-        setHoverStrokeId(selectedStroke.id);
-        setObjectGestureState("grab");
-        return;
-      }
-
-      const hitStroke = options.forcedStrokeId
-        ? boardRef.current.strokes[options.forcedStrokeId]
-        : findAnnotationObjectAtPoint(boardRef.current, point);
-      if (hitStroke?.annotation) {
-        objectInteractionInitialStateRef.current = boardRef.current;
-        selectAnnotationObject(hitStroke.id);
-        setHoverStrokeId(hitStroke.id);
-        objectInteractionRef.current = {
-          mode: "moving",
-          strokeId: hitStroke.id,
-          start: point,
-          initialAnnotation: hitStroke.annotation,
-        };
-        setObjectGestureState("grab");
-        return;
-      }
-
-      selectAnnotationObject(null);
-      setHoverStrokeId(null);
       setObjectGestureState("hover");
     },
     [
       activeObjectTool,
-      eraseAt,
       makePoint,
-      selectAnnotationObject,
-      selectedAnnotationId,
+      publishEraserCursor,
       updatePlacementGhost,
     ],
   );
@@ -4101,77 +3870,36 @@ export function AirboardPrototype({
       if (pointerErasingRef.current) {
         const eraserPoint = makePoint(point.x, point.y);
         eraserPoint.inputSource = inputSource;
-        const affectedStrokeIds = eraseAt(eraserPoint, ERASER_RADIUS);
-        affectedStrokeIds.forEach((strokeId) =>
-          activeEraseAffectedStrokeIdsRef.current.add(strokeId),
-        );
+        publishEraserCursor(eraserPoint);
         return;
       }
 
       const interaction = objectInteractionRef.current;
       if (interaction?.mode === "catalog_carrying") {
         interaction.point = point;
-        updatePlacementGhost(interaction.tool, point, point);
+        updatePlacementGhost(interaction.tool, point, point, {
+          creationTool: interaction.creationTool,
+          mode: "drop",
+        });
         return;
       }
 
       if (interaction?.mode === "placing") {
-        updatePlacementGhost(interaction.tool, interaction.start, point);
-        return;
-      }
-
-      if (interaction?.mode === "moving") {
-        const translated = translateAnnotation(
-          interaction.initialAnnotation,
-          point.x - interaction.start.x,
-          point.y - interaction.start.y,
-        );
-        const snapped = snapAnnotationToBoard({
-          annotation: translated,
-          boardState: boardRef.current,
-          excludeStrokeId: interaction.strokeId,
-          // Hand tracking jitters far more than a pointer: give air-gesture
-          // drags a wider capture radius, kept screen-consistent under zoom.
-          thresholdPx:
-            (inputSource === "air_gesture" ? 22 : 9) / boardViewportRef.current.scale,
+        updatePlacementGhost(interaction.tool, interaction.start, point, {
+          creationTool: interaction.creationTool,
+          mode: "drag",
         });
-        setAlignmentGuides(snapped.guides);
-        updateAnnotationObject(
-          interaction.strokeId,
-          snapped.annotation,
-        );
-        return;
-      }
-
-      if (interaction?.mode === "resizing") {
-        const annotation =
-          interaction.handle === "start" || interaction.handle === "end"
-            ? updateLineEndpoint({
-                annotation: interaction.initialAnnotation,
-                endpoint: interaction.handle,
-                point,
-                boardState: boardRef.current,
-                autoSnapConnectors,
-              })
-            : resizeBoundsAnnotation(interaction.initialAnnotation, interaction.handle, point);
-        updateAnnotationObject(interaction.strokeId, annotation);
         return;
       }
 
       if (isPlacementTool(activeObjectTool)) {
         updatePlacementGhost(activeObjectTool, point, point);
-        setHoverStrokeId(null);
-        return;
       }
-
-      setHoverStrokeId(findAnnotationObjectAtPoint(boardRef.current, point)?.id ?? null);
     },
     [
       activeObjectTool,
-      autoSnapConnectors,
-      eraseAt,
       makePoint,
-      updateAnnotationObject,
+      publishEraserCursor,
       updatePlacementGhost,
     ],
   );
@@ -4182,7 +3910,6 @@ export function AirboardPrototype({
       options: { inputSource?: CursorState["inputSource"] } = {},
     ) => {
       if (pointerErasingRef.current) {
-        commitActiveEraseInteraction();
         pointerErasingRef.current = false;
         setObjectGestureState("hover");
         return;
@@ -4205,17 +3932,10 @@ export function AirboardPrototype({
         });
       };
       const interaction = objectInteractionRef.current;
-      // Placing always makes a v2 object. An interaction armed with only an
-      // older placement tool (not reachable from the dock or the toolbar
-      // today) places the toolbar's equivalent rather than a legacy stroke.
-      const placedTool = (
-        target: Extract<ObjectInteraction, { mode: "placing" | "catalog_carrying" }>,
-      ): CreationToolId | null => {
-        const tool = target.creationTool ?? creationToolForPlacementTool(target.tool as LegacyPlacementTool);
-        return tool && isScenePlacementTool(tool) ? tool : null;
-      };
+      // Placing always makes a v2 object. An interaction armed with only a
+      // dock tool places the toolbar's equivalent.
       if (interaction?.mode === "placing" || interaction?.mode === "catalog_carrying") {
-        const tool = placedTool(interaction);
+        const tool = placementCreationTool(interaction.tool, interaction.creationTool);
         if (tool) {
           placeSceneElement(
             tool,
@@ -4224,37 +3944,16 @@ export function AirboardPrototype({
               : { mode: "drop", from: point },
           );
         }
-        setGhostAnnotation(null);
-        setGhostAnnotations([]);
-        setAlignmentGuides([]);
+        setGhostElement(null);
         if (!tool) setActiveObjectTool("select");
-      } else if (interaction?.mode === "moving" || interaction?.mode === "resizing") {
-        const initialState = objectInteractionInitialStateRef.current;
-        const undoEvents = initialState
-          ? createAnnotationRestoreEvents(boardSessionIdRef.current, initialState, boardRef.current)
-          : [];
-        if (undoEvents.length > 0) {
-          undoStackRef.current.push({
-            type: "diagram",
-            undoEvents,
-            selectionBefore: selectedAnnotationIds,
-          });
-          sceneRedoStackRef.current = [];
-        }
       }
 
       objectInteractionRef.current = null;
-      objectInteractionInitialStateRef.current = null;
       cameraPlacementActiveRef.current = false;
       cameraPlacementArmedToolRef.current = null;
-      setAlignmentGuides([]);
       setObjectGestureState("hover");
     },
-    [
-      commitActiveEraseInteraction,
-      createSceneElementAtPoint,
-      selectedAnnotationIds,
-    ],
+    [createSceneElementAtPoint, placementCreationTool],
   );
 
   const cancelObjectInteraction = useCallback(() => {
@@ -4263,12 +3962,7 @@ export function AirboardPrototype({
         objectInteractionRef.current?.mode === "catalog_carrying")
         ? objectInteractionRef.current.creationTool
         : null;
-    if (objectInteractionInitialStateRef.current) {
-      boardRef.current = objectInteractionInitialStateRef.current;
-      render();
-    }
     objectInteractionRef.current = null;
-    objectInteractionInitialStateRef.current = null;
     // A hand grab of a v2 element puts it back too.
     cancelSceneMove(HAND_SCENE_POINTER_ID);
     handSceneMoveResumeRef.current = null;
@@ -4283,41 +3977,13 @@ export function AirboardPrototype({
     cameraPlacementArmedToolRef.current = null;
     cameraGrabActiveRef.current = false;
     pointerErasingRef.current = false;
-    activeEraseAffectedStrokeIdsRef.current = new Set();
-    setGhostAnnotation(null);
-    setGhostAnnotations([]);
-    setAlignmentGuides([]);
+    setGhostElement(null);
     setActiveObjectTool("select");
     if (cancelledCreationTool || rearmedCreationTool) {
       setActiveCreationTool("move");
       activeCreationToolRef.current = "move";
     }
-  }, [cancelSceneMove, render]);
-
-  const saveAnnotationLabel = useCallback(() => {
-    if (!selectedAnnotationId) {
-      return;
-    }
-
-    applyLocalEvent({
-      ...createEventEnvelope({
-        boardSessionId: boardSessionIdRef.current,
-        actorParticipantId: PARTICIPANT_ID,
-      }),
-      type: "stroke.label_updated",
-      strokeId: selectedAnnotationId,
-      label: labelDraft.trim(),
-    });
-    setEditingAnnotationId(null);
-  }, [applyLocalEvent, labelDraft, selectedAnnotationId]);
-
-  const dismissAnnotationLabelEditor = useCallback(() => {
-    setEditingAnnotationId(null);
-    const annotation = selectedAnnotationId
-      ? boardRef.current.strokes[selectedAnnotationId]?.annotation
-      : undefined;
-    setLabelDraft(annotation?.label ?? "");
-  }, [selectedAnnotationId]);
+  }, [cancelSceneMove]);
 
   const cancelCatalogClose = useCallback(() => {
     if (catalogCloseTimerRef.current !== null) {
@@ -4468,15 +4134,8 @@ export function AirboardPrototype({
       if (diagramVisibleRef.current === visible) return;
 
       if (!visible) {
-        gesturePathRef.current = [];
         cancelObjectInteraction();
-        setSelectedAnnotationId(null);
-        setSelectedAnnotationIds([]);
-        setHoverStrokeId(null);
-        setGhostAnnotation(null);
-        setGhostAnnotations([]);
-        setAlignmentGuides([]);
-        setEditingAnnotationId(null);
+        setGhostElement(null);
         setOpenCatalogId(null);
         semanticIntentRequestIdRef.current += 1;
         pendingSemanticClarificationRef.current = null;
@@ -4609,8 +4268,7 @@ export function AirboardPrototype({
       setActiveCreationTool("move");
     }
     setActiveObjectTool("select");
-    setGhostAnnotation(null);
-    setGhostAnnotations([]);
+    setGhostElement(null);
   }, []);
 
   /** Ends a hand grab of a v2 element; false when no hand scene move is active. */
@@ -4631,9 +4289,11 @@ export function AirboardPrototype({
   const eraseSceneElementsUnderHand = useCallback(
     (point: AnnotationPoint, targetId?: string | null) => {
       const ids = new Set<string>();
-      if (targetId && gestureTargetWorld(boardRef.current, targetId) === "scene") ids.add(targetId);
+      if (targetId && isHandTargetableSceneElement(boardRef.current, boardRef.current.elements[targetId])) {
+        ids.add(targetId);
+      }
       const hit = findSceneElementAtPoint(boardRef.current, point);
-      if (hit && gestureTargetWorld(boardRef.current, hit.id) === "scene") ids.add(hit.id);
+      if (hit && isHandTargetableSceneElement(boardRef.current, hit)) ids.add(hit.id);
       for (const id of ids) {
         deleteSceneElement(id);
         handPointingRecorderRef.current.forget(id);
@@ -4645,26 +4305,22 @@ export function AirboardPrototype({
 
   /**
    * Hand multi-select: with a selection already made, resting the open hand
-   * still on another shape adds it. Selections stay in one shape world.
+   * still on another shape adds it.
    */
   const addHandTargetToSelection = useCallback(
     (targetId: string) => {
-      const world = gestureTargetWorld(boardRef.current, targetId);
-      if (world === "scene" && selectedElementIdsRef.current.length > 0) {
+      if (
+        isHandTargetableSceneElement(boardRef.current, boardRef.current.elements[targetId]) &&
+        selectedElementIdsRef.current.length > 0
+      ) {
         if (selectedElementIdsRef.current.includes(targetId)) return false;
         selectSceneElements([...selectedElementIdsRef.current, targetId], targetId);
         setHoverElementId(targetId);
         return true;
       }
-      if (world === "stroke" && selectedAnnotationIdsRef.current.length > 0) {
-        if (selectedAnnotationIdsRef.current.includes(targetId)) return false;
-        toggleAnnotationObject(targetId);
-        setHoverStrokeId(targetId);
-        return true;
-      }
       return false;
     },
-    [selectSceneElements, toggleAnnotationObject],
+    [selectSceneElements],
   );
 
   const handleGesture = useCallback(
@@ -4792,10 +4448,6 @@ export function AirboardPrototype({
         }
 
         if (action?.type === "grab_cancelled") {
-          const interaction = objectInteractionRef.current;
-          if (interaction?.mode === "moving" || interaction?.mode === "resizing") {
-            updateAnnotationObject(interaction.strokeId, interaction.initialAnnotation);
-          }
           const wasCarrying = cameraGrabActiveRef.current || cameraPlacementActiveRef.current;
           finishHandSceneMove(point ?? lastGesturePointerRef.current ?? { x: 0, y: 0 }, "cancel");
           cameraGrabActiveRef.current = false;
@@ -4821,16 +4473,12 @@ export function AirboardPrototype({
               showHandCue("Hand lost — placement cancelled.", "warning");
             }
             handAimTargetRef.current = null;
-            setHoverStrokeId(null);
             setObjectGestureState("hover");
           }
           return;
         }
 
         if (!point) {
-          if (hybridOutput.trackingState === "lost") {
-            setHoverStrokeId(null);
-          }
           return;
         }
 
@@ -4970,10 +4618,7 @@ export function AirboardPrototype({
           cameraGrabActiveRef.current = true;
           handDwellSelectTrackerRef.current.reset();
           if (activeObjectTool === "eraser") {
-            beginObjectInteraction(point, {
-              inputSource: "air_gesture",
-              forcedStrokeId: action.targetId,
-            });
+            beginObjectInteraction(point, { inputSource: "air_gesture" });
             eraseSceneElementsUnderHand(point, action.targetId);
             setObjectGestureState("erase");
             setCommandFeedback(
@@ -4986,10 +4631,10 @@ export function AirboardPrototype({
             );
             return;
           }
-          if (gestureTargetWorld(boardRef.current, action.targetId) === "scene") {
-            // v2 elements move through the same scene move commands as the
+          const element = boardRef.current.elements[action.targetId];
+          if (isHandTargetableSceneElement(boardRef.current, element)) {
+            // Elements move through the same scene move commands as the
             // mouse, so the move syncs and undoes like a mouse drag.
-            const element = boardRef.current.elements[action.targetId]!;
             if (!beginSceneMove(HAND_SCENE_POINTER_ID, element, point, "air_gesture")) {
               cameraGrabActiveRef.current = false;
               hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
@@ -4999,14 +4644,6 @@ export function AirboardPrototype({
               return;
             }
             setHoverElementId(element.id);
-          } else {
-            selectAnnotationObject(action.targetId);
-            setHoverStrokeId(action.targetId);
-            beginObjectInteraction(point, {
-              inputSource: "air_gesture",
-              forcedStrokeId: action.targetId,
-              moveOnly: true,
-            });
           }
           setObjectGestureState("grab");
           setCommandFeedback("Move locked — keep your hand closed, then reopen to drop.");
@@ -5060,17 +4697,17 @@ export function AirboardPrototype({
           return;
         }
 
-        const focusedWorld = gestureTargetWorld(boardRef.current, hybridOutput.focusedTargetId);
-        setHoverStrokeId(focusedWorld === "stroke" ? hybridOutput.focusedTargetId : null);
-        setHoverElementId(focusedWorld === "scene" ? hybridOutput.focusedTargetId : null);
+        const focusedId = hybridOutput.focusedTargetId;
+        setHoverElementId(
+          focusedId && isHandTargetableSceneElement(boardRef.current, boardRef.current.elements[focusedId])
+            ? focusedId
+            : null,
+        );
         const dwellTargetId = handDwellSelectTrackerRef.current.update({
           now: hybridOutput.timestampMs,
           targetId: hybridOutput.pinchState === "open" ? hybridOutput.focusedTargetId : null,
           screenPoint,
-          eligible:
-            !cameraGrabActiveRef.current &&
-            (selectedElementIdsRef.current.length > 0 ||
-              selectedAnnotationIdsRef.current.length > 0),
+          eligible: !cameraGrabActiveRef.current && selectedElementIdsRef.current.length > 0,
         });
         if (dwellTargetId && addHandTargetToSelection(dwellTargetId)) {
           showHandCue("Added to the selection.");
@@ -5156,7 +4793,7 @@ export function AirboardPrototype({
         });
         const eraserPoint = makePoint(point.x, point.y, result.confidence);
         eraserPoint.inputSource = "air_gesture";
-        eraseAt(eraserPoint);
+        publishEraserCursor(eraserPoint);
         return;
       }
 
@@ -5182,10 +4819,7 @@ export function AirboardPrototype({
           inputSource: result.diagnostics?.inputSource,
         });
         if (!objectInteractionRef.current && !pointerErasingRef.current) {
-          beginObjectInteraction(point, {
-            inputSource: "air_gesture",
-            preferSelected: true,
-          });
+          beginObjectInteraction(point, { inputSource: "air_gesture" });
         } else {
           moveObjectInteraction(point, { inputSource: "air_gesture" });
         }
@@ -5209,7 +4843,6 @@ export function AirboardPrototype({
       cancelObjectInteraction,
       disarmHandPlacementTool,
       endObjectInteraction,
-      eraseAt,
       eraseSceneElementsUnderHand,
       finishHandSceneMove,
       handleDockGesture,
@@ -5217,23 +4850,19 @@ export function AirboardPrototype({
       moveCursorPoint,
       moveObjectInteraction,
       previewSceneMove,
+      publishEraserCursor,
       rearmHandPlacementTool,
       reportGestureStage,
       scheduleCatalogClose,
-      selectAnnotationObject,
       showHandCue,
       toBoardPoint,
-      updateAnnotationObject,
     ],
   );
 
   const endActivePointerInteraction = useCallback(() => {
-    if (pointerErasingRef.current) {
-      commitActiveEraseInteraction();
-    }
     pointerErasingRef.current = false;
     activePointerIdRef.current = null;
-  }, [commitActiveEraseInteraction]);
+  }, []);
 
   const undoLastAction = useCallback(
     (source: UndoSource = "button", followUpInteractionId?: string) => {
@@ -5369,48 +4998,17 @@ export function AirboardPrototype({
             }
           }
         }
-        const restoredSelection = action.selectionBefore.filter(
-          (strokeId) => boardRef.current.strokes[strokeId]?.status === "committed",
-        );
+        // A diagram undo restores no selection.
         if (action.redoEvents?.length) {
           sceneRedoStackRef.current.push({
             type: "diagram",
             undoEvents: action.redoEvents,
             redoEvents: action.undoEvents,
-            selectionBefore: restoredSelection,
           });
         }
-        refreshRealtimeSpeechKeyterms(boardRef.current, restoredSelection);
-        setSelectedAnnotationIds(restoredSelection);
-        setSelectedAnnotationId(restoredSelection[restoredSelection.length - 1] ?? null);
+        refreshRealtimeSpeechKeyterms(boardRef.current, []);
         setCommandFeedback("Undid the last diagram command.");
         render();
-        return;
-      }
-
-      if (action.type === "stroke") {
-        applyLocalEvent({
-          ...createEventEnvelope({
-            boardSessionId: boardSessionIdRef.current,
-            actorParticipantId: PARTICIPANT_ID,
-          }),
-          type: "stroke.deleted",
-          strokeIds: [action.strokeId],
-        });
-        setCommandFeedback("Undid the last object.");
-        return;
-      }
-
-      if (action.type === "erase") {
-        applyLocalEvent({
-          ...createEventEnvelope({
-            boardSessionId: boardSessionIdRef.current,
-            actorParticipantId: PARTICIPANT_ID,
-          }),
-          type: "stroke.restored",
-          strokeIds: action.strokeIds,
-        });
-        setCommandFeedback("Restored the erased objects.");
       }
     },
     [
@@ -5443,9 +5041,9 @@ export function AirboardPrototype({
         type: "diagram",
         undoEvents: action.redoEvents ?? [],
         redoEvents: action.undoEvents,
-        selectionBefore: action.selectionBefore,
       });
-      refreshRealtimeSpeechKeyterms(boardRef.current, action.selectionBefore);
+      // Like the undo, a redo restores no selection.
+      refreshRealtimeSpeechKeyterms(boardRef.current, []);
       setCommandFeedback("Redid the last diagram command.");
       render();
       return;
@@ -5536,27 +5134,17 @@ export function AirboardPrototype({
     semanticIntentRequestIdRef.current += 1;
     voiceCorrectionPendingRef.current = null;
     pendingIntentRef.current = null;
-    setGhostAnnotation(null);
-    setGhostAnnotations([]);
-    setAlignmentGuides([]);
+    setGhostElement(null);
     setCommandFeedback(message);
   }, []);
 
   /**
-   * Selects what a command left selected. The board selects one kind of
-   * object at a time: v2 objects as scene elements (with their toolbar), or
-   * legacy nodes from a board saved before Airo drew v2 shapes, which win.
+   * Selects what a command left selected. An empty or stale list (an id that
+   * is no longer on the board) leaves the current selection as it is.
    */
   const applyIntentSelection = useCallback((ids: string[], primary: string | null) => {
-    const annotationSelection = ids.filter((id) => !isSceneOnlyElement(boardRef.current, id));
-    if (annotationSelection.length === 0 && ids.length > 0) {
-      selectSceneElements(ids, primary && ids.includes(primary) ? primary : ids.at(-1) ?? null);
-      return;
-    }
-    setSelectedAnnotationIds(annotationSelection);
-    setSelectedAnnotationId(
-      primary && annotationSelection.includes(primary) ? primary : annotationSelection.at(-1) ?? null,
-    );
+    if (ids.length === 0 || !ids.every((id) => isActiveElement(boardRef.current, id))) return;
+    selectSceneElements(ids, primary && ids.includes(primary) ? primary : ids.at(-1) ?? null);
   }, [selectSceneElements]);
 
   const prepareParsedIntentPlan = useCallback(
@@ -5600,16 +5188,11 @@ export function AirboardPrototype({
           y: (canvasRect?.height ?? 600) / 2,
         });
       let previewState = baseState;
-      // The selection, Airo's older legacy nodes or v2 objects alike.
       let workingSelectionIds = currentSemanticSelectionIds().filter(
-        (id) => previewState.strokes[id]?.status === "committed" || isSceneOnlyElement(previewState, id),
+        (id) => isActiveElement(previewState, id),
       );
-      let workingPrimarySelectionId =
-        selectedAnnotationId && workingSelectionIds.includes(selectedAnnotationId)
-          ? selectedAnnotationId
-          : (workingSelectionIds[workingSelectionIds.length - 1] ?? null);
+      let workingPrimarySelectionId = workingSelectionIds[workingSelectionIds.length - 1] ?? null;
       let commands: DiagramCommand[] = [];
-      let affectedStrokeIds: string[] = [];
       let alreadySatisfied = false;
 
       try {
@@ -5622,7 +5205,6 @@ export function AirboardPrototype({
             viewOrigin: toBoardPoint({ x: 0, y: 0 }),
             selectionIds: workingSelectionIds,
             primarySelectionId: workingPrimarySelectionId,
-            hoverStrokeId,
             strokeColor,
           });
           if ("error" in resolved) {
@@ -5649,15 +5231,13 @@ export function AirboardPrototype({
           }
 
           for (const command of resolved.commands) {
-            const result = applyDiagramCommand(previewState, command, diagramCommandContext(boardSessionIdRef.current));
-            previewState = result.state;
-            affectedStrokeIds = [...affectedStrokeIds, ...result.affectedStrokeIds];
+            previewState = applyDiagramCommand(previewState, command, diagramCommandContext(boardSessionIdRef.current)).state;
           }
           commands = [...commands, ...resolved.commands];
           alreadySatisfied = alreadySatisfied || resolved.alreadySatisfied === true;
           if (resolved.selectionAfter) {
             workingSelectionIds = resolved.selectionAfter.filter(
-              (id) => previewState.strokes[id]?.status === "committed" || isSceneOnlyElement(previewState, id),
+              (id) => isActiveElement(previewState, id),
             );
             workingPrimarySelectionId =
               workingSelectionIds[workingSelectionIds.length - 1] ?? null;
@@ -5688,27 +5268,6 @@ export function AirboardPrototype({
           }
           return "no-op";
         }
-        const previewIds = [
-          ...new Set([...affectedStrokeIds, ...workingSelectionIds]),
-        ];
-        const ghosts = previewIds.flatMap((strokeId): AnnotationRenderObject[] => {
-          const previewStroke = previewState.strokes[strokeId];
-          const currentStroke = baseState.strokes[strokeId];
-          const stroke = previewStroke?.status === "deleted" ? currentStroke : previewStroke;
-          if (!stroke?.annotation) {
-            return [];
-          }
-          return [
-            {
-              annotation: stroke.annotation,
-              points: stroke.points,
-              color: stroke.color,
-              thickness: stroke.thickness,
-              previewKind:
-                previewStroke?.status === "deleted" ? "delete" : currentStroke ? "change" : "add",
-            },
-          ];
-        });
         const message =
           parsedSteps.length === 1
             ? firstParsed.message
@@ -5725,11 +5284,9 @@ export function AirboardPrototype({
           requiresExplicitConfirmation: false,
           commands,
           selectionAfter: workingSelectionIds,
-          ...(ghosts.length > 0 ? { ghosts } : {}),
           ...(voiceTurnId ? { voiceTurnId } : {}),
         };
         pendingIntentRef.current = pending;
-        setGhostAnnotations(ghosts);
         setCommandFeedback(message);
         appendCopilotActivity({
           source: "Airo",
@@ -5767,9 +5324,7 @@ export function AirboardPrototype({
       currentSemanticSelectionIds,
       appendCopilotActivity,
       cancelPendingIntent,
-      hoverStrokeId,
       reportVoiceTrace,
-      selectedAnnotationId,
       strokeColor,
       toBoardPoint,
     ],
@@ -5829,7 +5384,7 @@ export function AirboardPrototype({
       // selectionAfter values must not retarget later actions in the same plan.
       const referenceSelectionIds = [...initialSelectionIds];
       const initialPrimarySelectionId =
-        executionSnapshot?.primarySelectionId ?? selectedAnnotationId;
+        executionSnapshot?.primarySelectionId ?? null;
       const referencePrimarySelectionId =
         initialPrimarySelectionId &&
         referenceSelectionIds.includes(initialPrimarySelectionId)
@@ -5854,7 +5409,6 @@ export function AirboardPrototype({
               ? { requestSelectionIds: executionSnapshot.requestSelectionIds }
               : {}),
             primarySelectionId: referencePrimarySelectionId,
-            hoverStrokeId: executionSnapshot?.hoverStrokeId ?? hoverStrokeId,
             strokeColor,
           },
           applyCommand: (state, command) =>
@@ -5890,7 +5444,7 @@ export function AirboardPrototype({
           cancelPendingIntent(`Plan could not be grounded: ${grounding.reason}`);
           return "rejected";
         }
-        const { previewState, commands, affectedStrokeIds } = grounding;
+        const { commands } = grounding;
         const skippedSteps = grounding.skipped.map((step) => step.reason);
         const workingSelectionIds = grounding.selectionIds;
         const workingPrimarySelectionId =
@@ -5937,25 +5491,6 @@ export function AirboardPrototype({
           return selectionOnly ? "applied" : "no-op";
         }
 
-        const previewIds = [...new Set([...affectedStrokeIds, ...workingSelectionIds])];
-        const ghosts = previewIds.flatMap((strokeId): AnnotationRenderObject[] => {
-          const previewStroke = previewState.strokes[strokeId];
-          const currentStroke = baseState.strokes[strokeId];
-          const stroke = previewStroke?.status === "deleted" ? currentStroke : previewStroke;
-          if (!stroke?.annotation) {
-            return [];
-          }
-          return [
-            {
-              annotation: stroke.annotation,
-              points: stroke.points,
-              color: stroke.color,
-              thickness: stroke.thickness,
-              previewKind:
-                previewStroke?.status === "deleted" ? "delete" : currentStroke ? "change" : "add",
-            },
-          ];
-        });
         const message = skippedSteps.length > 0
           ? `${describeSemanticPlan(plan.actions)} (skipped ${skippedSteps.length} of ${plan.actions.length} steps: ${skippedSteps[0]})`
           : describeSemanticPlan(plan.actions);
@@ -5971,7 +5506,6 @@ export function AirboardPrototype({
           requiresExplicitConfirmation: false,
           commands,
           selectionAfter: workingSelectionIds,
-          ...(ghosts.length > 0 ? { ghosts } : {}),
           ...(voiceTurnId ? { voiceTurnId } : {}),
         };
         pendingIntentRef.current = pending;
@@ -6009,9 +5543,7 @@ export function AirboardPrototype({
       applyIntentSelection,
       cancelPendingIntent,
       currentSemanticSelectionIds,
-      hoverStrokeId,
       reportVoiceTrace,
-      selectedAnnotationId,
       strokeColor,
       toBoardPoint,
       undoLastAction,
@@ -6205,11 +5737,7 @@ export function AirboardPrototype({
       }
       const deterministicFanIn = resolveExistingBoardFanIn(
         instruction,
-        buildSemanticIntentContext(
-          boardRef.current,
-          selectedAnnotationIdsRef.current,
-          false,
-        ),
+        buildSemanticIntentContext(boardRef.current, [], false),
       );
       if (deterministicFanIn.status === "already_satisfied") {
         pendingSemanticClarificationRef.current = null;
@@ -6345,14 +5873,7 @@ export function AirboardPrototype({
 
       const requestBoardState = boardRef.current;
       const requestLiveSelectionIds = currentSemanticSelectionIds();
-      // "this"/"that" said while pointing at shapes Airo drew: the scene rules
-      // can't edit those, so the planner gets them as the selection it reads
-      // "this" from. The commit still checks the live selection.
-      const pointedLegacyIds = DEICTIC_REFERENCE_PATTERN.test(instruction)
-        ? pointedLegacyStrokeIds(requestBoardState, voiceReferenceRef.current)
-        : [];
-      const requestSelectionIds =
-        pointedLegacyIds.length > 0 ? pointedLegacyIds : requestLiveSelectionIds;
+      const requestSelectionIds = requestLiveSelectionIds;
       const pendingClarificationRecord =
         pendingSemanticClarificationRef.current;
       // A question stays open while the person answers, even if a hand or a
@@ -6382,7 +5903,6 @@ export function AirboardPrototype({
         baseSelectionIds: requestLiveSelectionIds,
         requestSelectionIds: [...requestSelectionIds],
         primarySelectionId: requestSelectionIds[requestSelectionIds.length - 1] ?? null,
-        hoverStrokeId: pointedLegacyIds.at(-1) ?? hoverStrokeId,
         pointer: requestPointer,
         canvasWidth: (requestCanvasRect?.width ?? 900) / boardViewportRef.current.scale,
         canvasHeight: (requestCanvasRect?.height ?? 600) / boardViewportRef.current.scale,
@@ -6453,7 +5973,7 @@ export function AirboardPrototype({
           // what was selected when the person spoke; steps whose shapes are
           // gone are skipped rather than the whole command being dropped.
           const stillThere = requestSelectionIds.filter(
-            (id) => boardRef.current.strokes[id]?.status === "committed" || isSceneOnlyElement(boardRef.current, id),
+            (id) => isActiveElement(boardRef.current, id),
           );
           executionSnapshot.boardState = boardRef.current;
           executionSnapshot.selectionIds = stillThere;
@@ -6639,7 +6159,6 @@ export function AirboardPrototype({
       appendCopilotActivity,
       effectiveAccessToken,
       executeSceneIntent,
-      hoverStrokeId,
       prepareIntentCommand,
       prepareSceneFanIn,
       prepareSemanticActionPlan,
@@ -6752,7 +6271,6 @@ export function AirboardPrototype({
           type: "diagram",
           undoEvents,
           redoEvents: forwardEvents,
-          selectionBefore: [...pending.baseSelectionIds],
           ...(pending.voiceTurnId
             ? { originatingInteractionId: pending.voiceTurnId }
             : {}),
@@ -6771,18 +6289,11 @@ export function AirboardPrototype({
       }
       const finalSelection = commit.selectionIds;
       refreshRealtimeSpeechKeyterms(nextState, finalSelection);
-      // Shapes from typed commands and the toolbar are selected as scene
-      // elements; the board selects one kind at a time, and Airo's own nodes win.
-      const annotationSelection = finalSelection.filter((id) => !isSceneOnlyElement(nextState, id));
-      if (annotationSelection.length === 0 && finalSelection.length > 0) {
+      // What the command left selected; an empty or stale list keeps the
+      // current selection.
+      if (finalSelection.length > 0 && finalSelection.every((id) => isActiveElement(nextState, id))) {
         selectSceneElements(finalSelection);
-      } else {
-        const primary = annotationSelection[annotationSelection.length - 1] ?? null;
-        setSelectedAnnotationIds(annotationSelection);
-        setSelectedAnnotationId(primary);
-        setLabelDraft(primary ? (nextState.strokes[primary]?.annotation?.label ?? "") : "");
       }
-      setEditingAnnotationId(null);
       setActiveObjectTool("select");
       setIntentCommandText("");
       setCommandFeedback(`Applied: ${pending.message}`);
@@ -6795,9 +6306,7 @@ export function AirboardPrototype({
       });
       voiceCorrectionPendingRef.current = null;
       pendingIntentRef.current = null;
-      setGhostAnnotation(null);
-      setGhostAnnotations([]);
-      setAlignmentGuides([]);
+      setGhostElement(null);
       if (pending.voiceTurnId) {
         reportVoiceTrace(pending.voiceTurnId, "action_applied", {
           actionCount: pending.commands.length,
@@ -7363,7 +6872,7 @@ export function AirboardPrototype({
         const gestureSummary =
           gestureTraceJournalRef.current?.summary() ?? null;
         return {
-          selectionIds: [...selectedAnnotationIdsRef.current],
+          selectionIds: [...selectedElementIdsRef.current],
           viewport: { ...boardViewportRef.current },
           gestureOwner:
             [...gestureTrace]
@@ -7398,7 +6907,7 @@ export function AirboardPrototype({
       },
       getCatalogGestureState: () => {
         const interaction = objectInteractionRef.current;
-        const ghostBounds = ghostAnnotation?.annotation.bounds;
+        const ghostBounds = ghostElement?.transform;
         return {
           openCatalogId,
           activeTool: activeObjectTool,
@@ -7420,7 +6929,6 @@ export function AirboardPrototype({
             : null,
           activeCreationTool: activeCreationToolRef.current,
           selectedElementIds: [...selectedElementIdsRef.current],
-          selectedAnnotationIds: [...selectedAnnotationIdsRef.current],
         };
       },
       getHandPointingSnapshot: () => structuredClone(handPointingSnapshotRef.current),
@@ -7431,29 +6939,14 @@ export function AirboardPrototype({
         render();
       },
       getBoardSummary: () => {
-        const committed = Object.values(boardRef.current.strokes).filter(
-          (stroke) => stroke.status === "committed" && stroke.annotation,
-        );
         const sceneElements = Object.values(boardRef.current.elements)
-          .filter((element) => element.status === "active" && !element.legacyStrokeId)
+          .filter((element) => element.status === "active")
           .sort((left, right) => left.zIndex - right.zIndex);
         return {
-          objectCount: committed.length + sceneElements.length,
-          labels: [
-            ...committed.map((stroke) => stroke.annotation?.label ?? ""),
-            ...sceneElements.map(sceneElementReferenceLabel),
-          ],
-          positions: [
-            ...committed.map((stroke) => {
-              const bounds = stroke.annotation?.bounds;
-              return bounds
-                ? { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }
-                : null;
-            }),
-            ...sceneElements.map(elementCenter),
-          ],
-          selectedCount:
-            selectedAnnotationIdsRef.current.length + selectedElementIdsRef.current.length,
+          objectCount: sceneElements.length,
+          labels: sceneElements.map(sceneElementReferenceLabel),
+          positions: sceneElements.map(elementCenter),
+          selectedCount: selectedElementIdsRef.current.length,
           boardSessionId: boardSessionIdRef.current,
           syncStatus: boardSyncStatusRef.current,
         };
@@ -7466,7 +6959,7 @@ export function AirboardPrototype({
     activeObjectTool,
     voiceCoalescer,
     currentViewportLimits,
-    ghostAnnotation,
+    ghostElement,
     handleGesture,
     openVoiceGate,
     openCatalogId,
@@ -7792,10 +7285,7 @@ export function AirboardPrototype({
           undefined,
         // Board labels bias this session's recognition toward the names on
         // screen; the transport bounds the merged list to the provider cap.
-        keyterms: buildSessionKeyterms(
-          boardRef.current,
-          selectedAnnotationIdsRef.current,
-        ),
+        keyterms: buildSessionKeyterms(boardRef.current, []),
         dynamicKeyterms:
           realtimeTranscriptionConfig?.dynamicKeyterms === true,
       },
@@ -8787,25 +8277,21 @@ export function AirboardPrototype({
         syncVoiceGateUi();
       }
 
-      const interaction = objectInteractionRef.current;
       const snapshot = voiceRouter.snapshot;
-      // The scoped gate's `strokeId` is a board target id: a legacy stroke id
-      // or, for a v2 element the hand is holding, the scene element id.
+      // The scoped gate's `strokeId` is a board target id: the scene element
+      // the hand is holding.
       const handSceneMove =
         sceneMoveRef.current?.pointerId === HAND_SCENE_POINTER_ID ? sceneMoveRef.current : null;
-      const movingStrokeId =
-        interaction?.mode === "moving"
-          ? interaction.strokeId
-          : handSceneMove?.elementId ?? handSceneMoveResumeRef.current;
+      const heldElementId = handSceneMove?.elementId ?? handSceneMoveResumeRef.current;
       const event = holdToEditTrackerRef.current!.update({
-        interaction: movingStrokeId
-          ? { strokeId: movingStrokeId, point: lastGesturePointerRef.current }
+        interaction: heldElementId
+          ? { strokeId: heldElementId, point: lastGesturePointerRef.current }
           : null,
         now: Date.now(),
         scopedActiveForStroke:
           snapshot?.mode === "scoped" &&
           snapshot.open &&
-          snapshot.strokeId === movingStrokeId,
+          snapshot.strokeId === heldElementId,
       });
       if (event?.type === "scope") {
         openVoiceGate({ mode: "scoped", strokeId: event.strokeId });
@@ -8968,13 +8454,7 @@ export function AirboardPrototype({
         if (selectedElementIdsRef.current.length > 0) {
           event.preventDefault();
           selectedElementIdsRef.current.forEach(deleteSceneElement);
-          return;
         }
-        if (selectedAnnotationIds.length === 0) {
-          return;
-        }
-        event.preventDefault();
-        prepareIntentCommand("delete selected");
         return;
       }
 
@@ -8985,31 +8465,17 @@ export function AirboardPrototype({
       // browser's native focus movement, so focus can always leave the canvas
       // (WCAG 2.1.2). Enter/exit follows the standard composite-widget pattern.
       if (shortcutsActiveRef.current && event.key === "Tab") {
-        const objects = [
-          ...getSelectableAnnotationIds(boardRef.current).map((id) => ({ source: "stroke" as const, id })),
-          ...sceneElementsForRender(boardRef.current)
-            .filter((element) => !element.legacyStrokeId)
-            .sort((a, b) => a.zIndex - b.zIndex)
-            .map((element) => ({ source: "element" as const, id: element.id })),
-        ];
+        const objects = sceneElementsForRender(boardRef.current)
+          .sort((a, b) => a.zIndex - b.zIndex)
+          .map((element) => element.id);
         if (objects.length > 0) {
           const currentId = selectedElementIdsRef.current.length === 1
             ? selectedElementIdsRef.current[0]
-            : selectedAnnotationIdsRef.current.length === 1
-              ? selectedAnnotationIdsRef.current[0]
-              : null;
-          const currentIndex = currentId ? objects.findIndex(({ id }) => id === currentId) : -1;
+            : null;
+          const currentIndex = currentId ? objects.indexOf(currentId) : -1;
           const selectAt = (index: number) => {
-            const next = objects[index]!;
-            if (next.source === "element") {
-              selectSceneElements([next.id], next.id);
-            } else {
-              setSelectedElementId(null);
-              setSelectedElementIds([]);
-              setSelectedAnnotationId(next.id);
-              setSelectedAnnotationIds([next.id]);
-              setEditingAnnotationId(null);
-            }
+            const nextId = objects[index]!;
+            selectSceneElements([nextId], nextId);
           };
           if (!event.shiftKey) {
             if (currentIndex === -1) {
@@ -9034,8 +8500,8 @@ export function AirboardPrototype({
         }
       }
 
-      // Enter / F2 open the label editor for the single selected object, mirroring
-      // double-click. The auto-focus effect then puts the cursor in the input.
+      // Enter / F2 open the scene text editor on the single selected element,
+      // mirroring double-click.
       if (shortcutsActiveRef.current && (event.key === "Enter" || event.key === "F2")) {
         const selectedSceneId = selectedElementIdsRef.current.length === 1
           ? selectedElementIdsRef.current[0]
@@ -9044,16 +8510,6 @@ export function AirboardPrototype({
           event.preventDefault();
           setEditingElementId(selectedSceneId);
           return;
-        }
-        const current = selectedAnnotationIdsRef.current;
-        if (current.length === 1) {
-          const stroke = boardRef.current.strokes[current[0]!];
-          if (stroke?.annotation && annotationNeedsLabel(stroke.annotation)) {
-            event.preventDefault();
-            setLabelDraft(stroke.annotation.label ?? "");
-            setEditingAnnotationId(current[0]!);
-            return;
-          }
         }
       }
 
@@ -9064,9 +8520,6 @@ export function AirboardPrototype({
         }
         endActivePointerInteraction();
         handPanRef.current = null;
-        gesturePathRef.current = [];
-        setSelectedAnnotationId(null);
-        setSelectedAnnotationIds([]);
         setSelectedElementId(null);
         setSelectedElementIds([]);
         setHoverElementId(null);
@@ -9078,8 +8531,6 @@ export function AirboardPrototype({
           boardRef.current = { ...boardRef.current, activeStrokes };
           render();
         }
-        setLabelDraft("");
-        setEditingAnnotationId(null);
         cancelObjectInteraction();
       }
     };
@@ -9123,7 +8574,6 @@ export function AirboardPrototype({
     redoLastSceneAction,
     render,
     selectSceneElements,
-    selectedAnnotationIds,
     setDiagramVisibility,
     undoLastAction,
   ]);
@@ -9219,25 +8669,18 @@ export function AirboardPrototype({
       }
       if (isScenePlacementTool(creationTool)) {
         createSceneElementAtPoint(creationTool, point);
-        setGhostAnnotation(null);
-        setGhostAnnotations([]);
+        setGhostElement(null);
         return;
       }
       const sceneHit = findSceneElementAtPoint(boardRef.current, point);
-      const v2SceneHit = sceneHit?.legacyStrokeId ? null : sceneHit;
       if (event.shiftKey) {
-        if (v2SceneHit) {
-          const next = selectedElementIdsRef.current.includes(v2SceneHit.id)
-            ? selectedElementIdsRef.current.filter((id) => id !== v2SceneHit.id)
-            : [...selectedElementIdsRef.current, v2SceneHit.id];
-          selectSceneElements(next, v2SceneHit.id);
-          setHoverElementId(v2SceneHit.id);
+        if (sceneHit) {
+          const next = selectedElementIdsRef.current.includes(sceneHit.id)
+            ? selectedElementIdsRef.current.filter((id) => id !== sceneHit.id)
+            : [...selectedElementIdsRef.current, sceneHit.id];
+          selectSceneElements(next, sceneHit.id);
+          setHoverElementId(sceneHit.id);
           return;
-        }
-        const hitStroke = findAnnotationObjectAtPoint(boardRef.current, point);
-        if (hitStroke) {
-          toggleAnnotationObject(hitStroke.id);
-          setHoverStrokeId(hitStroke.id);
         }
         moveCursorPoint({ point, mode: "marker_hover", inputSource });
         return;
@@ -9248,17 +8691,16 @@ export function AirboardPrototype({
         const eraserPoint = makePoint(point.x, point.y);
         eraserPoint.inputSource = inputSource;
         pointerErasingRef.current = true;
-        activeEraseAffectedStrokeIdsRef.current = new Set(eraseAt(eraserPoint, ERASER_RADIUS));
-        selectAnnotationObject(null);
+        publishEraserCursor(eraserPoint);
         moveCursorPoint({ point, mode: "erasing", inputSource });
         return;
       }
-      if (v2SceneHit && beginSceneMove(event.pointerId, v2SceneHit, point, inputSource)) {
-        setHoverElementId(v2SceneHit.id);
+      if (sceneHit && beginSceneMove(event.pointerId, sceneHit, point, inputSource)) {
+        setHoverElementId(sceneHit.id);
         moveCursorPoint({ point, mode: "writing", inputSource });
         return;
       }
-      if (!v2SceneHit) selectSceneElements([]);
+      if (!sceneHit) selectSceneElements([]);
       beginObjectInteraction(point, { inputSource });
       moveCursorPoint({ point, mode: "writing", inputSource });
     },
@@ -9267,16 +8709,14 @@ export function AirboardPrototype({
       beginSceneDrawing,
       beginSceneMove,
       createSceneElementAtPoint,
-      eraseAt,
       eraseSceneDrawingsAt,
       insertLinkAtPoint,
       makePoint,
       moveCursorPoint,
+      publishEraserCursor,
       requestMediaAtPoint,
-      selectAnnotationObject,
       selectSceneElements,
       toBoardPoint,
-      toggleAnnotationObject,
     ],
   );
 
@@ -9292,7 +8732,7 @@ export function AirboardPrototype({
       event.preventDefault();
       if (activePointerIdRef.current === null) {
         const hovered = findSceneElementAtPoint(boardRef.current, canvasPoint);
-        setHoverElementId(hovered?.legacyStrokeId ? null : hovered?.id ?? null);
+        setHoverElementId(hovered?.id ?? null);
       }
       const handPan = handPanRef.current;
       if (handPan && handPan.pointerId === event.pointerId) {
@@ -9412,22 +8852,11 @@ export function AirboardPrototype({
         y: event.clientY - rect.top,
       });
       const sceneElement = findSceneElementAtPoint(boardRef.current, point);
-      if (sceneElement && !sceneElement.legacyStrokeId) {
+      if (sceneElement) {
         event.preventDefault();
         selectSceneElements([sceneElement.id], sceneElement.id);
         setEditingElementId(sceneElement.id);
-        return;
       }
-      const hitStroke = findAnnotationObjectAtPoint(boardRef.current, point);
-      if (!hitStroke?.annotation || !annotationNeedsLabel(hitStroke.annotation)) {
-        return;
-      }
-
-      event.preventDefault();
-      setSelectedAnnotationId(hitStroke.id);
-      setSelectedAnnotationIds([hitStroke.id]);
-      setLabelDraft(hitStroke.annotation.label ?? "");
-      setEditingAnnotationId(hitStroke.id);
     },
     [selectSceneElements, toBoardPoint],
   );
@@ -9457,7 +8886,7 @@ export function AirboardPrototype({
   );
 
   const activateObjectTool = useCallback(
-    (tool: ObjectDockTool) => {
+    (tool: ObjectDockTool, creationTool?: CreationToolId) => {
       if (objectInteractionRef.current || cameraGrabActiveRef.current) {
         cancelObjectInteraction();
         hybridGestureControllerRef.current?.reset({ requirePinchRelease: true });
@@ -9469,11 +8898,9 @@ export function AirboardPrototype({
       cameraGrabActiveRef.current = false;
       hybridPinchClosedRef.current = false;
       pointerErasingRef.current = false;
-      setAlignmentGuides([]);
       setActiveObjectTool(tool);
       if (!isPlacementTool(tool)) {
-        setGhostAnnotation(null);
-        setGhostAnnotations([]);
+        setGhostElement(null);
         setCommandFeedback(
           tool === "eraser"
             ? "Eraser ready. Move over an object while holding the erase gesture."
@@ -9489,7 +8916,7 @@ export function AirboardPrototype({
           x: (rect?.width ?? 760) / 2,
           y: (rect?.height ?? 520) / 2,
         });
-      updatePlacementGhost(tool, center, center);
+      updatePlacementGhost(tool, center, center, creationTool ? { creationTool } : {});
       setCommandFeedback(
         `${objectToolLabel(tool)} preview ready. Close your hand anywhere, move it, then open to place.`,
       );
@@ -9500,7 +8927,7 @@ export function AirboardPrototype({
   const activateCreationTool = useCallback(
     (tool: CreationToolId) => {
       if (isScenePlacementTool(tool)) {
-        activateObjectTool(scenePlacementPreviewTool(tool));
+        activateObjectTool(scenePlacementPreviewTool(tool), tool);
         setActiveCreationTool(tool);
         activeCreationToolRef.current = tool;
         return;
@@ -9600,17 +9027,6 @@ export function AirboardPrototype({
     ],
   );
 
-  const selectedStroke = selectedAnnotationId ? boardRef.current.strokes[selectedAnnotationId] : undefined;
-  const selectedAnnotation = selectedStroke?.annotation;
-  const labelAnchor = selectedAnnotation ? getAnnotationLabelAnchor(selectedAnnotation) : null;
-  const showFloatingLabelEditor =
-    selectedAnnotationIds.length === 1 &&
-    editingAnnotationId === selectedAnnotationId &&
-    Boolean(selectedAnnotation && annotationNeedsLabel(selectedAnnotation)) &&
-    labelAnchor;
-  const labelAnchorScreen = labelAnchor
-    ? screenPointFromBoard(boardViewportRef.current, labelAnchor)
-    : null;
   const editingSceneElement = editingElementId ? boardRef.current.elements[editingElementId] : undefined;
   const inlineTextTarget = editingSceneElement?.status === "active" &&
     (editingSceneElement.kind === "section" || isInlineTextEditable(editingSceneElement))
@@ -9619,24 +9035,6 @@ export function AirboardPrototype({
   const inlineTextBounds = inlineTextTarget
     ? sceneTextEditorBounds(inlineTextTarget, boardViewportRef.current, canvasRef.current)
     : null;
-  const floatingLabelStyle = labelAnchorScreen
-    ? {
-        left: Math.max(14, labelAnchorScreen.x + 10),
-        top: Math.max(14, labelAnchorScreen.y + 10),
-      }
-    : undefined;
-
-  // Auto-focus the label editor when it opens (double-click or a new node created
-  // by voice/gesture) so the user can type/speak the label without an extra click.
-  useEffect(() => {
-    if (editingAnnotationId) {
-      const input = labelInputRef.current;
-      if (input) {
-        input.focus();
-        input.select();
-      }
-    }
-  }, [editingAnnotationId]);
 
   const beginTitleEdit = useCallback(() => {
     if (!onRenameBoard || titleStatus === "saving") return;
@@ -10066,37 +9464,6 @@ export function AirboardPrototype({
               onClose={() => setEditingElementId((current) => (current === inlineTextTarget.id ? null : current))}
             />
           ) : null}
-          {showFloatingLabelEditor && floatingLabelStyle ? (
-            <div className="floating-label-editor" style={floatingLabelStyle}>
-              <label htmlFor="floating-annotation-label">Say or type label</label>
-              <input
-                id="floating-annotation-label"
-                ref={labelInputRef}
-                type="text"
-                value={labelDraft}
-                onChange={(event) => setLabelDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.stopPropagation();
-                    saveAnnotationLabel();
-                  }
-                  if (event.key === "Escape") {
-                    event.stopPropagation();
-                    dismissAnnotationLabelEditor();
-                  }
-                }}
-                placeholder="Label"
-              />
-              <div className="label-actions">
-                <button type="button" onClick={saveAnnotationLabel}>
-                  Save
-                </button>
-                <button type="button" onClick={dismissAnnotationLabelEditor}>
-                  Dismiss
-                </button>
-              </div>
-            </div>
-          ) : null}
         </section>
 
         {settingsOpen ? (
@@ -10137,31 +9504,6 @@ export function AirboardPrototype({
       </div>
     </main>
   );
-}
-
-function createAnnotationRestoreEvents(boardSessionId: string, initial: BoardState, current: BoardState): BoardEvent[] {
-  const events: BoardEvent[] = [];
-  for (const [strokeId, initialStroke] of Object.entries(initial.strokes)) {
-    const currentStroke = current.strokes[strokeId];
-    if (
-      !initialStroke.annotation ||
-      !currentStroke?.annotation ||
-      initialStroke === currentStroke
-    ) {
-      continue;
-    }
-    events.push({
-      ...createEventEnvelope({
-        boardSessionId,
-        actorParticipantId: PARTICIPANT_ID,
-      }),
-      type: "stroke.annotation_updated",
-      strokeId,
-      annotation: initialStroke.annotation,
-      points: initialStroke.points,
-    });
-  }
-  return events;
 }
 
 function isObjectGestureGrabStart(result: GestureResult): boolean {
@@ -10209,26 +9551,6 @@ function decodeCanvasImage(source: string, signal: AbortSignal): Promise<HTMLIma
   });
 }
 
-/** The hidden scene copy the reducer keeps of a legacy (Airo-drawn) stroke. */
-function isLegacyStrokeSceneCopy(state: BoardState, id: string): boolean {
-  return Boolean(state.elements[id]?.legacyStrokeId);
-}
-
-/**
- * Legacy strokes the voice reference points at, for the planner: the scene
- * rules can't edit those, so the planner gets them as what "this" means.
- */
-function pointedLegacyStrokeIds(
-  state: BoardState,
-  reference: VoiceReference | null,
-): string[] {
-  if (!reference) return [];
-  const ids = [reference.startTargetId, ...reference.pointedIds].filter(
-    (id): id is string => Boolean(id) && state.strokes[id!]?.status === "committed",
-  );
-  return [...new Set(ids)];
-}
-
 
 /**
  * Speech recognizers commonly render “add a database, uh, later that is
@@ -10262,49 +9584,4 @@ function getCanvasPoint(event: ReactPointerEvent<HTMLCanvasElement>): { x: numbe
     x: event.clientX - rect.left,
     y: event.clientY - rect.top,
   };
-}
-
-function getAnnotationHandleAtPoint(
-  annotation: StrokeAnnotation,
-  point: AnnotationPoint,
-): AnnotationResizeHandle | null {
-  const hitRadius = 12;
-  if (annotation.bounds) {
-    const { x, y, width, height } = annotation.bounds;
-    const handles: readonly { handle: AnnotationResizeHandle; point: AnnotationPoint }[] = [
-      { handle: "nw", point: { x, y } },
-      { handle: "ne", point: { x: x + width, y } },
-      { handle: "sw", point: { x, y: y + height } },
-      { handle: "se", point: { x: x + width, y: y + height } },
-    ];
-    return (
-      handles.find((item) => Math.hypot(item.point.x - point.x, item.point.y - point.y) <= hitRadius)
-        ?.handle ?? null
-    );
-  }
-
-  if (annotation.start && Math.hypot(annotation.start.x - point.x, annotation.start.y - point.y) <= hitRadius) {
-    return "start";
-  }
-  if (annotation.end && Math.hypot(annotation.end.x - point.x, annotation.end.y - point.y) <= hitRadius) {
-    return "end";
-  }
-
-  return null;
-}
-
-// Committed diagram objects in a stable order, for keyboard Tab cycling.
-function getSelectableAnnotationIds(state: BoardState): string[] {
-  return Object.values(state.strokes)
-    .filter((stroke) => stroke.status === "committed" && stroke.annotation)
-    .sort((a, b) =>
-      a.createdAt < b.createdAt
-        ? -1
-        : a.createdAt > b.createdAt
-          ? 1
-          : a.id < b.id
-            ? -1
-            : 1,
-    )
-    .map((stroke) => stroke.id);
 }

@@ -1389,32 +1389,6 @@ button:disabled {
   resize: none;
 }
 
-.floating-label-editor {
-  position: absolute;
-  z-index: 5;
-  display: grid;
-  gap: 6px;
-  width: 220px;
-  padding: 8px;
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 10px 28px rgba(31, 37, 32, 0.12);
-}
-
-.floating-label-editor label {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.floating-label-editor input {
-  width: 100%;
-  min-height: 34px;
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  padding: 0 8px;
-}
-
 .sidebar {
   display: flex;
   flex-direction: column;
@@ -1524,16 +1498,6 @@ button:disabled {
   background: var(--panel);
   color: var(--ink);
   padding: 0 8px;
-}
-
-.label-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-}
-
-.label-actions button {
-  min-height: 32px;
 }
 
 .check-row {

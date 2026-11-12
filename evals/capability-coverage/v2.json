@@ -260,7 +260,7 @@
       "rationale": "The real semantic grounder resolves spatial ordinals, emits two labelled branch commands, and the production reducer reaches the asserted graph."
     },
     {
-      "evidenceId": "test:packages/core/test/diagramCommands.test.mjs#creates annotation-compatible nodes and snapped connectors through BoardEvents",
+      "evidenceId": "test:packages/core/test/diagramCommandsV2.test.mjs#nodes.connect draws a bound v2 connector that meets a diamond on its outline",
       "capabilities": [
         "action:create",
         "action:connect"
@@ -271,29 +271,28 @@
       "rationale": "Commands are reduced through real BoardEvents and the committed node/connector state is asserted."
     },
     {
-      "evidenceId": "test:apps/web/test/intentPipeline.test.mjs#REGRESSION: repairs the unique visually detached line in place",
+      "evidenceId": "test:apps/web/test/intentPipeline.test.mjs#semantic connect relabels the one existing line instead of drawing a second",
       "capabilities": [
         "action:connect"
       ],
       "facets": [
         "positive",
-        "grounding",
-        "final_state"
+        "grounding"
       ],
-      "rationale": "The production text and semantic grounders both recognize stale connector geometry, emit one atomic connection.attach command, preserve identity and style, and prove exact Undo."
+      "rationale": "The production semantic grounder resolves a connect between two visible labels that are already joined to one scene.rename of the existing connector instead of drawing a second line."
     },
     {
-      "evidenceId": "test:apps/web/test/intentPipeline.test.mjs#disconnected-line grounding never steals a healthy mismatched connector",
+      "evidenceId": "test:apps/web/test/intentPipeline.test.mjs#attaching an existing line: every line is bound, so it is already joined or refused",
       "capabilities": [
         "action:connect"
       ],
       "facets": [
         "negative"
       ],
-      "rationale": "An explicit disconnected-line request still fails closed rather than replacing a geometrically healthy endpoint belonging to another relationship."
+      "rationale": "An explicit disconnected-line request fails closed with an exact error (or reports an existing join as already satisfied) and never takes a healthy line belonging to another relationship."
     },
     {
-      "evidenceId": "test:packages/core/test/diagramCommands.test.mjs#rename, resize, and cascade delete remain undoable with existing event types",
+      "evidenceId": "test:packages/core/test/diagramCommandsV2.test.mjs#the edit verbs move, restyle, rename and delete with their connectors, undoably",
       "capabilities": [
         "action:rename",
         "action:delete"
@@ -304,7 +303,7 @@
       "rationale": "Committed rename/delete state and cascade behavior are asserted through the production reducer."
     },
     {
-      "evidenceId": "test:packages/core/test/diagramCommands.test.mjs#groups stay renderer-compatible and duplicate with remapped memberships",
+      "evidenceId": "test:packages/core/test/diagramCommandsV2.test.mjs#grouping and duplicating v2 objects make v2 sections and copies",
       "capabilities": [
         "action:group",
         "action:duplicate"
@@ -315,7 +314,7 @@
       "rationale": "The final group membership and duplicated identity graph are asserted."
     },
     {
-      "evidenceId": "test:packages/core/test/diagramCommands.test.mjs#moving a node keeps attached connectors bound and compensating events undo both",
+      "evidenceId": "test:packages/core/test/sceneDiagramCommands.test.mjs#moving or deleting a diagram node keeps connectors attached to it in step",
       "capabilities": [
         "action:move"
       ],
@@ -325,7 +324,7 @@
       "rationale": "Final moved-node and attached-connector geometry plus undo are asserted."
     },
     {
-      "evidenceId": "test:packages/core/test/diagramCommands.test.mjs#align and layout produce deterministic constraint-based geometry",
+      "evidenceId": "test:packages/core/test/sceneDiagramCommands.test.mjs#align, distribute and layout arrange toolbar shapes and diagram nodes together, and undo cleanly",
       "capabilities": [
         "action:align",
         "action:layout"
@@ -712,10 +711,10 @@
         "grounding",
         "final_state"
       ],
-      "rationale": "The production grounder resolves visible labels on a legacy node and a v2 shape, emits object.retype and scene.retype, and the reducer reaches the new node type and shape with the label kept."
+      "rationale": "The production grounder resolves visible labels on Airo's node and a toolbar shape, emits scene.retype for both, and the reducer reaches the new node type and shape with the label kept."
     },
     {
-      "evidenceId": "test:apps/web/test/semanticPlanGrounding.test.mjs#resize makes legacy and toolbar shapes bigger around their centers",
+      "evidenceId": "test:apps/web/test/semanticPlanGrounding.test.mjs#resize makes Airo's and toolbar shapes bigger around their centers",
       "capabilities": [
         "action:resize"
       ],
@@ -723,7 +722,7 @@
         "grounding",
         "final_state"
       ],
-      "rationale": "The production grounder emits object.resize and scene.resize for named objects and the reducer reaches larger, center-preserving bounds."
+      "rationale": "The production grounder emits scene.resize for named objects and the reducer reaches larger, center-preserving bounds."
     },
     {
       "evidenceId": "test:apps/web/test/semanticPlanGrounding.test.mjs#connectors can be labelled and dashed by naming their ends",
@@ -735,7 +734,7 @@
         "grounding",
         "final_state"
       ],
-      "rationale": "The production grounder resolves a connector by its endpoints, labels it and changes its line style, and the reducer reaches the labelled, dashed (and then solid) legacy connector and its v2 mirror."
+      "rationale": "The production grounder resolves a connector by its endpoints, labels it and changes its line style, and the reducer reaches the labelled, dashed (and then solid) v2 connector."
     }
   ],
   "physicalMedia": {

@@ -1,10 +1,10 @@
 /**
- * Which creation tools place a v2 scene element, and the legacy preview each
- * shows while placing. Moved verbatim out of AirboardPrototype.tsx (board
+ * Which creation tools place a v2 scene element, and the dock tool each one
+ * arms while placing. Moved out of AirboardPrototype.tsx (board
  * split, phase 1).
  */
 import { legacyToolForCreationTool, type CreationToolId } from "../creationToolCatalog.ts";
-import { isPlacementTool, type ObjectDockTool } from "../gestureAnnotationMode.ts";
+import { isPlacementTool, type ObjectDockTool } from "../placementGhost.ts";
 
 export function isScenePlacementTool(tool: CreationToolId): boolean {
   return (

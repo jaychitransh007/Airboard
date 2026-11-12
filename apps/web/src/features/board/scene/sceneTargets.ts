@@ -31,7 +31,6 @@ export function resolveSceneIntentTargetIds(
     .filter((element) =>
       element.status === "active" &&
       sceneElementVisibleForIntent(state, element) &&
-      !element.legacyStrokeId &&
       sceneElementReferenceLabels(element).some(
         (label) => normalizeSceneReference(label) === requested,
       ),
@@ -76,8 +75,7 @@ export function resolveContextualSceneTarget(
       element.status === "active" &&
       element.visible &&
       element.kind !== "connector" &&
-      element.kind !== "section" &&
-      !element.legacyStrokeId,
+      element.kind !== "section",
     )
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
   return recent ? [recent.id] : [];
@@ -140,7 +138,6 @@ export function buildSceneFanInContext(state: BoardState, selectionIds: readonly
     .filter((element) =>
       element.status === "active" &&
       sceneElementVisibleForIntent(state, element) &&
-      !element.legacyStrokeId &&
       element.kind !== "connector" &&
       element.kind !== "drawing",
     )
@@ -162,7 +159,6 @@ export function buildSceneFanInContext(state: BoardState, selectionIds: readonly
       element.kind !== "connector" ||
       element.status !== "active" ||
       !sceneElementVisibleForIntent(state, element) ||
-      element.legacyStrokeId ||
       !element.start.binding ||
       !element.end.binding
     ) return [];

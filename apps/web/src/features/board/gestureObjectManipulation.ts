@@ -5,7 +5,6 @@ import {
   type BoardState,
   type ConnectorEndpoint,
 } from "@airboard/core";
-import { getConnectorRoutePoints } from "@airboard/drawing-engine";
 import type { GestureTarget } from "@airboard/gesture-engine";
 
 /**
@@ -14,36 +13,11 @@ import type { GestureTarget } from "@airboard/gesture-engine";
  * a closed hand may move an object, while every other empty-canvas pose is a
  * no-op.
  *
- * Both shape worlds are targets (gap 2 of the hands-free audit): legacy
- * annotation strokes that Airo's planner draws, and v2 scene elements made by
- * short commands, the toolbar and dock placement. A target id is either a
- * stroke id or a scene element id; `gestureTargetWorld` says which.
+ * Every hand-targetable element is a target (gap 2 of the hands-free audit),
+ * whoever made it: Airo, short commands, the toolbar or dock placement.
  */
 export function buildGestureMoveTargets(state: BoardState): GestureTarget[] {
   const targets: GestureTarget[] = [];
-  for (const stroke of Object.values(state.strokes)) {
-    const annotation = stroke.annotation;
-    if (stroke.status !== "committed" || !annotation) {
-      continue;
-    }
-
-    if (annotation.bounds) {
-      targets.push({
-        id: stroke.id,
-        bounds: annotation.bounds,
-        priority: annotation.type === "flow_node" || annotation.type === "sticky_note" ? 2 : 1,
-        capturePaddingPx: 12,
-        releasePaddingPx: 18,
-      });
-      continue;
-    }
-
-    if (annotation.start && annotation.end) {
-      const route = getConnectorRoutePoints(annotation);
-      pushSegmentTargets(targets, stroke.id, route, annotation.type === "connector" ? 0.9 : 0.8);
-    }
-  }
-
   for (const element of Object.values(state.elements ?? {})) {
     if (!isHandTargetableSceneElement(state, element)) continue;
     if (element.kind === "connector") {
@@ -97,10 +71,9 @@ function pushSegmentTargets(
 }
 
 /**
- * A v2 element a hand may grab, move, erase or hold-to-edit. Mirrors of
- * legacy strokes are reached through their stroke; sections are containers a
- * closed hand would grab by accident, so they stay mouse-only; hidden
- * elements and members of hidden or collapsed sections are not on view.
+ * An element a hand may grab, move, erase or hold-to-edit. Sections are
+ * containers a closed hand would grab by accident, so they stay mouse-only;
+ * hidden elements and members of hidden or collapsed sections are not on view.
  */
 export function isHandTargetableSceneElement(
   state: BoardState,
@@ -108,7 +81,6 @@ export function isHandTargetableSceneElement(
 ): element is BoardSceneElement {
   if (!element || element.status !== "active" || !element.visible) return false;
   if (element.kind === "section") return false;
-  if (element.legacyStrokeId || state.strokes[element.id]) return false;
   const section = element.sectionId ? state.elements[element.sectionId] : undefined;
   if (
     section?.kind === "section" &&
@@ -120,17 +92,7 @@ export function isHandTargetableSceneElement(
   return true;
 }
 
-/** Which shape world a hand target id belongs to. */
-export function gestureTargetWorld(
-  state: BoardState,
-  targetId: string | null | undefined,
-): "stroke" | "scene" | null {
-  if (!targetId) return null;
-  if (state.strokes[targetId]?.status === "committed") return "stroke";
-  return isHandTargetableSceneElement(state, state.elements[targetId]) ? "scene" : null;
-}
-
-/** The v2 node (shape, sticky, text, mind-map node) under a board point, if any. */
+/** The node (shape, sticky, text, mind-map node) under a board point, if any. */
 export function sceneNodeAtPoint(
   state: BoardState,
   point: AnnotationPoint,
@@ -260,20 +222,4 @@ function anchorToward(element: BoardSceneElement, toward: AnnotationPoint): Anno
   const halfHeight = Math.max(0.5, element.transform.height / 2);
   const scale = 1 / Math.max(Math.abs(dx) / halfWidth, Math.abs(dy) / halfHeight);
   return { x: center.x + dx * scale, y: center.y + dy * scale };
-}
-
-/**
- * Pointer and keyboard-assisted interactions may resolve visible resize
- * handles. Camera input never may, even when its cursor happens to overlap a
- * selected object's pointer handle.
- */
-export function resolveResizeHandleForInput<T>(
-  inputSource: string,
-  forcedHandle: T | null | undefined,
-  detectedHandle: T | null,
-): T | null {
-  if (inputSource === "air_gesture") {
-    return null;
-  }
-  return forcedHandle ?? detectedHandle;
 }

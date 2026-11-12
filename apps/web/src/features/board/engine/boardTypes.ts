@@ -10,9 +10,7 @@ import {
   type BoardState,
   type CursorState,
   type DiagramCommand,
-  type StrokeAnnotation,
 } from "@airboard/core";
-import type { AnnotationRenderObject } from "@airboard/drawing-engine";
 import type {
   DetectedHand,
   GestureResult,
@@ -24,8 +22,8 @@ import type {
   RawLandmarkFrameGeometry,
   RawLandmarkFrameSource,
 } from "../gestureFrameCoordinator.ts";
-import type { AnnotationResizeHandle, ObjectDockTool } from "../gestureAnnotationMode.ts";
 import type { ParsedIntentCanvasCommand } from "../intentCanvasParser.ts";
+import type { ObjectDockTool } from "../placementGhost.ts";
 import type { RealtimeSpeechSession } from "../realtimeSpeech.ts";
 import type { SemanticIntentPendingClarification } from "../semanticIntent.ts";
 
@@ -131,7 +129,6 @@ export type PendingIntent = {
   requiresExplicitConfirmation: boolean;
   commands: DiagramCommand[];
   selectionAfter?: string[];
-  ghosts?: AnnotationRenderObject[];
   voiceTurnId?: string;
 };
 
@@ -151,7 +148,6 @@ export type SemanticExecutionSnapshot = {
    */
   requestSelectionIds?: string[];
   primarySelectionId: string | null;
-  hoverStrokeId: string | null;
   pointer: { x: number; y: number } | null;
   /** Dimensions of the VISIBLE board window (screen size ÷ viewport scale). */
   canvasWidth: number;
@@ -190,18 +186,6 @@ export type ObjectInteraction =
         bottom: number;
       };
       enteredCanvas: boolean;
-    }
-  | {
-      mode: "moving";
-      strokeId: string;
-      start: AnnotationPoint;
-      initialAnnotation: StrokeAnnotation;
-    }
-  | {
-      mode: "resizing";
-      strokeId: string;
-      handle: AnnotationResizeHandle;
-      initialAnnotation: StrokeAnnotation;
     };
 
 export const BOARD_SESSION_ID = "local-standalone-board";
@@ -272,9 +256,6 @@ export type VoiceReference = {
   /** Up to two shapes pointed at during the command, in order. */
   pointedIds: string[];
 };
-
-/** Words that mean "what I'm pointing at". */
-export const DEICTIC_REFERENCE_PATTERN = /\b(?:this|that|it|these|those|them)\b/i;
 
 /** The planner accepts up to this much dialogue for a clarification answer. */
 export const MAX_CLARIFICATION_TRANSCRIPT_CHARS = 2_000;

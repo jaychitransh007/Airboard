@@ -23,7 +23,7 @@ import {
  */
 
 const FIXTURE = JSON.parse(
-  readFileSync(new URL("../../apps/web/e2e/fixtures/legacy-annotations.board.json", import.meta.url), "utf8"),
+  readFileSync(new URL("../../packages/core/test/fixtures/legacy-annotations.board.json", import.meta.url), "utf8"),
 );
 
 test("the connection string reaches psql only through libpq variables", () => {
@@ -204,7 +204,7 @@ test("end to end on a local Postgres: dry run reads only, apply backs up, conver
   const plan = applied.plans.find((candidate) => candidate.id === BOARD.converted);
   assert.equal(row(BOARD.converted).latest_version, 4);
   assert.deepEqual(row(BOARD.converted).latest_state, plan.after);
-  assert.deepEqual(row(BOARD.converted).latest_state.strokes, {});
+  assert.equal("strokes" in row(BOARD.converted).latest_state, false, "a converted board has no strokes key");
   assert.equal(row(BOARD.converted).updated_at, untouched.boards.find((board) => board.id === BOARD.converted).updated_at);
   const sessions = after.sessions.filter((session) => session.board_id === BOARD.converted);
   assert.deepEqual(sessions.map((session) => session.status), ["ended", "ended", "ended"]);

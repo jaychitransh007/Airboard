@@ -17,6 +17,10 @@ import { signIn } from "./support/signedInApi";
  *     pnpm --filter @airboard/web e2e renderBoardStates --workers=1
  *
  * Nothing is compared or saved back; the pictures are for a person to look at.
+ *
+ * Since shape-merge phase 3 the app has no legacy model: a before-state that
+ * still holds strokes renders through upgradeLegacyBoardState, the convert-
+ * on-open step, so it shows the converted board, not the old drawing.
  */
 
 const SOURCE = process.env.AIRBOARD_RENDER_STATES ? resolve(process.env.AIRBOARD_RENDER_STATES) : null;

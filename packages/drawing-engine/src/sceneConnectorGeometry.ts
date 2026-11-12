@@ -456,8 +456,6 @@ export function sceneConnectorLabelObstacles(
     }
     if (LABEL_IGNORES.has(other.kind)) continue;
     if (other.kind === "connector") {
-      // Legacy mirrors are drawn as strokes; their routes are elsewhere.
-      if (other.legacyStrokeId) continue;
       const route = sampleSceneConnector(other);
       if (routeCrossesBox(route, near, 0)) lines.push(route);
       continue;
