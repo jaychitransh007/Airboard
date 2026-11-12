@@ -6,7 +6,7 @@ categoryLabel: Getting started
 order: 1
 status: shipped
 audiences: ["everyone"]
-lastVerified: 2026-11-11
+lastVerified: 2026-11-12
 sources: ["README.md", "apps/web/src/features/board/AirboardPrototype.tsx", "apps/web/src/features/product/AirboardsHome.tsx"]
 ---
 
@@ -18,8 +18,8 @@ board in Google Meet.
 
 - Create persistent boards and diagram objects.
 - Connect, rename, move, duplicate, and delete objects.
-- Use typed commands, Airo voice commands, a pointer, keyboard controls,
-  touchpad writing, or supported camera gestures.
+- Use typed commands, Airo voice commands, a mouse or touchpad, keyboard
+  controls, or supported camera gestures.
 - Present over a selected screen or camera and export a PNG.
 
 ## How changes are applied

@@ -11,7 +11,7 @@ This document describes the implemented customer journey, its operating data, an
 5. **Use Airboard** — users create persistent boards (each save is compare-and-swap on a version number; no history copies are kept); open recent and shared views; start live sessions; use typed, pointer, gesture or Airo input; and show a selected screen behind the board. A failed background save reports a non-blocking warning and preserves the working canvas.
 6. **Use it in Meet** — the presenter shares the Airboard tab (**Present now → A tab**); nothing is installed. The Chrome extension, the Meet add-on and the Electron desktop app were removed on 12 Nov 2026.
 7. **Buy and manage** — the billing page checks a secret-free commercial capability response. Unless Stripe checkout, prices and signed webhook processing are all configured, prices are labeled proposals, checkout stays unavailable and users enter a managed evaluation path. When enabled, signed idempotent webhooks update customers, subscriptions and entitlements and Stripe remains the payment system of record.
-8. **Administer** — owners/admins manage members, invitations, organization policy, usage and audit events. SSO and SCIM were removed on 12 Nov 2026; their tables stay in the database, unused.
+8. **Administer** — owners/admins manage members, invitations, organization policy, usage and audit events. SSO and SCIM were removed on 12 Nov 2026; migration `20261112120000_drop_unused_tables` drops their tables.
 9. **Get help or leave** — authenticated support requests and user-created, content-free seven-day diagnostic bundles are available. Users can request a data export, schedule account/workspace deletion with a seven-day cancellation window, cancel a queued request, end sessions and control notification/analytics consent.
 
 ## Product pages
@@ -40,7 +40,6 @@ This document describes the implemented customer journey, its operating data, an
 | Identity | email, display name, auth provider, locale, timezone | authentication, account recovery and display | user export/deletion; provider session revocation |
 | Organization | name, size band, country, role, membership | tenancy, onboarding, access and growth segmentation | organization lifecycle policy |
 | Product content | board title, description, latest state, visibility | core standalone and live-board service | active until deletion; deletion is immediate and permanent (boards soft-deleted before 2026-11-11 are purged after the organization retention window) |
-| Installation (extension era) | platform, version, settings, consent time, last seen/success/error | none since the extension was removed (12 Nov 2026); old rows stay in the table | included in export; account deletion clears the installer link |
 | Billing | Stripe customer/subscription IDs, plan, seats, periods, status | entitlement and revenue operations | Stripe remains payment system of record |
 | Consent | document version, consent type, granted state and source | prove media/privacy choice | append-only record; included in export |
 | Product events | allowlisted event name, timestamps and bounded content-free properties | activation, reliability, conversion and cohort analysis | 90 days; no labels, transcripts, meeting URLs, raw media or credentials |

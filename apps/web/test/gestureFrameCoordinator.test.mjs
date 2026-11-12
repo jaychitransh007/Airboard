@@ -166,7 +166,6 @@ test("live and injected landmarks execute the same production frame stages", () 
         sourceHeight: 720,
         sensitivity: 0.8,
       },
-      gestureModeEnabled: true,
       diagramVisible: true,
       processPipeline: ({ mapping }) => {
         order.push("pipeline");

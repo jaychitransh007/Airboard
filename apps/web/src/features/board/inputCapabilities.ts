@@ -1,5 +1,11 @@
 import type { StrokeInputSource } from "@airboard/core";
 
+/**
+ * Every production input surface. "touchpad" is laptop trackpad navigation:
+ * pinch (ctrl/cmd + wheel) zooms at the cursor and two-finger scroll pans.
+ * A trackpad press-and-drag reports as a mouse pointer, so it is attributed to
+ * "pointer" like any other primary-button drag.
+ */
 export const AIRBOARD_SHIPPED_INPUT_CHANNELS = [
   "typed",
   "voice",
@@ -32,8 +38,6 @@ export function isShippedInputChannel(
 
 export function strokeInputSourceForPointer(
   pointerType: string,
-  inputMode: "gesture" | "touchpad",
 ): StrokeInputSource {
-  if (pointerType === "pen") return "stylus";
-  return inputMode === "touchpad" ? "touchpad" : "pointer";
+  return pointerType === "pen" ? "stylus" : "pointer";
 }

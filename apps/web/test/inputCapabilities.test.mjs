@@ -23,22 +23,14 @@ test("the shipped channel contract includes every production input surface", () 
 });
 
 test("pen pointer events remain attributable to stylus input", () => {
-  assert.equal(strokeInputSourceForPointer("pen", "gesture"), "stylus");
-  assert.equal(strokeInputSourceForPointer("pen", "touchpad"), "stylus");
-  assert.equal(strokeInputSourceForPointer("mouse", "gesture"), "pointer");
-  assert.equal(strokeInputSourceForPointer("touch", "touchpad"), "touchpad");
+  assert.equal(strokeInputSourceForPointer("pen"), "stylus");
+  assert.equal(strokeInputSourceForPointer("mouse"), "pointer");
+  assert.equal(strokeInputSourceForPointer("touch"), "pointer");
 });
 
 test("non-pen pointer events cannot be misattributed to stylus", () => {
   for (const pointerType of ["mouse", "touch", "", "unknown"]) {
-    assert.notEqual(
-      strokeInputSourceForPointer(pointerType, "gesture"),
-      "stylus",
-    );
-    assert.notEqual(
-      strokeInputSourceForPointer(pointerType, "touchpad"),
-      "stylus",
-    );
+    assert.notEqual(strokeInputSourceForPointer(pointerType), "stylus");
   }
 });
 

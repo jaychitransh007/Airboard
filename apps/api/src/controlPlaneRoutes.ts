@@ -1207,7 +1207,6 @@ async function processDataRequests(auth: AuthService) {
           client.from("organization_memberships").select("organization_id,role,status,joined_at,organizations(name,slug,kind)").eq("profile_id", item.profile_id),
           client.from("boards").select("id,workspace_id,title,description,latest_state,latest_version,visibility,archived_at,deleted_at,created_at,updated_at").eq("organization_id", item.organization_id).eq("owner_profile_id", item.profile_id).limit(500),
           client.from("consent_records").select("consent_type,document_version,granted,source,created_at").eq("profile_id", item.profile_id),
-          client.from("platform_installations").select("platform,status,version,settings,consented_at,last_seen_at,last_success_at,created_at").eq("organization_id", item.organization_id).eq("installed_by", item.profile_id),
           client.from("support_requests").select("category,subject,message,status,created_at,updated_at").eq("profile_id", item.profile_id),
           client.from("product_events").select("event_name,properties,occurred_at,received_at").eq("profile_id", item.profile_id).limit(5_000),
           client.from("audit_events").select("actor_type,action,target_type,target_id,metadata,occurred_at").eq("actor_profile_id", item.profile_id).limit(5_000),
@@ -1216,14 +1215,14 @@ async function processDataRequests(auth: AuthService) {
         ]);
         // An export with a silently missing section would look complete.
         if (sections.some((section) => section.error)) throw new Error("EXPORT_QUERY_FAILED");
-        const [memberships, boards, consents, installations, supportRequests, productEvents, auditEvents, notifications, leads] = sections;
+        const [memberships, boards, consents, supportRequests, productEvents, auditEvents, notifications, leads] = sections;
         const result = {
-          schemaVersion: 2,
+          // 3: installations left with the extension (12 Nov 2026).
+          schemaVersion: 3,
           profile: profile.data,
           memberships: memberships.data ?? [],
           boards: boards.data ?? [],
           consents: consents.data ?? [],
-          installations: installations.data ?? [],
           supportRequests: supportRequests.data ?? [],
           productEvents: productEvents.data ?? [],
           auditEvents: auditEvents.data ?? [],
@@ -1259,15 +1258,6 @@ async function processDataRequests(auth: AuthService) {
         const erased = await Promise.all([
           client.from("support_requests").delete().eq("profile_id", item.profile_id),
           client.from("product_events").delete().eq("profile_id", item.profile_id),
-          client.from("platform_installations").update({
-            status: "revoked",
-            token_hash: null,
-            previous_token_hash: null,
-            previous_token_expires_at: null,
-            settings: {},
-            capabilities: {},
-            updated_at: new Date().toISOString(),
-          }).eq("installed_by", item.profile_id),
           client.from("audit_events").update({
             actor_profile_id: null,
             ip_hash: null,

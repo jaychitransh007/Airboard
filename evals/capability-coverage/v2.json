@@ -570,7 +570,7 @@
         "grounding",
         "final_state"
       ],
-      "rationale": "Mounted production handlers move a node by primary mouse input, reject a non-primary drag, classify touchpad and pen streams, commit through BoardEvents, and assert terminal geometry/source attribution."
+      "rationale": "Mounted production handlers move a node by primary mouse input, reject a non-primary drag, zoom around the cursor on a touchpad pinch and pan on a two-finger scroll without changing the board, attribute a pen marker stroke to stylus, and assert terminal geometry, view, and source attribution."
     },
     {
       "evidenceId": "browser:apps/web/e2e/directInputChannels.spec.ts#pointer, touchpad, and stylus streams ground to attributed final state",

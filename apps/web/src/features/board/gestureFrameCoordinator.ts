@@ -75,10 +75,7 @@ export type RawLandmarkFrameGeometry = {
   mirrorInput?: boolean;
 };
 
-export type RawLandmarkFrameDisposition =
-  | "pipeline_only"
-  | "diagram_hidden"
-  | "arbitrated";
+export type RawLandmarkFrameDisposition = "diagram_hidden" | "arbitrated";
 
 type RawLandmarkFrameContext<THand, TPipelineResult> = {
   hands: readonly THand[];
@@ -120,7 +117,6 @@ export type RawLandmarkFrameCoordinatorInput<
   inferenceMs?: number;
   hands: readonly THand[];
   geometry: RawLandmarkFrameGeometry;
-  gestureModeEnabled: boolean;
   diagramVisible: boolean;
   processPipeline: (
     context: Omit<
@@ -197,18 +193,6 @@ export function coordinateRawLandmarkFrame<
   };
   const pipelineResult = input.processPipeline(baseContext);
   const context = { ...baseContext, pipelineResult };
-
-  if (!input.gestureModeEnabled) {
-    const result = {
-      disposition: "pipeline_only" as const,
-      owner: null,
-      timestampMs: input.timestampMs,
-      pipelineResult,
-      manipulationResult: undefined,
-    };
-    input.applyFrame(result);
-    return { ...result, mapping };
-  }
 
   input.observeFrame?.(context);
   const gestureContext = input.prepareGesture(context);

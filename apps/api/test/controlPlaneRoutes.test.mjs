@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -21,6 +21,16 @@ const { registerControlPlaneRoutes } = await import("../src/controlPlaneRoutes.t
 const { accountEntitlement } = await import("../src/auth.ts");
 const { SupabaseSessionStore } = await import("../src/supabaseSessionStore.ts");
 
+// Tables a migration dropped. The fake answers a query on one the way
+// PostgREST does once the table is gone, and records it.
+const MIGRATIONS = new URL("../../../supabase/migrations/", import.meta.url);
+const DROPPED_TABLES = new Set(
+  readdirSync(MIGRATIONS)
+    .filter((name) => name.endsWith(".sql"))
+    .flatMap((name) => [...readFileSync(new URL(name, MIGRATIONS), "utf8")
+      .matchAll(/^drop table if exists public\.([a-z_]+)/gm)].map((match) => match[1])),
+);
+
 /**
  * Minimal in-memory stand-in for the supabase-js query builder: just the
  * filters, writes, and storage calls the control plane uses. `fail(table, op)`
@@ -33,6 +43,7 @@ function createFakeSupabase(tables, options = {}) {
     storageCalls,
     storageError: null,
     fail: options.fail ?? (() => null),
+    droppedTableQueries: [],
     from(table) {
       return new FakeQuery(fakeClient, table);
     },
@@ -177,6 +188,14 @@ class FakeQuery {
   }
 
   execute() {
+    if (DROPPED_TABLES.has(this.table)) {
+      this.client.droppedTableQueries.push(`${this.op} ${this.table}`);
+      return {
+        data: null,
+        error: { code: "PGRST205", message: `Could not find the table 'public.${this.table}' in the schema cache` },
+        count: null,
+      };
+    }
     const failure = this.client.fail(this.table, this.op);
     if (failure) return { data: null, error: failure, count: null };
     const rows = (this.client.tables[this.table] ??= []);
@@ -324,7 +343,7 @@ function patchBoard(server, payload) {
 }
 
 test("board state saves are compare-and-swap on latest_version", async (t) => {
-  const client = createFakeSupabase({ boards: [boardRow()], board_versions: [] });
+  const client = createFakeSupabase({ boards: [boardRow()] });
   const server = await buildApp(t, client);
 
   const saved = await patchBoard(server, { version: 4, state: { nodes: ["tab-a"] } });
@@ -345,7 +364,7 @@ test("board state saves are compare-and-swap on latest_version", async (t) => {
   const next = await patchBoard(server, { version: 5, state: { nodes: ["tab-b rebased"] } });
   assert.equal(next.statusCode, 200, next.body);
   assert.equal(next.json().board.latest_version, 5);
-  assert.deepEqual(client.tables.board_versions, [], "a save keeps no copy of the board");
+  assert.deepEqual(client.droppedTableQueries, [], "a save keeps no copy of the board");
 });
 
 test("another member's private board is invisible; organization boards stay shared", async (t) => {
@@ -564,6 +583,36 @@ test("account deletion erases a personal workspace's objects before deleting the
   assert.deepEqual(client.deletedAuthUsers, ["auth-user"]);
   assert.equal(client.tables.organizations.length, 0);
   assert.equal(client.tables.profiles.length, 0);
+  assert.deepEqual(client.droppedTableQueries, [], "erasure touches no dropped table");
+});
+
+test("a data export completes without the dropped tables", async (t) => {
+  assert.ok(DROPPED_TABLES.has("platform_installations"), "the drop migration is found");
+  const tables = lifecycleTables();
+  tables.profiles = [{ id: PROFILE, auth_user_id: "auth-user", email: "owner@airboard.test" }];
+  tables.consent_records = [{ profile_id: PROFILE, consent_type: "terms", document_version: "1", granted: true, source: "web" }];
+  tables.data_requests.push({
+    id: "request-export",
+    request_type: "export",
+    organization_id: ORG,
+    profile_id: PROFILE,
+    status: "queued",
+    execute_after: new Date(Date.now() - DAY).toISOString(),
+    requested_at: new Date(Date.now() - 2 * DAY).toISOString(),
+  });
+  const client = createFakeSupabase(tables);
+  const server = await buildApp(t, client);
+
+  const response = await runLifecycle(server);
+  assert.equal(response.statusCode, 200, response.body);
+  assert.deepEqual(response.json().dataRequests, { completed: 1, failed: 0, storageFailures: 0 });
+  const [request] = client.tables.data_requests;
+  assert.equal(request.status, "completed");
+  assert.equal(request.result.schemaVersion, 3);
+  assert.equal(request.result.profile.email, "owner@airboard.test");
+  assert.equal(request.result.consents.length, 1);
+  assert.equal("installations" in request.result, false);
+  assert.deepEqual(client.droppedTableQueries, []);
 });
 
 function deletionRequest(overrides = {}) {

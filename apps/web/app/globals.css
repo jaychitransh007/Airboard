@@ -1091,10 +1091,6 @@ button:disabled {
   outline-offset: -3px;
 }
 
-.board-canvas.touchpad-mode {
-  cursor: crosshair;
-}
-
 .board-canvas.gesture-mode {
   cursor: crosshair;
 }
@@ -1675,30 +1671,6 @@ button:disabled {
   padding: 0 8px;
 }
 
-.color-input {
-  width: 48px;
-  min-height: 32px;
-  padding: 2px;
-}
-
-.segmented-control {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-}
-
-.segmented-control button {
-  min-height: 32px;
-  padding: 0 8px;
-}
-
-.segmented-control button.selected {
-  border-color: var(--accent);
-  background: #e9efed;
-  color: #17433e;
-  font-weight: 650;
-}
-
 .label-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1727,10 +1699,6 @@ button:disabled {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
-}
-
-.warning-text {
-  color: var(--warning);
 }
 
 @media (max-width: 900px) {
