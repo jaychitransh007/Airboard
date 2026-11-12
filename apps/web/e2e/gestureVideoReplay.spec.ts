@@ -10,6 +10,7 @@ import {
 } from "node:path";
 
 import { expect, test, type Page } from "@playwright/test";
+import type { AirboardTestWindow } from "./support/testHooks";
 import {
   createGestureBrowserEvidence,
   evaluateGestureBrowserEvidence,
@@ -168,50 +169,22 @@ for (const asset of assets) {
       const setup = asset.annotations.browserReplay.setup;
       for (const transcript of setup?.deterministicWakeTranscripts ?? []) {
         await page.evaluate(async (input) => {
-          const hooks = (
-            window as unknown as {
-              __airboardTestHooks: {
-                emitFinalTranscript(transcript: string): Promise<unknown>;
-              };
-            }
-          ).__airboardTestHooks;
+          const hooks = (window as unknown as AirboardTestWindow).__airboardTestHooks;
           await hooks.emitFinalTranscript(input);
         }, transcript);
       }
       if (setup?.viewport) {
         await page.evaluate((viewport) => {
-          (
-            window as unknown as {
-              __airboardTestHooks: {
-                setViewport(value: {
-                  x: number;
-                  y: number;
-                  scale: number;
-                }): void;
-              };
-            }
-          ).__airboardTestHooks.setViewport(viewport);
+          (window as unknown as AirboardTestWindow).__airboardTestHooks.setViewport(viewport);
         }, setup.viewport);
       }
       if (setup?.diagramVisible !== undefined) {
         await page.evaluate((visible) => {
-          (
-            window as unknown as {
-              __airboardTestHooks: {
-                setDiagramVisible(value: boolean): void;
-              };
-            }
-          ).__airboardTestHooks.setDiagramVisible(visible);
+          (window as unknown as AirboardTestWindow).__airboardTestHooks.setDiagramVisible(visible);
         }, setup.diagramVisible);
       }
       await page.evaluate(() => {
-        (
-          window as unknown as {
-            __airboardTestHooks: {
-              clearEvalJournals(): void;
-            };
-          }
-        ).__airboardTestHooks.clearEvalJournals();
+        (window as unknown as AirboardTestWindow).__airboardTestHooks.clearEvalJournals();
       });
       const baseline = await readOutcomeSnapshot(page);
       await page.evaluate(() =>
@@ -225,37 +198,7 @@ for (const asset of assets) {
         asset.annotations.browserReplay.runDurationMs,
       );
       const observation = await page.evaluate(() => {
-        const hooks = (
-          window as unknown as {
-            __airboardTestHooks: {
-              getCanonicalBoardState(): {
-                strokes: Record<
-                  string,
-                  { status: string; annotation?: unknown }
-                >;
-              };
-              getBoardEventLog(): unknown[];
-              getInteractionDiagnostics(): {
-                gestureTrace: {
-                  stage: string;
-                  data: Record<string, unknown>;
-                }[];
-                gestureSummary: {
-                  totalEvents: number;
-                  stageCounts: Record<string, number>;
-                  observedOwners: string[];
-                  appliedActionCounts: Record<string, number>;
-                  targetedGestureCounts: Record<string, number>;
-                  inferenceP95Ms: number | null;
-                };
-                selectionIds: string[];
-                viewport: { x: number; y: number; scale: number };
-                undoDepth: number;
-              };
-              getDiagramVisible(): boolean;
-            };
-          }
-        ).__airboardTestHooks;
+        const hooks = (window as unknown as AirboardTestWindow).__airboardTestHooks;
         const board = hooks.getCanonicalBoardState();
         return {
           events: hooks.getBoardEventLog().length,
@@ -303,6 +246,10 @@ for (const asset of assets) {
       );
       const oracle = asset.annotations.browserReplay;
       const gestureSummary = observation.diagnostics.gestureSummary;
+      if (!gestureSummary) {
+        throw new Error("The replay recorded no gesture trace summary.");
+      }
+      const stageCounts: Record<string, number | undefined> = gestureSummary.stageCounts;
       const perceptionFrames =
         gestureSummary.stageCounts.perception_health ?? 0;
       expect(perceptionFrames).toBeGreaterThanOrEqual(
@@ -310,7 +257,7 @@ for (const asset of assets) {
       );
       for (const stage of oracle.requiredStages ?? []) {
         expect(
-          (gestureSummary.stageCounts[stage] ?? 0) > 0,
+          (stageCounts[stage] ?? 0) > 0,
           `required gesture stage ${stage}`,
         ).toBe(true);
       }
@@ -411,17 +358,7 @@ for (const asset of assets) {
       let postUndoBoardHash: string | null = null;
       if (oracle.requireUndoRoundTrip === true) {
         const undoResult = await page.evaluate(() => {
-          const hooks = (
-            window as unknown as {
-              __airboardTestHooks: {
-                undoLastActionForEval(): {
-                  applied: boolean;
-                  depthBefore: number;
-                  depthAfter: number;
-                };
-              };
-            }
-          ).__airboardTestHooks;
+          const hooks = (window as unknown as AirboardTestWindow).__airboardTestHooks;
           return hooks.undoLastActionForEval();
         });
         expect(undoResult.applied, "gesture result must be one-step undoable").toBe(
@@ -507,32 +444,7 @@ for (const asset of assets) {
 
 async function readOutcomeSnapshot(page: Page) {
   return page.evaluate(() => {
-    const hooks = (
-      window as unknown as {
-        __airboardTestHooks: {
-          getCanonicalBoardState(): {
-            strokes: Record<
-              string,
-              {
-                status: string;
-                annotation?: {
-                  bounds?: {
-                    x: number;
-                    y: number;
-                    width: number;
-                    height: number;
-                  };
-                };
-              }
-            >;
-          };
-          getInteractionDiagnostics(): {
-            viewport: { x: number; y: number; scale: number };
-          };
-          getDiagramVisible(): boolean;
-        };
-      }
-    ).__airboardTestHooks;
+    const hooks = (window as unknown as AirboardTestWindow).__airboardTestHooks;
     const board = hooks.getCanonicalBoardState();
     return {
       board,

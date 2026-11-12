@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { waitForTestHooks, type AirboardTestWindow } from "./support/testHooks";
 import { launchOptionsWith } from "./support/launchOptions";
 
 /**
@@ -18,17 +19,14 @@ async function openBoard(page: Page) {
   const onboarding = page.getByRole("button", { name: "Got it" });
   await expect(onboarding).toBeVisible();
   await onboarding.click();
-  await page.waitForFunction(() => "__airboardTestHooks" in window);
+  await waitForTestHooks(page);
   await expect
     .poll(
       () =>
         page.evaluate(
           () =>
-            (
-              window as unknown as {
-                __airboardTestHooks: { getBoardSummary(): { boardSessionId: string | null } };
-              }
-            ).__airboardTestHooks.getBoardSummary().boardSessionId !== null,
+            (window as unknown as AirboardTestWindow).__airboardTestHooks.getBoardSummary()
+              .boardSessionId !== null,
         ),
       { timeout: 30_000 },
     )

@@ -3,7 +3,7 @@ import {
   applyBoardEvent,
   applyDiagramCommand,
   applyDiagramUndo,
-  connectorGeometryMatchesBindings,
+  boardDiagramGraph,
   createInitialBoardState,
 } from "../../packages/core/src/index.ts";
 import { commitCommandTurn } from "../../apps/web/src/features/board/commandTurnCoordinator.ts";
@@ -642,26 +642,19 @@ export function deriveBoardEffects(initialState, finalState) {
   };
 }
 
-function semanticNodes(state) {
-  const nodes = Object.values(state.strokes)
-    .filter(
-      (stroke) =>
-        stroke.status === "committed" &&
-        stroke.annotation?.bounds &&
-        stroke.annotation.type !== "connector" &&
-        stroke.annotation.type !== "arrow",
-    )
-    .map((stroke) => ({
-      id: stroke.id,
-      label: stroke.annotation.label ?? null,
-      nodeType:
-        stroke.annotation.nodeType ?? stroke.annotation.type,
-      x:
-        stroke.annotation.bounds.x +
-        stroke.annotation.bounds.width / 2,
-      y:
-        stroke.annotation.bounds.y +
-        stroke.annotation.bounds.height / 2,
+/**
+ * Every named object on the board, legacy stroke or v2 element, read from the
+ * model-independent diagram graph. Group containers count as objects, as they
+ * always have.
+ */
+function semanticNodes(state, graph = boardDiagramGraph(state)) {
+  const nodes = [...graph.nodes, ...graph.groups]
+    .map((node) => ({
+      id: node.id,
+      label: node.label,
+      nodeType: node.kind,
+      x: node.bounds.x + node.bounds.width / 2,
+      y: node.bounds.y + node.bounds.height / 2,
     }))
     .sort(
       (left, right) =>
@@ -678,29 +671,17 @@ function semanticNodes(state) {
 }
 
 function semanticEdges(state) {
+  const graph = boardDiagramGraph(state);
   const nodes = new Map(
-    semanticNodes(state).map((node) => [node.id, node]),
+    semanticNodes(state, graph).map((node) => [node.id, node]),
   );
-  const edges = Object.values(state.strokes)
-    .filter(
-      (stroke) =>
-        stroke.status === "committed" &&
-        (stroke.annotation?.type === "connector" ||
-          stroke.annotation?.type === "arrow"),
-    )
-    .map((stroke) => ({
-      id: stroke.id,
-      label: stroke.annotation.label ?? null,
-      from: endpointSummary(
-        nodes.get(stroke.annotation.snappedStartStrokeId),
-      ),
-      to: endpointSummary(
-        nodes.get(stroke.annotation.snappedEndStrokeId),
-      ),
-      geometryAttached: connectorGeometryMatchesBindings(
-        state,
-        stroke.annotation,
-      ),
+  const edges = graph.edges
+    .map((edge) => ({
+      id: edge.id,
+      label: edge.label,
+      from: endpointSummary(nodes.get(edge.from)),
+      to: endpointSummary(nodes.get(edge.to)),
+      geometryAttached: edge.attached,
     }))
     .sort((left, right) => String(left.id).localeCompare(String(right.id)));
   const occurrenceByEndpoints = new Map();

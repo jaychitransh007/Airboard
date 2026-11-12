@@ -1,3 +1,4 @@
+export * from "./boardDiagramGraph.ts";
 export * from "./boardPreview.ts";
 export * from "./boardReducer.ts";
 export * from "./diagramCommands.ts";

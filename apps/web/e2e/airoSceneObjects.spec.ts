@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import type { AirboardTestWindow } from "./support/testHooks";
 import { signIn } from "./support/signedInApi";
 
 // RGB-039: in the live journey Airo drew a second "API" because the first one,
@@ -10,8 +11,7 @@ type SceneConnector = { id: string; kind: "connector"; status: string; legacyStr
 function boardElements(page: Page) {
   return page.evaluate(() =>
     Object.values(
-      (window as never as { __airboardTestHooks: { getCanonicalBoardState(): { elements: Record<string, unknown> } } })
-        .__airboardTestHooks.getCanonicalBoardState().elements,
+      (window as unknown as AirboardTestWindow).__airboardTestHooks.getCanonicalBoardState().elements,
     ),
   ) as Promise<Array<SceneShape | SceneConnector>>;
 }

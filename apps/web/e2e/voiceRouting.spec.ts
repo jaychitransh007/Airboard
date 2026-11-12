@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { waitForTestHooks, type AirboardTestWindow } from "./support/testHooks";
 
 /**
  * E2E path (b): finalized-transcript routing through the VoiceCommandRouter —
@@ -7,60 +8,8 @@ import { expect, test } from "@playwright/test";
  * safety, and the single-execution invariant, all against the live app.
  */
 
-type Hooks = {
-  emitFinalTranscript(transcript: string): { routed: boolean; wakeDetected: boolean };
-  emitTranscriptionProviderEvent(event: {
-    type: "transcription.final";
-    transcript: string;
-    provider: string;
-    model: string;
-    confidence: number;
-    turnIndex: number;
-  }): { routed: boolean; wakeDetected: boolean };
-  openPttGate(): void;
-  emitPalmVoiceGestureFrame(frame: {
-    score: number;
-    point: { x: number; y: number } | null;
-    timestampMs: number;
-    suppressed: boolean;
-  }): "activate" | "release" | null;
-  resetVoiceRouting(): void;
-  emitRemoteBoardEvent(event: Record<string, unknown>): void;
-  prepareLegacyIntentCommandForEval(
-    instruction: string,
-  ): "previewed" | "applied" | "no-op" | "rejected";
-  getCanonicalBoardState(): {
-    boardId: string;
-    strokes: Record<string, {
-      id: string;
-      status: string;
-      points: Array<Record<string, unknown>>;
-      annotation?: {
-        type: string;
-        label?: string;
-        bounds?: { x: number; y: number; width: number; height: number };
-        start?: { x: number; y: number };
-        end?: { x: number; y: number };
-        snappedStartStrokeId?: string;
-        snappedEndStrokeId?: string;
-      };
-    }>;
-  };
-  clearEvalJournals(): void;
-  undoLastActionForEval(): { applied: boolean; depthBefore: number; depthAfter: number };
-  getDiagramVisible(): boolean;
-  getBoardSummary(): {
-    objectCount: number;
-    labels: string[];
-    selectedCount: number;
-    syncStatus: string;
-  };
-  getBoardEventLog(): unknown[];
-  getInteractionDiagnostics(): { undoDepth: number };
-};
-
 async function hooks(page: import("@playwright/test").Page) {
-  await page.waitForFunction(() => "__airboardTestHooks" in window);
+  await waitForTestHooks(page);
   await expect
     .poll(async () => (await summary(page)).syncStatus, { timeout: 20_000 })
     .toBe("connected");
@@ -69,7 +18,7 @@ async function hooks(page: import("@playwright/test").Page) {
 function emit(page: import("@playwright/test").Page, transcript: string) {
   return page.evaluate(
     (t) =>
-      (window as never as { __airboardTestHooks: Hooks }).__airboardTestHooks.emitFinalTranscript(
+      (window as unknown as AirboardTestWindow).__airboardTestHooks.emitFinalTranscript(
         t,
       ),
     transcript,
@@ -78,7 +27,7 @@ function emit(page: import("@playwright/test").Page, transcript: string) {
 
 function summary(page: import("@playwright/test").Page) {
   return page.evaluate(() =>
-    (window as never as { __airboardTestHooks: Hooks }).__airboardTestHooks.getBoardSummary(),
+    (window as unknown as AirboardTestWindow).__airboardTestHooks.getBoardSummary(),
   );
 }
 
@@ -89,14 +38,14 @@ async function seedLegacyDiagram(
   for (const [index, command] of commands.entries()) {
     const result = await page.evaluate(
       (instruction) =>
-        (window as never as { __airboardTestHooks: Hooks })
+        (window as unknown as AirboardTestWindow)
           .__airboardTestHooks.prepareLegacyIntentCommandForEval(instruction),
       command,
     );
     expect(["previewed", "applied"]).toContain(result);
     await expect.poll(async () => {
       const state = await page.evaluate(() =>
-        (window as never as { __airboardTestHooks: Hooks })
+        (window as unknown as AirboardTestWindow)
           .__airboardTestHooks.getCanonicalBoardState(),
       );
       return Object.values(state.strokes).filter(
@@ -155,7 +104,7 @@ test("right-side copilot is collapsible and voice applies without its Send butto
     .poll(async () => (await summary(page)).objectCount, { timeout: 15_000 })
     .toBe(1);
   await page.evaluate(() =>
-    (window as never as { __airboardTestHooks: Hooks }).__airboardTestHooks.openPttGate(),
+    (window as unknown as AirboardTestWindow).__airboardTestHooks.openPttGate(),
   );
   await emit(page, "add a database, uh, layer that is connected to service.");
   await expect
@@ -184,7 +133,7 @@ test("open-palm swipe motion is inert and voice undo restores the board", async 
   const movingPalm = (x: number, timestampMs: number) =>
     page.evaluate(
       ({ x, timestampMs }) =>
-        (window as never as { __airboardTestHooks: Hooks })
+        (window as unknown as AirboardTestWindow)
           .__airboardTestHooks.emitPalmVoiceGestureFrame({
             score: 0.92,
             point: { x, y: 0.45 },
@@ -218,7 +167,7 @@ test("an open palm must hold for 400 ms, activates voice once, and releases clea
   ) =>
     page.evaluate(
       ({ timestampMs, score, point }) =>
-        (window as never as { __airboardTestHooks: Hooks })
+        (window as unknown as AirboardTestWindow)
           .__airboardTestHooks.emitPalmVoiceGestureFrame({
             score,
             point,
@@ -250,7 +199,7 @@ test("push-to-talk gate routes wake-word-free commands exactly once", async ({ p
   await hooks(page);
 
   await page.evaluate(() =>
-    (window as never as { __airboardTestHooks: Hooks }).__airboardTestHooks.openPttGate(),
+    (window as unknown as AirboardTestWindow).__airboardTestHooks.openPttGate(),
   );
   await expect(page.getByTestId("voice-gate-pill")).toBeVisible();
 
@@ -289,7 +238,7 @@ test("PTT repairs the production stale connector in place, undoes exactly, and r
   await expect.poll(async () => (await summary(page)).objectCount).toBe(5);
 
   const corrupted = await page.evaluate(() => {
-    const testHooks = (window as never as { __airboardTestHooks: Hooks })
+    const testHooks = (window as unknown as AirboardTestWindow)
       .__airboardTestHooks;
     const state = testHooks.getCanonicalBoardState();
     const labels = Object.fromEntries(
@@ -313,8 +262,8 @@ test("PTT repairs the production stale connector in place, undoes exactly, and r
         snappedEndStrokeId: labels.Planner,
       },
       points: [
-        { x: 520, y: 520, t: 1, inputSource: "pointer" },
-        { ...edge.annotation.end!, t: 2, inputSource: "pointer" },
+        { x: 520, y: 520, t: 1, inputSource: "pointer" as const },
+        { ...edge.annotation.end!, t: 2, inputSource: "pointer" as const },
       ],
     };
     testHooks.emitRemoteBoardEvent({
@@ -338,7 +287,7 @@ test("PTT repairs the production stale connector in place, undoes exactly, and r
   });
 
   await page.evaluate(() =>
-    (window as never as { __airboardTestHooks: Hooks })
+    (window as unknown as AirboardTestWindow)
       .__airboardTestHooks.openPttGate(),
   );
   const routed = await emit(
@@ -351,7 +300,7 @@ test("PTT repairs the production stale connector in place, undoes exactly, and r
   });
 
   const repaired = await page.evaluate(({ edgeId }) => {
-    const testHooks = (window as never as { __airboardTestHooks: Hooks })
+    const testHooks = (window as unknown as AirboardTestWindow)
       .__airboardTestHooks;
     const state = testHooks.getCanonicalBoardState();
     const connector = state.strokes[edgeId]!;
@@ -382,12 +331,12 @@ test("PTT repairs the production stale connector in place, undoes exactly, and r
   });
 
   const undo = await page.evaluate(() =>
-    (window as never as { __airboardTestHooks: Hooks })
+    (window as unknown as AirboardTestWindow)
       .__airboardTestHooks.undoLastActionForEval(),
   );
   expect(undo.applied).toBe(true);
   const afterUndo = await page.evaluate(({ edgeId }) => {
-    const edge = (window as never as { __airboardTestHooks: Hooks })
+    const edge = (window as unknown as AirboardTestWindow)
       .__airboardTestHooks.getCanonicalBoardState().strokes[edgeId]!;
     return { annotation: edge.annotation, points: edge.points };
   }, { edgeId: corrupted.edgeId });
@@ -396,25 +345,25 @@ test("PTT repairs the production stale connector in place, undoes exactly, and r
   // Repair again, then repeat the same complete request. The healthy repeat
   // must add neither an event nor an Undo entry and must not say "applied".
   await page.evaluate(() =>
-    (window as never as { __airboardTestHooks: Hooks })
+    (window as unknown as AirboardTestWindow)
       .__airboardTestHooks.openPttGate(),
   );
   await emit(page, "Connect existing disconnected line to Client and Planner.");
   await expect(page.locator(".intent-feedback")).toContainText("Applied:");
   const beforeRepeat = await page.evaluate(() => {
-    const testHooks = (window as never as { __airboardTestHooks: Hooks })
+    const testHooks = (window as unknown as AirboardTestWindow)
       .__airboardTestHooks;
     testHooks.clearEvalJournals();
     return testHooks.getInteractionDiagnostics().undoDepth;
   });
   await page.evaluate(() =>
-    (window as never as { __airboardTestHooks: Hooks })
+    (window as unknown as AirboardTestWindow)
       .__airboardTestHooks.openPttGate(),
   );
   await emit(page, "Connect existing disconnected line to Client and Planner.");
   await expect(page.locator(".intent-feedback")).toContainText("already attached");
   const repeated = await page.evaluate(() => {
-    const testHooks = (window as never as { __airboardTestHooks: Hooks })
+    const testHooks = (window as unknown as AirboardTestWindow)
       .__airboardTestHooks;
     return {
       events: testHooks.getBoardEventLog().length,
@@ -456,7 +405,7 @@ test("ambiguous disconnected lines clarify without semantic fallback or mutation
   ]);
 
   const before = await page.evaluate(() => {
-    const testHooks = (window as never as { __airboardTestHooks: Hooks })
+    const testHooks = (window as unknown as AirboardTestWindow)
       .__airboardTestHooks;
     const state = testHooks.getCanonicalBoardState();
     const connectors = Object.values(state.strokes).filter(
@@ -483,7 +432,7 @@ test("ambiguous disconnected lines clarify without semantic fallback or mutation
         annotation,
         points: [
           { ...annotation.start, t: 1, inputSource: "pointer" },
-          { ...annotation.end, t: 2, inputSource: "pointer" },
+          { ...annotation.end!, t: 2, inputSource: "pointer" },
         ],
       });
     });
@@ -507,7 +456,7 @@ test("ambiguous disconnected lines clarify without semantic fallback or mutation
   });
 
   await page.evaluate(() =>
-    (window as never as { __airboardTestHooks: Hooks })
+    (window as unknown as AirboardTestWindow)
       .__airboardTestHooks.openPttGate(),
   );
   const routed = await emit(
@@ -522,7 +471,7 @@ test("ambiguous disconnected lines clarify without semantic fallback or mutation
   await page.waitForTimeout(300);
 
   const after = await page.evaluate(() => {
-    const testHooks = (window as never as { __airboardTestHooks: Hooks })
+    const testHooks = (window as unknown as AirboardTestWindow)
       .__airboardTestHooks;
     const state = testHooks.getCanonicalBoardState();
     return {
@@ -571,12 +520,12 @@ test("provider-final Data/Dataset wording updates an existing board and repeat f
     turnIndex: 21,
   };
   await page.evaluate(() =>
-    (window as never as { __airboardTestHooks: Hooks })
+    (window as unknown as AirboardTestWindow)
       .__airboardTestHooks.openPttGate(),
   );
   const routed = await page.evaluate(
     (event) =>
-      (window as never as { __airboardTestHooks: Hooks })
+      (window as unknown as AirboardTestWindow)
         .__airboardTestHooks.emitTranscriptionProviderEvent(event),
     providerFinal,
   );
@@ -584,7 +533,7 @@ test("provider-final Data/Dataset wording updates an existing board and repeat f
   await expect.poll(async () => (await summary(page)).objectCount).toBe(5);
 
   const beforeRepeat = await page.evaluate(() => {
-    const testHooks = (window as never as { __airboardTestHooks: Hooks })
+    const testHooks = (window as unknown as AirboardTestWindow)
       .__airboardTestHooks;
     return {
       eventCount: testHooks.getBoardEventLog().length,
@@ -593,7 +542,7 @@ test("provider-final Data/Dataset wording updates an existing board and repeat f
   });
   await page.evaluate(
     (event) =>
-      (window as never as { __airboardTestHooks: Hooks })
+      (window as unknown as AirboardTestWindow)
         .__airboardTestHooks.emitTranscriptionProviderEvent(event),
     providerFinal,
   );
@@ -603,7 +552,7 @@ test("provider-final Data/Dataset wording updates an existing board and repeat f
   await page.waitForTimeout(250);
   expect((await summary(page)).objectCount).toBe(5);
   const afterRepeat = await page.evaluate(() => {
-    const testHooks = (window as never as { __airboardTestHooks: Hooks })
+    const testHooks = (window as unknown as AirboardTestWindow)
       .__airboardTestHooks;
     return {
       eventCount: testHooks.getBoardEventLog().length,
@@ -622,7 +571,7 @@ test("voice hides and restores the diagram while hidden edits stay suspended", a
   expect(
     await page.evaluate(
       () =>
-        (window as never as { __airboardTestHooks: Hooks })
+        (window as unknown as AirboardTestWindow)
           .__airboardTestHooks.getDiagramVisible(),
     ),
   ).toBe(false);

@@ -1,13 +1,20 @@
-import type {
-  AnnotationBounds,
-  AnnotationPoint,
-  BoardState,
-  Stroke,
+import {
+  boardDiagramGraph,
+  type AnnotationBounds,
+  type AnnotationPoint,
+  type BoardDiagramEdgeGeometry,
+  type BoardState,
+  type ConnectorElement,
+  type StrokeAnnotation,
 } from "@airboard/core";
 import {
   getConnectorRoutePoints,
   getRouteMidpoint,
 } from "./connectorGeometry.ts";
+import {
+  sampleSceneConnector,
+  sceneConnectorPointAt,
+} from "./sceneConnectorGeometry.ts";
 
 const GEOMETRY_EPSILON = 0.001;
 const CONNECTOR_LABEL_OFFSET_Y = -10;
@@ -134,48 +141,30 @@ type SpatialConnectorLabelEdgeIntersection = {
 export function inspectBoardSpatialQuality(
   state: BoardState,
 ): DiagramSpatialFacts {
-  const committed = Object.values(state.strokes).filter(
-    (stroke) => stroke.status === "committed" && stroke.annotation,
-  );
-  const nodes = committed.flatMap((stroke): SpatialNode[] => {
-    const annotation = stroke.annotation;
-    if (
-      !annotation?.bounds ||
-      annotation.type === "connector" ||
-      annotation.type === "arrow" ||
-      annotation.type === "highlight" ||
-      annotation.type === "pointer" ||
-      annotation.type === "text_label" ||
-      annotation.type === "cross_mark" ||
-      annotation.type === "freehand" ||
-      (annotation.groupMemberStrokeIds?.length ?? 0) > 0
-    ) {
-      return [];
-    }
+  // Read the model-independent graph, so legacy strokes and v2 scene elements
+  // are scored the same way. Text, highlights, pointers, crosses, freehand ink
+  // and group containers don't take part in the spacing rules.
+  const graph = boardDiagramGraph(state);
+  const nodes = graph.nodes.flatMap((node): SpatialNode[] => {
+    if (node.role !== "shape") return [];
     return [{
-      id: stroke.id,
-      label: annotation.label?.trim() || null,
-      bounds: normalizeBounds(annotation.bounds),
+      id: node.id,
+      label: node.label?.trim() || null,
+      bounds: normalizeBounds(node.bounds),
     }];
   });
-  const connectors = committed.flatMap((stroke): SpatialConnector[] => {
-    const annotation = stroke.annotation;
-    if (
-      !annotation ||
-      (annotation.type !== "connector" && annotation.type !== "arrow") ||
-      !annotation.start ||
-      !annotation.end
-    ) {
-      return [];
-    }
-    const route = getConnectorRoutePoints(annotation).map(clonePoint);
+  const connectors = graph.edges.flatMap((edge): SpatialConnector[] => {
+    const geometry = edge.geometry;
+    if (!geometry.start || !geometry.end) return [];
+    const route = edgeRoutePoints(geometry).map(clonePoint);
+    const label = edge.label?.trim() || null;
     return [{
-      id: stroke.id,
-      label: annotation.label?.trim() || null,
-      sourceId: annotation.snappedStartStrokeId ?? null,
-      targetId: annotation.snappedEndStrokeId ?? null,
+      id: edge.id,
+      label,
+      sourceId: edge.from,
+      targetId: edge.to,
       route,
-      labelBounds: connectorLabelBounds(stroke, route),
+      labelBounds: connectorLabelBounds(geometry, label, route),
     }];
   });
 
@@ -531,15 +520,45 @@ function inspectConnectorLabelEdgeIntersections(
  * connector labels. Exact font metrics vary by host, but midpoint-in-node and
  * duplicate-anchor failures remain stable across fonts.
  */
+/** The rendered route of an edge, from whichever model drew it. */
+function edgeRoutePoints(geometry: BoardDiagramEdgeGeometry): AnnotationPoint[] {
+  if (geometry.model === "stroke") {
+    // The legacy route reads only the type, the ends and the lane offset.
+    const { type, start, end, routeOffset } = geometry;
+    return getConnectorRoutePoints({
+      type,
+      source: "ai",
+      ...(start ? { start } : {}),
+      ...(end ? { end } : {}),
+      ...(routeOffset !== undefined ? { routeOffset } : {}),
+    } satisfies StrokeAnnotation);
+  }
+  return sampleSceneConnector(sceneConnectorShape(geometry));
+}
+
+/** The fields the scene connector geometry reads, without the rest of the element. */
+function sceneConnectorShape(
+  geometry: Extract<BoardDiagramEdgeGeometry, { model: "scene" }>,
+): ConnectorElement {
+  return {
+    pathKind: geometry.pathKind,
+    start: { point: geometry.start, decoration: "none" },
+    end: { point: geometry.end, decoration: "none" },
+    controlPoints: geometry.controlPoints,
+  } as ConnectorElement;
+}
+
 function connectorLabelBounds(
-  stroke: Stroke,
+  geometry: BoardDiagramEdgeGeometry,
+  label: string | null,
   route: readonly AnnotationPoint[],
 ): AnnotationBounds | null {
-  const annotation = stroke.annotation;
-  const label = annotation?.label?.trim();
-  if (!annotation?.start || !annotation.end || !label) return null;
-  const midpoint = getRouteMidpoint(route);
+  if (!geometry.start || !geometry.end || !label) return null;
+  const midpoint = geometry.model === "scene"
+    ? sceneConnectorPointAt(sceneConnectorShape(geometry), geometry.labelPosition)
+    : getRouteMidpoint(route);
   if (!midpoint) return null;
+  const annotation = { start: geometry.start, end: geometry.end };
   const maxWidth = Math.max(
     Math.abs(annotation.end.x - annotation.start.x),
     72,

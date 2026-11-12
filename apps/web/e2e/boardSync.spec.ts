@@ -1,24 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
+import { waitForTestHooks, type AirboardTestWindow, type BoardSummary } from "./support/testHooks";
 
 /**
  * Phase 2 acceptance: two browsers, one board — live sync both ways, and the
  * board survives a reload (hydration from the server session).
  */
 
-type Summary = {
-  objectCount: number;
-  labels: string[];
-  boardSessionId: string;
-  syncStatus: string;
-};
-
-function summary(page: Page): Promise<Summary> {
+function summary(page: Page): Promise<BoardSummary> {
   return page.evaluate(() =>
-    (
-      window as never as {
-        __airboardTestHooks: { getBoardSummary(): Summary };
-      }
-    ).__airboardTestHooks.getBoardSummary(),
+    (window as unknown as AirboardTestWindow).__airboardTestHooks.getBoardSummary(),
   );
 }
 
@@ -31,7 +21,7 @@ async function runCommand(page: Page, command: string) {
 }
 
 async function waitForLiveSession(page: Page) {
-  await page.waitForFunction(() => "__airboardTestHooks" in window);
+  await waitForTestHooks(page);
   await expect
     .poll(async () => (await summary(page)).syncStatus, { timeout: 20_000 })
     .toBe("connected");

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { waitForTestHooks, type AirboardTestWindow } from "./support/testHooks";
 
 type CanonicalBoard = {
   elements: Record<
@@ -25,15 +26,7 @@ async function objectPositions(
 ): Promise<Array<{ x: number; y: number }>> {
   return page.evaluate(
     () =>
-      (
-        window as never as {
-          __airboardTestHooks: {
-            getBoardSummary(): {
-              positions: Array<{ x: number; y: number } | null>;
-            };
-          };
-        }
-      ).__airboardTestHooks
+      (window as unknown as AirboardTestWindow).__airboardTestHooks
         .getBoardSummary()
         .positions.filter(
           (position): position is { x: number; y: number } =>
@@ -44,11 +37,9 @@ async function objectPositions(
 
 async function inputSources(page: Page): Promise<string[]> {
   return page.evaluate(() => {
-    const board = (
-      window as never as {
-        __airboardTestHooks: { getCanonicalBoardState(): CanonicalBoard };
-      }
-    ).__airboardTestHooks.getCanonicalBoardState();
+    // A narrow view of the board: just the input-source fields read here.
+    const board = (window as unknown as AirboardTestWindow).__airboardTestHooks
+      .getCanonicalBoardState() as unknown as CanonicalBoard;
     const sceneSources = Object.values(board.elements)
       .filter(
         ({ status, legacyStrokeId }) => status === "active" && !legacyStrokeId,
@@ -78,13 +69,7 @@ async function viewport(
   page: Page,
 ): Promise<{ x: number; y: number; scale: number }> {
   return page.evaluate(() =>
-    (
-      window as never as {
-        __airboardTestHooks: {
-          getViewport(): { x: number; y: number; scale: number };
-        };
-      }
-    ).__airboardTestHooks.getViewport(),
+    (window as unknown as AirboardTestWindow).__airboardTestHooks.getViewport(),
   );
 }
 
@@ -139,7 +124,7 @@ test("pointer, touchpad, and stylus streams ground to attributed final state", a
   page,
 }) => {
   await page.goto("/?testStandalone=1");
-  await page.waitForFunction(() => "__airboardTestHooks" in window);
+  await waitForTestHooks(page);
 
   const canvas = page.locator("canvas.board-canvas");
   const box = await canvas.boundingBox();

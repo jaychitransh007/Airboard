@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
+import type { AirboardTestWindow } from "./support/testHooks";
 import { signIn } from "./support/signedInApi";
 
 // A board built by the production diagram commands: Shopper → Checkout API → Orders DB.
@@ -19,8 +20,7 @@ test.beforeEach(async ({ page, context }) => {
 
 function boardLabels(page: Page) {
   return page.evaluate(() =>
-    (window as never as { __airboardTestHooks?: { getBoardSummary(): { labels: string[] } } })
-      .__airboardTestHooks?.getBoardSummary().labels ?? [],
+    (window as unknown as Partial<AirboardTestWindow>).__airboardTestHooks?.getBoardSummary().labels ?? [],
   );
 }
 

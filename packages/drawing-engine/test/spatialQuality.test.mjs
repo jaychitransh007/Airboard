@@ -2,6 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  applyBoardEvent,
+  applyDiagramCommand,
+  createBoardSceneElement,
+  createEventEnvelope,
+  createInitialBoardState,
+  createRichTextDocument,
+} from "@airboard/core";
+
+import {
   analyzeBoardSpatialQuality,
   diagramSpatialConstraintErrors,
   inspectBoardSpatialQuality,
@@ -238,4 +247,131 @@ test("shares strict spatial-constraint validation across eval corpora", () => {
       "contains unsupported key inventedRule",
     ],
   );
+});
+
+// The scorer reads the model-independent diagram graph, so v2 scene elements
+// are scored like legacy strokes, and a legacy node's scene mirror is not
+// counted twice.
+
+function withElement(state, element) {
+  return applyBoardEvent(state, {
+    ...createEventEnvelope({ boardSessionId: "board", actorParticipantId: "participant" }),
+    type: "element.created",
+    element: createBoardSceneElement({ boardId: "board", ...element }),
+  });
+}
+
+function sceneNode(state, id, bounds, label = id) {
+  return withElement(state, {
+    id,
+    kind: "shape",
+    shapeKind: "service",
+    transform: { ...bounds, rotation: 0 },
+    content: createRichTextDocument(label, `${id}:content`),
+  });
+}
+
+function sceneConnector(state, id, fromId, toId, start, end, label = id) {
+  return withElement(state, {
+    id,
+    kind: "connector",
+    pathKind: "straight",
+    start: { point: start, binding: { elementId: fromId, anchor: "auto" }, decoration: "none" },
+    end: { point: end, binding: { elementId: toId, anchor: "auto" }, decoration: "solid_arrow" },
+    label: createRichTextDocument(label, `${id}:label`),
+  });
+}
+
+const SOURCE = { x: 0, y: 0, width: 100, height: 80 };
+const BLOCKER = { x: 180, y: 0, width: 100, height: 80 };
+const TARGET = { x: 360, y: 0, width: 100, height: 80 };
+const CLOSE = { x: 470, y: 0, width: 100, height: 80 };
+
+function geometryOf(facts) {
+  return {
+    nodes: facts.nodes,
+    connectors: facts.connectors,
+    nodePairs: facts.nodePairs,
+    connectorNodeIntersections: facts.connectorNodeIntersections,
+    connectorLabelNodeIntersections: facts.connectorLabelNodeIntersections,
+  };
+}
+
+test("the same diagram as legacy strokes or as v2 elements scores the same", () => {
+  const legacy = board(
+    node("source", SOURCE, "Source"),
+    node("blocker", BLOCKER, "Blocker"),
+    node("target", TARGET, "Target"),
+    node("close", CLOSE, "Close"),
+    connector("crossing", "source", "target", { x: 100, y: 40 }, { x: 360, y: 40 }, "lands on"),
+  );
+  let scene = createInitialBoardState("board");
+  scene = sceneNode(scene, "source", SOURCE, "Source");
+  scene = sceneNode(scene, "blocker", BLOCKER, "Blocker");
+  scene = sceneNode(scene, "target", TARGET, "Target");
+  scene = sceneNode(scene, "close", CLOSE, "Close");
+  scene = sceneConnector(scene, "crossing", "source", "target", { x: 100, y: 40 }, { x: 360, y: 40 }, "lands on");
+
+  const constraints = { ...CRITICAL_SPATIAL_CONSTRAINTS, forbidConnectorLabelEdgeOverlap: true };
+  const fromStrokes = analyzeBoardSpatialQuality(legacy, constraints);
+  const fromScene = analyzeBoardSpatialQuality(scene, constraints);
+  assert.deepEqual(geometryOf(fromScene.facts), geometryOf(fromStrokes.facts));
+  assert.deepEqual(fromScene.violations, fromStrokes.violations);
+  assert.deepEqual(
+    new Set(fromScene.violations.map(({ kind }) => kind)),
+    new Set(["connector_through_node", "node_clearance", "connector_label_node_overlap"]),
+  );
+});
+
+test("a mixed board scores legacy and v2 objects together, each once", () => {
+  let state = createInitialBoardState("board");
+  state = applyDiagramCommand(state, {
+    type: "node.create",
+    nodeId: "legacy",
+    nodeType: "service",
+    label: "Legacy",
+    bounds: { x: 0, y: 0, width: 100, height: 80 },
+    source: "voice",
+  }, {
+    boardSessionId: "board",
+    actorParticipantId: "participant",
+    userId: "user",
+    createdAt: "2026-11-12T00:00:00.000Z",
+    eventIdFactory: (() => { let count = 0; return () => `event-${++count}`; })(),
+  }).state;
+  assert.equal(state.elements.legacy?.legacyStrokeId, "legacy", "the legacy node has a scene mirror");
+  state = sceneNode(state, "typed", { x: 60, y: 10, width: 100, height: 80 }, "Typed");
+  state = withElement(state, {
+    id: "caption",
+    kind: "text",
+    transform: { x: 0, y: 0, width: 200, height: 30, rotation: 0 },
+    content: createRichTextDocument("A caption over both", "caption:content"),
+  });
+
+  const facts = inspectBoardSpatialQuality(state);
+  assert.deepEqual(facts.nodes.map(({ id }) => id), ["legacy", "typed"], "no mirror copy, no text mark");
+  const result = analyzeBoardSpatialQuality(state, { forbidNodeOverlap: true });
+  assert.deepEqual(
+    result.violations.map(({ kind, objectIds }) => ({ kind, objectIds })),
+    [{ kind: "node_overlap", objectIds: ["legacy", "typed"] }],
+  );
+});
+
+test("a v2 bent connector is traced along their rendered route", () => {
+  let state = createInitialBoardState("board");
+  state = sceneNode(state, "a", { x: 0, y: 0, width: 100, height: 80 });
+  state = sceneNode(state, "b", { x: 400, y: 300, width: 100, height: 80 });
+  state = sceneNode(state, "corner", { x: 400, y: 0, width: 100, height: 80 });
+  state = withElement(state, {
+    id: "bent",
+    kind: "connector",
+    pathKind: "bent",
+    start: { point: { x: 100, y: 40 }, binding: { elementId: "a" }, decoration: "none" },
+    end: { point: { x: 450, y: 300 }, binding: { elementId: "b" }, decoration: "solid_arrow" },
+    controlPoints: [{ x: 450, y: 40 }],
+  });
+  const facts = inspectBoardSpatialQuality(state);
+  const bent = facts.connectors.find(({ id }) => id === "bent");
+  assert.deepEqual(bent.route, [{ x: 100, y: 40 }, { x: 450, y: 40 }, { x: 450, y: 300 }]);
+  assert.deepEqual(facts.connectorNodeIntersections, [{ connectorId: "bent", nodeId: "corner" }]);
 });
