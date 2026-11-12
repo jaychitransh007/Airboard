@@ -89,9 +89,9 @@ test("the retired annotation-stroke events are refused before any other check", 
   assert.equal(invalidBoardEventReason({ ...envelope, type: "element.deleted", elementId: "shape-1" }), null);
 });
 
-test("the websocket handshake accepts scene versions 2 and 3 until step C", () => {
-  assert.equal(isSupportedSceneVersion(2), true);
-  assert.equal(isSupportedSceneVersion("2"), true);
+test("the websocket handshake accepts only scene version 3", () => {
+  assert.equal(isSupportedSceneVersion(2), false);
+  assert.equal(isSupportedSceneVersion("2"), false);
   assert.equal(isSupportedSceneVersion(3), true);
   assert.equal(isSupportedSceneVersion("3"), true);
   assert.equal(isSupportedSceneVersion(1), false);

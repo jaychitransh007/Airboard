@@ -7,12 +7,10 @@ import {
 } from "@airboard/core";
 
 /**
- * Scene versions the realtime socket accepts. Step A of the shape-merge phase 3
- * rollout accepts both the launch-f5e326e web ("2") and the phase-3 web ("3").
- * Step C (a separate API deploy at least 24 h after the phase-3 web is live)
- * removes "2", so older tabs get UPGRADE_REQUIRED and reload.
+ * Scene versions the realtime socket accepts: only the current one, so tabs
+ * from before shape-merge phase 3 (version 2) get UPGRADE_REQUIRED and reload.
  */
-const SUPPORTED_SCENE_VERSIONS: ReadonlySet<string> = new Set(["2", String(BOARD_SCENE_VERSION)]);
+const SUPPORTED_SCENE_VERSIONS: ReadonlySet<string> = new Set([String(BOARD_SCENE_VERSION)]);
 
 export function isSupportedSceneVersion(value: unknown): boolean {
   return SUPPORTED_SCENE_VERSIONS.has(String(value ?? ""));

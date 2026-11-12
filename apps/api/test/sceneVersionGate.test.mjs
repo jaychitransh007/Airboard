@@ -21,8 +21,8 @@ const { buildServer } = await import("../src/server.ts");
 const { InMemorySessionStore } = await import("../src/sessionStore.ts");
 const { issueSignedToken } = await import("../src/signedTokens.ts");
 
-// Shape-merge phase 3, step A: launch-f5e326e tabs (scene version 2) still
-// connect and still read state.strokes, while nobody can write a stroke.* event.
+// Shape-merge phase 3: only scene version 3 connects; older tabs are told to
+// upgrade, nobody can write a stroke.* event, and state carries no strokes.
 async function startServer(t) {
   const config = loadConfig({ NODE_ENV: "test", AIRBOARD_LOCAL_ENTITLEMENTS: "true" });
   const store = new InMemorySessionStore({ ownerGraceSeconds: 180, localEntitlements: true });
@@ -49,37 +49,35 @@ const waitFor = async (predicate) => {
   for (let i = 0; i < 200 && !predicate(); i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
 };
 
-test("/state keeps an empty strokes map for launch-f5e326e tabs", async (t) => {
+test("/state carries no legacy strokes map", async (t) => {
   const { port, session, ticket } = await startServer(t);
   const response = await fetch(`http://127.0.0.1:${port}/sessions/${session.id}/state?ticket=${encodeURIComponent(ticket)}`);
   assert.equal(response.status, 200);
   const body = await response.json();
-  assert.deepEqual(body.state.strokes, {});
+  assert.equal("strokes" in body.state, false);
   assert.equal(typeof body.state.elements, "object");
 });
 
-test("scene versions 2 and 3 connect, others are told to upgrade, and stroke writes are refused", async (t) => {
+test("only scene version 3 connects, older tabs are told to upgrade, and stroke writes are refused", async (t) => {
   const { port, session, ownerParticipant, ticket } = await startServer(t);
-  for (const version of ["2", "3"]) {
-    const client = open(port, ticket, version);
-    await waitFor(() => client.messages.some((m) => m.type === "board.initialized"));
-    assert.ok(client.messages.some((m) => m.type === "board.initialized"), `scene version ${version}`);
-    if (version === "2") {
-      client.socket.send(JSON.stringify({
-        type: "board.event",
-        event: {
-          ...createEventEnvelope({ boardSessionId: session.id, actorParticipantId: ownerParticipant.id }),
-          type: "stroke.committed",
-          strokeId: "stroke-1",
-        },
-      }));
-      await waitFor(() => client.messages.some((m) => m.type === "event.rejected"));
-      assert.equal(client.messages.find((m) => m.type === "event.rejected")?.reason, "LEGACY_EVENT_RETIRED");
-    }
-    client.socket.close();
-    await client.closed;
+  const client = open(port, ticket, "3");
+  await waitFor(() => client.messages.some((m) => m.type === "board.initialized"));
+  assert.ok(client.messages.some((m) => m.type === "board.initialized"));
+  client.socket.send(JSON.stringify({
+    type: "board.event",
+    event: {
+      ...createEventEnvelope({ boardSessionId: session.id, actorParticipantId: ownerParticipant.id }),
+      type: "stroke.committed",
+      strokeId: "stroke-1",
+    },
+  }));
+  await waitFor(() => client.messages.some((m) => m.type === "event.rejected"));
+  assert.equal(client.messages.find((m) => m.type === "event.rejected")?.reason, "LEGACY_EVENT_RETIRED");
+  client.socket.close();
+  await client.closed;
+  for (const version of ["2", "1"]) {
+    const stale = open(port, ticket, version);
+    assert.equal(await stale.closed, 1008, `scene version ${version}`);
+    assert.ok(stale.messages.some((m) => m.reason === "UPGRADE_REQUIRED"));
   }
-  const stale = open(port, ticket, "1");
-  assert.equal(await stale.closed, 1008);
-  assert.ok(stale.messages.some((m) => m.reason === "UPGRADE_REQUIRED"));
 });

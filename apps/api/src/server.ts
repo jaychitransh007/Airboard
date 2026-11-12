@@ -456,7 +456,7 @@ export async function buildServer(
       });
       return {
         ...result,
-        state: forLegacyClients(result.state),
+        state: result.state,
         sceneVersion: BOARD_SCENE_VERSION,
         ...liveCredentials(config.sessionSigningSecret, {
           sub: result.participant.id,
@@ -487,7 +487,7 @@ export async function buildServer(
       session: owned.session,
       participant,
       sceneVersion: BOARD_SCENE_VERSION,
-      state: forLegacyClients(await store.getState(owned.session.id)),
+      state: await store.getState(owned.session.id),
       ...liveCredentials(config.sessionSigningSecret, {
         sub: owned.account.profileId,
         organizationId: owned.account.organizationId,
@@ -652,7 +652,7 @@ export async function buildServer(
       return {
         sceneVersion: BOARD_SCENE_VERSION,
         session: await store.getSession(request.params.sessionId),
-        state: forLegacyClients(await store.getState(request.params.sessionId)),
+        state: await store.getState(request.params.sessionId),
       };
     } catch (error) {
       return reply.code(404).send({ error: error instanceof Error ? error.message : "NOT_FOUND" });
@@ -1073,12 +1073,4 @@ export function joinLinkReplaced(issuedAtSeconds: number, resetAt: string | unde
   if (!resetAt) return false;
   const resetSeconds = Math.floor(Date.parse(resetAt) / 1_000);
   return Number.isFinite(resetSeconds) && issuedAtSeconds < resetSeconds;
-}
-
-/**
- * launch-f5e326e tabs read the board's `strokes` map; remove ≥7 days after the API accepts
- * only scene version 3 (shape-merge phase 3, step C).
- */
-export function forLegacyClients<T extends object>(state: T): T & { strokes: Record<string, never> } {
-  return { strokes: {}, ...state };
 }
