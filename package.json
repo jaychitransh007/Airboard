@@ -42,7 +42,7 @@
     "supabase:reset": "supabase db reset"
   },
   "devDependencies": {
-    "eslint": "^9.39.5",
+    "eslint": "^10.14.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.72.1"
