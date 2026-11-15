@@ -8,13 +8,17 @@ import {
   VOICE_COALESCE_ACTIVITY_HOLD_MS,
   VOICE_COALESCE_HOLD_MS,
   VOICE_COALESCE_MAX_HOLD_MS,
+  VOICE_COALESCE_LATE_GATED_FINAL_MS,
+  VOICE_COALESCE_TRAILING_GRACE_MS,
   VOICE_FOLLOW_UP_WINDOW_MS,
   VoiceCommandCoalescer,
   VoiceCommandRouter,
+  coalescerInterimText,
   isAnswerShapedUtterance,
   isBoardFollowUpUtterance,
   isCommandContinuationUtterance,
 } from "../src/features/board/voiceCommandRouter.ts";
+import { isCompleteLocalEditCommand } from "../src/features/board/immediateVoiceCommands.ts";
 
 const MEETING_NEGATIVES = JSON.parse(
   readFileSync(new URL("../../../evals/voice-intent/meeting-negatives.v1.json", import.meta.url), "utf8"),
@@ -483,8 +487,14 @@ function makeCoalescer(overrides = {}) {
   let nextId = 1;
   const timers = new Map();
   const flushed = [];
+  const infos = [];
+  const holds = [];
   const coalescer = new VoiceCommandCoalescer({
-    onFlush: (decision) => flushed.push(decision),
+    onFlush: (decision, info) => {
+      flushed.push(decision);
+      infos.push(info);
+    },
+    onHold: (decision) => holds.push(decision.command),
     now: () => clock,
     setTimer: (callback, ms) => {
       const id = nextId++;
@@ -509,7 +519,7 @@ function makeCoalescer(overrides = {}) {
     }
     clock = target;
   };
-  return { coalescer, flushed, tick };
+  return { coalescer, flushed, infos, holds, tick, now: () => clock };
 }
 
 const wakeDecision = (command, transcript = `Airo, ${command}`) => ({
@@ -718,4 +728,321 @@ test("expectsFollowUp reflects the follow-up and answer windows", () => {
   assert.equal(router.expectsFollowUp(), false);
   router.openAnswerWindow();
   assert.equal(router.expectsFollowUp(), true);
+});
+
+/* ------------------------- Coalescer latency (W1, W3, W4, W6) ------------------------- */
+
+const gatedDecision = (command, channel = "gated-ptt") => ({
+  channel,
+  command,
+  transcript: command,
+  wakePhrase: channel === "gated-ptt" ? "push-to-talk" : "hold-to-edit",
+});
+
+test("coalescer flush info: timer, merge and the reason for every flush", () => {
+  const { coalescer, flushed, infos, tick } = makeCoalescer();
+  // A lone command: the hold runs out.
+  coalescer.push(wakeDecision("add a database"));
+  tick(VOICE_COALESCE_HOLD_MS);
+  assert.deepEqual(infos[0], {
+    heldMs: VOICE_COALESCE_HOLD_MS,
+    merged: false,
+    mergeCount: 0,
+    flushReason: "timer",
+    lastInterimAgoMs: null,
+  });
+
+  // A merged command: heldMs counts from the first hold, not the merge.
+  coalescer.push(wakeDecision("add a database"));
+  tick(500);
+  coalescer.noteSpeechActivity("called");
+  tick(700);
+  assert.equal(coalescer.offerContinuation("called Orders"), true);
+  tick(VOICE_COALESCE_HOLD_MS);
+  assert.equal(flushed[1].command, "add a database called Orders");
+  assert.deepEqual(infos[1], {
+    heldMs: 1_200 + VOICE_COALESCE_HOLD_MS,
+    merged: true,
+    mergeCount: 1,
+    flushReason: "timer",
+    lastInterimAgoMs: 700 + VOICE_COALESCE_HOLD_MS,
+  });
+
+  // A new routed command flushes the held one.
+  coalescer.push(wakeDecision("add a user"));
+  tick(100);
+  coalescer.push(wakeDecision("add a cache"));
+  assert.equal(infos[2].flushReason, "new-command");
+  assert.equal(infos[2].heldMs, 100);
+
+  // Undo runs at once (and the held cache flushes first).
+  coalescer.push(wakeDecision("undo"));
+  assert.deepEqual(infos.slice(3).map((info) => info.flushReason), ["new-command", "immediate"]);
+  assert.equal(infos[4].heldMs, 0);
+
+  // Explicit flush.
+  coalescer.push(wakeDecision("add a queue"));
+  coalescer.flush();
+  assert.equal(infos[5].flushReason, "explicit");
+
+  // Palm drop.
+  coalescer.setGateOpen(true);
+  coalescer.push(gatedDecision("add a service"));
+  tick(500);
+  coalescer.setGateOpen(false);
+  tick(VOICE_COALESCE_TRAILING_GRACE_MS);
+  assert.equal(infos[6].flushReason, "gate-drop");
+  assert.equal(infos[6].heldMs, 500 + VOICE_COALESCE_TRAILING_GRACE_MS);
+
+  // Room talk ends a stretched hold.
+  coalescer.push(wakeDecision("add a gateway"));
+  tick(300);
+  coalescer.noteSpeechActivity("which honestly");
+  tick(400);
+  assert.equal(coalescer.offerContinuation("which honestly is where everything breaks"), false);
+  tick(VOICE_COALESCE_HOLD_MS);
+  assert.equal(infos[7].flushReason, "room-talk");
+  assert.equal(flushed.length, 8);
+});
+
+test("W3: a gated final that arrives after the palm dropped flushes after the late-final hold", () => {
+  const { coalescer, flushed, infos, tick } = makeCoalescer();
+  coalescer.setGateOpen(true);
+  coalescer.setGateOpen(false);
+  // The router sends the late final through the grace-window gate.
+  coalescer.push(gatedDecision("add a database"));
+  tick(VOICE_COALESCE_LATE_GATED_FINAL_MS - 1);
+  assert.equal(flushed.length, 0);
+  tick(1);
+  assert.equal(flushed.length, 1, "800 ms, not the 1.2 s hold");
+  assert.equal(infos[0].flushReason, "gate-drop");
+
+  // Same for hold-to-edit.
+  coalescer.push({ ...gatedDecision("add a note", "gated-scoped"), strokeId: "s1" });
+  tick(VOICE_COALESCE_LATE_GATED_FINAL_MS);
+  assert.equal(flushed.length, 2);
+});
+
+test("W3: palm dropped in a thinking pause, continuation resumes after the late final, still merges", () => {
+  const { coalescer, flushed, infos, tick } = makeCoalescer();
+  coalescer.setGateOpen(true);
+  tick(1_200);
+  coalescer.setGateOpen(false); // palm drops at 1.2 s, mid-pause
+  tick(1_000);
+  coalescer.push(gatedDecision("add a database")); // Flux final at 2.2 s
+  tick(500);
+  coalescer.noteSpeechActivity("called"); // first interim of the resumed speech at 2.7 s
+  tick(600);
+  assert.equal(flushed.length, 0);
+  assert.equal(coalescer.offerContinuation("called Orders"), true); // 3.3 s
+  tick(VOICE_COALESCE_HOLD_MS);
+  assert.deepEqual(flushed.map((d) => d.command), ["add a database called Orders"]);
+  assert.equal(infos[0].merged, true);
+});
+
+test("W3: speech right after a late gated final still extends the hold and merges the continuation", () => {
+  const { coalescer, flushed, tick } = makeCoalescer();
+  coalescer.setGateOpen(true);
+  coalescer.setGateOpen(false);
+  coalescer.push(gatedDecision("add a cache"));
+  tick(200);
+  coalescer.noteSpeechActivity("called");
+  tick(VOICE_COALESCE_TRAILING_GRACE_MS);
+  assert.equal(flushed.length, 0, "an interim within the grace keeps it held");
+  tick(1_000);
+  coalescer.noteSpeechActivity("called Orders");
+  tick(1_400);
+  assert.equal(flushed.length, 0);
+  assert.equal(coalescer.offerContinuation("called Orders"), true);
+  tick(VOICE_COALESCE_HOLD_MS);
+  assert.deepEqual(flushed.map((d) => d.command), ["add a cache called Orders"]);
+});
+
+test("W3: a wake-word final still holds the full 1.2 s; a final while the palm is up keeps the gate hold", () => {
+  const { coalescer, flushed, tick } = makeCoalescer();
+  coalescer.push(wakeDecision("add a database"));
+  tick(VOICE_COALESCE_TRAILING_GRACE_MS);
+  assert.equal(flushed.length, 0);
+  tick(VOICE_COALESCE_HOLD_MS - VOICE_COALESCE_TRAILING_GRACE_MS);
+  assert.equal(flushed.length, 1);
+
+  coalescer.setGateOpen(true);
+  coalescer.push(gatedDecision("add a cache"));
+  tick(1_500);
+  assert.equal(flushed.length, 1, "palm still up: the gate hold applies");
+});
+
+const withImmediate = () => makeCoalescer({
+  flushImmediately: (decision) => isCompleteLocalEditCommand(decision.command),
+});
+
+test("W4: complete local edits run at once; creates and open-ended commands keep the hold", () => {
+  assert.equal(isCompleteLocalEditCommand("make it red"), true);
+  assert.equal(isCompleteLocalEditCommand("delete this"), true);
+  assert.equal(isCompleteLocalEditCommand("delete selected"), true);
+  assert.equal(isCompleteLocalEditCommand("make it bigger"), true);
+  assert.equal(isCompleteLocalEditCommand("zoom to fit"), true);
+  // A named target can still be narrowed by "… called Orders" / "… next to the API".
+  assert.equal(isCompleteLocalEditCommand("delete the cache"), false);
+  assert.equal(isCompleteLocalEditCommand("delete the box"), false);
+  assert.equal(isCompleteLocalEditCommand("make the database blue"), false);
+  assert.equal(isCompleteLocalEditCommand("focus on the cache"), false);
+  assert.equal(isCompleteLocalEditCommand("add a database"), false);
+  assert.equal(isCompleteLocalEditCommand("rename it to Foo"), false);
+  assert.equal(isCompleteLocalEditCommand("move it left"), false);
+  assert.equal(isCompleteLocalEditCommand("connect the API to the cache"), false);
+
+  const { coalescer, flushed, infos, holds, tick } = withImmediate();
+  coalescer.push(wakeDecision("make it red"));
+  assert.deepEqual(flushed.map((d) => d.command), ["make it red"], "flushes at 0 ms");
+  assert.equal(infos[0].flushReason, "immediate");
+  coalescer.push(wakeDecision("delete this"));
+  assert.equal(flushed.length, 2);
+  assert.deepEqual(holds, [], "an immediate command is never offered for speculation");
+
+  coalescer.push(wakeDecision("add a database"));
+  assert.equal(flushed.length, 2, "a create keeps the hold");
+  tick(VOICE_COALESCE_HOLD_MS);
+  assert.equal(flushed.length, 3);
+});
+
+for (const [head, tail] of [
+  ["delete the box", "called Orders"],
+  ["delete the cache", "next to the API"],
+  ["delete the database", "below the cache"],
+  ["delete the arrow", "from the API"],
+  ["make the database blue", "next to the API"],
+  ["focus on the cache", "next to the API"],
+]) {
+  test(`W4: a named-target edit keeps the hold so "${tail}" merges into "${head}"`, () => {
+    const { coalescer, flushed, infos, tick } = withImmediate();
+    coalescer.push(wakeDecision(head));
+    assert.equal(flushed.length, 0, "not flushed at once");
+    tick(300);
+    coalescer.noteSpeechActivity(tail.split(" ")[0]);
+    tick(600);
+    assert.equal(coalescer.offerContinuation(tail), true);
+    tick(VOICE_COALESCE_HOLD_MS);
+    assert.deepEqual(flushed.map((d) => d.command), [`${head} ${tail}`]);
+    assert.equal(infos[0].merged, true);
+  });
+}
+
+test("W4: with the palm open a complete edit still holds", () => {
+  const { coalescer, flushed, tick } = withImmediate();
+  coalescer.setGateOpen(true);
+  coalescer.push(gatedDecision("make it red"));
+  tick(1_000);
+  assert.equal(flushed.length, 0);
+  coalescer.setGateOpen(false);
+  tick(VOICE_COALESCE_TRAILING_GRACE_MS);
+  assert.deepEqual(flushed.map((d) => d.command), ["make it red"]);
+});
+
+test("W4: a dangling command holds even when the predicate says complete", () => {
+  const { coalescer, flushed, tick } = makeCoalescer({ flushImmediately: () => true });
+  coalescer.push(wakeDecision("rename it to"));
+  assert.equal(flushed.length, 0);
+  assert.equal(coalescer.offerContinuation("Payments"), true);
+  tick(VOICE_COALESCE_HOLD_MS);
+  assert.deepEqual(flushed.map((d) => d.command), ["rename it to Payments"]);
+});
+
+test("W4: a connective follow-up after an immediate edit is its own command", () => {
+  const { coalescer, flushed, tick } = withImmediate();
+  coalescer.push(wakeDecision("make it red"));
+  assert.equal(flushed.length, 1);
+  // Nothing is held any more, so the follow-up is not merged into it.
+  assert.equal(coalescer.offerContinuation("and connect it to the API"), false);
+  coalescer.push({
+    channel: "follow-up",
+    command: "and connect it to the API",
+    transcript: "and connect it to the API",
+    wakePhrase: "follow-up",
+  });
+  tick(VOICE_COALESCE_HOLD_MS);
+  assert.deepEqual(flushed.map((d) => d.command), ["make it red", "and connect it to the API"]);
+});
+
+test("W6: an interim that carries the wake word flushes the held command at once", () => {
+  const { coalescer, flushed, infos, tick } = makeCoalescer();
+  coalescer.push(wakeDecision("add a database"));
+  tick(400);
+  coalescer.noteSpeechActivity("Airo, add a");
+  assert.deepEqual(flushed.map((d) => d.command), ["add a database"]);
+  assert.equal(infos[0].flushReason, "wake-interim");
+  assert.equal(infos[0].heldMs, 400);
+
+  // An ordinary interim only extends the hold.
+  coalescer.push(wakeDecision("add a cache"));
+  tick(1_000);
+  coalescer.noteSpeechActivity("called");
+  tick(VOICE_COALESCE_HOLD_MS);
+  assert.equal(flushed.length, 1);
+  tick(VOICE_COALESCE_ACTIVITY_HOLD_MS);
+  assert.equal(flushed.length, 2);
+  assert.equal(infos[1].flushReason, "timer");
+
+  // Activity reported without text (a late interim of the finalized turn) only extends.
+  coalescer.push(wakeDecision("add a queue", "Airo, add a queue"));
+  coalescer.noteSpeechActivity();
+  assert.equal(flushed.length, 2);
+  tick(VOICE_COALESCE_ACTIVITY_HOLD_MS);
+  assert.equal(flushed.length, 3);
+});
+
+test("W6: a bare wake word interim (narration about Airo) only extends the hold", () => {
+  const { coalescer, flushed, tick } = makeCoalescer();
+  coalescer.push(wakeDecision("add a database"));
+  tick(400);
+  coalescer.noteSpeechActivity("Airo");
+  assert.equal(flushed.length, 0, "\"Airo\" alone does not flush");
+  tick(300);
+  coalescer.noteSpeechActivity("Airo is great");
+  tick(300);
+  assert.equal(coalescer.offerContinuation("Airo is great"), false);
+  assert.equal(flushed.length, 0, "the room-talk final leaves the hold in place");
+  tick(400);
+  coalescer.noteSpeechActivity("called");
+  tick(500);
+  assert.equal(coalescer.offerContinuation("called Orders"), true);
+  tick(VOICE_COALESCE_HOLD_MS);
+  assert.deepEqual(flushed.map((d) => d.command), ["add a database called Orders"]);
+});
+
+test("W6: a late interim of the finalized turn is only activity; a new turn's interim can flush", () => {
+  assert.equal(coalescerInterimText("Airo, add a", 3, 3), undefined);
+  assert.equal(coalescerInterimText("Airo, add a", 4, 3), "Airo, add a");
+  assert.equal(coalescerInterimText("Airo, add a", undefined, 3), "Airo, add a");
+  assert.equal(coalescerInterimText("Airo, add a", 0, undefined), "Airo, add a");
+
+  const { coalescer, flushed } = makeCoalescer();
+  coalescer.push(wakeDecision("add a database", "Airo, add a database"));
+  // Flux sends one more interim of turn 3 after its final.
+  coalescer.noteSpeechActivity(coalescerInterimText("Airo, add a database", 3, 3));
+  assert.equal(flushed.length, 0, "the finalized turn's own words do not flush it");
+  coalescer.noteSpeechActivity(coalescerInterimText("Airo, add a cache", 4, 3));
+  assert.deepEqual(flushed.map((d) => d.command), ["add a database"]);
+});
+
+test("onHold fires for a new held command, on a merge and on a gate change, never for undo or cancel", () => {
+  const { coalescer, holds, tick } = makeCoalescer();
+  coalescer.push(wakeDecision("add a database"));
+  assert.deepEqual(holds, ["add a database"]);
+  coalescer.offerContinuation("called Orders");
+  assert.deepEqual(holds, ["add a database", "add a database called Orders"]);
+  coalescer.offerContinuation("which honestly is where everything breaks");
+  assert.equal(holds.length, 2, "room talk does not change the held command");
+  coalescer.setGateOpen(true);
+  assert.equal(holds.length, 3);
+  coalescer.setGateOpen(false);
+  tick(VOICE_COALESCE_TRAILING_GRACE_MS);
+  coalescer.push(wakeDecision("undo"));
+  coalescer.push(wakeDecision("cancel"));
+  assert.equal(holds.length, 4);
+  // A merge through the push path (gated continuation).
+  coalescer.setGateOpen(true);
+  coalescer.push(gatedDecision("add a user"));
+  coalescer.push(gatedDecision("called Priya"));
+  assert.deepEqual(holds.slice(-2), ["add a user", "add a user called Priya"]);
 });

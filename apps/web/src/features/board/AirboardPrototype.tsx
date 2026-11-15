@@ -155,9 +155,27 @@ import {
 import {
   VoiceCommandCoalescer,
   VoiceCommandRouter,
+  coalescerInterimText,
+  type VoiceCoalescerFlushInfo,
   type VoiceGateMode,
   type VoiceRouteDecision,
 } from "./voiceCommandRouter";
+import { isCompleteLocalEditCommand } from "./immediateVoiceCommands";
+import {
+  expandSpokenCreateAndConnect,
+  parseDiagramVisibilityIntent,
+  predictSemanticPlannerIssue,
+  semanticParserIssue,
+} from "./semanticPlannerIssue";
+import {
+  SemanticSpeculation,
+  composeSemanticRequestOptions,
+  plannerRequestAddressedBy,
+  plannerRequestHasPointer,
+  semanticRequestFingerprint,
+  semanticSpeculationKey,
+  voiceAddressedBy,
+} from "./semanticSpeculation";
 import { airoSoundsEnabled, playAiroCue } from "./airoCues";
 import {
   createRealtimeSpeechSession,
@@ -176,6 +194,7 @@ import {
   type SemanticIntentConfig,
   type SemanticIntentAddressedBy,
   type SemanticIntentParserIssue,
+  type SemanticIntentResolution,
 } from "./semanticIntent";
 import {
   exportCanvasPng,
@@ -372,28 +391,6 @@ function voiceTraceChannel(decision: VoiceRouteDecision | undefined): string {
 /** Backoff for retrying a settings load: 2 s, 4 s, 8 s … capped at a minute. */
 function configRetryDelayMs(attempt: number): number {
   return Math.min(60_000, 1_000 * 2 ** Math.min(attempt, 6));
-}
-
-function parseDiagramVisibilityIntent(text: string): "hide" | "show" | null {
-  const normalized = text
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (
-    /^(?:please )?hide (?:the )?(?:canvas|diagram)$/.test(normalized) ||
-    /^(?:please )?turn (?:the )?(?:canvas|diagram) off$/.test(normalized)
-  ) {
-    return "hide";
-  }
-  if (
-    /^(?:please )?(?:show|restore) (?:the )?(?:canvas|diagram)$/.test(normalized) ||
-    /^(?:please )?bring (?:the )?(?:canvas|diagram) back$/.test(normalized) ||
-    /^(?:please )?turn (?:the )?(?:canvas|diagram) on$/.test(normalized)
-  ) {
-    return "show";
-  }
-  return null;
 }
 
 export function AirboardPrototype({
@@ -616,6 +613,17 @@ export function AirboardPrototype({
     ((text: string, voiceTurnId?: string) => Promise<IntentPreparationOutcome>) | null
   >(null);
   const wakeCommandQueueRef = useRef<Promise<void>>(Promise.resolve());
+  /** Voice commands queued or running (see queueVoiceCommand). */
+  const wakeCommandQueuePendingRef = useRef(0);
+  /** Planner requests the normal path is awaiting. */
+  const semanticPlannerInFlightRef = useRef(0);
+  const semanticSpeculationRef = useRef<SemanticSpeculation<SemanticIntentResolution> | null>(null);
+  if (semanticSpeculationRef.current === null) {
+    semanticSpeculationRef.current = new SemanticSpeculation<SemanticIntentResolution>();
+  }
+  const speculateHeldVoiceCommandRef = useRef<(() => void) | null>(null);
+  /** The provider turn of the latest final transcript (see onInterim). */
+  const lastFinalTurnIndexRef = useRef<number | undefined>(undefined);
   const semanticIntentConfigRef = useRef<SemanticIntentConfig | null>(null);
   const semanticIntentRequestIdRef = useRef(0);
   const pendingSemanticClarificationRef =
@@ -634,20 +642,31 @@ export function AirboardPrototype({
   }
   const voiceRouter = voiceRouterRef.current;
   const runVoiceDecisionRef = useRef<
-    ((decision: VoiceRouteDecision, metadata: VoiceDecisionMetadata) => void) | null
+    | ((
+        decision: VoiceRouteDecision,
+        metadata: VoiceDecisionMetadata,
+        flushInfo?: VoiceCoalescerFlushInfo,
+      ) => void)
+    | null
   >(null);
   const heldVoiceMetaRef = useRef<VoiceDecisionMetadata | null>(null);
   const incomingVoiceMetaRef = useRef<VoiceDecisionMetadata | null>(null);
   const voiceCoalescerRef = useRef<VoiceCommandCoalescer | null>(null);
   if (voiceCoalescerRef.current === null) {
     voiceCoalescerRef.current = new VoiceCommandCoalescer({
-      onFlush: (decision) => {
+      onFlush: (decision, flushInfo) => {
         const metadata = heldVoiceMetaRef.current ?? incomingVoiceMetaRef.current ?? {
           engine: "realtime",
         };
         heldVoiceMetaRef.current = null;
-        runVoiceDecisionRef.current?.(decision, metadata);
+        runVoiceDecisionRef.current?.(decision, metadata, flushInfo);
       },
+      // The held command's metadata is recorded right after push() returns,
+      // so the speculative planner call starts on the next microtask.
+      onHold: () => {
+        queueMicrotask(() => speculateHeldVoiceCommandRef.current?.());
+      },
+      flushImmediately: (decision) => isCompleteLocalEditCommand(decision.command),
     });
   }
   const voiceCoalescer = voiceCoalescerRef.current;
@@ -4143,6 +4162,7 @@ export function AirboardPrototype({
         applyPendingIntentRef.current = null;
         voiceRouter.reset();
         voiceCoalescer.cancel();
+        semanticSpeculationRef.current?.invalidate();
         heldVoiceMetaRef.current = null;
         setVoiceGate(null);
         palmVoiceGestureTrackerRef.current!.reset();
@@ -5669,6 +5689,10 @@ export function AirboardPrototype({
   const prepareIntentCommandWithSemantic = useCallback(
     async (text: string, voiceTurnId?: string): Promise<IntentPreparationOutcome> => {
       const instruction = text.trim();
+      // A speculative planner call is usable only if nothing bumped the
+      // planner generation between its start and this command (a cancel, a
+      // typed command, a hidden board). Stages below may bump it themselves.
+      const entryGeneration = semanticIntentRequestIdRef.current;
       const visibilityIntent = parseDiagramVisibilityIntent(instruction);
       if (visibilityIntent || !diagramVisibleRef.current) {
         pendingSemanticClarificationRef.current = null;
@@ -5855,11 +5879,8 @@ export function AirboardPrototype({
           stepCount: 0,
         };
       }
-      const parserIssue = (
-        compound
-          ? "compound_command"
-          : deterministic.status === "parsed" ? "grounding_failed" : deterministic.issue.code
-      ) as SemanticIntentParserIssue;
+      // Not null: the checks above already returned for every case without an issue.
+      const parserIssue = semanticParserIssue(compound, deterministic) as SemanticIntentParserIssue;
 
       const semanticConfig = semanticIntentConfigRef.current;
       if (!semanticConfig?.available) {
@@ -5909,10 +5930,44 @@ export function AirboardPrototype({
         viewOrigin: toBoardPoint({ x: 0, y: 0 }),
       };
 
-      const requestId = semanticIntentRequestIdRef.current + 1;
-      semanticIntentRequestIdRef.current = requestId;
       const semanticModel =
         selectedSemanticIntentModelRef.current || semanticConfig.defaultModel;
+      const semanticRequest = composeSemanticRequestOptions({
+        apiBaseUrl: AIRBOARD_API_URL,
+        accessToken: effectiveAccessToken,
+        voiceTurnId: voiceTurnId ?? crypto.randomUUID(),
+        transcript: instruction,
+        parserIssue,
+        context: buildSemanticIntentContext(
+          requestBoardState,
+          requestSelectionIds,
+          plannerRequestHasPointer(voiceReferenceRef.current, lastGesturePointerRef.current),
+        ),
+        pendingClarification,
+        model: semanticModel,
+        // Speech meant for Airo is a board request: a narrated flow is drawn.
+        addressedBy: plannerRequestAddressedBy(voiceTurnId, voiceAddressedByRef.current),
+      });
+      // A planner call started while the command was held is used only when
+      // it asked exactly what this request asks; otherwise it is dropped.
+      const speculation = voiceTurnId
+        ? semanticSpeculationRef.current!.take({
+            key: semanticSpeculationKey(voiceTurnId, instruction),
+            generation: entryGeneration,
+            fingerprint: semanticRequestFingerprint(semanticRequest),
+            clarification: pendingClarificationIsCurrent ? pendingClarificationRecord : null,
+          })
+        : null;
+      const speculationTrace =
+        speculation === null
+          ? {}
+          : speculation.hit
+            ? { speculation: "consumed", speculativeLeadMs: Date.now() - speculation.startedAt }
+            : speculation.reason === "none"
+              ? { speculation: "none" }
+              : { speculation: "discarded", speculationMiss: speculation.reason };
+      const requestId = semanticIntentRequestIdRef.current + 1;
+      semanticIntentRequestIdRef.current = requestId;
       setSpeechRecognitionStatus("interpreting");
       setCommandFeedback(
         `Understanding “${truncateSpeechTranscript(instruction)}” with ${semanticConfig.provider ?? "AI"} / ${semanticModel ?? "semantic model"}…`,
@@ -5924,33 +5979,15 @@ export function AirboardPrototype({
           deterministicGroundingFailed,
           provider: semanticConfig.provider,
           model: semanticModel,
+          ...speculationTrace,
         });
       }
 
+      semanticPlannerInFlightRef.current += 1;
       try {
-        const resolution = await resolveSemanticIntent({
-          apiBaseUrl: AIRBOARD_API_URL,
-          ...(effectiveAccessToken ? { accessToken: effectiveAccessToken } : {}),
-          voiceTurnId: voiceTurnId ?? crypto.randomUUID(),
-          transcript: instruction,
-          parserIssue,
-          context: buildSemanticIntentContext(
-            requestBoardState,
-            requestSelectionIds,
-            Boolean(requestPointer),
-          ),
-          ...(pendingClarification ? { pendingClarification } : {}),
-          ...(semanticModel ? { model: semanticModel } : {}),
-          // Speech meant for Airo is a board request: a narrated flow is drawn.
-          ...(() => {
-            const addressedBy = !voiceTurnId
-              ? "typed"
-              : voiceAddressedByRef.current
-                ? voiceAddressedByRef.current.addressedBy
-                : "wake";
-            return addressedBy ? { addressedBy } : {};
-          })(),
-        });
+        const resolution = await (speculation?.hit
+          ? speculation.promise
+          : resolveSemanticIntent(semanticRequest));
         if (semanticIntentRequestIdRef.current !== requestId) {
           return {
             result: "rejected",
@@ -6014,6 +6051,7 @@ export function AirboardPrototype({
               providerProcessingMs: resolution.metadata.providerProcessingMs,
               totalLatencyMs: resolution.metadata.totalLatencyMs,
               usage: resolution.metadata.usage,
+              ...speculationTrace,
             });
             reportVoiceTrace(voiceTurnId, "feedback", {
               category: "no-op",
@@ -6046,6 +6084,7 @@ export function AirboardPrototype({
               providerProcessingMs: resolution.metadata.providerProcessingMs,
               totalLatencyMs: resolution.metadata.totalLatencyMs,
               usage: resolution.metadata.usage,
+              ...speculationTrace,
             });
             if (plan.status === "clarification") {
               reportVoiceTrace(voiceTurnId, "clarification", {
@@ -6106,6 +6145,7 @@ export function AirboardPrototype({
             providerProcessingMs: resolution.metadata.providerProcessingMs,
             totalLatencyMs: resolution.metadata.totalLatencyMs,
             usage: resolution.metadata.usage,
+            ...speculationTrace,
           });
         }
         if (!voiceTurnId) setIntentCommandText(instruction);
@@ -6136,6 +6176,7 @@ export function AirboardPrototype({
                 ? Number(caught.status)
                 : undefined,
             message: caught instanceof Error ? caught.message : "Semantic interpretation failed.",
+            ...speculationTrace,
           });
         }
         if (semanticIntentRequestIdRef.current === requestId) {
@@ -6152,6 +6193,8 @@ export function AirboardPrototype({
           source: "semantic",
           stepCount: 0,
         };
+      } finally {
+        semanticPlannerInFlightRef.current -= 1;
       }
     },
     [
@@ -6377,14 +6420,9 @@ export function AirboardPrototype({
     const voiceTurnId = traceContext?.voiceTurnId;
     // Captured now, never when the queued command runs.
     const reference = traceContext?.reference ?? captureVoiceReference();
-    const addressedBy: SemanticIntentAddressedBy | undefined =
-      traceContext?.wakePhrase === "push-to-talk"
-        ? "palm"
-        : traceContext?.wakePhrase === "hold-to-edit"
-          ? "hold"
-          : traceContext?.wakePhrase === "follow-up" || traceContext?.wakePhrase === "answer"
-            ? undefined
-            : "wake";
+    const addressedBy: SemanticIntentAddressedBy | undefined = voiceAddressedBy(
+      traceContext?.wakePhrase,
+    );
     const intentKey = createInteractionIntentKey(command);
     if (traceContext) {
       reportVoiceTrace(traceContext.voiceTurnId, "capture_metadata", {
@@ -6405,6 +6443,7 @@ export function AirboardPrototype({
         command,
       });
     }
+    wakeCommandQueuePendingRef.current += 1;
     wakeCommandQueueRef.current = wakeCommandQueueRef.current
       .then(async () => {
         const instruction = command.trim();
@@ -6449,6 +6488,12 @@ export function AirboardPrototype({
         } finally {
           voiceReferenceRef.current = null;
           voiceAddressedByRef.current = null;
+          // A speculation for this turn that the preparer did not use (a
+          // fast rule handled the command after all) has nothing left to serve.
+          const speculation = semanticSpeculationRef.current!;
+          if (voiceTurnId && speculation.activeKey?.startsWith(`${voiceTurnId}\u0000`)) {
+            speculation.invalidate();
+          }
         }
         // Commands commit instantly inside the preparer — there is no pending
         // plan to confirm and no "did you mean?" prompt. Airo applies its best
@@ -6535,6 +6580,11 @@ export function AirboardPrototype({
           detail: "Say the command again.",
           tone: "warning",
         });
+      })
+      .finally(() => {
+        wakeCommandQueuePendingRef.current -= 1;
+        // A command held while this one ran can now plan ahead.
+        if (wakeCommandQueuePendingRef.current === 0) speculateHeldVoiceCommandRef.current?.();
       });
   }, [appendCopilotActivity, captureVoiceReference, reportAttributedVoiceFollowUp, reportVoiceTrace, settleHandSceneMove, showAiroNotice, voiceRouter]);
 
@@ -6662,9 +6712,24 @@ export function AirboardPrototype({
   );
 
   const runVoiceDecision = useCallback(
-    (decision: VoiceRouteDecision, metadata: VoiceDecisionMetadata) => {
+    (
+      decision: VoiceRouteDecision,
+      metadata: VoiceDecisionMetadata,
+      flushInfo?: VoiceCoalescerFlushInfo,
+    ) => {
+      const voiceTurnId = metadata.voiceTurnId ?? crypto.randomUUID();
+      if (flushInfo) {
+        reportVoiceTrace(voiceTurnId, "coalescer_flushed", {
+          heldMs: flushInfo.heldMs,
+          merged: flushInfo.merged,
+          mergeCount: flushInfo.mergeCount,
+          flushReason: flushInfo.flushReason,
+          lastInterimAgoMs: flushInfo.lastInterimAgoMs,
+          channel: voiceTraceChannel(decision),
+        });
+      }
       queueVoiceCommand(decision.command, {
-        voiceTurnId: metadata.voiceTurnId ?? crypto.randomUUID(),
+        voiceTurnId,
         transcript: decision.transcript,
         wakePhrase: decision.wakePhrase,
         engine: metadata.engine,
@@ -6675,9 +6740,74 @@ export function AirboardPrototype({
         reference: metadata.reference,
       });
     },
-    [queueVoiceCommand],
+    [queueVoiceCommand, reportVoiceTrace],
   );
   runVoiceDecisionRef.current = runVoiceDecision;
+
+  /**
+   * Starts the planner call for the held voice command while the coalescer
+   * still waits for a possible continuation (see semanticSpeculation.ts).
+   * It only predicts; nothing here touches the board. It speculates only
+   * when no other voice command or planner call is running, and only for a
+   * command every fast rule would pass to the planner. The command's own run
+   * later builds its request as usual and uses this answer only when the two
+   * requests are identical.
+   */
+  speculateHeldVoiceCommandRef.current = () => {
+    const decision = voiceCoalescer.pending;
+    const metadata = heldVoiceMetaRef.current;
+    const voiceTurnId = metadata?.voiceTurnId;
+    const reference = metadata?.reference;
+    if (!decision || !voiceTurnId || !reference) return;
+    if (wakeCommandQueuePendingRef.current > 0 || semanticPlannerInFlightRef.current > 0) return;
+    const semanticConfig = semanticIntentConfigRef.current;
+    if (!semanticConfig?.available || !diagramVisibleRef.current) return;
+    const instruction = decision.command.trim();
+    const parserIssue = predictSemanticPlannerIssue(
+      instruction,
+      boardRef.current,
+      selectedElementIdsRef.current,
+    );
+    if (!parserIssue) return;
+    const pendingClarificationRecord = pendingSemanticClarificationRef.current;
+    const pendingClarificationIsCurrent =
+      pendingClarificationRecord !== null &&
+      Date.now() - pendingClarificationRecord.askedAt <= CLARIFICATION_ANSWER_MS;
+    const semanticModel =
+      selectedSemanticIntentModelRef.current || semanticConfig.defaultModel;
+    const request = composeSemanticRequestOptions({
+      apiBaseUrl: AIRBOARD_API_URL,
+      accessToken: effectiveAccessToken,
+      voiceTurnId,
+      transcript: instruction,
+      parserIssue,
+      context: buildSemanticIntentContext(
+        boardRef.current,
+        currentSemanticSelectionIds(),
+        plannerRequestHasPointer(reference, null),
+      ),
+      pendingClarification: pendingClarificationIsCurrent
+        ? pendingClarificationRecord.request
+        : undefined,
+      model: semanticModel,
+      addressedBy: voiceAddressedBy(decision.wakePhrase),
+    });
+    const started = semanticSpeculationRef.current!.start({
+      key: semanticSpeculationKey(voiceTurnId, instruction),
+      generation: semanticIntentRequestIdRef.current,
+      fingerprint: semanticRequestFingerprint(request),
+      clarification: pendingClarificationIsCurrent ? pendingClarificationRecord : null,
+      run: (signal) => resolveSemanticIntent({ ...request, signal }),
+    });
+    if (started) {
+      reportVoiceTrace(voiceTurnId, "semantic_request", {
+        speculative: true,
+        parserIssue,
+        provider: semanticConfig.provider,
+        model: semanticModel,
+      });
+    }
+  };
 
   /**
    * Every routed command passes through the coalescer, which holds it for a
@@ -6861,6 +6991,7 @@ export function AirboardPrototype({
       resetVoiceRouting: () => {
         voiceRouter.reset();
         voiceCoalescer.cancel();
+        semanticSpeculationRef.current?.invalidate();
         heldVoiceMetaRef.current = null;
         setVoiceGate(null);
       },
@@ -7013,6 +7144,7 @@ export function AirboardPrototype({
       markVoiceDropped(false);
       voiceRouter.reset();
       voiceCoalescer.cancel();
+      semanticSpeculationRef.current?.invalidate();
       heldVoiceMetaRef.current = null;
       setVoiceGate(null);
       setSpeechArmed(false);
@@ -7161,7 +7293,7 @@ export function AirboardPrototype({
           setCommandFeedback(warning.message);
           showAiroNotice({ tone: "warning", detail: warning.message });
         },
-        onInterim: (transcript) => {
+        onInterim: (transcript, event) => {
           if (!voiceCaptureInteractionIdRef.current) {
             captureSpeechStartPointing();
             const voiceTurnId = crypto.randomUUID();
@@ -7174,11 +7306,17 @@ export function AirboardPrototype({
             });
           }
           voiceRouter.noteSpeechActivity();
-          voiceCoalescer.noteSpeechActivity();
+          // A wake word heard in a new turn's interim starts the next command,
+          // so the held one runs at once. A late interim of the turn that was
+          // just finalized is only activity.
+          voiceCoalescer.noteSpeechActivity(
+            coalescerInterimText(transcript, event.turnIndex, lastFinalTurnIndexRef.current),
+          );
           showHeardSpeech(transcript);
           setSpeechRecognitionStatus("hearing");
         },
         onFinal: (transcript, event) => {
+          lastFinalTurnIndexRef.current = event.turnIndex;
           const metadata = realtimeSession?.getMetadata();
           const traceMetadata = {
             engine: "realtime" as const,
@@ -7242,6 +7380,7 @@ export function AirboardPrototype({
           }
           voiceRouter.reset();
           voiceCoalescer.cancel();
+          semanticSpeculationRef.current?.invalidate();
           heldVoiceMetaRef.current = null;
           setVoiceGate(null);
           speechSessionRef.current = null;
@@ -9551,26 +9690,6 @@ function decodeCanvasImage(source: string, signal: AbortSignal): Promise<HTMLIma
   });
 }
 
-
-/**
- * Speech recognizers commonly render “add a database, uh, later that is
- * connected to service” as one sentence. Convert that safe, explicit pattern
- * into the same atomic create+connect plan the semantic planner would produce,
- * so it never falls back to a manual Send click when the semantic provider is
- * unavailable.
- */
-function expandSpokenCreateAndConnect(text: string): [string, string] | null {
-  const match =
-    /^(?:add|create|insert|place|make)\s+(?:(?:a|an|the)\s+)?(process|service|database|queue|user|api|decision|note|component|circle|rectangle|document)\b[\s,]*(?:(?:uh|um|er|erm|like|then|later|layer)[\s,]*)*(?:that\s+)?(?:is\s+)?connected\s+to\s+(?:the\s+)?(.+?)\s*[.!?]?$/i.exec(
-      text.trim(),
-    );
-  const nodeType = match?.[1]?.trim();
-  const target = match?.[2]?.trim().replace(/[.!?]+$/, "");
-  if (!nodeType || !target) {
-    return null;
-  }
-  return [`add a ${nodeType} here`, `connect this to ${target}`];
-}
 
 function nextAnimationFrame(): Promise<void> {
   return new Promise((resolve) => {

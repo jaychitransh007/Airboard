@@ -6,6 +6,7 @@ export const VOICE_TRACE_STAGES = [
   "stt_finalization",
   "stt_final",
   "routing",
+  "coalescer_flushed",
   "wake_classification",
   "parser_outcome",
   "semantic_request",

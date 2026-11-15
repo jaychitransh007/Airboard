@@ -678,3 +678,216 @@ test("long narrations get a longer planning budget and fit the transcript limit"
   assert.equal(semanticIntentTimeoutForTranscript(30_000, 2_000), 30_000, "a larger configured budget wins");
   assert.equal(loadSemanticIntentConfig({ OPENAI_API_KEY: "k" }).maxTranscriptCharacters, 2_000);
 });
+
+test("the rate limit and the entitlement are looked up together, and a rate limit is reported first", async (t) => {
+  let entitlementCalled;
+  const entitlementSeen = new Promise((resolve) => {
+    entitlementCalled = resolve;
+  });
+  const base = fakeAuth({ entitledOrganizations: ["org-paid"] });
+  const auth = {
+    ...base,
+    async activeEntitlement(organizationId) {
+      entitlementCalled();
+      return base.activeEntitlement(organizationId);
+    },
+    client: {
+      async rpc(name) {
+        if (name !== "consume_rate_limit") return { data: 1, error: null };
+        // Finishes only once the entitlement lookup has started, so a
+        // sequential check would stall here until the test times out.
+        const started = await Promise.race([
+          entitlementSeen.then(() => true),
+          new Promise((resolve) => setTimeout(() => resolve(false), 2_000)),
+        ]);
+        overlapped.push(started);
+        return { data: rateAllowed, error: null };
+      },
+    },
+  };
+  let rateAllowed = true;
+  // The limiter swallows its own errors, so the overlap is checked here.
+  const overlapped = [];
+  const server = Fastify();
+  t.after(() => server.close());
+  registerSemanticIntentRoutes(server, productionConfig(), undefined, auth);
+  const send = (user) =>
+    server.inject({
+      method: "POST",
+      url: "/intent/resolve",
+      headers: { origin, authorization: `Bearer user:${user}` },
+      payload: requestBody(fanInTranscript),
+    });
+
+  assert.equal((await send("paid")).statusCode, 200);
+  const unentitled = await send("fresh");
+  assert.equal(unentitled.statusCode, 402);
+  assert.deepEqual(unentitled.json(), { error: "ACTIVE_ENTITLEMENT_REQUIRED" });
+
+  // Rate-limited and not entitled: the rate limit wins, as before.
+  rateAllowed = false;
+  const both = await send("fresh");
+  assert.equal(both.statusCode, 429);
+  assert.equal(both.json().error, "RATE_LIMITED");
+  assert.deepEqual(overlapped, [true, true, true], "the entitlement lookup starts while the rate limit is counted");
+});
+
+test("a seen entitlement is reused, a missing one is looked up again, and a 429 never waits for the lookup", async (t) => {
+  const base = fakeAuth({ entitledOrganizations: ["org-paid"] });
+  let slowEntitlement = false;
+  const auth = {
+    ...base,
+    async activeEntitlement(organizationId) {
+      if (slowEntitlement) await new Promise((resolve) => setTimeout(resolve, 3_000));
+      return base.activeEntitlement(organizationId);
+    },
+    client: {
+      async rpc(name) {
+        return { data: name === "consume_rate_limit" ? rateAllowed : 1, error: null };
+      },
+    },
+  };
+  let rateAllowed = true;
+  const server = Fastify();
+  t.after(() => server.close());
+  registerSemanticIntentRoutes(server, productionConfig(), undefined, auth);
+  const send = (user) =>
+    server.inject({
+      method: "POST",
+      url: "/intent/resolve",
+      headers: { origin, authorization: `Bearer user:${user}` },
+      payload: requestBody(fanInTranscript),
+    });
+
+  assert.equal((await send("paid")).statusCode, 200);
+  assert.equal((await send("paid")).statusCode, 200);
+  assert.deepEqual(base.calls.entitlement, ["org-paid"], "the second request trusts the seen entitlement");
+  assert.equal((await send("fresh")).statusCode, 402);
+  assert.equal((await send("fresh")).statusCode, 402);
+  assert.deepEqual(base.calls.entitlement, ["org-paid", "org-fresh", "org-fresh"], "no entitlement is never cached");
+
+  rateAllowed = false;
+  slowEntitlement = true;
+  const startedAt = Date.now();
+  const limited = await send("other");
+  assert.equal(limited.statusCode, 429);
+  assert.ok(Date.now() - startedAt < 1_500, "the refusal does not wait for the entitlement lookup");
+});
+
+test("a streamed planner answer keeps the browser's wire shape, and a server error inside the stream still trips the breaker", async (t) => {
+  const { createServer } = await import("node:http");
+  const { AIRBOARD_SEMANTIC_PLAN_TOOL_NAME, AIRBOARD_SEMANTIC_PLAN_CONTRACT_VERSION } = await import(
+    "@airboard/core/semantic-plan"
+  );
+  const plan = {
+    version: AIRBOARD_SEMANTIC_PLAN_CONTRACT_VERSION,
+    status: "resolved",
+    issueCode: "none",
+    clarificationQuestion: null,
+    missingSlots: [],
+    actions: [
+      { type: "create", nodeType: "database", label: "Orders", handle: "orders", placement: { kind: "auto" } },
+    ],
+  };
+  const item = {
+    id: "fc_1",
+    type: "function_call",
+    status: "completed",
+    name: AIRBOARD_SEMANTIC_PLAN_TOOL_NAME,
+    call_id: "call_1",
+    arguments: JSON.stringify(plan),
+  };
+  const event = (type, data) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
+  let mode = "ok";
+  let providerCalls = 0;
+  const requestBodies = [];
+  const provider = createServer((request, response) => {
+    providerCalls += 1;
+    let raw = "";
+    request.on("data", (chunk) => {
+      raw += chunk;
+    });
+    request.on("end", () => {
+      requestBodies.push(JSON.parse(raw));
+      response.writeHead(200, { "content-type": "text/event-stream", "x-request-id": "req_route_stream" });
+      response.write(event("response.created", { response: { id: "resp_route", status: "in_progress" } }));
+      if (mode === "fail") {
+        response.end(event("response.failed", { response: { status: "failed", error: { code: "server_error" } } }));
+        return;
+      }
+      response.write(event("response.output_item.added", { output_index: 0, item: { ...item, arguments: "", status: "in_progress" } }));
+      response.write(event("response.output_item.done", { output_index: 0, item }));
+      response.end(
+        event("response.completed", {
+          response: {
+            id: "resp_route",
+            status: "completed",
+            output: [item],
+            usage: {
+              input_tokens: 100,
+              input_tokens_details: { cached_tokens: 90 },
+              output_tokens: 10,
+              output_tokens_details: { reasoning_tokens: 0 },
+              total_tokens: 110,
+            },
+          },
+        }),
+      );
+    });
+  });
+  await new Promise((resolve) => provider.listen(0, "127.0.0.1", resolve));
+  t.after(() => provider.close());
+
+  const server = Fastify();
+  t.after(() => server.close());
+  const config = makeConfig();
+  registerSemanticIntentRoutes(server, {
+    ...config,
+    semanticIntent: {
+      ...config.semanticIntent,
+      provider: "openai",
+      apiKey: "test-key",
+      stream: true,
+      endpoint: `http://127.0.0.1:${provider.address().port}/v1/responses`,
+    },
+  });
+  const send = () =>
+    server.inject({
+      method: "POST",
+      url: "/intent/resolve",
+      headers: { origin },
+      payload: requestBody("make the planner talk to the dataset"),
+    });
+
+  const ok = await send();
+  assert.equal(ok.statusCode, 200, ok.body);
+  const body = ok.json();
+  assert.deepEqual(Object.keys(body).sort(), ["metadata", "model", "plan", "provider"]);
+  assert.deepEqual(body.plan, plan);
+  // Exactly the keys the browser checks; the stream timings stay in the server log.
+  assert.deepEqual(Object.keys(body.metadata).sort(), [
+    "clientRequestId",
+    "providerProcessingMs",
+    "providerRequestId",
+    "responseId",
+    "responseModel",
+    "totalLatencyMs",
+    "usage",
+  ]);
+  assert.ok(
+    body.metadata.usage === null ||
+      JSON.stringify(Object.keys(body.metadata.usage).sort()) ===
+        JSON.stringify(["inputTokens", "outputTokens", "totalTokens"]),
+  );
+  assert.equal(requestBodies[0].stream, true);
+
+  mode = "fail";
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    assert.equal((await send()).json().error, "SEMANTIC_INTENT_PROVIDER_UNAVAILABLE");
+  }
+  assert.equal(providerCalls, 4);
+  const fastFail = await send();
+  assert.equal(fastFail.statusCode, 503);
+  assert.equal(fastFail.json().error, "SEMANTIC_INTENT_COOLING_DOWN");
+  assert.equal(providerCalls, 4);
+});

@@ -140,6 +140,11 @@ export type ResolveSemanticIntentOptions = {
   maxAttempts?: number;
   /** Test seam for the wait before a retry. */
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Abandons the request (a speculative call that was superseded). The
+   * promise then rejects with SEMANTIC_INTENT_ABORTED and is never retried.
+   */
+  signal?: AbortSignal;
 };
 
 /**
@@ -355,13 +360,21 @@ export async function resolveSemanticIntent(
   const maxAttempts = Math.max(1, options.maxAttempts ?? 2);
   const sleep = options.sleep ?? defaultSleep;
   for (let attempt = 1; ; attempt += 1) {
+    throwIfSemanticIntentAborted(options.signal);
     try {
       return await resolveSemanticIntentOnce(options, fetchImpl);
     } catch (caught) {
+      throwIfSemanticIntentAborted(options.signal);
       const wait = attempt < maxAttempts ? semanticIntentRetryWaitMs(caught) : null;
       if (wait === null) throw caught;
       await sleep(wait);
     }
+  }
+}
+
+function throwIfSemanticIntentAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw new SemanticIntentClientError("SEMANTIC_INTENT_ABORTED", 499);
   }
 }
 
@@ -374,6 +387,8 @@ async function resolveSemanticIntentOnce(
     () => controller.abort(),
     options.timeoutMs ?? semanticIntentTimeoutMs(options.transcript.length),
   );
+  const onExternalAbort = () => controller.abort();
+  options.signal?.addEventListener("abort", onExternalAbort, { once: true });
   try {
     const response = await fetchImpl(new URL("/intent/resolve", options.apiBaseUrl), {
       method: "POST",
@@ -415,6 +430,9 @@ async function resolveSemanticIntentOnce(
     }
     return parseSemanticIntentResolution(await response.json());
   } catch (caught) {
+    if (options.signal?.aborted) {
+      throw new SemanticIntentClientError("SEMANTIC_INTENT_ABORTED", 499);
+    }
     if (controller.signal.aborted) {
       throw new SemanticIntentClientError("SEMANTIC_INTENT_TIMEOUT", 504);
     }
@@ -424,6 +442,7 @@ async function resolveSemanticIntentOnce(
     throw caught;
   } finally {
     clearTimeout(timeout);
+    options.signal?.removeEventListener("abort", onExternalAbort);
   }
 }
 

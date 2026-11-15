@@ -45,7 +45,9 @@ that isn't a board command, such as ordinary talk with the room, ends that
 window and is ignored.
 
 You can pause to think in the middle of a command: “Airo, add a database…
-called Orders” is one command.
+called Orders” is one command. Short edits to a shape you point at or have
+selected, such as “make it red” or “delete this”, apply as soon as you stop
+speaking.
 
 Holding your palm flat to aim at a shape or a tool in the dock doesn't turn
 the microphone on; only an open palm held still in empty space does.

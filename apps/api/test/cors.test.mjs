@@ -36,6 +36,6 @@ test("a PATCH preflight advertises the mutation method to the browser", async ()
   assert.equal(response.statusCode, 204);
   assert.match(response.headers["access-control-allow-methods"], /PATCH/);
   // Browsers reuse the answer instead of preflighting every call again.
-  assert.equal(response.headers["access-control-max-age"], "600");
+  assert.equal(response.headers["access-control-max-age"], "7200");
   await server.close();
 });

@@ -584,10 +584,60 @@ export const VOICE_COALESCE_MAX_HOLD_MS = 4_000;
 export const VOICE_COALESCE_GATE_HOLD_MS = 2_000;
 /** Trailing grace after the gate closes before a held command flushes. */
 export const VOICE_COALESCE_TRAILING_GRACE_MS = 300;
+/**
+ * Hold for a gated final that arrives after the palm dropped. The provider
+ * finalizes a turn up to ~1.2 s after speech stops, so the palm may have
+ * dropped in a thinking pause and the speaker may resume ("… called Orders")
+ * a moment after this final arrives. The continuation's first interim lands
+ * ~250-500 ms after speech resumes; this covers that while still running the
+ * command 400 ms sooner than the ordinary hold.
+ */
+export const VOICE_COALESCE_LATE_GATED_FINAL_MS = 800;
+
+/** Why a held command was emitted (for latency tracing). */
+export type VoiceCoalescerFlushReason =
+  /** The ordinary hold (or an activity-stretched hold) ran out. */
+  | "timer"
+  /** The palm / hold-to-edit gate closed, or a gated final arrived after it closed. */
+  | "gate-drop"
+  /** A new routed command that does not continue the held one. */
+  | "new-command"
+  /** Undo / cancel, or a complete local edit (see `flushImmediately`). */
+  | "immediate"
+  /** An interim result carried the wake word: the next command has started. */
+  | "wake-interim"
+  /** Room talk finalized during the hold and the shorter hold ran out. */
+  | "room-talk"
+  /** The caller flushed it directly. */
+  | "explicit";
+
+export type VoiceCoalescerFlushInfo = {
+  /** From when the command was first held to its flush. */
+  heldMs: number;
+  merged: boolean;
+  mergeCount: number;
+  flushReason: VoiceCoalescerFlushReason;
+  /** Time since the latest speech activity, or null when none was reported while held. */
+  lastInterimAgoMs: number | null;
+};
 
 export type VoiceCommandCoalescerConfig = {
   /** Receives each command once it is complete (possibly merged). */
-  onFlush: (decision: VoiceRouteDecision) => void;
+  onFlush: (decision: VoiceRouteDecision, info: VoiceCoalescerFlushInfo) => void;
+  /**
+   * Called whenever a command starts (or restarts) being held: a new held
+   * command, a merge that changed it, or a gate change that re-armed its
+   * hold. Never called for a command that flushes immediately. The decision
+   * is what would flush if nothing else arrived.
+   */
+  onHold?: (decision: VoiceRouteDecision) => void;
+  /**
+   * True for a command that is complete on its own and should run at once
+   * instead of waiting for a continuation (a style, delete or view change).
+   * Only consulted while no gate is open and when the command does not end
+   * open ("rename it to").
+   */
+  flushImmediately?: (decision: VoiceRouteDecision) => boolean;
   /** See VOICE_COALESCE_HOLD_MS. */
   holdMs?: number;
   /** See VOICE_COALESCE_ACTIVITY_HOLD_MS. */
@@ -596,6 +646,8 @@ export type VoiceCommandCoalescerConfig = {
   maxHoldMs?: number;
   gateHoldMs?: number;
   trailingGraceMs?: number;
+  /** See VOICE_COALESCE_LATE_GATED_FINAL_MS. */
+  lateGatedFinalMs?: number;
   /** Clock for hold deadlines (defaults to Date.now); keep it in step with setTimer. */
   now?: () => number;
   /** Injectable timers (defaults to globalThis setTimeout / clearTimeout). */
@@ -686,12 +738,15 @@ export function isCommandContinuationUtterance(text: string, heldCommand = ""): 
  * immediately.
  */
 export class VoiceCommandCoalescer {
-  private readonly onFlush: (decision: VoiceRouteDecision) => void;
+  private readonly onFlush: (decision: VoiceRouteDecision, info: VoiceCoalescerFlushInfo) => void;
+  private readonly onHold: ((decision: VoiceRouteDecision) => void) | undefined;
+  private readonly flushImmediately: ((decision: VoiceRouteDecision) => boolean) | undefined;
   private readonly holdMs: number;
   private readonly activityHoldMs: number;
   private readonly maxHoldMs: number;
   private readonly gateHoldMs: number;
   private readonly trailingGraceMs: number;
+  private readonly lateGatedFinalMs: number;
   private readonly now: () => number;
   private readonly setTimer: (callback: () => void, ms: number) => unknown;
   private readonly clearTimer: (handle: unknown) => void;
@@ -701,14 +756,26 @@ export class VoiceCommandCoalescer {
   private deadline = 0;
   private timer: unknown = null;
   private gateOpen = false;
+  /** When the held command was first held (merges do not reset it). */
+  private firstHeldAt = 0;
+  private mergeCount = 0;
+  private lastActivityAt: number | null = null;
+  /** What the pending timer means when it fires. */
+  private timerReason: VoiceCoalescerFlushReason = "timer";
 
   constructor(config: VoiceCommandCoalescerConfig) {
     this.onFlush = config.onFlush;
+    this.onHold = config.onHold;
+    this.flushImmediately = config.flushImmediately;
     this.holdMs = config.holdMs ?? VOICE_COALESCE_HOLD_MS;
     this.activityHoldMs = config.activityHoldMs ?? VOICE_COALESCE_ACTIVITY_HOLD_MS;
     this.maxHoldMs = config.maxHoldMs ?? VOICE_COALESCE_MAX_HOLD_MS;
     this.gateHoldMs = config.gateHoldMs ?? VOICE_COALESCE_GATE_HOLD_MS;
     this.trailingGraceMs = config.trailingGraceMs ?? VOICE_COALESCE_TRAILING_GRACE_MS;
+    this.lateGatedFinalMs = Math.max(
+      this.trailingGraceMs,
+      config.lateGatedFinalMs ?? VOICE_COALESCE_LATE_GATED_FINAL_MS,
+    );
     this.now = config.now ?? (() => Date.now());
     this.setTimer =
       config.setTimer ?? ((callback, ms) => globalThis.setTimeout(callback, ms));
@@ -726,16 +793,41 @@ export class VoiceCommandCoalescer {
   push(decision: VoiceRouteDecision): void {
     if (this.held && this.continuesHeld(decision)) {
       this.held = mergeDecision(this.held, decision.command, decision.transcript);
-      this.holdFromNow();
+      this.mergeCount += 1;
+      if (this.isLateGatedFinal(decision)) {
+        this.holdForLateGatedFinal();
+      } else {
+        this.holdFromNow();
+      }
+      this.notifyHold();
       return;
     }
-    this.flush();
+    this.flushAs("new-command");
     this.held = { ...decision };
-    if (IMMEDIATE_COMMAND_PATTERN.test(decision.command.trim())) {
-      this.flush();
+    this.firstHeldAt = this.now();
+    this.mergeCount = 0;
+    this.lastActivityAt = null;
+    const command = decision.command.trim();
+    if (
+      IMMEDIATE_COMMAND_PATTERN.test(command) ||
+      (!this.gateOpen &&
+        this.flushImmediately !== undefined &&
+        !DANGLING_COMMAND_PATTERN.test(command.replace(/[\s,.;:!?]+$/u, "")) &&
+        this.flushImmediately(this.held))
+    ) {
+      this.flushAs("immediate");
       return;
     }
-    this.holdFromNow();
+    if (this.isLateGatedFinal(decision)) {
+      // The palm already dropped, possibly in a thinking pause before the
+      // provider finalized this turn: hold long enough for a resumed
+      // continuation's first interim (speech activity then stretches it, as
+      // for any held command).
+      this.holdForLateGatedFinal();
+    } else {
+      this.holdFromNow();
+    }
+    this.notifyHold();
   }
 
   /**
@@ -758,11 +850,16 @@ export class VoiceCommandCoalescer {
       // Room talk finalized while the command was held. Whatever speech
       // stretched the hold was this sentence, not a continuation: fall back
       // to the ordinary hold.
-      this.scheduleAt(Math.min(this.deadline, this.now() + this.currentHoldMs()));
+      const fallback = this.now() + this.currentHoldMs();
+      if (fallback < this.deadline) {
+        this.scheduleAt(fallback, "room-talk");
+      }
       return false;
     }
     this.held = mergeDecision(this.held, text, transcript);
+    this.mergeCount += 1;
     this.holdFromNow();
+    this.notifyHold();
     return true;
   }
 
@@ -773,16 +870,27 @@ export class VoiceCommandCoalescer {
    * activity, so a continuation still being spoken can finalize and merge —
    * but never past VOICE_COALESCE_MAX_HOLD_MS from when it was held. No-op
    * when nothing is held.
+   *
+   * Pass the interim text of a new provider turn when there is one: an
+   * interim that carries the wake word is the start of the next command,
+   * which is never merged into the held one, so the held command flushes at
+   * once instead of waiting. (Leave it out for a late interim of the turn
+   * that was just finalized.)
    */
-  noteSpeechActivity(): void {
+  noteSpeechActivity(interimTranscript?: string): void {
     if (!this.held) {
       return;
     }
     const now = this.now();
+    this.lastActivityAt = now;
+    if (interimTranscript && this.startsNextCommand(interimTranscript)) {
+      this.flushAs("wake-interim");
+      return;
+    }
     const cap = this.heldSince + Math.max(this.maxHoldMs, this.gateOpen ? this.gateHoldMs : 0);
     const extended = Math.min(now + this.activityHoldMs, cap);
     if (extended > this.deadline) {
-      this.scheduleAt(extended);
+      this.scheduleAt(extended, this.timerReason === "gate-drop" ? "gate-drop" : "timer");
     }
   }
 
@@ -798,24 +906,74 @@ export class VoiceCommandCoalescer {
     if (!this.held) {
       return;
     }
-    this.scheduleAt(this.now() + (open ? this.gateHoldMs : this.trailingGraceMs));
+    if (open) {
+      this.scheduleAt(this.now() + this.gateHoldMs, "timer");
+    } else {
+      this.scheduleAt(this.now() + this.trailingGraceMs, "gate-drop");
+    }
+    this.notifyHold();
   }
 
   /** Emits the held command now. Returns it (or null when nothing was held). */
   flush(): VoiceRouteDecision | null {
-    this.cancelTimer();
-    const held = this.held;
-    this.held = null;
-    if (held) {
-      this.onFlush(held);
-    }
-    return held;
+    return this.flushAs("explicit");
   }
 
   /** Drops the held command without emitting it (session teardown). */
   cancel(): void {
     this.cancelTimer();
     this.held = null;
+  }
+
+  private flushAs(reason: VoiceCoalescerFlushReason): VoiceRouteDecision | null {
+    this.cancelTimer();
+    const held = this.held;
+    this.held = null;
+    if (held) {
+      const now = this.now();
+      this.onFlush(held, {
+        heldMs: Math.max(0, now - this.firstHeldAt),
+        merged: this.mergeCount > 0,
+        mergeCount: this.mergeCount,
+        flushReason: reason,
+        lastInterimAgoMs: this.lastActivityAt === null ? null : Math.max(0, now - this.lastActivityAt),
+      });
+    }
+    return held;
+  }
+
+  private notifyHold(): void {
+    if (this.held && this.onHold) {
+      this.onHold({ ...this.held });
+    }
+  }
+
+  /** A gated final routed through the grace window after the palm dropped. */
+  private isLateGatedFinal(decision: VoiceRouteDecision): boolean {
+    return (
+      !this.gateOpen &&
+      (decision.channel === "gated-ptt" || decision.channel === "gated-scoped")
+    );
+  }
+
+  private holdForLateGatedFinal(): void {
+    const now = this.now();
+    this.heldSince = now;
+    this.scheduleAt(now + this.lateGatedFinalMs, "gate-drop");
+  }
+
+  /**
+   * An interim that addresses Airo afresh. A decision with its own wake word
+   * is never merged into the held command, so waiting longer cannot change
+   * what runs; it only delays it.
+   */
+  private startsNextCommand(interimTranscript: string): boolean {
+    // The wake word alone ("Airo …") may open narration about Airo ("Airo is
+    // great"), whose final is room talk and leaves the hold in place. Only an
+    // interim that already carries a command after the wake word is the next
+    // command, the same condition under which its final routes as a new wake
+    // decision.
+    return classifyBrowserWakeTranscript(interimTranscript).commands.length > 0;
   }
 
   private continuesHeld(decision: VoiceRouteDecision): boolean {
@@ -852,15 +1010,16 @@ export class VoiceCommandCoalescer {
   private holdFromNow(): void {
     const now = this.now();
     this.heldSince = now;
-    this.scheduleAt(now + this.currentHoldMs());
+    this.scheduleAt(now + this.currentHoldMs(), "timer");
   }
 
-  private scheduleAt(deadline: number): void {
+  private scheduleAt(deadline: number, reason: VoiceCoalescerFlushReason): void {
     this.cancelTimer();
     this.deadline = deadline;
+    this.timerReason = reason;
     this.timer = this.setTimer(() => {
       this.timer = null;
-      this.flush();
+      this.flushAs(this.timerReason);
     }, Math.max(0, deadline - this.now()));
   }
 
@@ -891,4 +1050,19 @@ function mergeDecision(
     command,
     transcript: `${held.transcript} ${continuationTranscript}`.trim(),
   };
+}
+
+/**
+ * The interim text to pass to VoiceCommandCoalescer.noteSpeechActivity: the
+ * transcript for a new provider turn, or undefined for a late interim of the
+ * turn that was just finalized (its words are already in the held command, so
+ * they only count as activity and never start the next command).
+ */
+export function coalescerInterimText(
+  transcript: string,
+  turnIndex: number | undefined,
+  lastFinalTurnIndex: number | undefined,
+): string | undefined {
+  const lateInterim = turnIndex !== undefined && turnIndex === lastFinalTurnIndex;
+  return lateInterim ? undefined : transcript;
 }
