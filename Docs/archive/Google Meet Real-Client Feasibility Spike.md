@@ -93,7 +93,7 @@ The main-stage URL is selected when the side-panel client starts the activity. T
 4. [x] Add pilot diagnostics for frame type, frame-open reason, SDK failures, and correlation ID without displaying tokens or raw provider identifiers.
 5. [x] Deploy the web/API pilot, configure exact HTTPS origins, create the Google HTTP deployment, and install the developer add-on.
 6. [ ] Execute every mandatory case below in actual Meet meetings. Publisher-account discovery, side panel, main stage, live sync, typed editing, and a leave/rejoin/relaunch smoke test are proven; draft-tester installation and the remaining matrix are open.
-7. [ ] Update [`Platform Support Matrix.md`](<Platform Support Matrix.md>) with real-client results and evidence.
+7. [ ] Update [`Platform Support Matrix.md`](<../Platform Support Matrix.md>) with real-client results and evidence.
 8. [ ] Remove or feature-gate the diagnostic surface before production review.
 
 ## Mandatory real-client cases

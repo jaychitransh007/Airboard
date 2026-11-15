@@ -1,48 +1,15 @@
-import {
-  nodeVisualContainsPoint,
-  isCatalogShapeKind,
-  type BoardSceneElement,
-  type BoardState,
-  type CatalogShapeKind,
-  type ShapeElement,
-  type Stroke,
-  type StrokeAnnotation,
-  type StrokePoint,
+import type {
+  BoardSceneElement,
+  BoardState,
+  ShapeElement,
+  StrokePoint,
 } from "@airboard/core";
-import { getConnectorRoutePoints } from "./connectorGeometry.ts";
-import { sampleSceneConnector, sceneConnectorPointAt } from "./sceneConnectorGeometry.ts";
 import {
-  catalogShapeContainsPoint,
-  catalogShapeIntersectsCircle,
-} from "./shapeGeometry.ts";
-
-export function findIntersectingStrokeIds(
-  state: BoardState,
-  point: StrokePoint,
-  radius: number,
-): string[] {
-  return Object.values(state.strokes)
-    .filter((stroke) => stroke.status === "committed")
-    .filter((stroke) => strokeIntersectsCircle(stroke, point, radius))
-    .map((stroke) => stroke.id);
-}
-
-export function findAnnotationObjectAtPoint(
-  state: BoardState,
-  point: Pick<StrokePoint, "x" | "y">,
-): Stroke | null {
-  const strokes = Object.values(state.strokes)
-    .filter((stroke) => stroke.status === "committed" && stroke.annotation)
-    .reverse();
-
-  for (const stroke of strokes) {
-    if (annotationContainsPoint(stroke, point)) {
-      return stroke;
-    }
-  }
-
-  return null;
-}
+  sampleSceneConnector,
+  sceneConnectorLabelLayoutOnBoard,
+  sceneConnectorPointAt,
+} from "./sceneConnectorGeometry.ts";
+import { catalogShapeContainsPoint } from "./shapeGeometry.ts";
 
 /** Returns the topmost active v2 scene element at a board-space point. */
 export function findSceneElementAtPoint(
@@ -55,14 +22,13 @@ export function findSceneElementAtPoint(
       (element) =>
         element.status === "active" &&
         element.visible &&
-        !hiddenMemberIds.has(element.id) &&
-        !(element.legacyStrokeId && state.strokes[element.legacyStrokeId]),
+        !hiddenMemberIds.has(element.id),
     )
     .map((element, index) => ({ element, index }))
     .sort((a, b) => b.element.zIndex - a.element.zIndex || b.index - a.index);
 
   for (const { element } of elements) {
-    if (sceneElementContainsPoint(element, point)) return element;
+    if (sceneElementContainsPoint(element, point, state.elements)) return element;
   }
   return null;
 }
@@ -93,133 +59,10 @@ function hiddenSceneMemberIds(state: BoardState): Set<string> {
   return hidden;
 }
 
-export function strokeIntersectsCircle(
-  stroke: Stroke,
-  center: Pick<StrokePoint, "x" | "y">,
-  radius: number,
-): boolean {
-  const catalogKind = annotationCatalogShapeKind(stroke.annotation);
-  if (catalogKind && stroke.annotation?.bounds) {
-    return catalogShapeIntersectsCircle(catalogKind, stroke.annotation.bounds, center, radius);
-  }
-  if (stroke.annotation?.bounds && boundsIntersectsCircle(stroke.annotation.bounds, center, radius)) {
-    return true;
-  }
-
-  if (stroke.points.length === 0) {
-    return false;
-  }
-
-  if (
-    (stroke.annotation?.type === "arrow" || stroke.annotation?.type === "connector") &&
-    stroke.annotation.start &&
-    stroke.annotation.end
-  ) {
-    const route = getConnectorRoutePoints(stroke.annotation);
-    for (let index = 1; index < route.length; index += 1) {
-      const start = route[index - 1];
-      const end = route[index];
-      if (start && end && distanceToSegment(center, start, end) <= radius + stroke.thickness / 2) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  if (stroke.points.length === 1) {
-    const point = stroke.points[0];
-    return point ? distance(point, center) <= radius + stroke.thickness / 2 : false;
-  }
-
-  for (let index = 1; index < stroke.points.length; index += 1) {
-    const start = stroke.points[index - 1];
-    const end = stroke.points[index];
-    if (start && end && distanceToSegment(center, start, end) <= radius + stroke.thickness / 2) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function annotationContainsPoint(
-  stroke: Stroke,
-  point: Pick<StrokePoint, "x" | "y">,
-): boolean {
-  const annotation = stroke.annotation;
-  if (!annotation) {
-    return false;
-  }
-
-  if (annotation.bounds) {
-    const padding = annotation.type === "highlight" ? 8 : 4;
-    const { x, y, width, height } = annotation.bounds;
-    const halfWidth = width / 2;
-    const halfHeight = height / 2;
-    const centerX = x + halfWidth;
-    const centerY = y + halfHeight;
-    const dx = point.x - centerX;
-    const dy = point.y - centerY;
-    const radiusX = halfWidth + padding;
-    const radiusY = halfHeight + padding;
-
-    const catalogKind = annotationCatalogShapeKind(annotation);
-    if (catalogKind) {
-      return catalogShapeContainsPoint(catalogKind, annotation.bounds, point, padding);
-    }
-
-    if (annotation.nodeType) {
-      return nodeVisualContainsPoint(
-        annotation.bounds,
-        annotation.nodeType,
-        point,
-        padding,
-      );
-    }
-
-    // Match the rendered geometry so a generic ellipse's transparent
-    // bounding-box corners are not grabbable.
-    if (annotation.type === "ellipse" || annotation.type === "pointer") {
-      if (!(radiusX > 0) || !(radiusY > 0)) {
-        return false;
-      }
-      return (dx * dx) / (radiusX * radiusX) + (dy * dy) / (radiusY * radiusY) <= 1;
-    }
-
-    return (
-      point.x >= x - padding &&
-      point.x <= x + width + padding &&
-      point.y >= y - padding &&
-      point.y <= y + height + padding
-    );
-  }
-
-  if (
-    (annotation.type === "arrow" || annotation.type === "connector") &&
-    annotation.start &&
-    annotation.end
-  ) {
-    const route = getConnectorRoutePoints(annotation);
-    for (let index = 1; index < route.length; index += 1) {
-      const start = route[index - 1];
-      const end = route[index];
-      if (
-        start &&
-        end &&
-        distanceToSegment(point, start, end) <= Math.max(10, stroke.thickness + 7)
-      ) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  return false;
-}
-
 function sceneElementContainsPoint(
   element: BoardSceneElement,
   point: Pick<StrokePoint, "x" | "y">,
+  elements?: Readonly<Record<string, BoardSceneElement>>,
 ): boolean {
   if (element.kind === "shape") return sceneShapeContainsPoint(element, point);
 
@@ -240,6 +83,17 @@ function sceneElementContainsPoint(
       const anchor = sceneConnectorPointAt(element, element.labelPosition);
       const halfWidth = Math.min(110, Math.max(36, label.length * 3.6 + 12));
       if (Math.abs(localPoint.x - anchor.x) <= halfWidth && Math.abs(localPoint.y - anchor.y) <= 38) {
+        return true;
+      }
+      // A label moved beside the line is hit where it is drawn.
+      const layout = sceneConnectorLabelLayoutOnBoard(element, elements);
+      if (
+        layout &&
+        localPoint.x >= layout.bounds.x - 4 &&
+        localPoint.x <= layout.bounds.x + layout.bounds.width + 4 &&
+        localPoint.y >= layout.bounds.y - 4 &&
+        localPoint.y <= layout.bounds.y + layout.bounds.height + 4
+      ) {
         return true;
       }
     }
@@ -294,29 +148,8 @@ function sceneShapeContainsPoint(
   return catalogShapeContainsPoint(element.shapeKind, element.transform, point, 8);
 }
 
-function annotationCatalogShapeKind(
-  annotation: StrokeAnnotation | undefined,
-): CatalogShapeKind | null {
-  const candidate = annotation?.shapeKind;
-  return isCatalogShapeKind(candidate) ? candidate : null;
-}
-
 function distance(a: Pick<StrokePoint, "x" | "y">, b: Pick<StrokePoint, "x" | "y">): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
-}
-
-function boundsIntersectsCircle(
-  bounds: NonNullable<Stroke["annotation"]>["bounds"],
-  center: Pick<StrokePoint, "x" | "y">,
-  radius: number,
-): boolean {
-  if (!bounds) {
-    return false;
-  }
-
-  const closestX = clamp(center.x, bounds.x, bounds.x + bounds.width);
-  const closestY = clamp(center.y, bounds.y, bounds.y + bounds.height);
-  return Math.hypot(center.x - closestX, center.y - closestY) <= radius;
 }
 
 function distanceToSegment(
@@ -358,8 +191,4 @@ function rotateAround(
     x: center.x + dx * cosine - dy * sine,
     y: center.y + dx * sine + dy * cosine,
   };
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
 }

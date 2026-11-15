@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import type { AirboardTestWindow } from "./support/testHooks";
 import { signIn } from "./support/signedInApi";
 
 const checkoutFlow = JSON.parse(readFileSync(resolve(import.meta.dirname, "fixtures/shared-board.json"), "utf8")) as {
@@ -15,8 +16,7 @@ test.beforeEach(async ({ context }) => {
 
 function liveSessionId(page: Page) {
   return page.evaluate(() =>
-    (window as never as { __airboardTestHooks?: { getBoardSummary(): { boardSessionId: string | null } } })
-      .__airboardTestHooks?.getBoardSummary().boardSessionId ?? null,
+    (window as unknown as Partial<AirboardTestWindow>).__airboardTestHooks?.getBoardSummary().boardSessionId ?? null,
   );
 }
 

@@ -233,10 +233,6 @@ export function canonicalShapeKind(value: string): CatalogShapeKind | null {
   return normalizedAliases.get(normalizeShapeTerm(value)) ?? null;
 }
 
-export function isCatalogShapeKind(value: unknown): value is CatalogShapeKind {
-  return typeof value === "string" && canonicalKinds.has(value as CatalogShapeKind);
-}
-
 export function shapeCatalogEntry(
   kind: CatalogShapeKind,
   preferredCategory?: ShapeCatalogCategory,
@@ -277,6 +273,3 @@ function normalizeShapeTerm(value: string): string {
   return value.trim().toLowerCase().replace(/[_/]+/g, " ").replace(/[-\s]+/g, " ");
 }
 
-const canonicalKinds = new Set<CatalogShapeKind>(
-  BOARD_SHAPE_CATALOG.map(({ kind }) => kind),
-);

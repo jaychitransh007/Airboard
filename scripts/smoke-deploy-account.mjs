@@ -74,7 +74,7 @@ async function journey(results) {
     body: { title: `Deploy smoke ${new Date().toISOString()}` },
   })).body.board;
   assert.ok(board.id);
-  const state = { nodes: [], edges: [], strokes: [], selectedIds: [], camera: { x: 0, y: 0, zoom: 1 } };
+  const state = { nodes: [], edges: [], selectedIds: [], camera: { x: 0, y: 0, zoom: 1 } };
   const first = (await call(`/boards/${board.id}`, { method: "PATCH", body: { version: 1, state } })).body.board;
   assert.equal(first.latest_version, 1);
   const stale = await call(`/boards/${board.id}`, {

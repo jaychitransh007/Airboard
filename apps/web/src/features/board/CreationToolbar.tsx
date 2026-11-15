@@ -12,7 +12,7 @@ import {
   type RefObject,
 } from "react";
 import { CatalogGlyph } from "./catalogGlyphs";
-import type { ObjectDockTool } from "./gestureAnnotationMode";
+import type { ObjectDockTool } from "./placementGhost";
 import {
   ALL_SHAPES,
   CONNECTOR_TOOLS,

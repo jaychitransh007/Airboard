@@ -32,6 +32,15 @@ const EXISTING_BOARD_FAN_IN_MODEL = "existing-board-fan-in-v1";
 const CHARGED_TURN_WINDOW_MS = 5 * 60_000;
 const CHARGED_TURN_MAX_KEYS = 10_000;
 
+/**
+ * How long an organization's active entitlement, once seen, is trusted
+ * without another lookup. Matches the sign-in cache, so a lapsed entitlement
+ * stops model spend within the same 30 s a revoked sign-in does. Only a
+ * positive answer is remembered: a just-bought plan works on the next call.
+ */
+const ENTITLEMENT_CACHE_TTL_MS = 30_000;
+const ENTITLEMENT_CACHE_MAX_KEYS = 10_000;
+
 /** Keys seen in the last `windowMs`, oldest dropped first past `maxKeys`. */
 export function createRecentKeys(windowMs: number, maxKeys: number, now: () => number = Date.now) {
   const seenAt = new Map<string, number>();
@@ -84,6 +93,7 @@ export function registerSemanticIntentRoutes(
   );
 
   const chargedTurns = createRecentKeys(CHARGED_TURN_WINDOW_MS, CHARGED_TURN_MAX_KEYS);
+  const entitledOrganizations = createRecentKeys(ENTITLEMENT_CACHE_TTL_MS, ENTITLEMENT_CACHE_MAX_KEYS);
 
   server.get("/intent/config", async () => publicSemanticIntentConfig(config.semanticIntent));
 
@@ -97,25 +107,34 @@ export function registerSemanticIntentRoutes(
     if (!operator && !context && !config.localEntitlements) {
       return reply.code(401).send({ error: "AUTH_REQUIRED" });
     }
-    if (
-      !(await rateLimiter.allow(
-        clientKey(request, {
-          profileId: context?.profileId,
-          trustedProxyHops: config.trustedProxyHops,
-        }),
-      ))
-    ) {
-      return reply.code(429).send({ error: "RATE_LIMITED" });
-    }
     // Signing in is free (magic links auto-provision an account), so model
     // spend additionally requires the caller's organization to hold an
-    // active, trialing, or grace entitlement.
-    if (
-      context &&
-      auth &&
-      !config.localEntitlements &&
-      !(await auth.activeEntitlement(context.organizationId))
-    ) {
+    // active, trialing, or grace entitlement. A recently seen entitlement is
+    // trusted for ENTITLEMENT_CACHE_TTL_MS; otherwise the lookup runs
+    // alongside the rate limit (they are independent). A refusal still
+    // reports the rate limit first and does not wait for the entitlement.
+    const organizationId =
+      context && auth && !config.localEntitlements ? context.organizationId : null;
+    const entitlementLookup: Promise<boolean> =
+      organizationId === null || entitledOrganizations.has(organizationId)
+        ? Promise.resolve(true)
+        : auth!.activeEntitlement(organizationId).then((entitlement) => {
+            if (entitlement) entitledOrganizations.remember(organizationId);
+            return Boolean(entitlement);
+          });
+    // Observed here so a lookup left behind by a rate-limit refusal never
+    // surfaces as an unhandled rejection.
+    entitlementLookup.catch(() => undefined);
+    const allowed = await rateLimiter.allow(
+      clientKey(request, {
+        profileId: context?.profileId,
+        trustedProxyHops: config.trustedProxyHops,
+      }),
+    );
+    if (!allowed) {
+      return reply.code(429).send({ error: "RATE_LIMITED" });
+    }
+    if (!(await entitlementLookup)) {
       return reply.code(402).send({ error: "ACTIVE_ENTITLEMENT_REQUIRED" });
     }
 
@@ -273,8 +292,22 @@ export function registerSemanticIntentRoutes(
         semanticModel: model,
         semanticPlan: semanticPlanSummary(resolution.plan),
         semanticMetadata: resolution.metadata,
+        ...(resolution.diagnostics ? { semanticDiagnostics: resolution.diagnostics } : {}),
       };
       request.log.info(completedLog, "semantic intent completed");
+      if (resolution.lateUsage) {
+        // A streamed plan returns before the final event carries the token
+        // usage; log it (with the prompt-cache hit count) once it arrives.
+        const requestLog = request.log;
+        const voiceTurnId = parsed.value.voiceTurnId;
+        const responseId = resolution.metadata.responseId;
+        void resolution.lateUsage.then((usage) => {
+          requestLog.info(
+            { voiceTurnId, responseId, semanticModel: model, semanticUsage: usage },
+            "semantic intent usage",
+          );
+        });
+      }
       traceBuffer.append({
         voiceTurnId: parsed.value.voiceTurnId,
         stage: "semantic.server.completed",

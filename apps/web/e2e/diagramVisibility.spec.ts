@@ -1,27 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
-
-type Hooks = {
-  emitSnapGestureFrame(frame: {
-    hands: Array<{
-      handedness: string;
-      confidence: number;
-      landmarks: Array<{ x: number; y: number; z: number }>;
-    }>;
-    timestampMs: number;
-    suppressed: boolean;
-  }): boolean;
-  openPttGate(): void;
-  getDiagramVisible(): boolean;
-  getBoardSummary(): { objectCount: number };
-};
+import { waitForTestHooks, type AirboardTestWindow } from "./support/testHooks";
 
 async function hooks(page: Page): Promise<void> {
-  await page.waitForFunction(() => "__airboardTestHooks" in window);
+  await waitForTestHooks(page);
 }
 
 async function emitSnap(page: Page, startAt: number): Promise<void> {
   await page.evaluate((timestampMs) => {
-    const api = (window as unknown as { __airboardTestHooks: Hooks }).__airboardTestHooks;
+    const api = (window as unknown as AirboardTestWindow).__airboardTestHooks;
     const makeHand = (contact: boolean, middleX: number) => {
       const points = Array.from({ length: 21 }, () => ({ x: 0.5, y: 0.6, z: 0 }));
       points[0] = { x: 0.5, y: 0.82, z: 0 };
@@ -73,7 +59,7 @@ test("snap, keyboard, menu, and voice share one local visibility action", async 
   await hooks(page);
 
   await page.evaluate(() => {
-    const api = (window as unknown as { __airboardTestHooks: Hooks }).__airboardTestHooks;
+    const api = (window as unknown as AirboardTestWindow).__airboardTestHooks;
     api.openPttGate();
   });
   await expect(page.getByTestId("voice-gate-pill")).toBeVisible();
@@ -98,7 +84,7 @@ test("snap, keyboard, menu, and voice share one local visibility action", async 
 
   const before = await page.evaluate(
     () =>
-      (window as unknown as { __airboardTestHooks: Hooks })
+      (window as unknown as AirboardTestWindow)
         .__airboardTestHooks.getBoardSummary().objectCount,
   );
   await command.fill("add a database named Invisible Edit");
@@ -106,7 +92,7 @@ test("snap, keyboard, menu, and voice share one local visibility action", async 
   await expect(page.locator(".intent-feedback")).toContainText("editing commands are suspended");
   const after = await page.evaluate(
     () =>
-      (window as unknown as { __airboardTestHooks: Hooks })
+      (window as unknown as AirboardTestWindow)
         .__airboardTestHooks.getBoardSummary().objectCount,
   );
   expect(after).toBe(before);

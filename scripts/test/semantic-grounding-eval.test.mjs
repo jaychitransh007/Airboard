@@ -54,7 +54,8 @@ test("semantic eval uses production grounding, atomic commit, and one-step Undo"
   assert.equal(result.status, "applied");
   assert.equal(result.mutationApplied, true);
   assert.equal(result.commands.length, 3);
-  assert.equal(result.eventDelta.length, 6);
+  // One element.created per new object: Airo draws v2 shapes and connectors.
+  assert.deepEqual(result.eventDelta.map(({ type }) => type), ["element.created", "element.created", "element.created"]);
   assert.deepEqual(
     {
       nodes: result.effects.nodeCountDelta,
@@ -255,7 +256,7 @@ test("Data/Dataset repair reaches the exact final graph and remains one-step und
     context,
   );
   assert.equal(result.status, "applied");
-  assert.equal(result.eventDelta.length, 4);
+  assert.equal(result.eventDelta.length, 2, "a new v2 shape and its v2 connector");
   assert.equal(result.undo.applicable, true);
   assert.equal(result.undo.roundTripPassed, true);
   assert.deepEqual(

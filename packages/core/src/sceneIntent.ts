@@ -224,10 +224,10 @@ function parseCommand(sentence: string): Exclude<BoardSceneIntent, { type: "corr
   const input = normalize(sourceWithPlacement);
   if (!input) return null;
 
-  // A disconnected-line instruction is a repair of an existing legacy
-  // connector, not a request to create a new v2 connector between labels.
-  // Leave it to the established graph-repair grammar, which can inspect the
-  // connector's bindings and fail closed when the candidate is ambiguous.
+  // A disconnected-line instruction asks to repair an existing connector,
+  // not to create a new one between labels. Leave it to the attach_connection
+  // grammar, which explains that no visually disconnected line can be
+  // attached (only legacy annotation connectors could be; they are gone).
   if (/^connect (?:the )?existing disconnected line\b/.test(input)) return null;
 
   const edit = parseElementEdit(input, sourceWithPlacement, Boolean(pointerMatch));

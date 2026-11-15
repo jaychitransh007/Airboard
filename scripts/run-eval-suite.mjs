@@ -1,175 +1,104 @@
 #!/usr/bin/env node
 
+// The offline eval gate (`pnpm eval:pr`). It runs only eval CLIs: unit and
+// script tests run once, through `pnpm test` and `pnpm test:scripts`, never
+// here. The runner writes one JSON summary, suite-results.json.
+
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(import.meta.dirname, "..");
-const options = parseArgs(process.argv.slice(2));
-const tier = options.tier ?? "pr";
-const runId =
-  process.env.AIRBOARD_EVAL_RUN_ID ??
-  `${tier}-${new Date().toISOString().replaceAll(/[:.]/g, "-")}`;
-const outputDirectory = resolve(
-  process.cwd(),
-  options.outputDir ?? `artifacts/evals/${runId}`,
-);
 
-const coreBrowserFiles = [
-  "e2e/typedCommand.spec.ts",
-  "e2e/voiceRouting.spec.ts",
-  "e2e/diagramVisibility.spec.ts",
-  "e2e/catalogDock.spec.ts",
-  "e2e/directInputChannels.spec.ts",
-  "e2e/mediaOwnership.spec.ts",
-];
-
-const suites = {
-  pr: [
-    nodeStep("dataset-policy", "scripts/validate-eval-datasets.mjs"),
-    nodeStep("capability-coverage", "scripts/eval-capability-coverage.mjs"),
-    nodeStep(
-      "capability-coverage-tests",
-      "--test",
-      "scripts/test/capability-coverage.test.mjs",
-      "apps/web/test/capabilityCoverageEvidence.test.mjs",
-      "apps/web/test/inputCapabilities.test.mjs",
-    ),
-    nodeStep(
-      "release-quality-policy-tests",
-      "--test",
-      "scripts/test/eval-quality-gate.test.mjs",
-      "scripts/test/eval-quality-report.test.mjs",
-    ),
-    nodeStep(
-      "release-quality-report-policy",
+/**
+ * The PR tier, in run order. Each step is an eval CLI with its arguments.
+ * `{output}` is replaced by the run's output directory.
+ */
+export const prSteps = [
+  { id: "dataset-policy", args: ["scripts/validate-eval-datasets.mjs"] },
+  { id: "capability-coverage", args: ["scripts/eval-capability-coverage.mjs"] },
+  {
+    id: "release-quality-report-policy",
+    args: [
       "scripts/eval-quality-report.mjs",
       "--mode",
       "pr",
       "--output",
-      resolve(outputDirectory, "quality-report-policy.json"),
-    ),
-    nodeStep(
-      "release-quality-policy",
+      "{output}/quality-report-policy.json",
+    ],
+  },
+  {
+    id: "release-quality-policy",
+    args: [
       "scripts/eval-quality-gate.mjs",
       "--mode",
       "pr",
       "--output",
-      resolve(outputDirectory, "quality-policy.json"),
-    ),
-    nodeStep(
-      "interaction-foundation-tests",
-      "--test",
-      "scripts/test/interaction-eval-foundation.test.mjs",
-    ),
-    nodeStep(
-      "end-to-end-evaluator-tests",
-      "--test",
-      "scripts/test/audio-stt-eval.test.mjs",
-      "scripts/test/confusion-matrix.test.mjs",
-      "scripts/test/eval-suite-composition.test.mjs",
-      "scripts/test/gesture-browser-evidence.test.mjs",
-      "scripts/test/gesture-eval-report.test.mjs",
-      "scripts/test/launch-ready-check.test.mjs",
-      "scripts/test/seeded-faults.test.mjs",
-      "scripts/test/semantic-grounding-eval.test.mjs",
-      "scripts/test/semantic-live-runner.test.mjs",
-      "scripts/test/semantic-metamorphic-corpus.test.mjs",
-      "scripts/test/semantic-negatives.test.mjs",
-    ),
-    nodeStep("deterministic-contract-matrix", "scripts/eval-contract-matrix.mjs"),
-    nodeStep("deterministic-positive-corpus", "scripts/eval-grammar.mjs"),
-    nodeStep("grounded-ambient-negatives", "scripts/eval-false-accepts.mjs"),
-    nodeStep(
-      "semantic-ambient-negative-replay",
-      "scripts/eval-semantic-negatives.mjs",
-      "--replay",
-    ),
-    nodeStep("provider-event-replay", "scripts/eval-provider-events.mjs"),
-    nodeStep("seeded-evaluator-faults", "scripts/eval-seeded-faults.mjs"),
-    nodeStep(
-      "canonical-interactions",
-      "scripts/eval-interactions.mjs",
-      "--output-dir",
-      resolve(outputDirectory, "interactions"),
-    ),
-    nodeStep("landmark-replay", "scripts/eval-gesture-replay.mjs"),
-    nodeStep(
-      "production-coordinator-tests",
-      "--test",
-      "apps/web/test/commandTurnCoordinator.test.mjs",
-      "apps/web/test/gestureActionEvidence.test.mjs",
-      "apps/web/test/gestureFrameCoordinator.test.mjs",
-      "apps/web/test/gesturePerceptionConfig.test.mjs",
-      "apps/web/test/interactionAttribution.test.mjs",
-      "apps/web/test/inputCapabilities.test.mjs",
-      "apps/web/test/realDeviceMediaEval.test.mjs",
-      "apps/web/test/voiceTrace.test.mjs",
-    ),
-    nodeStep(
-      "existing-board-fan-in-regressions",
-      "--test",
-      "apps/web/test/existingBoardFanIn.test.mjs",
-      "apps/web/test/intentPipeline.test.mjs",
-      "apps/web/test/semanticIntent.test.mjs",
-      "apps/api/test/semanticIntentRoutes.test.mjs",
-      "apps/api/test/voiceTrace.test.mjs",
-    ),
-    nodeStep(
-      "semantic-metamorphic-contract",
-      "scripts/eval-semantic-metamorphic.mjs",
-      "--validate-only",
-    ),
-    nodeStep(
-      "semantic-ambient-negative-contract",
-      "scripts/eval-semantic-negatives.mjs",
-      "--validate-only",
-    ),
-    nodeStep("audio-adapter-replay", "scripts/eval-audio-stt.mjs"),
-    ...(options.skipBrowser
-      ? []
-      : [
-          commandStep(
-            "core-browser-journeys",
-            "pnpm",
-            [
-              "--filter",
-              "@airboard/web",
-              "exec",
-              "playwright",
-              "test",
-              ...coreBrowserFiles,
-            ],
-          ),
-        ]),
-  ],
-};
+      "{output}/quality-policy.json",
+    ],
+  },
+  { id: "deterministic-contract-matrix", args: ["scripts/eval-contract-matrix.mjs"] },
+  { id: "deterministic-positive-corpus", args: ["scripts/eval-grammar.mjs"] },
+  { id: "grounded-ambient-negatives", args: ["scripts/eval-false-accepts.mjs"] },
+  {
+    id: "semantic-ambient-negative-replay",
+    args: ["scripts/eval-semantic-negatives.mjs", "--replay"],
+  },
+  { id: "provider-event-replay", args: ["scripts/eval-provider-events.mjs"] },
+  { id: "seeded-evaluator-faults", args: ["scripts/eval-seeded-faults.mjs"] },
+  {
+    id: "canonical-interactions",
+    args: ["scripts/eval-interactions.mjs", "--output-dir", "{output}/interactions"],
+  },
+  { id: "landmark-replay", args: ["scripts/eval-gesture-replay.mjs"] },
+  {
+    id: "semantic-metamorphic-contract",
+    args: ["scripts/eval-semantic-metamorphic.mjs", "--validate-only"],
+  },
+  { id: "audio-adapter-replay", args: ["scripts/eval-audio-stt.mjs"] },
+];
 
-main().catch((error) => {
-  console.error(
-    `Eval suite could not start: ${error instanceof Error ? error.message : String(error)}`,
-  );
-  process.exitCode = 2;
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(
+      `Eval suite could not start: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    process.exitCode = 2;
+  });
+}
 
 async function main() {
-  const steps = suites[tier];
-  if (!steps) throw new Error(`Unknown eval tier: ${tier}`);
+  const options = parseArgs(process.argv.slice(2));
+  const tier = options.tier ?? "pr";
+  if (tier !== "pr") throw new Error(`Unknown eval tier: ${tier}`);
+  const runId = process.env.AIRBOARD_EVAL_RUN_ID ?? `${tier}-latest`;
+  const outputDirectory = resolve(
+    process.cwd(),
+    options.outputDir ?? "artifacts/evals/latest",
+  );
   await mkdir(outputDirectory, { recursive: true });
+
   const results = [];
-  for (const step of steps) {
-    const result = await runStep(step);
+  for (const step of prSteps) {
+    const result = await runStep(step, { outputDirectory, runId });
     results.push(result);
     console.log(
-      `${statusLabel(result.status)} ${step.id} (${formatMs(result.durationMs)})`,
+      `${result.status === "passed" ? "PASS" : "FAIL"} ${step.id} (${formatMs(result.durationMs)})`,
     );
     if (result.status !== "passed") {
-      const tail = result.output.trim().split(/\r?\n/u).slice(-12);
-      for (const line of tail) console.log(`  ${line}`);
+      // The whole output, so CI logs carry the failure without artifacts.
+      for (const line of result.output.trim().split(/\r?\n/u)) console.log(`  ${line}`);
       if (!options.keepGoing) break;
     }
   }
+  const summary = {
+    total: results.length,
+    passed: results.filter(({ status }) => status === "passed").length,
+    failed: results.filter(({ status }) => status === "failed").length,
+    durationMs: results.reduce((sum, result) => sum + result.durationMs, 0),
+  };
   const report = {
     schemaVersion: "airboard-eval-suite-result.v1",
     tier,
@@ -183,49 +112,26 @@ async function main() {
       ci: Boolean(process.env.CI),
     },
     datasetHash: await hashEvalManifests(resolve(ROOT, "evals")),
-    versions: {
-      semanticPlanContract: "production-imported",
-      semanticPrompt: "production-response-metadata",
-      semanticModel:
-        process.env.AIRBOARD_SEMANTIC_INTENT_MODEL ??
-        process.env.AIRBOARD_INTENT_MODEL ??
-        "provider-default",
-      transcriptionModel:
-        process.env.AIRBOARD_TRANSCRIPTION_MODEL ??
-        process.env.DEEPGRAM_MODEL ??
-        "provider-default",
-    },
     results,
-    summary: summarize(results),
+    summary,
     replay: `node scripts/run-eval-suite.mjs --tier ${tier}`,
   };
-  await Promise.all([
-    writeFile(
-      resolve(outputDirectory, "suite-results.json"),
-      `${JSON.stringify(report, null, 2)}\n`,
-    ),
-    writeFile(resolve(outputDirectory, "suite-results.xml"), junit(report)),
-    writeFile(resolve(outputDirectory, "suite-results.md"), markdown(report)),
-    writeFile(resolve(outputDirectory, "suite-results.html"), html(report)),
-  ]);
-  console.log(`Artifacts: ${outputDirectory}`);
-
-  if (report.summary.failed > 0) process.exitCode = 1;
+  await writeFile(
+    resolve(outputDirectory, "suite-results.json"),
+    `${JSON.stringify(report, null, 2)}\n`,
+  );
+  console.log(`Summary: ${resolve(outputDirectory, "suite-results.json")}`);
+  if (summary.failed > 0 || summary.total < prSteps.length) process.exitCode = 1;
 }
 
-async function runStep(step) {
-  const result = await spawnStep(step);
-  return {
-    ...result,
-    status: result.exitCode === 0 ? "passed" : "failed",
-    failureClass: result.exitCode === 0 ? null : "quality_or_contract",
-  };
-}
-
-function spawnStep(step) {
+function runStep(step, { outputDirectory, runId }) {
+  const args = step.args.map((arg) => arg.replaceAll("{output}", outputDirectory));
+  const command = [process.execPath, ...args]
+    .map((part) => (/[\s"']/u.test(part) ? JSON.stringify(part) : part))
+    .join(" ");
   return new Promise((resolveStep) => {
     const startedAt = performance.now();
-    const child = spawn(step.command, step.args, {
+    const child = spawn(process.execPath, args, {
       cwd: ROOT,
       env: {
         ...process.env,
@@ -241,128 +147,22 @@ function spawnStep(step) {
     };
     child.stdout.on("data", append);
     child.stderr.on("data", append);
-    child.on("error", (error) => {
+    const finish = (exitCode, extra = {}) =>
       resolveStep({
         id: step.id,
-        command: replayCommand(step),
-        exitCode: 2,
-        durationMs: performance.now() - startedAt,
-        output: error.message,
-        attempts: 1,
-      });
-    });
-    child.on("close", (code, signal) => {
-      resolveStep({
-        id: step.id,
-        command: replayCommand(step),
-        exitCode: code ?? 2,
-        signal: signal ?? null,
+        command,
+        exitCode,
+        status: exitCode === 0 ? "passed" : "failed",
         durationMs: performance.now() - startedAt,
         output,
-        attempts: 1,
+        ...extra,
       });
+    child.on("error", (error) => {
+      output += error.message;
+      finish(2);
     });
+    child.on("close", (code, signal) => finish(code ?? 2, { signal: signal ?? null }));
   });
-}
-
-function nodeStep(id, ...args) {
-  return commandStep(id, process.execPath, args);
-}
-
-function commandStep(id, command, args) {
-  return { id, command, args };
-}
-
-function replayCommand(step) {
-  return [step.command, ...step.args]
-    .map((part) => (/[\s"']/u.test(part) ? JSON.stringify(part) : part))
-    .join(" ");
-}
-
-function summarize(results) {
-  return {
-    total: results.length,
-    passed: results.filter(({ status }) => status === "passed").length,
-    failed: results.filter(({ status }) => status === "failed").length,
-    durationMs: results.reduce((sum, result) => sum + result.durationMs, 0),
-  };
-}
-
-function junit(report) {
-  const lines = [
-    '<?xml version="1.0" encoding="UTF-8"?>',
-    `<testsuite name="Airboard eval:${xml(report.tier)}" tests="${report.summary.total}" failures="${report.summary.failed}" time="${(report.summary.durationMs / 1000).toFixed(3)}">`,
-  ];
-  for (const result of report.results) {
-    lines.push(
-      `  <testcase classname="eval.${xml(report.tier)}" name="${xml(result.id)}" time="${(result.durationMs / 1000).toFixed(3)}">`,
-    );
-    if (result.status === "failed") {
-      lines.push(
-        `    <failure message="${xml(result.failureClass)}">${xml(result.output)}</failure>`,
-      );
-    }
-    lines.push("  </testcase>");
-  }
-  lines.push("</testsuite>");
-  return `${lines.join("\n")}\n`;
-}
-
-function markdown(report) {
-  const lines = [
-    `# Airboard ${report.tier} evaluation`,
-    "",
-    `Commit: \`${report.commit}\`  `,
-    `Run: \`${report.runId}\`  `,
-    `Dataset: \`${report.datasetHash}\`  `,
-    `Replay: \`${report.replay}\``,
-    "",
-    `Passed **${report.summary.passed}/${report.summary.total}**. Failed: ${report.summary.failed}.`,
-    "",
-    "| Status | Step | Duration | Replay |",
-    "| --- | --- | ---: | --- |",
-  ];
-  for (const result of report.results) {
-    lines.push(
-      `| ${statusLabel(result.status)} | ${result.id} | ${formatMs(result.durationMs)} | \`${result.command.replaceAll("`", "\\`")}\` |`,
-    );
-  }
-  return `${lines.join("\n")}\n`;
-}
-
-function html(report) {
-  const rows = report.results
-    .map(
-      (result) => `<tr>
-  <td class="${xml(result.status)}">${xml(statusLabel(result.status))}</td>
-  <td>${xml(result.id)}</td>
-  <td>${xml(formatMs(result.durationMs))}</td>
-  <td><code>${xml(result.command)}</code></td>
-</tr>`,
-    )
-    .join("\n");
-  return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Airboard ${xml(report.tier)} evaluation</title>
-  <style>
-    body{font:15px/1.5 system-ui,sans-serif;max-width:1100px;margin:40px auto;padding:0 20px;color:#17202a}
-    table{border-collapse:collapse;width:100%}th,td{padding:9px;border-bottom:1px solid #d9dee3;text-align:left}
-    code{white-space:pre-wrap}.passed{color:#08783d}.failed{color:#b42318}
-  </style>
-</head>
-<body>
-  <h1>Airboard ${xml(report.tier)} evaluation</h1>
-  <p>Commit <code>${xml(report.commit)}</code><br>Dataset <code>${xml(report.datasetHash)}</code><br>Replay <code>${xml(report.replay)}</code></p>
-  <p><strong>${report.summary.passed}/${report.summary.total} passed</strong>; ${report.summary.failed} failed.</p>
-  <table><thead><tr><th>Status</th><th>Step</th><th>Duration</th><th>Replay</th></tr></thead><tbody>
-${rows}
-  </tbody></table>
-</body>
-</html>
-`;
 }
 
 function parseArgs(argv) {
@@ -372,7 +172,6 @@ function parseArgs(argv) {
     if (arg === "--tier") result.tier = argv[++index];
     else if (arg.startsWith("--tier=")) result.tier = arg.slice(7);
     else if (arg === "--output-dir") result.outputDir = argv[++index];
-    else if (arg === "--skip-browser") result.skipBrowser = true;
     else if (arg === "--keep-going") result.keepGoing = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -411,19 +210,6 @@ async function walk(directory, paths) {
   }
 }
 
-function statusLabel(status) {
-  return status === "passed" ? "PASS" : "FAIL";
-}
-
 function formatMs(value) {
   return value < 1_000 ? `${value.toFixed(0)}ms` : `${(value / 1_000).toFixed(1)}s`;
-}
-
-function xml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;");
 }

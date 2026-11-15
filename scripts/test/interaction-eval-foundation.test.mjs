@@ -22,18 +22,15 @@ import {
   runInteractionCorpus,
   validateInteractionCorpus,
 } from "../lib/interaction-eval-corpus.mjs";
-import {
-  emitHtmlReport,
-  emitJsonReport,
-  emitJunitReport,
-  emitMarkdownReport,
-} from "../lib/interaction-eval-reporters.mjs";
+import { emitJsonReport } from "../lib/interaction-eval-reporters.mjs";
 import {
   executeInteractionEvalCase,
 } from "../lib/interaction-eval-production-executor.mjs";
 
 const CREATED_AT = "2026-07-30T00:00:00.000Z";
 
+// Boards are built as v2 scene elements; the harness projects them into the
+// corpus's canonical annotation nodes and edges.
 function context(createdAt = CREATED_AT) {
   let eventNumber = 0;
   return {
@@ -134,7 +131,7 @@ test("canonical BoardState uses logical IDs/timestamps and sorted nodes/edges", 
     canonical.edges.map(({ id }) => id),
     ["edge:node:alpha->node:zeta:calls"],
   );
-  assert.match(canonical.nodes[0].createdAt, /^@time:\d+$/);
+  assert.match(canonical.elements["generated-uuid-a"].createdAt, /^@time:\d+$/);
   assert.equal(
     canonical.edges[0].annotation.snappedStartStrokeId,
     "node:alpha",
@@ -145,13 +142,39 @@ test("canonical BoardState uses logical IDs/timestamps and sorted nodes/edges", 
   });
   assert.deepEqual(
     canonicalEvents.map(({ type }) => type),
-    ["stroke.started", "stroke.committed"],
+    ["element.created"],
   );
   assert.equal(
-    canonicalEvents[1].strokeId,
+    canonicalEvents[0].element.id,
     "edge:node:alpha->node:zeta:calls",
   );
   assert.match(canonicalEvents[0].id, /^event:\d+$/);
+});
+
+test("a v2 board canonicalizes to nodes and edges, and a v2 commit counts as one object.created", () => {
+  let state = createInitialBoardState("physical-board-7d91");
+  state = applyDiagramCommand(state, { type: "node.create", nodeId: "generated-uuid-z", nodeType: "service", label: "Zeta", center: { x: 500, y: 200 }, source: "voice" }, context()).state;
+  state = applyDiagramCommand(state, { type: "node.create", nodeId: "generated-uuid-a", nodeType: "decision", label: "Alpha", center: { x: 200, y: 200 }, source: "voice" }, context()).state;
+  const scene = applyDiagramCommand(state, { type: "nodes.connect", connectorId: "generated-edge-uuid", fromId: "generated-uuid-a", toId: "generated-uuid-z", label: "calls", source: "voice" }, context("2026-07-30T00:00:01.000Z"));
+  assert.equal("strokes" in scene.state, false);
+  const canonical = canonicalizeBoardState(scene.state);
+  assert.equal("strokes" in canonical, false);
+  assert.deepEqual(
+    canonical.nodes.map(({ id, status, annotation }) => ({ id, status, type: annotation.type, nodeType: annotation.nodeType, label: annotation.label })),
+    [
+      { id: "node:alpha", status: "committed", type: "flow_node", nodeType: "decision", label: "Alpha" },
+      { id: "node:zeta", status: "committed", type: "flow_node", nodeType: "service", label: "Zeta" },
+    ],
+  );
+  assert.deepEqual(
+    canonical.edges.map(({ id, annotation }) => ({ id, label: annotation.label, from: annotation.snappedStartStrokeId, to: annotation.snappedEndStrokeId })),
+    [{ id: "edge:node:alpha->node:zeta:calls", label: "calls", from: "node:alpha", to: "node:zeta" }],
+  );
+  const once = checkExactOnce(
+    { finalBoardState: scene.state, events: scene.events },
+    [{ id: "edge-created", match: { type: "object.created", objectId: "generated-edge-uuid" }, count: 1 }],
+  );
+  assert.equal(once.pass, true, JSON.stringify(once.checks));
 });
 
 test("geometry comparison tolerates small drift but reports larger drift", () => {
@@ -163,9 +186,9 @@ test("geometry comparison tolerates small drift but reports larger drift", () =>
     { x: 200, y: 200 },
   );
   const withinTolerance = structuredClone(created.state);
-  withinTolerance.strokes["node:checkout"].annotation.bounds.x += 0.4;
+  withinTolerance.elements["node:checkout"].transform.x += 0.4;
   const outsideTolerance = structuredClone(created.state);
-  outsideTolerance.strokes["node:checkout"].annotation.bounds.x += 0.6;
+  outsideTolerance.elements["node:checkout"].transform.x += 0.6;
 
   assert.equal(
     compareBoardStates(withinTolerance, created.state, {
@@ -206,9 +229,9 @@ test("canonical BoardState delta reports semantic additions and BoardEvent order
   assert.equal(delta.nodes.added[0].id, "node:checkout-api");
   assert.deepEqual(
     delta.events.map(({ type }) => type),
-    ["stroke.started", "stroke.committed"],
+    ["element.created"],
   );
-  assert.equal(delta.events[1].strokeId, "node:checkout-api");
+  assert.equal(delta.events[0].element.id, "node:checkout-api");
 });
 
 test("case evaluator checks board/non-board state, exact-once, forbidden mutations, and undo", () => {
@@ -266,9 +289,8 @@ test("case evaluator checks board/non-board state, exact-once, forbidden mutatio
         {
           id: "rename-once",
           match: {
-            type: "stroke.label_updated",
-            strokeId: "node:checkout",
-            label: "Payments",
+            type: "element.patched",
+            elementId: "node:checkout",
           },
         },
       ],
@@ -488,7 +510,7 @@ test("pre-grounded direct commands are labeled harness-only", async () => {
   });
 
   assert.equal(observation.outcome, "applied");
-  assert.equal(observation.events.length, 2);
+  assert.deepEqual(observation.events.map(({ type }) => type), ["element.created"], "a v2 shape");
   assert.equal(observation.evidenceProvenance.class, "harness-fixture");
   assert.equal(observation.evidenceProvenance.releaseEligible, false);
   assert.equal(
@@ -503,9 +525,9 @@ test("exact-once and forbidden mutation checks expose actionable failures", () =
     boardSessionId: "board:primary",
     actorParticipantId: "participant:owner",
     createdAt: CREATED_AT,
-    type: "stroke.label_updated",
-    strokeId: "node:checkout",
-    label: "Payments",
+    type: "element.patched",
+    elementId: "node:checkout",
+    patches: [{ op: "field.set", path: ["content"], value: { type: "doc", blocks: [] } }],
   };
   const exactOnce = checkExactOnce(
     { events: [event, { ...event, id: "event:rename-retry" }] },
@@ -513,8 +535,8 @@ test("exact-once and forbidden mutation checks expose actionable failures", () =
       {
         id: "rename-once",
         match: {
-          type: "stroke.label_updated",
-          strokeId: "node:checkout",
+          type: "element.patched",
+          elementId: "node:checkout",
         },
       },
     ],
@@ -619,7 +641,7 @@ test("corpus runner converts executor observations and errors to result records"
   assert.equal(report.results[1].evidenceProvenance.class, "executor-error");
 });
 
-test("JSON, JUnit, and Markdown emitters summarize the same results", () => {
+test("the JSON report summarizes results and marks undeclared evidence diagnostic", () => {
   const results = [
     {
       schemaVersion: "interaction-eval-result.v1",
@@ -658,20 +680,11 @@ test("JSON, JUnit, and Markdown emitters summarize the same results", () => {
   ];
   const options = { generatedAt: "2026-07-30T12:00:00.000Z" };
   const json = JSON.parse(emitJsonReport(results, options));
-  const junit = emitJunitReport(results, options);
-  const markdown = emitMarkdownReport(results, options);
-  const html = emitHtmlReport(results, options);
 
   assert.equal(json.summary.total, 2);
   assert.equal(json.summary.failed, 1);
-  assert.match(junit, /tests="2" failures="1"/);
-  assert.match(junit, /A &amp; B/);
-  assert.match(junit, /Failure &lt;case&gt;/);
-  assert.match(markdown, /Passed \*\*1\/2\*\* \(50\.0%\)/);
-  assert.match(markdown, /## Failures/);
-  assert.match(markdown, /outside tolerance/);
-  assert.match(markdown, /unspecified · diagnostic only/);
-  assert.match(html, /1\/2 passed/);
-  assert.match(html, /Failure &lt;case&gt;/);
-  assert.match(html, /unspecified · diagnostic only/);
+  assert.equal(json.generatedAt, "2026-07-30T12:00:00.000Z");
+  assert.equal(json.results[1].title, "Failure <case>");
+  assert.equal(json.results[1].evidenceProvenance.class, "unspecified");
+  assert.equal(json.results[1].evidenceProvenance.releaseEligible, false);
 });

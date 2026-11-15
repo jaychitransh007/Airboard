@@ -77,7 +77,6 @@ export function evaluateDeterministicAudioActions(
       canvasHeight: finitePositive(context.canvasHeight) ?? 600,
       selectionIds,
       primarySelectionId: selectionIds.at(-1) ?? null,
-      hoverStrokeId: null,
       strokeColor: "#111111",
     });
     if ("error" in resolution) {

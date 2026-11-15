@@ -38,7 +38,7 @@ test("rejects a participant that does not belong to the session", () => {
   const decision = authorizeBoardEvent({
     session: makeSession(),
     participant: makeParticipant({ boardSessionId: "other-session" }),
-    event: { type: "stroke.committed" },
+    event: { type: "element.created" },
   });
   assert.equal(decision.allowed, false);
   assert.equal(decision.reason, "PARTICIPANT_NOT_IN_SESSION");
@@ -48,7 +48,7 @@ test("rejects any write to an expired or ended session", () => {
   const expired = authorizeBoardEvent({
     session: makeSession({ expiresAt: PAST }),
     participant: makeParticipant({ role: "owner" }),
-    event: { type: "stroke.committed" },
+    event: { type: "element.created" },
   });
   assert.equal(expired.allowed, false);
   assert.equal(expired.reason, "SESSION_NOT_JOINABLE");
@@ -67,7 +67,7 @@ test("viewers cannot mutate the board", () => {
   const decision = authorizeBoardEvent({
     session: makeSession(),
     participant: makeParticipant({ role: "viewer" }),
-    event: { type: "stroke.deleted" },
+    event: { type: "element.deleted" },
   });
   assert.equal(decision.allowed, false);
   assert.equal(decision.reason, "NOT_ALLOWED_TO_DRAW");
@@ -77,7 +77,7 @@ test("editors can draw when participant drawing is allowed", () => {
   const decision = authorizeBoardEvent({
     session: makeSession(),
     participant: makeParticipant({ role: "editor" }),
-    event: { type: "stroke.committed" },
+    event: { type: "element.created" },
   });
   assert.equal(decision.allowed, true);
 });
@@ -102,7 +102,7 @@ test("editors cannot draw when the owner disabled participant drawing", () => {
   const decision = authorizeBoardEvent({
     session: makeSession({ allowParticipantDrawing: false }),
     participant: makeParticipant({ role: "editor" }),
-    event: { type: "stroke.committed" },
+    event: { type: "element.created" },
   });
   assert.equal(decision.allowed, false);
 });

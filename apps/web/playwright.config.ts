@@ -9,6 +9,21 @@ export default defineConfig({
   testDir: "./e2e",
   timeout: 60_000,
   retries: process.env.CI ? 1 : 0,
+  // Screenshot baselines (styleContract.screenshots.spec.ts) are stored per
+  // platform: text renders differently on macOS and Linux, so each platform
+  // compares only with its own committed set.
+  snapshotPathTemplate: "{testDir}/__screenshots__/{platform}/{testFileName}/{arg}{ext}",
+  expect: {
+    toHaveScreenshot: {
+      animations: "disabled",
+      caret: "hide",
+      scale: "css",
+      // Tolerant: anti-aliasing and GPU noise pass; a moved, recoloured or
+      // resized element does not.
+      threshold: 0.2,
+      maxDiffPixelRatio: 0.005,
+    },
+  },
   use: {
     // Playwright's bundled Chromium by default. For the release browser matrix
     // (Docs/Browser Matrix.md), AIRBOARD_E2E_CHANNEL=chrome or msedge runs the

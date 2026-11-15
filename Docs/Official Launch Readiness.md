@@ -1,7 +1,7 @@
 # Airboard official launch readiness
 
-> **Status:** Active source of truth for commercial release decisions
-> **Last updated:** 25 July 2026
+> **Owns:** the release ladder, what each stage may and must not promise, and the data and retention inventory. What is left before each stage is listed in [Project Status](<Project Status.md#what-is-left>) and checked by `pnpm launch:check`; [Docs/README](README.md) lists the owner of every other topic.
+> **Last reviewed:** 12 November 2026
 > **Current honest label:** Controlled production pilot
 > **Current public channels:** Standalone web pilot, including Google Meet by presenting the Airboard tab (the Chrome extension, Meet add-on and Electron desktop app were removed on 12 November 2026)
 > **Not supported channels:** Zoom and Microsoft Teams product integrations
@@ -27,12 +27,12 @@ The Chrome public and Desktop public stages, and their `chrome-public` and `desk
 - Say: Airboard works in Google Meet by presenting the Airboard tab, with nothing to install; slides or another app can be shown behind the board from the web app.
 - Say: Zoom and Microsoft Teams are planned or design-partner discovery only, not usable integrations.
 - Do not say: generally available, certified, compliant, always available, unlimited, enterprise-ready, or covered by an SLA.
-- The `/status` marketing page is a placeholder disclosure, not live monitoring.
+- The `/status` page checks the web, API and database from the visitor's browser and lists incidents posted in the last 90 days. It is not an uptime guarantee, and the `public-status-process` gate (a proven incident update process) is still pending.
 
 ### 2. Signup and identity
 
-- Email magic-link is the deployed public identity path when `/auth/config` reports it.
-- Google or Microsoft buttons render only when Supabase reports those providers as available.
+- The pilot signs people in with Google only; it sends no sign-in email.
+- The email-link form and a Microsoft button render only when `/auth/config` reports them, and the pilot enables neither.
 - A successful identity bootstrap creates a profile, personal organization, owner membership, default workspace, organization policy, trial eligibility and pending entitlement.
 - Production OAuth redirects, account recovery and provider logout still need release-environment evidence.
 
@@ -45,9 +45,9 @@ The Chrome public and Desktop public stages, and their `chrome-public` and `desk
 
 ### 4. Core usage
 
-- Implemented: persistent boards, versions, recent and shared views, sharing, JSON/image export paths, live sessions, pointer, typed commands, voice/semantic routing, gesture controls, screen underlay and presentation modes.
+- Implemented: persistent boards (saves keep no version copies), one Airboards home page, sharing, JSON/image export paths, live sessions, pointer, typed commands, voice/semantic routing, gesture controls, screen underlay and presentation modes.
 - Reliability boundary: provider-powered voice requires configured Deepgram; semantic fallback requires configured OpenAI. Deterministic typed commands remain the provider-independent path.
-- Deleted boards remain recoverable for the organization policy window and are then hard-deleted by the scheduled lifecycle job.
+- Deleting a board is immediate and permanent; there is no Trash (RGB-046). Boards soft-deleted before 11 November 2026 are purged by the scheduled lifecycle job after the organization policy window.
 - Active boards are not automatically expired.
 
 ### 5. Integrations
@@ -67,9 +67,9 @@ The Chrome public and Desktop public stages, and their `chrome-public` and `desk
 ### 7. Support, export and deletion
 
 - Users can create a content-free seven-day diagnostic bundle after an explicit action and recorded support-diagnostics consent.
-- Users can request a portable JSON export. It includes the requesting profile, memberships, owned boards, consents, owned installations, support requests, product/audit metadata, notification history and matching lead submissions. It does not export other members’ boards or organization billing records.
+- Users can request a portable JSON export. It includes the requesting profile, memberships, owned boards, consents, support requests, product/audit metadata, notification history and matching lead submissions. It does not export other members’ boards or organization billing records.
 - Completed export payloads are cleared after seven days; terminal request metadata is removed after 30 days.
-- Account and workspace deletion has a seven-day cancellation window. Account execution revokes owned installations, deletes user-linked support/analytics/lead data and anonymizes retained audit metadata.
+- Account and workspace deletion has a seven-day cancellation window. Account execution deletes user-linked support/analytics/lead data and anonymizes retained audit metadata.
 
 ## Data inventory and enforced retention
 
@@ -91,45 +91,6 @@ The Chrome public and Desktop public stages, and their `chrome-public` and `desk
 
 Open or in-progress support requests are retained until they are resolved/closed or the related account is deleted. Billing retention and provider-side deletion must be finalized with accounting and counsel before paid GA.
 
-## Implementation completed in this launch pass
+## What is left, and how to release
 
-- Public copy and authenticated billing now expose controlled-pilot and proposed-price status instead of implying a purchasable GA product.
-- A public, secret-free `/commercial/config` capability response gates checkout presentation.
-- Stripe credentials do not activate checkout by themselves; `AIRBOARD_BILLING_ENABLED=true` is a separate paid-release switch.
-- Checkout also requires a webhook secret, preventing payment acceptance when entitlement webhooks cannot be verified.
-- Voice traces and semantic logs redact transcript, commands and board labels before buffering, logging or persistence.
-- Historical voice-trace content receives a migration scrub.
-- Lifecycle retention now covers deleted boards, exports, terminal privacy requests, analytics, audit, leads, support, notifications, webhooks and diagnostics.
-- Portable exports no longer include organization-wide non-private boards or other users’ installations/billing.
-- Account deletion revokes installations and cleans or anonymizes linked operational data.
-- Browser test harness authentication preserves production authorization while allowing deterministic local E2E execution.
-- The launch checker makes missing configuration and human/external evidence fail closed.
-
-## Work that cannot be truthfully completed in source code
-
-The owner must supply or coordinate:
-
-- legal entity and registered contact details;
-- counsel-approved privacy notice, terms, DPA, subprocessors, trial, renewal, cancellation, tax and refund language;
-- production Supabase, OAuth, Deepgram, OpenAI, Resend and Stripe accounts/configuration;
-- production database migration execution and scheduler setup;
-- ingress, load-balancer and log-sink verification that redacts realtime ticket query parameters in addition to the application logger;
-- independent penetration testing and remediation;
-- backup/restore and incident-response exercises;
-- public monitoring, alert routing, on-call ownership and status publishing;
-- accessibility and promised browser/device matrix testing;
-- real two-account evidence of presenting the Airboard tab in Google Meet;
-- staffed support hours and escalation ownership.
-
-Record proof in `ops/launch-evidence.json`. A gate is complete only when its status is `verified` and its evidence field points to an immutable report, deployment, dashboard, ticket or repository artifact.
-
-## Release procedure
-
-1. Freeze the exact release commit and record it in the evidence file.
-2. Run `pnpm typecheck`, `pnpm test`, `pnpm build`, voice evaluations and full Playwright journeys.
-3. Apply all Supabase migrations to a production-like database and run `pnpm smoke:commercial`.
-4. Deploy that same commit; verify web, API, auth, readiness, commercial config, save/export/delete and lifecycle behavior.
-5. Exercise rollback and alert delivery.
-6. Complete the human/external evidence for the chosen scope.
-7. Run the matching launch-check command. Treat any `BLOCK` as a stop-ship.
-8. Only then change public stage labels or enable the applicable distribution/payment channel.
+What is left before each stage is listed once, in [Project Status](<Project Status.md#what-is-left>); the gate ledger [`ops/launch-evidence.json`](../ops/launch-evidence.json) is the machine-checked source, read by `pnpm launch:check`. A gate is complete only when its status is `verified` and its evidence points to an immutable report, deployment, dashboard, ticket or repository artifact. How to release is in the [Commercial Platform Runbook](<Commercial Platform Runbook.md#release>). Treat any `BLOCK` from the matching launch-check command as a stop-ship, and change public stage labels or enable a distribution or payment channel only after it passes.

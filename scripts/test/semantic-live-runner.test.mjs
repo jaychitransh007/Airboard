@@ -153,7 +153,7 @@ test("live semantic runner retries one transient failure and emits privacy-safe 
   assert.equal(report.versions.prompt, "2.14");
   assert.equal(report.results[0].groundingStatus, "applied");
   assert.equal(report.results[0].groundedCommands.length, 1);
-  assert.equal(report.results[0].eventDelta.length, 2);
+  assert.equal(report.results[0].eventDelta.length, 1, "one element.created for the v2 shape");
   assert.equal(report.results[0].effects.nodeCountDelta, 1);
   assert.equal(report.results[0].undo.roundTripPassed, true);
   assert.equal(report.results[0].metadata.providerRequestId, undefined);

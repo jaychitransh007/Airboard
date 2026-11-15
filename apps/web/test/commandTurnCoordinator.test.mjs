@@ -62,21 +62,19 @@ test("commits a compound turn atomically as one event and undo batch", () => {
 
   assert.equal(result.status, "applied");
   assert.deepEqual(result.events.map((event) => event.type), [
-    "stroke.started",
-    "stroke.committed",
-    "stroke.started",
-    "stroke.committed",
-    "stroke.started",
-    "stroke.committed",
+    "element.created",
+    "element.created",
+    "element.created",
   ]);
   assert.deepEqual(result.selectionIds, ["api", "db"]);
-  assert.deepEqual(Object.keys(result.state.strokes).sort(), ["api", "api-db", "db"]);
+  assert.deepEqual(Object.keys(result.state.elements).sort(), ["api", "api-db", "db"]);
+  assert.equal("strokes" in result.state, false);
 
   const undone = applyDiagramUndo(result.state, {
     undoEvents: result.undoEvents,
   });
   assert.equal(
-    Object.values(undone.state.strokes).filter((stroke) => stroke.status === "committed").length,
+    Object.values(undone.state.elements).filter((element) => element.status === "active").length,
     0,
     "one Undo compensates the complete user turn",
   );
@@ -147,7 +145,8 @@ test("a failing later command cannot leak an earlier command", () => {
       contextForCommand,
     }),
   );
-  assert.deepEqual(initial.strokes, {});
+  assert.equal("strokes" in initial, false);
+  assert.deepEqual(initial.elements, {}, "the snapshot is untouched");
 });
 
 test("redo of an undone turn restores the elements it created instead of replaying their creation", () => {

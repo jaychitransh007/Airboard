@@ -155,6 +155,20 @@ export function legacyToolForCreationTool(tool: CreationToolId): LegacyPlacement
   return connector && "legacyTool" in connector ? connector.legacyTool : null;
 }
 
+/**
+ * The toolbar tool that draws, as a v2 object, what an older placement tool
+ * drew as a legacy annotation. A placement that somehow arrives with only the
+ * older tool still makes a v2 object.
+ */
+export function creationToolForPlacementTool(tool: LegacyPlacementTool): CreationToolId | null {
+  if (tool === "note") return "sticky";
+  if (tool === "connector") return "connector:bent";
+  if (tool === "arrow") return "connector:straight";
+  if (tool === "highlight") return "draw:highlighter";
+  const shape = ALL_SHAPES.find((entry) => entry.legacyTool === tool);
+  return shape ? shapeToolId(shape.id) : null;
+}
+
 export function creationToolLabel(tool: CreationToolId): string {
   const shapeDefinition = shapeForTool(tool);
   if (shapeDefinition) return shapeDefinition.label;

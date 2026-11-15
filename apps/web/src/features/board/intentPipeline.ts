@@ -11,14 +11,15 @@ import {
   AIRBOARD_SEMANTIC_NODE_CAPABILITIES,
   AIRBOARD_SEMANTIC_PLAN_MAX_DIAGRAM_COMMANDS,
   canonicalShapeKind,
-  connectorEndpointMatchesBinding,
   inferSemanticNodeForLabel,
-  connectorGeometryMatchesBindings,
-  isSceneOnlyElement,
+  isActiveElement,
+  isSceneNodeElement,
   nodeVisualDefaultSize,
-  pointOnNodeBoundary,
   richTextToPlainText,
   sceneConnectorsBetween,
+  sceneElementNodeType,
+  shapeKindForNodeType,
+  type AnnotationBounds,
   type AnnotationNodeType,
   type AnnotationPoint,
   type BoardState,
@@ -28,10 +29,7 @@ import {
   type SemanticPlacement,
   type SemanticLayoutDirection,
   type SemanticPlanAction,
-  type ShapeKind,
-  type StrokeAnnotation,
 } from "@airboard/core";
-import { findAnnotationObjectAtPoint } from "@airboard/drawing-engine";
 import { normalizeSpokenNumberAliases } from "./desiredGraphCorrection.ts";
 import type { IntentCanvasOperation } from "./intentCanvasParser.ts";
 import type { SemanticIntentContext } from "./semanticIntent.ts";
@@ -48,11 +46,11 @@ import {
  * second while a hand or pointer is moving, so object identity is useless as
  * a staleness signal — it would reject every semantic plan while the camera
  * is live. Grounding only cares about committed diagram content: the reducer
- * replaces `strokes` on every commit/label/erase/delete/restore/clear and
- * preserves it for cursor and in-flight ink events.
+ * replaces `elements` on every change to an object, and preserves it for
+ * cursor, presence and in-flight ink events.
  */
 export function boardContentChanged(a: BoardState, b: BoardState): boolean {
-  return a.strokes !== b.strokes || a.clearedAt !== b.clearedAt;
+  return a.elements !== b.elements || a.clearedAt !== b.clearedAt;
 }
 
 /**
@@ -84,7 +82,6 @@ export type IntentResolutionContext = {
   canvasHeight: number;
   selectionIds: string[];
   primarySelectionId: string | null;
-  hoverStrokeId: string | null;
   strokeColor: string;
 };
 
@@ -92,7 +89,6 @@ type IntentResolution =
   | {
       commands: DiagramCommand[];
       selectionAfter?: string[];
-      previewStrokeId?: string | undefined;
       /** Supported request whose desired state already exists; no event needed. */
       alreadySatisfied?: boolean;
     }
@@ -228,9 +224,7 @@ function resolveSemanticPlanActionSteps(
       if (endpoints.created.length > 0) {
         // The new shapes aren't on the board yet, so there is nothing to
         // reuse: create them and draw the arrow in one step.
-        const connect = endpoints.sceneEndpoint
-          ? sceneConnectCommand(endpoints.fromId, endpoints.toId, action.label)
-          : semanticConnectCommand(endpoints.fromId, endpoints.toId, action.label, context.strokeColor);
+        const connect = semanticConnectCommand(endpoints.fromId, endpoints.toId, action.label, context.strokeColor);
         return {
           commands: [...endpoints.created, connect],
           selectionAfter: [endpoints.fromId, endpoints.toId],
@@ -244,7 +238,6 @@ function resolveSemanticPlanActionSteps(
         context.boardState,
         from.id,
         to.id,
-        { includeStale: true },
       );
       const matchingExisting = action.label === null
         ? existing
@@ -253,72 +246,20 @@ function resolveSemanticPlanActionSteps(
               normalizeObjectLookup(connection.label ?? "") ===
               normalizeObjectLookup(action.label ?? ""),
           );
-      if (matchingExisting.some((connection) => connection.geometryAttached)) {
+      if (matchingExisting.length > 0) {
         return {
           commands: [],
           selectionAfter: [from.id, to.id],
           ...(repairKinds.length > 0 ? { repairKinds } : {}),
         };
       }
-      // A v2 shape (typed command or toolbar) can only take a v2 connector.
-      if (isSceneOnlyElement(context.boardState, from.id) || isSceneOnlyElement(context.boardState, to.id)) {
-        const relabel = action.label !== null && existing.length === 1 ? existing[0]! : null;
-        return {
-          commands: [
-            relabel
-              ? relabel.scene
-                ? { type: "scene.rename", elementId: relabel.id, label: action.label! }
-                : { type: "object.rename", objectId: relabel.id, label: action.label! }
-              : sceneConnectCommand(from.id, to.id, action.label),
-          ],
-          selectionAfter: [from.id, to.id],
-          ...(repairKinds.length > 0 ? { repairKinds } : {}),
-        };
-      }
-      if (matchingExisting.length === 1) {
-        return {
-          commands: [
-            {
-              type: "connection.attach",
-              connectorId: matchingExisting[0]!.id,
-              fromId: from.id,
-              toId: to.id,
-              ...(action.label !== null ? { label: action.label } : {}),
-            },
-          ],
-          selectionAfter: [from.id, to.id],
-          ...(repairKinds.length > 0 ? { repairKinds } : {}),
-        };
-      }
-      if (matchingExisting.length > 1) {
-        return {
-          error:
-            "More than one visually detached connector matches those endpoints. Select the intended line and try again.",
-        };
-      }
-      if (action.label !== null && existing.length === 1) {
-        return {
-          commands: [
-            existing[0]!.geometryAttached
-              ? {
-                  type: "object.rename",
-                  objectId: existing[0]!.id,
-                  label: action.label,
-                }
-              : {
-                  type: "connection.attach",
-                  connectorId: existing[0]!.id,
-                  fromId: from.id,
-                  toId: to.id,
-                  label: action.label,
-                },
-          ],
-          selectionAfter: [from.id, to.id],
-          ...(repairKinds.length > 0 ? { repairKinds } : {}),
-        };
-      }
+      const relabel = action.label !== null && existing.length === 1 ? existing[0]! : null;
       return {
-        commands: [semanticConnectCommand(from.id, to.id, action.label, context.strokeColor)],
+        commands: [
+          relabel
+            ? { type: "scene.rename", elementId: relabel.id, label: action.label! }
+            : semanticConnectCommand(from.id, to.id, action.label, context.strokeColor),
+        ],
         selectionAfter: [from.id, to.id],
         ...(repairKinds.length > 0 ? { repairKinds } : {}),
       };
@@ -365,39 +306,15 @@ function resolveSemanticPlanActionSteps(
             };
       }
       const source = sourceConnections.connections[0]!;
-      if (source.scene) {
-        return {
-          commands: [
-            desiredAlreadyExists
-              ? { type: "scene.delete", elementIds: [source.id] }
-              : {
-                  type: "scene.connector.reverse",
-                  connectorId: source.id,
-                  ...(action.label !== null ? { label: action.label } : {}),
-                },
-          ],
-          selectionAfter: [endpoints.toId, endpoints.fromId],
-        };
-      }
-      if (desiredAlreadyExists) {
-        return {
-          commands: [
-            {
-              type: "objects.delete",
-              objectIds: [source.id],
-              cascadeConnectors: false,
-            },
-          ],
-          selectionAfter: [endpoints.toId, endpoints.fromId],
-        };
-      }
       return {
         commands: [
-          {
-            type: "connection.reverse",
-            connectorId: source.id,
-            ...(action.label !== null ? { label: action.label } : {}),
-          },
+          desiredAlreadyExists
+            ? { type: "scene.delete", elementIds: [source.id] }
+            : {
+                type: "scene.connector.reverse",
+                connectorId: source.id,
+                ...(action.label !== null ? { label: action.label } : {}),
+              },
         ],
         selectionAfter: [endpoints.toId, endpoints.fromId],
       };
@@ -411,15 +328,7 @@ function resolveSemanticPlanActionSteps(
       return "error" in connection
         ? connection
         : {
-            commands: [
-              connection.scene
-                ? { type: "scene.delete", elementIds: [connection.id] }
-                : {
-                    type: "objects.delete",
-                    objectIds: [connection.id],
-                    cascadeConnectors: false,
-                  },
-            ],
+            commands: [{ type: "scene.delete", elementIds: [connection.id] }],
             selectionAfter: [],
           };
     }
@@ -448,11 +357,7 @@ function resolveSemanticPlanActionSteps(
         if (to.id === from.id) {
           return { error: "A decision branch cannot point back to its source object." };
         }
-        commands.push(
-          isSceneOnlyElement(context.boardState, from.id) || isSceneOnlyElement(context.boardState, to.id)
-            ? sceneConnectCommand(from.id, to.id, branch.label)
-            : semanticConnectCommand(from.id, to.id, branch.label, context.strokeColor),
-        );
+        commands.push(semanticConnectCommand(from.id, to.id, branch.label, context.strokeColor));
         targetIds.push(to.id);
       }
       if (new Set(targetIds).size !== targetIds.length) {
@@ -469,11 +374,7 @@ function resolveSemanticPlanActionSteps(
       return "error" in target
         ? target
         : {
-            commands: [
-              isSceneOnlyElement(context.boardState, target.id)
-                ? { type: "scene.rename", elementId: target.id, label: action.label }
-                : { type: "object.rename", objectId: target.id, label: action.label },
-            ],
+            commands: [{ type: "scene.rename", elementId: target.id, label: action.label }],
             selectionAfter: [target.id],
           };
     }
@@ -489,12 +390,8 @@ function resolveSemanticPlanActionSteps(
       const resolvedOthers = otherTargets.length > 0 ? resolveMany(otherTargets) : { ids: [] as string[] };
       if ("error" in resolvedOthers) return resolvedOthers;
       const targets = { ids: [...new Set([...selectedNodes, ...selectedConnectors, ...resolvedOthers.ids])] };
-      const { legacy, scene } = splitByWorld(context.boardState, targets.ids);
       return {
-        commands: [
-          ...(legacy.length > 0 ? [{ type: "objects.delete", objectIds: legacy } as const] : []),
-          ...(scene.length > 0 ? [{ type: "scene.delete", elementIds: scene } as const] : []),
-        ],
+        commands: targets.ids.length > 0 ? [{ type: "scene.delete", elementIds: targets.ids }] : [],
         selectionAfter: [],
       };
     }
@@ -512,32 +409,11 @@ function resolveSemanticPlanActionSteps(
         true,
       );
       if ("error" in placement) return placement;
-      const { legacy, scene } = splitByWorld(context.boardState, targets.ids);
-      if (scene.length === 0) {
-        return {
-          commands: [
-            {
-              type: "objects.duplicate",
-              objectIds: targets.ids,
-              idMap,
-              offset: placement.duplicateOffset,
-            },
-            ...placement.commands,
-          ],
-          selectionAfter: duplicatedIds,
-        };
-      }
-      // Each kind is copied by its own command. The copies don't exist while
-      // planning, so the placement's move becomes part of the copy offset.
+      // The copies don't exist while planning, so the placement's move
+      // becomes part of the copy offset.
       const offset = duplicateOffsetWithPlacement(context.boardState, targets.ids, placement);
-      const copiesOf = (ids: string[]) => Object.fromEntries(ids.map((id) => [id, idMap[id]!]));
       return {
-        commands: [
-          ...(legacy.length > 0
-            ? [{ type: "objects.duplicate", objectIds: legacy, idMap: copiesOf(legacy), offset } as const]
-            : []),
-          { type: "scene.duplicate", elementIds: scene, idMap: copiesOf(scene), offset },
-        ],
+        commands: [{ type: "scene.duplicate", elementIds: targets.ids, idMap, offset }],
         selectionAfter: duplicatedIds,
       };
     }
@@ -554,7 +430,7 @@ function resolveSemanticPlanActionSteps(
       );
       if ("error" in placement) return placement;
       return {
-        commands: placement.commands.flatMap((command) => splitMoveByWorld(context.boardState, command)),
+        commands: placement.commands.map((command) => sceneMoveCommand(context.boardState, command)),
         selectionAfter: targets.ids,
       };
     }
@@ -608,42 +484,18 @@ function resolveSemanticPlanActionSteps(
       const targets = resolveMany(action.targets);
       if ("error" in targets) return targets;
       const groupId = crypto.randomUUID();
-      const { legacy, scene } = splitByWorld(context.boardState, targets.ids);
-      if (scene.length > 0) {
-        if (legacy.length > 0) {
-          return {
-            error: "Airo can't group its own diagram shapes with shapes added from the toolbar or with typed commands yet. Select them and use the toolbar.",
-          };
-        }
-        // A section, as the toolbar makes. Sections aren't objects Airo names,
-        // so the shapes stay selected rather than the section.
-        return {
-          commands: [{ type: "scene.group", sectionId: groupId, memberIds: scene, ...(action.label ? { label: action.label } : {}) }],
-          selectionAfter: scene,
-          handleAssignments: { [action.handle]: [groupId] },
-        };
-      }
+      // A section, as the toolbar makes. Sections aren't objects Airo names,
+      // so the shapes stay selected rather than the section.
       return {
-        commands: [
-          {
-            type: "objects.group",
-            groupId,
-            objectIds: targets.ids,
-            ...(action.label ? { label: action.label } : {}),
-            source: "voice",
-            style: { strokeColor: context.strokeColor },
-          },
-        ],
-        selectionAfter: [groupId],
+        commands: [{ type: "scene.group", sectionId: groupId, memberIds: targets.ids, ...(action.label ? { label: action.label } : {}) }],
+        selectionAfter: targets.ids,
         handleAssignments: { [action.handle]: [groupId] },
       };
     }
     case "select": {
       const targets = resolveMany(action.targets);
       if ("error" in targets) return targets;
-      const current = context.selectionIds.filter(
-        (id) => context.boardState.strokes[id]?.status === "committed" || isSceneOnlyElement(context.boardState, id),
-      );
+      const current = context.selectionIds.filter((id) => isActiveElement(context.boardState, id));
       const next =
         action.mode === "replace"
           ? targets.ids
@@ -655,13 +507,15 @@ function resolveSemanticPlanActionSteps(
     case "change_type": {
       const targets = resolveMany(action.targets);
       if ("error" in targets) return targets;
+      // Only shapes have a shape to change; a sticky or text stays as it is.
       const commands = targets.ids.flatMap((id): DiagramCommand[] => {
-        if (!isSceneOnlyElement(context.boardState, id)) {
-          return [{ type: "object.retype", objectId: id, nodeType: action.nodeType, shapeKind: action.shape }];
-        }
-        // Only v2 shapes have a shape to change; a sticky or text stays as it is.
         return context.boardState.elements[id]?.kind === "shape"
-          ? [{ type: "scene.retype", elementId: id, shapeKind: action.shape ?? shapeKindForNodeType(action.nodeType) }]
+          ? [{
+              type: "scene.retype",
+              elementId: id,
+              shapeKind: action.shape ?? shapeKindForNodeType(action.nodeType),
+              nodeType: action.nodeType,
+            }]
           : [];
       });
       return commands.length > 0
@@ -676,9 +530,7 @@ function resolveSemanticPlanActionSteps(
         const bounds = semanticObjectBounds(context.boardState, id);
         if (!bounds) return [];
         const resized = resizeBoundsAroundCenter(bounds, "both", direction);
-        return isSceneOnlyElement(context.boardState, id)
-          ? [{ type: "scene.resize", elementId: id, bounds: resized }]
-          : [{ type: "object.resize", objectId: id, bounds: resized }];
+        return [{ type: "scene.resize", elementId: id, bounds: resized }];
       });
       return commands.length > 0
         ? { commands, selectionAfter: targets.ids }
@@ -701,11 +553,7 @@ function resolveSemanticPlanActionSteps(
           : connection;
       }
       return {
-        commands: [
-          connection.scene
-            ? { type: "scene.rename", elementId: connection.id, label: action.label }
-            : { type: "object.rename", objectId: connection.id, label: action.label },
-        ],
+        commands: [{ type: "scene.rename", elementId: connection.id, label: action.label }],
         selectionAfter: [connection.fromId, connection.toId],
       };
     }
@@ -713,29 +561,13 @@ function resolveSemanticPlanActionSteps(
       const connection = resolveSemanticConnectionReference(action.connection, context, planHandles);
       if ("error" in connection) return connection;
       return {
-        commands: [
-          connection.scene
-            ? { type: "scene.connector.restyle", connectorId: connection.id, lineStyle: action.lineStyle }
-            : { type: "connector.restyle", connectorId: connection.id, lineStyle: action.lineStyle },
-        ],
+        commands: [{ type: "scene.connector.restyle", connectorId: connection.id, lineStyle: action.lineStyle }],
         selectionAfter: [connection.fromId, connection.toId],
       };
     }
     case "undo":
     case "cancel":
       return { error: "Undo and cancel are handled immediately." };
-  }
-}
-
-/** The shape a v2 element takes for a node type, matching how legacy nodes are mirrored. */
-function shapeKindForNodeType(nodeType: AnnotationNodeType): ShapeKind {
-  switch (nodeType) {
-    case "decision": return "diamond";
-    case "io": return "right-parallelogram";
-    case "circle": return "ellipse";
-    case "note":
-    case "custom": return "rounded-rectangle";
-    default: return nodeType;
   }
 }
 
@@ -755,7 +587,6 @@ function resolveConnectEndpointsCreatingMissing(
       fromId: string;
       toId: string;
       created: DiagramCommand[];
-      sceneEndpoint: boolean;
       repairKinds: SemanticGroundingRepairKind[];
     }
   | Extract<SemanticActionResolution, { error: string }> {
@@ -803,7 +634,6 @@ function resolveConnectEndpointsCreatingMissing(
     fromId,
     toId,
     created,
-    sceneEndpoint: isSceneOnlyElement(context.boardState, fromId) || isSceneOnlyElement(context.boardState, toId),
     repairKinds: [...repairKinds],
   };
 }
@@ -855,6 +685,7 @@ function besideCenter(
   return { x: center.x + (direction === "left" ? -offset : offset), y: center.y };
 }
 
+/** A new arrow between two objects. */
 function semanticConnectCommand(
   fromId: string,
   toId: string,
@@ -869,16 +700,6 @@ function semanticConnectCommand(
     ...(label ? { label } : {}),
     source: "voice",
     style: { strokeColor },
-  };
-}
-
-function sceneConnectCommand(fromId: string, toId: string, label: string | null): DiagramCommand {
-  return {
-    type: "scene.connect",
-    connectorId: crypto.randomUUID(),
-    fromId,
-    toId,
-    ...(label ? { label } : {}),
   };
 }
 
@@ -898,78 +719,39 @@ function duplicateOffsetWithPlacement(
   }, placement.duplicateOffset);
 }
 
-/** Legacy nodes take stroke commands; v2 shapes take scene commands. */
-function splitByWorld(state: BoardState, ids: readonly string[]): { legacy: string[]; scene: string[] } {
-  const scene = ids.filter((id) => isSceneOnlyElement(state, id));
-  return { legacy: ids.filter((id) => !scene.includes(id)), scene };
-}
-
-/** A move of mixed objects: the same shift for each kind, through its own command. */
-function splitMoveByWorld(state: BoardState, command: DiagramCommand): DiagramCommand[] {
-  if (command.type !== "objects.move") return [command];
-  const { legacy, scene } = splitByWorld(state, command.objectIds);
-  if (scene.length === 0) return [command];
+/**
+ * A planned objects.move as the scene.move it runs as: the same shift for
+ * every object, worked out from the targets' bounds when it names a point.
+ */
+function sceneMoveCommand(state: BoardState, command: DiagramCommand): DiagramCommand {
+  if (command.type !== "objects.move") return command;
+  const elementIds = command.objectIds.filter((id) => isActiveElement(state, id));
+  if (elementIds.length === 0) return command;
   const bounds = semanticSelectionBounds(state, command.objectIds);
   const delta = command.delta ?? (command.to && bounds
     ? { x: command.to.x - bounds.x, y: command.to.y - bounds.y }
     : { x: 0, y: 0 });
-  return [
-    ...(legacy.length > 0 ? [{ type: "objects.move", objectIds: legacy, delta } as const] : []),
-    { type: "scene.move", elementIds: scene, delta },
-  ];
+  return { type: "scene.move", elementIds, delta };
 }
 
 type DirectedSemanticConnection = {
   id: string;
   label: string | null;
-  geometryAttached: boolean;
   /** When it was drawn, for picking the newest of several parallel lines. */
   createdAtMs: number;
-  /** A v2 connector, changed through scene commands. */
-  scene?: boolean;
 };
 
 function findDirectedSemanticConnections(
   state: BoardState,
   fromId: string,
   toId: string,
-  options: { includeStale?: boolean } = {},
 ): DirectedSemanticConnection[] {
-  return Object.values(state.strokes)
-    .flatMap((stroke): DirectedSemanticConnection[] => {
-      const annotation = stroke.annotation;
-      if (
-        stroke.status !== "committed" ||
-        !annotation ||
-        (annotation.type !== "connector" && annotation.type !== "arrow") ||
-        annotation.snappedStartStrokeId !== fromId ||
-        annotation.snappedEndStrokeId !== toId
-      ) {
-        return [];
-      }
-      const geometryAttached = connectorGeometryMatchesBindings(
-        state,
-        annotation,
-        fromId,
-        toId,
-      );
-      if (!geometryAttached && !options.includeStale) {
-        return [];
-      }
-      return [{
-        id: stroke.id,
-        label: annotation.label?.trim() || null,
-        geometryAttached,
-        createdAtMs: nodeCreatedAtMs(state, stroke.id),
-      }];
-    })
-    .concat(sceneConnectorsBetween(state, fromId, toId).map((connector) => ({
+  return sceneConnectorsBetween(state, fromId, toId)
+    .map((connector) => ({
       id: connector.id,
       label: richTextToPlainText(connector.label).trim() || null,
-      geometryAttached: true,
       createdAtMs: nodeCreatedAtMs(state, connector.id),
-      scene: true,
-    })))
+    }))
     .sort((left, right) => left.id.localeCompare(right.id));
 }
 
@@ -1076,7 +858,7 @@ function resolveSemanticConnectionReference(
   planHandles: ReadonlyMap<string, string[]>,
   options: { eitherDirection?: boolean } = {},
 ):
-  | { id: string; fromId: string; toId: string; scene?: boolean }
+  | { id: string; fromId: string; toId: string }
   | { error: string; errorCode?: SemanticGroundingErrorCode; missingConnector?: true } {
   const endpoints = resolveSemanticConnectionEndpoints(reference, context, planHandles);
   if ("error" in endpoints) return endpoints;
@@ -1085,7 +867,7 @@ function resolveSemanticConnectionReference(
   if ("error" in selected) return selected;
   const connection = selected.connections[0];
   if (connection) {
-    return { id: connection.id, ...endpoints, ...(connection.scene ? { scene: true } : {}) };
+    return { id: connection.id, ...endpoints };
   }
   let anyBetween = forward.length > 0;
   if (options.eitherDirection) {
@@ -1098,7 +880,6 @@ function resolveSemanticConnectionReference(
         id: match.id,
         fromId: endpoints.toId,
         toId: endpoints.fromId,
-        ...(match.scene ? { scene: true } : {}),
       };
     }
   }
@@ -1230,12 +1011,9 @@ function resolveSemanticReference(
         : { error: "There is no current object selection." };
     }
     case "pointer": {
-      if (isNode(context.hoverStrokeId)) return { ids: [context.hoverStrokeId] };
       if (!context.pointerAvailable) {
         return { error: "No live pointer target is available. Point at an object and try again." };
       }
-      const hit = findAnnotationObjectAtPoint(context.boardState, context.pointer);
-      if (isNode(hit?.id)) return { ids: [hit.id] };
       const sceneHit = sceneNodeAtPoint(context.boardState, context.pointer);
       return sceneHit
         ? { ids: [sceneHit.id] }
@@ -1306,17 +1084,10 @@ function selectedNodeIds(context: SemanticIntentResolutionContext): string[] {
   return context.selectionIds.filter((id) => nodeIds.has(id));
 }
 
-/** Selected connectors still on the board, legacy or v2. */
+/** Selected connectors still on the board. */
 function selectedConnectorIds(context: SemanticIntentResolutionContext): string[] {
   const state = context.boardState;
-  return context.selectionIds.filter((id) => {
-    const stroke = state.strokes[id];
-    if (stroke) {
-      return stroke.status === "committed" &&
-        (stroke.annotation?.type === "connector" || stroke.annotation?.type === "arrow");
-    }
-    return isSceneOnlyElement(state, id) && state.elements[id]?.kind === "connector";
-  });
+  return context.selectionIds.filter((id) => isActiveElement(state, id) && state.elements[id]?.kind === "connector");
 }
 
 const LOOSE_LABEL_FILLER = new Set(["the", "a", "an", "one", "my", "our", "that", "this"]);
@@ -1347,12 +1118,12 @@ function looseLabelCandidates(nodes: SemanticBoardNode[], label: string): Semant
   return nodes.filter((node) => {
     const capability = AIRBOARD_SEMANTIC_NODE_CAPABILITIES.find(({ nodeType }) => nodeType === node.nodeType);
     if (capability && capability.nodeType !== "custom" && (capability.terms as readonly string[]).includes(phrase)) return true;
-    return node.world === "scene" && shapeKind !== null && node.nodeType === shapeKind;
+    return shapeKind !== null && node.nodeType === shapeKind;
   });
 }
 
 function nodeCreatedAtMs(state: BoardState, id: string): number {
-  const raw = state.strokes[id]?.createdAt ?? state.elements[id]?.createdAt;
+  const raw = state.elements[id]?.createdAt;
   const parsed = raw ? Date.parse(raw) : Number.NaN;
   return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
 }
@@ -1598,7 +1369,7 @@ function semanticOffsetDelta(
 function semanticSelectionBounds(
   state: BoardState,
   ids: string[],
-): NonNullable<StrokeAnnotation["bounds"]> | null {
+): AnnotationBounds | null {
   const bounds = ids.flatMap((id) => {
     const value = semanticObjectBounds(state, id);
     return value ? [value] : [];
@@ -1709,7 +1480,7 @@ export function groundSemanticPlan(input: SemanticPlanGroundingInput): SemanticP
   const skipped: SkippedSemanticAction[] = [];
   const repairs: Extract<SemanticPlanGrounding, { status: "grounded" }>["repairs"] = [];
   let selectionIds = input.context.selectionIds.filter(
-    (id) => previewState.strokes[id]?.status === "committed" || isSceneOnlyElement(previewState, id),
+    (id) => isActiveElement(previewState, id),
   );
   let appliedActionCount = 0;
 
@@ -1776,7 +1547,7 @@ export function groundSemanticPlan(input: SemanticPlanGroundingInput): SemanticP
     }
     if (resolved.selectionAfter) {
       selectionIds = resolved.selectionAfter.filter(
-        (id) => previewState.strokes[id]?.status === "committed" || isSceneOnlyElement(previewState, id),
+        (id) => isActiveElement(previewState, id),
       );
     }
   }
@@ -1914,9 +1685,7 @@ export function resolveIntentOperation(
   operation: IntentCanvasOperation,
   context: IntentResolutionContext,
 ): IntentResolution {
-  const selectionIds = context.selectionIds.filter(
-    (strokeId) => context.boardState.strokes[strokeId]?.status === "committed",
-  );
+  const selectionIds = context.selectionIds.filter((id) => isActiveElement(context.boardState, id));
   const primarySelectionId =
     context.primarySelectionId && selectionIds.includes(context.primarySelectionId)
       ? context.primarySelectionId
@@ -1986,7 +1755,6 @@ export function resolveIntentOperation(
       return {
         commands,
         selectionAfter: ids,
-        previewStrokeId: ids[0],
       };
     }
 
@@ -1995,7 +1763,6 @@ export function resolveIntentOperation(
         boardState: context.boardState,
         selectionIds,
         primarySelectionId,
-        hoverStrokeId: context.hoverStrokeId,
       });
       const from = resolveConnectionReference(operation.from, context.boardState, deictic);
       if ("error" in from) {
@@ -2024,7 +1791,6 @@ export function resolveIntentOperation(
           },
         ],
         selectionAfter: [fromId],
-        previewStrokeId: connectorId,
       };
     }
 
@@ -2033,7 +1799,6 @@ export function resolveIntentOperation(
         boardState: context.boardState,
         selectionIds,
         primarySelectionId,
-        hoverStrokeId: context.hoverStrokeId,
       });
       const from = resolveConnectionReference(
         operation.from,
@@ -2051,80 +1816,32 @@ export function resolveIntentOperation(
         return { error: "The source and target must be different objects." };
       }
 
-      const candidates = findAttachableConnections(
-        context.boardState,
-        from.id,
-        to.id,
-        operation.endpointOrder ?? "directed",
-      );
-      const selectedCandidates = candidates.filter((candidate) =>
-        selectionIds.includes(candidate.id),
-      );
-      const pointedCandidates = candidates.filter(
-        (candidate) => candidate.id === context.hoverStrokeId,
-      );
+      // Every line on the board is bound to its ends, so there is never a
+      // disconnected one to attach: an existing join is already what was
+      // asked for, and otherwise the request is refused.
       const lineReference = operation.lineReference ?? "unique_existing";
-      const chosen = lineReference === "selected"
-        ? selectedCandidates.length === 1
-          ? selectedCandidates[0]
-          : null
-        : lineReference === "pointer"
-          ? pointedCandidates.length === 1
-            ? pointedCandidates[0]
-            : null
-          : selectedCandidates.length === 1
-            ? selectedCandidates[0]
-            : selectedCandidates.length > 1
-              ? null
-              : candidates.length === 1
-                ? candidates[0]
-                : null;
-      if (!chosen) {
-        if (candidates.length === 0 && lineReference === "unique_existing") {
-          const exactHealthy = [
-            ...findDirectedSemanticConnections(
-              context.boardState,
-              from.id,
-              to.id,
-            ),
-            ...(operation.endpointOrder === "undirected"
-              ? findDirectedSemanticConnections(
-                  context.boardState,
-                  to.id,
-                  from.id,
-                )
-              : []),
-          ];
-          if (exactHealthy.length > 0) {
-            return {
-              commands: [],
-              selectionAfter: [from.id, to.id],
-              alreadySatisfied: true,
-            };
-          }
+      if (lineReference === "unique_existing") {
+        const exactHealthy = [
+          ...findDirectedSemanticConnections(context.boardState, from.id, to.id),
+          ...(operation.endpointOrder === "undirected"
+            ? findDirectedSemanticConnections(context.boardState, to.id, from.id)
+            : []),
+        ];
+        if (exactHealthy.length > 0) {
+          return {
+            commands: [],
+            selectionAfter: [from.id, to.id],
+            alreadySatisfied: true,
+          };
         }
-        return {
-          error:
-            lineReference === "selected"
-              ? "The selected object is not one uniquely attachable disconnected line. Select the intended line and try again."
-              : lineReference === "pointer"
-                ? "The pointed object is not one uniquely attachable disconnected line. Point at the intended line and try again."
-                : candidates.length === 0
-              ? "No visually disconnected line can be safely attached to those two objects."
-              : "More than one disconnected line could match. Select the intended line and try again.",
-        };
       }
       return {
-        commands: [
-          {
-            type: "connection.attach",
-            connectorId: chosen.id,
-            fromId: chosen.fromId,
-            toId: chosen.toId,
-          },
-        ],
-        selectionAfter: [chosen.id],
-        previewStrokeId: chosen.id,
+        error:
+          lineReference === "selected"
+            ? "The selected object is not one uniquely attachable disconnected line. Select the intended line and try again."
+            : lineReference === "pointer"
+              ? "The pointed object is not one uniquely attachable disconnected line. Point at the intended line and try again."
+              : "No visually disconnected line can be safely attached to those two objects.",
       };
     }
 
@@ -2133,7 +1850,6 @@ export function resolveIntentOperation(
         boardState: context.boardState,
         selectionIds,
         primarySelectionId,
-        hoverStrokeId: context.hoverStrokeId,
       });
       const from = resolveConnectionReference(operation.from, context.boardState, deictic);
       if ("error" in from) {
@@ -2178,7 +1894,6 @@ export function resolveIntentOperation(
           boardState: context.boardState,
           selectionIds,
           primarySelectionId,
-          hoverStrokeId: context.hoverStrokeId,
         });
         const target = resolveConnectionReference(operation.target, context.boardState, deictic);
         if ("error" in target) {
@@ -2188,7 +1903,9 @@ export function resolveIntentOperation(
       }
       const commands: DiagramCommand[] = [];
       for (const objectId of targetIds) {
-        const bounds = context.boardState.strokes[objectId]?.annotation?.bounds;
+        const bounds = isNodeObject(context.boardState, objectId)
+          ? semanticObjectBounds(context.boardState, objectId)
+          : null;
         if (!bounds) {
           continue;
         }
@@ -2204,7 +1921,6 @@ export function resolveIntentOperation(
       return {
         commands,
         selectionAfter: targetIds,
-        previewStrokeId: targetIds[0],
       };
     }
 
@@ -2221,7 +1937,6 @@ export function resolveIntentOperation(
           boardState: context.boardState,
           selectionIds,
           primarySelectionId,
-          hoverStrokeId: context.hoverStrokeId,
         });
         const target = resolveConnectionReference(operation.target, context.boardState, deictic);
         if ("error" in target) {
@@ -2241,14 +1956,13 @@ export function resolveIntentOperation(
           strokeColor: palette.stroke,
         })),
         selectionAfter: targetIds,
-        previewStrokeId: targetIds[0],
       };
     }
 
     case "select_all": {
-      const ids = Object.values(context.boardState.strokes)
-        .filter((stroke) => stroke.status === "committed" && stroke.annotation)
-        .map((stroke) => stroke.id);
+      const ids = Object.values(context.boardState.elements)
+        .filter((element) => element.visible && isActiveElement(context.boardState, element.id))
+        .map((element) => element.id);
       if (ids.length === 0) {
         return { error: "The board has no objects to select yet." };
       }
@@ -2260,7 +1974,6 @@ export function resolveIntentOperation(
         boardState: context.boardState,
         selectionIds,
         primarySelectionId,
-        hoverStrokeId: context.hoverStrokeId,
       });
       const target = resolveConnectionReference(operation.target, context.boardState, deictic);
       if ("error" in target) {
@@ -2275,7 +1988,6 @@ export function resolveIntentOperation(
           },
         ],
         selectionAfter: [target.id],
-        previewStrokeId: target.id,
       };
     }
 
@@ -2292,7 +2004,6 @@ export function resolveIntentOperation(
           },
         ],
         selectionAfter: selectionIds,
-        previewStrokeId: primarySelectionId,
       };
     }
 
@@ -2320,7 +2031,6 @@ export function resolveIntentOperation(
           },
         ],
         selectionAfter: duplicatedIds,
-        previewStrokeId: duplicatedIds[duplicatedIds.length - 1],
       };
     }
 
@@ -2343,7 +2053,6 @@ export function resolveIntentOperation(
           },
         ],
         selectionAfter: selectionIds,
-        previewStrokeId: primarySelectionId ?? selectionIds[0],
       };
     }
 
@@ -2366,7 +2075,6 @@ export function resolveIntentOperation(
       return {
         commands: [{ type: "objects.align", objectIds: selectionIds, alignment }],
         selectionAfter: selectionIds,
-        previewStrokeId: primarySelectionId ?? selectionIds[0],
       };
     }
 
@@ -2381,7 +2089,6 @@ export function resolveIntentOperation(
               },
             ],
             selectionAfter: selectionIds,
-            previewStrokeId: primarySelectionId ?? selectionIds[0],
           }
         : { error: "Shift-click at least three objects before distributing them." };
 
@@ -2397,7 +2104,6 @@ export function resolveIntentOperation(
       return {
         commands: layoutCommands,
         selectionAfter: selectionIds,
-        previewStrokeId: primarySelectionId ?? selectionIds[0],
       };
     }
 
@@ -2426,28 +2132,18 @@ function resolveConnectionReference(
   }
 
   const search = (lookup: string, nodeTypeFilter: string | null) => {
-    const candidates = Object.values(state.strokes).flatMap((stroke) => {
-      const annotation = stroke.annotation;
-      if (
-        stroke.status !== "committed" ||
-        !annotation ||
-        annotation.type === "connector" ||
-        annotation.type === "arrow" ||
-        !annotation.bounds
-      ) {
+    const candidates = nameableObjects(state).flatMap((object) => {
+      if (nodeTypeFilter && object.nodeType !== nodeTypeFilter) {
         return [];
       }
-      if (nodeTypeFilter && annotation.nodeType !== nodeTypeFilter) {
-        return [];
-      }
-      const label = normalizeObjectLookup(annotation.label ?? "");
-      const nodeType = normalizeObjectLookup(annotation.nodeType ?? "");
+      const label = normalizeObjectLookup(object.label);
+      const nodeType = normalizeObjectLookup(object.nodeType);
       const exactLabel = lookup.length > 0 && label === lookup;
       const exactType = lookup.length > 0 && nodeType === lookup;
       if (!exactLabel && !exactType && !(lookup.length === 0 && nodeTypeFilter)) {
         return [];
       }
-      return [{ id: stroke.id, exactLabel }];
+      return [{ id: object.id, exactLabel }];
     });
     const exactLabelMatches = candidates.filter((candidate) => candidate.exactLabel);
     return exactLabelMatches.length > 0 ? exactLabelMatches : candidates;
@@ -2477,101 +2173,25 @@ function resolveConnectionReference(
   return { id: matches[0]!.id };
 }
 
-type AttachableConnection = { id: string; fromId: string; toId: string };
-
-function findAttachableConnections(
-  state: BoardState,
-  firstId: string,
-  secondId: string,
-  endpointOrder: "directed" | "undirected",
-): AttachableConnection[] {
-  return Object.values(state.strokes)
-    .flatMap((stroke): AttachableConnection[] => {
-      const annotation = stroke.annotation;
-      if (
-        stroke.status !== "committed" ||
-        !annotation ||
-        (annotation.type !== "connector" && annotation.type !== "arrow") ||
-        !annotation.start ||
-        !annotation.end ||
-        connectorGeometryMatchesBindings(state, annotation)
-      ) {
-        return [];
-      }
-
-      const startHealthy = connectorEndpointMatchesBinding(
-        state,
-        annotation,
-        "start",
-      );
-      const endHealthy = connectorEndpointMatchesBinding(
-        state,
-        annotation,
-        "end",
-      );
-      const orientations = endpointOrder === "undirected"
-        ? [
-            { fromId: firstId, toId: secondId, listedOrder: 0 },
-            { fromId: secondId, toId: firstId, listedOrder: 1 },
-          ]
-        : [{ fromId: firstId, toId: secondId, listedOrder: 0 }];
-      const viable = orientations
-        .flatMap((orientation) => {
-          // A healthy binding is authoritative and must never be silently
-          // replaced. Missing/stale bindings are repairable only because this
-          // resolver is reached by an explicit disconnected-line command.
-          if (
-            (startHealthy &&
-              annotation.snappedStartStrokeId !== orientation.fromId) ||
-            (endHealthy &&
-              annotation.snappedEndStrokeId !== orientation.toId)
-          ) {
-            return [];
-          }
-          return [{
-            ...orientation,
-            preservedBindings: Number(startHealthy) + Number(endHealthy),
-            geometryDistance:
-              attachmentEndpointDistance(
-                state,
-                annotation.start!,
-                orientation.fromId,
-              ) +
-              attachmentEndpointDistance(
-                state,
-                annotation.end!,
-                orientation.toId,
-              ),
-          }];
-        })
-        .sort(
-          (left, right) =>
-            right.preservedBindings - left.preservedBindings ||
-            left.geometryDistance - right.geometryDistance ||
-            left.listedOrder - right.listedOrder,
-        );
-      const chosen = viable[0];
-      return chosen
-        ? [{ id: stroke.id, fromId: chosen.fromId, toId: chosen.toId }]
-        : [];
-    })
-    .sort((left, right) => left.id.localeCompare(right.id));
+/**
+ * Objects this grammar can name, with the label as written (empty when it has
+ * none) and the diagram type.
+ */
+function nameableObjects(state: BoardState): Array<{ id: string; label: string; nodeType: string }> {
+  return Object.values(state.elements).flatMap((element) =>
+    isSceneNodeElement(element)
+      ? [{
+          id: element.id,
+          label: "content" in element ? richTextToPlainText(element.content).trim() : "",
+          nodeType: sceneElementNodeType(element),
+        }]
+      : []);
 }
 
-function attachmentEndpointDistance(
-  state: BoardState,
-  point: { x: number; y: number },
-  nodeId: string,
-): number {
-  const node = state.strokes[nodeId];
-  const bounds = node?.annotation?.bounds;
-  if (!node || !bounds) return Number.POSITIVE_INFINITY;
-  const boundary = pointOnNodeBoundary(
-    bounds,
-    node.annotation?.nodeType,
-    point,
-  );
-  return Math.hypot(point.x - boundary.x, point.y - boundary.y);
+/** A shape (not a line) on the board. */
+function isNodeObject(state: BoardState, id: string | null | undefined): id is string {
+  if (!id) return false;
+  return isSceneNodeElement(state.elements[id]);
 }
 
 /**
@@ -2613,76 +2233,18 @@ function resizeBoundsAroundCenter(
   };
 }
 
-/**
- * Every committed connector/arrow whose endpoints join the two objects —
- * preferring explicit endpoint bindings, falling back to endpoint-in-bounds
- * geometry for lines drawn before snapping existed.
- */
+/** Every connector joining the two objects, in either direction. */
 function findConnectionsBetween(
   boardState: BoardState,
   firstId: string,
   secondId: string,
 ): string[] {
-  const matches: string[] = [];
-  for (const stroke of Object.values(boardState.strokes)) {
-    const annotation = stroke.annotation;
-    if (
-      stroke.status !== "committed" ||
-      !annotation ||
-      (annotation.type !== "connector" && annotation.type !== "arrow")
-    ) {
-      continue;
-    }
-    const boundPair = [annotation.snappedStartStrokeId, annotation.snappedEndStrokeId];
-    const hasAnyBinding = Boolean(boundPair[0] || boundPair[1]);
-    if (
-      (boundPair[0] === firstId && boundPair[1] === secondId) ||
-      (boundPair[0] === secondId && boundPair[1] === firstId)
-    ) {
-      if (connectorGeometryMatchesBindings(boardState, annotation)) {
-        matches.push(stroke.id);
-      }
-      continue;
-    }
-    // Geometry fallback is only for legacy lines created before endpoint
-    // bindings existed. A partial or stale binding denotes a disconnected
-    // line and cannot be targeted by a destructive relation command.
-    if (hasAnyBinding) continue;
-    if (annotation.start && annotation.end) {
-      const startHit = endpointNearObject(boardState, annotation.start, firstId)
-        ? firstId
-        : endpointNearObject(boardState, annotation.start, secondId)
-          ? secondId
-          : null;
-      const endHit = endpointNearObject(boardState, annotation.end, firstId)
-        ? firstId
-        : endpointNearObject(boardState, annotation.end, secondId)
-          ? secondId
-          : null;
-      if (startHit && endHit && startHit !== endHit) {
-        matches.push(stroke.id);
-      }
-    }
-  }
-  return matches.sort((left, right) => left.localeCompare(right));
-}
-
-function endpointNearObject(
-  boardState: BoardState,
-  point: { x: number; y: number },
-  objectId: string,
-): boolean {
-  const bounds = boardState.strokes[objectId]?.annotation?.bounds;
-  if (!bounds) {
-    return false;
-  }
-  const margin = 28;
-  return (
-    point.x >= bounds.x - margin &&
-    point.x <= bounds.x + bounds.width + margin &&
-    point.y >= bounds.y - margin &&
-    point.y <= bounds.y + bounds.height + margin
-  );
+  return [
+    ...sceneConnectorsBetween(boardState, firstId, secondId),
+    ...sceneConnectorsBetween(boardState, secondId, firstId),
+  ]
+    .map((connector) => connector.id)
+    .sort((left, right) => left.localeCompare(right));
 }
 
 /**
@@ -2736,7 +2298,6 @@ function resolvePlacementCenter(
     boardState: context.boardState,
     selectionIds: context.selectionIds,
     primarySelectionId: context.primarySelectionId,
-    hoverStrokeId: context.hoverStrokeId,
   });
   let referenceId: string | null = null;
   switch (placement.relativeTo.kind) {
@@ -2744,7 +2305,7 @@ function resolvePlacementCenter(
       referenceId = context.primarySelectionId;
       break;
     case "focus":
-      referenceId = context.hoverStrokeId ?? context.primarySelectionId;
+      referenceId = context.primarySelectionId;
       break;
     case "deictic":
       referenceId = placement.relativeTo.pronoun === "this" ? deictic.thisId : deictic.thatId;
@@ -2752,7 +2313,9 @@ function resolvePlacementCenter(
     case "pointer":
       return context.pointer;
   }
-  const bounds = referenceId ? context.boardState.strokes[referenceId]?.annotation?.bounds : undefined;
+  const bounds = isNodeObject(context.boardState, referenceId)
+    ? semanticObjectBounds(context.boardState, referenceId)
+    : null;
   if (!bounds) {
     return placement.relativeTo.kind === "focus" ? context.pointer : null;
   }
@@ -2778,17 +2341,12 @@ function resolveDeicticIds(input: {
   boardState: BoardState;
   selectionIds: string[];
   primarySelectionId: string | null;
-  hoverStrokeId: string | null;
 }): { thisId: string | null; thatId: string | null } {
-  const isNode = (strokeId: string | null): strokeId is string =>
-    Boolean(strokeId && input.boardState.strokes[strokeId]?.annotation?.bounds);
+  const isNode = (strokeId: string | null): strokeId is string => isNodeObject(input.boardState, strokeId);
   const thisId = isNode(input.primarySelectionId)
     ? input.primarySelectionId
     : input.selectionIds.find((strokeId) => isNode(strokeId)) ?? null;
-  const thatId =
-    isNode(input.hoverStrokeId) && input.hoverStrokeId !== thisId
-      ? input.hoverStrokeId
-      : input.selectionIds.find((strokeId) => isNode(strokeId) && strokeId !== thisId) ?? null;
+  const thatId = input.selectionIds.find((strokeId) => isNode(strokeId) && strokeId !== thisId) ?? null;
   return { thisId, thatId };
 }
 
@@ -2821,37 +2379,25 @@ function createLayoutCommands(
   return ordered.flatMap((entry, index) => {
     const column = direction === "grid" ? index % columns : horizontal ? index : 0;
     const row = direction === "grid" ? Math.floor(index / columns) : horizontal ? 0 : index;
-    return splitMoveByWorld(state, {
+    return [sceneMoveCommand(state, {
       type: "objects.move",
       objectIds: [entry.strokeId],
       to: {
         x: minX + column * (maxWidth + 48),
         y: minY + row * (maxHeight + 44),
       },
-    });
+    })];
   });
 }
 
-/** Connectors among a set of objects, legacy or v2, as from → to pairs. */
+/** Connectors among a set of objects, as from → to pairs. */
 function semanticEdgesAmong(state: BoardState, ids: readonly string[]): Array<{ from: string; to: string }> {
   const members = new Set(ids);
   const edges: Array<{ from: string; to: string }> = [];
-  for (const stroke of Object.values(state.strokes)) {
-    const annotation = stroke.annotation;
-    if (
-      stroke.status === "committed" &&
-      (annotation?.type === "connector" || annotation?.type === "arrow") &&
-      annotation.snappedStartStrokeId && members.has(annotation.snappedStartStrokeId) &&
-      annotation.snappedEndStrokeId && members.has(annotation.snappedEndStrokeId)
-    ) {
-      edges.push({ from: annotation.snappedStartStrokeId, to: annotation.snappedEndStrokeId });
-    }
-  }
   for (const element of Object.values(state.elements)) {
     if (
       element.kind === "connector" &&
       element.status === "active" &&
-      !element.legacyStrokeId &&
       element.start.binding && members.has(element.start.binding.elementId) &&
       element.end.binding && members.has(element.end.binding.elementId)
     ) {
@@ -2861,7 +2407,7 @@ function semanticEdgesAmong(state: BoardState, ids: readonly string[]): Array<{ 
   return edges;
 }
 
-/** Moves each object so its center lands on a point, through its own world's command. */
+/** Moves each object so its center lands on a point. */
 function moveCentersCommands(
   state: BoardState,
   centers: ReadonlyMap<string, AnnotationPoint>,
@@ -2871,7 +2417,7 @@ function moveCentersCommands(
     if (!bounds) return [];
     const to = { x: center.x - bounds.width / 2, y: center.y - bounds.height / 2 };
     if (Math.abs(to.x - bounds.x) < 0.5 && Math.abs(to.y - bounds.y) < 0.5) return [];
-    return splitMoveByWorld(state, { type: "objects.move", objectIds: [id], to });
+    return [sceneMoveCommand(state, { type: "objects.move", objectIds: [id], to })];
   });
 }
 
@@ -2969,7 +2515,7 @@ function createRadialLayoutCommands(state: BoardState, ids: string[]): DiagramCo
   return moveCentersCommands(state, centers);
 }
 
-function defaultNodeLabel(nodeType: NonNullable<StrokeAnnotation["nodeType"]>): string {
+function defaultNodeLabel(nodeType: AnnotationNodeType): string {
   return (
     AIRBOARD_SEMANTIC_NODE_CAPABILITIES.find(
       (capability) => capability.nodeType === nodeType,
@@ -2983,10 +2529,10 @@ function clampNumber(value: number, minimum: number, maximum: number): number {
 
 export function buildSemanticIntentContext(
   boardState: BoardState,
-  selectedStrokeIds: readonly string[],
+  selectedElementIds: readonly string[],
   pointerAvailable: boolean,
 ): SemanticIntentContext {
-  const selectedIds = new Set(selectedStrokeIds);
+  const selectedIds = new Set(selectedElementIds);
   // Airo's own nodes and the shapes typed commands and the toolbar make,
   // in reading order (RGB-039).
   const nodes = semanticBoardNodes(boardState).slice(0, 80);
@@ -3018,42 +2564,11 @@ export function buildSemanticIntentContext(
   const selected = objects.filter((summary) => summary.selected).slice(0, 20);
   const edges: SemanticIntentContext["edges"] = [];
   const edgeOccurrences = new Map<string, number>();
-  for (const stroke of Object.values(boardState.strokes).sort((left, right) =>
-    left.id.localeCompare(right.id)
-  )) {
-    const annotation = stroke.annotation;
-    if (
-      stroke.status !== "committed" ||
-      !annotation ||
-      (annotation.type !== "connector" && annotation.type !== "arrow") ||
-      !annotation.snappedStartStrokeId ||
-      !annotation.snappedEndStrokeId ||
-      !connectorGeometryMatchesBindings(boardState, annotation) ||
-      edges.length >= 120
-    ) {
-      continue;
-    }
-    const from = summariesById.get(annotation.snappedStartStrokeId);
-    const to = summariesById.get(annotation.snappedEndStrokeId);
-    if (!from || !to) {
-      continue;
-    }
-    const occurrenceKey = `${annotation.snappedStartStrokeId}\u0000${annotation.snappedEndStrokeId}`;
-    const occurrence = (edgeOccurrences.get(occurrenceKey) ?? 0) + 1;
-    edgeOccurrences.set(occurrenceKey, occurrence);
-    edges.push({
-      from: { label: from.label, nodeType: from.nodeType, ordinal: from.ordinal },
-      to: { label: to.label, nodeType: to.nodeType, ordinal: to.ordinal },
-      ...(annotation.label?.trim() ? { label: annotation.label.trim().slice(0, 80) } : {}),
-      occurrence,
-    });
-  }
-  // v2 connectors, whichever kind of object each end is bound to.
+  // Connectors, whichever kind of object each end is bound to.
   for (const element of Object.values(boardState.elements).sort((left, right) => left.id.localeCompare(right.id))) {
     if (
       element.kind !== "connector" ||
       element.status !== "active" ||
-      element.legacyStrokeId ||
       !element.start.binding ||
       !element.end.binding ||
       edges.length >= 120

@@ -1,11 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  findAnnotationObjectAtPoint,
-  findSceneElementAtPoint,
-  strokeIntersectsCircle,
-} from "../src/hitTest.ts";
+import { findSceneElementAtPoint } from "../src/hitTest.ts";
 import {
   drawStroke,
   drawShapeElement,
@@ -27,39 +23,39 @@ test("scene shape hit testing follows geometry, rotation, visibility, and z-orde
   assert.equal(findSceneElementAtPoint(state, { x: 125, y: 5 }), null);
 });
 
-test("legacy annotations carrying shapeKind use catalog render geometry for hits", () => {
-  const stroke = {
-    id: "legacy-triangle",
-    boardId: "board",
-    userId: "user",
-    tool: "marker",
-    color: "#111",
-    thickness: 2,
-    points: [{ x: 50, y: 50, t: 0 }],
-    createdAt: now,
-    updatedAt: now,
-    status: "committed",
-    annotation: {
-      type: "flow_node",
-      source: "keyboard",
-      shapeKind: "triangle",
-      bounds: { x: 0, y: 0, width: 100, height: 100 },
-    },
-  };
-  const state = boardState({}, { [stroke.id]: stroke });
+test("ellipse and diamond shapes are not hittable in their empty bounding-box corners", () => {
+  const ellipse = shapeElement("ellipse", "ellipse", 1, { x: 0, y: 0, width: 100, height: 100, rotation: 0 });
+  const diamond = shapeElement("diamond", "diamond", 2, { x: 200, y: 0, width: 100, height: 100, rotation: 0 });
+  const state = boardState({ ellipse, diamond });
 
-  assert.equal(findAnnotationObjectAtPoint(state, { x: 50, y: 50 }).id, stroke.id);
-  assert.equal(findAnnotationObjectAtPoint(state, { x: 2, y: 2 }), null);
-  assert.equal(strokeIntersectsCircle(stroke, { x: 2, y: 2 }, 1), false);
+  assert.equal(findSceneElementAtPoint(state, { x: 50, y: 50 }).id, "ellipse");
+  assert.equal(findSceneElementAtPoint(state, { x: 2, y: 2 }), null);
+  assert.equal(findSceneElementAtPoint(state, { x: 250, y: 50 }).id, "diamond");
+  assert.equal(findSceneElementAtPoint(state, { x: 203, y: 3 }), null);
+});
 
+test("a freehand preview stroke paints as a smoothed polyline", () => {
   const context = recordingContext();
   drawStroke(context, {
-    ...stroke,
-    points: [],
-    annotation: { ...stroke.annotation, type: "ellipse", shapeKind: "star" },
+    id: "preview",
+    boardId: "board",
+    userId: "user",
+    tool: "pen",
+    color: "#111",
+    thickness: 2,
+    points: [{ x: 0, y: 0, t: 0 }, { x: 10, y: 10, t: 1 }, { x: 20, y: 0, t: 2 }],
+    createdAt: now,
+    updatedAt: now,
+    status: "active",
   });
-  assert.equal(context.calls.some(([method]) => method === "ellipse"), false);
-  assert.ok(context.calls.filter(([method]) => method === "lineTo").length >= 9);
+  assert.deepEqual(
+    context.calls.filter(([method]) => ["moveTo", "quadraticCurveTo", "lineTo", "stroke"].includes(method)).map(([method]) => method),
+    ["moveTo", "quadraticCurveTo", "lineTo", "stroke"],
+  );
+
+  const empty = recordingContext();
+  drawStroke(empty, { id: "empty", boardId: "board", userId: "user", tool: "pen", color: "#111", thickness: 2, points: [], createdAt: now, updatedAt: now, status: "active" });
+  assert.deepEqual(empty.calls, []);
 });
 
 test("shape renderer paints rich text on rotated shapes", () => {
@@ -104,12 +100,11 @@ function shapeElement(id, shapeKind, zIndex, transform) {
   };
 }
 
-function boardState(elements, strokes = {}) {
+function boardState(elements) {
   return {
     boardId: "board",
-    sceneVersion: 2,
+    sceneVersion: 3,
     elements,
-    strokes,
     activeStrokes: {},
     eraseActions: {},
     participants: {},

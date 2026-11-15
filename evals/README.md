@@ -137,7 +137,7 @@ an outcome: `quiet`, `changes_board`, `acts`, `asks_clarification`,
 
 | Command | Intended use | Provider/media policy |
 | --- | --- | --- |
-| `pnpm eval:pr` | Every PR: schemas, policy, coverage, deterministic text, grounded negatives, recorded semantic negatives, mocked pipelines, provider replay, landmark replay, properties, seeded faults, and core Chromium journeys | Fully offline; blocking |
+| `pnpm eval:pr` | Every PR: schemas, policy, coverage, deterministic text, grounded negatives, recorded semantic negatives, mocked pipelines, provider replay, landmark replay, properties, and seeded faults. Eval CLIs only: unit and script tests run once, in `pnpm test` and `pnpm test:scripts`, and browser journeys run in the CI E2E job | Fully offline; blocking |
 
 The live-provider tiers (`eval:canary`, `eval:nightly`, `eval:release`) and the
 real-device tier (`eval:device`), with their `evals.yml` and `device-evals.yml`
@@ -161,9 +161,9 @@ pnpm eval:quality-report
 pnpm eval:quality
 ```
 
-`pnpm eval:pr -- --skip-browser` is the fast offline diagnostic variant; it is
-not the merge gate. Set `AIRBOARD_EVAL_RUN_ID` to obtain a stable artifact
-directory.
+`pnpm eval:pr` writes one summary, `artifacts/evals/latest/suite-results.json`,
+and the JSON report of each eval beside it. CI uploads nothing: a failing step
+prints its whole output in the job log.
 
 ## Provider adapters
 
@@ -346,9 +346,9 @@ kept as a diagnostic and is never substituted for end-to-action latency.
 
 ## Artifacts, aggregation, and replay
 
-Every composite run writes privacy-safe JSON, JUnit XML, Markdown, and HTML to
-`artifacts/evals/<run-id>/`. Reports contain the dataset hash, commit,
-environment, provider/model/prompt/schema versions, aggregate and slice
+Every composite run writes privacy-safe JSON to `artifacts/evals/latest/`
+(override with `--output-dir`); there are no JUnit, Markdown or HTML reports. Reports contain the dataset hash, commit,
+environment, aggregate and slice
 metrics, latency/cost distributions when observed, safe state diffs, failure
 taxonomy, and replay commands. They exclude raw media and customer content.
 

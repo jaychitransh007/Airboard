@@ -79,7 +79,7 @@ async function main() {
     body: { title: `Commercial journey smoke ${new Date().toISOString()}` },
   })).body.board;
   assert.ok(board.id);
-  const state = { nodes: [], edges: [], strokes: [], selectedIds: [], camera: { x: 0, y: 0, zoom: 1 } };
+  const state = { nodes: [], edges: [], selectedIds: [], camera: { x: 0, y: 0, zoom: 1 } };
   const savedBoard = (await call(`/boards/${board.id}`, {
     method: "PATCH",
     body: { version: 1, state },

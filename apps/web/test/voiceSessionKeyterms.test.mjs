@@ -3,12 +3,11 @@ import test from "node:test";
 
 import { buildSessionKeyterms } from "../src/features/board/voiceSessionKeyterms.ts";
 
-function board(strokes = {}, elements = {}) {
+function board(elements = {}) {
   return {
     boardId: "board-test",
-    sceneVersion: 2,
+    sceneVersion: 3,
     elements,
-    strokes,
     activeStrokes: {},
     eraseActions: {},
     participants: {},
@@ -24,17 +23,20 @@ function richText(text) {
   };
 }
 
-function committedNode(id, label, type = "flow_node") {
-  return {
-    id,
-    status: "committed",
-    annotation: {
-      type,
-      nodeType: "custom",
-      label,
-      bounds: { x: 0, y: 0, width: 160, height: 80 },
-    },
-  };
+const base = {
+  boardId: "board-test",
+  status: "active",
+  transform: { x: 0, y: 0, width: 160, height: 80, rotation: 0 },
+  zIndex: 1,
+  locked: false,
+  visible: true,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+  revision: 1,
+};
+
+function shapeNode(id, label) {
+  return { ...base, id, kind: "shape", shapeKind: "service", content: richText(label), style: {} };
 }
 
 test("adds current board entities to the complete transcription vocabulary", () => {
@@ -43,9 +45,9 @@ test("adds current board entities to the complete transcription vocabulary", () 
 
   const updated = buildSessionKeyterms(
     board({
-      planner: committedNode("planner", "Planner"),
-      golden: committedNode("golden", "Golden Dataset"),
-      historical: committedNode("historical", "Historical Dataset"),
+      planner: shapeNode("planner", "Planner"),
+      golden: shapeNode("golden", "Golden Dataset"),
+      historical: shapeNode("historical", "Historical Dataset"),
     }),
     ["planner"],
   );
@@ -58,37 +60,17 @@ test("adds current board entities to the complete transcription vocabulary", () 
 });
 
 test("prioritizes node labels over connector labels and removes deleted labels", () => {
-  const strokes = {
-    planner: committedNode("planner", "Planner"),
-    connector: {
-      ...committedNode("connector", "additional context", "connector"),
-      annotation: {
-        type: "connector",
-        label: "additional context",
-      },
-    },
-    deleted: {
-      ...committedNode("deleted", "Retired Dataset"),
-      status: "deleted",
-    },
+  const elements = {
+    connector: { ...base, id: "connector", kind: "connector", label: richText("additional context") },
+    planner: shapeNode("planner", "Planner"),
+    deleted: { ...shapeNode("deleted", "Retired Dataset"), status: "deleted" },
   };
-  const keyterms = buildSessionKeyterms(board(strokes));
+  const keyterms = buildSessionKeyterms(board(elements));
   assert.ok(keyterms.indexOf("Planner") < keyterms.indexOf("additional context"));
   assert.equal(keyterms.includes("Retired Dataset"), false);
 });
 
 test("includes canonical scene labels, shape names, and connector labels", () => {
-  const base = {
-    boardId: "board-test",
-    status: "active",
-    transform: { x: 0, y: 0, width: 160, height: 80, rotation: 0 },
-    zIndex: 1,
-    locked: false,
-    visible: true,
-    createdAt: "2026-01-01T00:00:00.000Z",
-    updatedAt: "2026-01-01T00:00:00.000Z",
-    revision: 1,
-  };
   const elements = {
     database: {
       ...base,
@@ -113,20 +95,20 @@ test("includes canonical scene labels, shape names, and connector labels", () =>
       label: richText("syncs to"),
     },
   };
-  const keyterms = buildSessionKeyterms(board({}, elements), ["database"]);
+  const keyterms = buildSessionKeyterms(board(elements), ["database"]);
   assert.ok(keyterms.indexOf("Customer Data") < keyterms.indexOf("Service"));
   assert.ok(keyterms.indexOf("Service") < keyterms.indexOf("syncs to"));
 });
 
 test("deduplicates case-insensitively and fits large boards to both limits", () => {
-  const strokes = Object.fromEntries(
+  const elements = Object.fromEntries(
     Array.from({ length: 80 }, (_, index) => [
       `node-${index}`,
-      committedNode(`node-${index}`, `Dataset Vocabulary ${index}`),
+      shapeNode(`node-${index}`, `Dataset Vocabulary ${index}`),
     ]),
   );
-  strokes.duplicate = committedNode("duplicate", "dataset vocabulary 0");
-  const keyterms = buildSessionKeyterms(board(strokes));
+  elements.duplicate = shapeNode("duplicate", "dataset vocabulary 0");
+  const keyterms = buildSessionKeyterms(board(elements));
   assert.equal(
     keyterms.filter(
       (term) => term.toLocaleLowerCase("en-US") === "dataset vocabulary 0",

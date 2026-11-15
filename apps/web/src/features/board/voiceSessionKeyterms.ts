@@ -3,7 +3,6 @@ import {
   shapeCatalogEntry,
   type BoardSceneElement,
   type BoardState,
-  type Stroke,
 } from "@airboard/core";
 import { AIRBOARD_TRANSCRIPTION_KEYTERMS } from "./browserSpeech.ts";
 import { boundedKeyterms } from "./realtimeSpeech.ts";
@@ -22,41 +21,20 @@ export function buildSessionKeyterms(
 ): string[] {
   const selectedIds = new Set(selectedElementIds);
   const sceneElements = Object.values(state.elements ?? {}).filter(
-    (element) => element.status === "active" && element.visible && !element.legacyStrokeId,
+    (element) => element.status === "active" && element.visible,
   );
-  const committed = Object.values(state.strokes).filter(
-    (stroke) => stroke.status === "committed" && stroke.annotation,
-  );
-  const selectedNodeLabels = [
-    ...sceneElements
-      .filter((element) => selectedIds.has(element.id) && element.kind !== "connector")
-      .map(sceneElementLabel)
-      .filter(isNonEmptyString),
-    ...committed
-    .filter((stroke) => selectedIds.has(stroke.id) && isBoardNode(stroke))
-    .map(annotationLabel)
-      .filter(isNonEmptyString),
-  ];
-  const nodeLabels = [
-    ...sceneElements
-      .filter((element) => !selectedIds.has(element.id) && element.kind !== "connector")
-      .map(sceneElementLabel)
-      .filter(isNonEmptyString),
-    ...committed
-    .filter((stroke) => !selectedIds.has(stroke.id) && isBoardNode(stroke))
-    .map(annotationLabel)
-      .filter(isNonEmptyString),
-  ];
-  const connectorLabels = [
-    ...sceneElements
-      .filter((element) => element.kind === "connector")
-      .map(sceneElementLabel)
-      .filter(isNonEmptyString),
-    ...committed
-    .filter((stroke) => isConnector(stroke))
-    .map(annotationLabel)
-      .filter(isNonEmptyString),
-  ];
+  const selectedNodeLabels = sceneElements
+    .filter((element) => selectedIds.has(element.id) && element.kind !== "connector")
+    .map(sceneElementLabel)
+    .filter(isNonEmptyString);
+  const nodeLabels = sceneElements
+    .filter((element) => !selectedIds.has(element.id) && element.kind !== "connector")
+    .map(sceneElementLabel)
+    .filter(isNonEmptyString);
+  const connectorLabels = sceneElements
+    .filter((element) => element.kind === "connector")
+    .map(sceneElementLabel)
+    .filter(isNonEmptyString);
 
   return boundedKeyterms([
     ...AIRBOARD_TRANSCRIPTION_KEYTERMS.slice(0, KEYTERM_WAKE_HEAD_COUNT),
@@ -65,24 +43,6 @@ export function buildSessionKeyterms(
     ...connectorLabels,
     ...AIRBOARD_TRANSCRIPTION_KEYTERMS.slice(KEYTERM_WAKE_HEAD_COUNT),
   ]);
-}
-
-function isBoardNode(stroke: Stroke): boolean {
-  const type = stroke.annotation?.type;
-  return Boolean(
-    stroke.annotation?.bounds &&
-      type !== "connector" &&
-      type !== "arrow",
-  );
-}
-
-function isConnector(stroke: Stroke): boolean {
-  const type = stroke.annotation?.type;
-  return type === "connector" || type === "arrow";
-}
-
-function annotationLabel(stroke: Stroke): string | null {
-  return boundedLabel(stroke.annotation?.label);
 }
 
 function sceneElementLabel(element: BoardSceneElement): string | null {

@@ -2,74 +2,61 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  applyBoardEvent,
+  createBoardSceneElement,
+  createEventEnvelope,
+  createInitialBoardState,
+  createRichTextDocument,
+} from "@airboard/core";
+
+import {
   analyzeBoardSpatialQuality,
   diagramSpatialConstraintErrors,
   inspectBoardSpatialQuality,
 } from "../src/spatialQuality.ts";
 
+// The scorer reads the board's diagram graph: shapes are nodes, connectors
+// are edges, and text marks don't take part.
+
+function withElement(state, element) {
+  return applyBoardEvent(state, {
+    ...createEventEnvelope({ boardSessionId: "board", actorParticipantId: "participant" }),
+    type: "element.created",
+    element: createBoardSceneElement({ boardId: "board", ...element }),
+  });
+}
+
+function sceneNode(state, id, bounds, label = id) {
+  return withElement(state, {
+    id,
+    kind: "shape",
+    shapeKind: "service",
+    transform: { ...bounds, rotation: 0 },
+    content: createRichTextDocument(label, `${id}:content`),
+  });
+}
+
+function sceneConnector(state, id, fromId, toId, start, end, label = id) {
+  return withElement(state, {
+    id,
+    kind: "connector",
+    pathKind: "straight",
+    start: { point: start, binding: { elementId: fromId, anchor: "auto" }, decoration: "none" },
+    end: { point: end, binding: { elementId: toId, anchor: "auto" }, decoration: "solid_arrow" },
+    label: createRichTextDocument(label, `${id}:label`),
+  });
+}
+
 function node(id, bounds, label = id) {
-  return {
-    id,
-    boardId: "board",
-    userId: "user",
-    tool: "marker",
-    color: "#111111",
-    thickness: 3,
-    points: [],
-    createdAt: "2026-07-30T00:00:00.000Z",
-    updatedAt: "2026-07-30T00:00:00.000Z",
-    status: "committed",
-    annotation: {
-      type: "flow_node",
-      source: "voice",
-      nodeType: "service",
-      label,
-      bounds,
-    },
-  };
+  return (state) => sceneNode(state, id, bounds, label);
 }
 
-function connector(
-  id,
-  fromId,
-  toId,
-  start,
-  end,
-  label = id,
-) {
-  return {
-    id,
-    boardId: "board",
-    userId: "user",
-    tool: "marker",
-    color: "#111111",
-    thickness: 3,
-    points: [],
-    createdAt: "2026-07-30T00:00:00.000Z",
-    updatedAt: "2026-07-30T00:00:00.000Z",
-    status: "committed",
-    annotation: {
-      type: "connector",
-      source: "voice",
-      label,
-      start,
-      end,
-      snappedStartStrokeId: fromId,
-      snappedEndStrokeId: toId,
-    },
-  };
+function connector(id, fromId, toId, start, end, label = id) {
+  return (state) => sceneConnector(state, id, fromId, toId, start, end, label);
 }
 
-function board(...strokes) {
-  return {
-    boardId: "board",
-    strokes: Object.fromEntries(strokes.map((stroke) => [stroke.id, stroke])),
-    activeStrokes: {},
-    eraseActions: {},
-    participants: {},
-    cursors: {},
-    lastSequence: 0,
-  };
+function board(...steps) {
+  return steps.reduce((state, step) => step(state), createInitialBoardState("board"));
 }
 
 const CRITICAL_SPATIAL_CONSTRAINTS = {
@@ -194,10 +181,12 @@ test("detects reciprocal collinear routes and duplicate label placement", () => 
   );
 });
 
-test("detects a connector label whose rendered anchor sits inside a node", () => {
+test("detects a connector label that has no clear gap and sits on a node", () => {
+  // The blocker fills the line between the two ends, so the label slides as
+  // far as it can and still lands on the blocker (and the target's edge).
   const state = board(
     node("source", { x: 0, y: 0, width: 100, height: 80 }),
-    node("blocker", { x: 170, y: 0, width: 100, height: 80 }),
+    node("blocker", { x: 120, y: 0, width: 200, height: 80 }),
     node("target", { x: 340, y: 0, width: 100, height: 80 }),
     connector(
       "long-edge",
@@ -211,6 +200,7 @@ test("detects a connector label whose rendered anchor sits inside a node", () =>
   const facts = inspectBoardSpatialQuality(state);
   assert.deepEqual(facts.connectorLabelNodeIntersections, [
     { connectorId: "long-edge", nodeId: "blocker" },
+    { connectorId: "long-edge", nodeId: "target" },
   ]);
 
   const result = analyzeBoardSpatialQuality(state, {
@@ -238,4 +228,39 @@ test("shares strict spatial-constraint validation across eval corpora", () => {
       "contains unsupported key inventedRule",
     ],
   );
+});
+
+test("a v2 bent connector is traced along their rendered route", () => {
+  let state = createInitialBoardState("board");
+  state = sceneNode(state, "a", { x: 0, y: 0, width: 100, height: 80 });
+  state = sceneNode(state, "b", { x: 400, y: 300, width: 100, height: 80 });
+  state = sceneNode(state, "corner", { x: 400, y: 0, width: 100, height: 80 });
+  state = withElement(state, {
+    id: "bent",
+    kind: "connector",
+    pathKind: "bent",
+    start: { point: { x: 100, y: 40 }, binding: { elementId: "a" }, decoration: "none" },
+    end: { point: { x: 450, y: 300 }, binding: { elementId: "b" }, decoration: "solid_arrow" },
+    controlPoints: [{ x: 450, y: 40 }],
+  });
+  const facts = inspectBoardSpatialQuality(state);
+  const bent = facts.connectors.find(({ id }) => id === "bent");
+  assert.deepEqual(bent.route, [{ x: 100, y: 40 }, { x: 450, y: 40 }, { x: 450, y: 300 }]);
+  assert.deepEqual(facts.connectorNodeIntersections, [{ connectorId: "bent", nodeId: "corner" }]);
+});
+
+test("a v2 connector in a side lane is scored along that lane", () => {
+  let state = createInitialBoardState("board");
+  state = sceneNode(state, "a", { x: 0, y: 0, width: 100, height: 80 });
+  state = sceneNode(state, "b", { x: 400, y: 0, width: 100, height: 80 });
+  state = withElement(state, {
+    id: "lane",
+    kind: "connector",
+    pathKind: "bent",
+    start: { point: { x: 100, y: 40 }, binding: { elementId: "a" }, decoration: "none" },
+    end: { point: { x: 400, y: 40 }, binding: { elementId: "b" }, decoration: "solid_arrow" },
+    routeOffset: 72,
+  });
+  const lane = inspectBoardSpatialQuality(state).connectors.find(({ id }) => id === "lane");
+  assert.deepEqual(lane.route, [{ x: 100, y: 40 }, { x: 100, y: 112 }, { x: 400, y: 112 }, { x: 400, y: 40 }]);
 });

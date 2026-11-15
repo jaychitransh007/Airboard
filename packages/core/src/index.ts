@@ -1,3 +1,4 @@
+export * from "./boardDiagramGraph.ts";
 export * from "./boardPreview.ts";
 export * from "./boardReducer.ts";
 export * from "./diagramCommands.ts";
@@ -14,3 +15,4 @@ export * from "./semanticPlan.ts";
 export * from "./shapeCatalog.ts";
 export * from "./tableOperations.ts";
 export * from "./types.ts";
+export * from "./legacyStrokeMigration.ts";

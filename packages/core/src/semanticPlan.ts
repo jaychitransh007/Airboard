@@ -90,7 +90,7 @@ export type SemanticObjectReference =
 
 /**
  * A connector is addressed semantically by its visible endpoints rather than
- * by an internal stroke id. `occurrence` disambiguates parallel connectors
+ * by an internal element id. `occurrence` disambiguates parallel connectors
  * after endpoint and optional label filtering.
  */
 export type SemanticConnectionReference = {

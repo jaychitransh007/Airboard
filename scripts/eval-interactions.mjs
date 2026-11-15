@@ -12,12 +12,7 @@ import {
 import {
   executeInteractionEvalCase,
 } from "./lib/interaction-eval-production-executor.mjs";
-import {
-  emitJsonReport,
-  emitJunitReport,
-  emitMarkdownReport,
-  emitHtmlReport,
-} from "./lib/interaction-eval-reporters.mjs";
+import { emitJsonReport } from "./lib/interaction-eval-reporters.mjs";
 import { buildConfusionMatrix } from "./lib/confusion-matrix.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -74,32 +69,9 @@ async function main() {
   if (args.outputDir) {
     const outputDirectory = resolve(process.cwd(), args.outputDir);
     await mkdir(outputDirectory, { recursive: true });
-    await Promise.all([
-      writeFile(
-        resolve(outputDirectory, "interaction-results.json"),
-        emitJsonReport(output, { metadata }),
-      ),
-      writeFile(
-        resolve(outputDirectory, "interaction-results.xml"),
-        emitJunitReport(output, {
-          suiteName: "Airboard interaction evals",
-          includeObserved: true,
-        }),
-      ),
-      writeFile(
-        resolve(outputDirectory, "interaction-results.md"),
-        emitMarkdownReport(output, {
-          title: "Airboard interaction evaluation",
-        }),
-      ),
-      writeFile(
-        resolve(outputDirectory, "interaction-results.html"),
-        emitHtmlReport(output, {
-          title: "Airboard interaction evaluation",
-        }),
-      ),
-    ]);
-    console.log(`Artifacts: ${outputDirectory}`);
+    const path = resolve(outputDirectory, "interaction-results.json");
+    await writeFile(path, emitJsonReport(output, { metadata }));
+    console.log(`Report: ${path}`);
   }
 
   console.log(

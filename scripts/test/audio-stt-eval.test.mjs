@@ -42,7 +42,7 @@ import {
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 
-// Trades the evaluation's sign-in token for a voice ticket, like the API does.
+// Trades the evaluation's sign-in or operator token for a voice ticket, like the API does.
 const ticketRequests = [];
 async function ticketFetch(url, init) {
   ticketRequests.push({ url, ...init });
@@ -560,11 +560,8 @@ test("live WebSocket adapter streams verified WAV frames through the same oracle
   assert.ok(socket);
   assert.equal(new URL(requestedUrl).searchParams.get("ticket"), "synthetic-ticket");
   assert.equal(new URL(requestedUrl).searchParams.get("access_token"), null, "the sign-in token never goes in a URL");
+  assert.equal(new URL(requestedUrl).searchParams.get("token"), null, "the operator token never goes in a URL");
   assert.equal(ticketRequests.at(-1).headers.authorization, "Bearer synthetic-eval-token");
-  assert.equal(
-    new URL(requestedUrl).searchParams.get("token"),
-    "synthetic-shared-token",
-  );
   assert.deepEqual(requestedSocketOptions, {
     origin: "http://localhost:3000",
   });
@@ -590,6 +587,67 @@ test("live WebSocket adapter streams verified WAV frames through the same oracle
       .map((value) => value.byteLength),
     [2_560, 2_560],
   );
+});
+
+test("live WebSocket adapter never puts a token in the socket URL in any credential configuration", async () => {
+  const wav = parsePcm16Wav(syntheticWav({ sampleCount: 1_600 }));
+  const configurations = [
+    { name: "operator token only", credentials: { apiToken: "synthetic-shared-token" }, bearer: "Bearer synthetic-shared-token" },
+    { name: "sign-in token only", credentials: { accessToken: "synthetic-eval-token" }, bearer: "Bearer synthetic-eval-token" },
+    {
+      name: "both tokens",
+      credentials: { accessToken: "synthetic-eval-token", apiToken: "synthetic-shared-token" },
+      bearer: "Bearer synthetic-eval-token",
+    },
+    { name: "no credential (local development)", credentials: {}, bearer: null },
+  ];
+  for (const { name, credentials, bearer } of configurations) {
+    let requestedUrl;
+    const ticketCallsBefore = ticketRequests.length;
+    const report = await runAudioSttScenarios({
+      scenarios: [
+        scenario({
+          id: "live",
+          adapter: "live-websocket",
+          assetId: "synthetic-wav",
+          // A stale token in a configured URL is dropped too.
+          source: { url: "ws://localhost/transcription/ws?token=stale&access_token=stale" },
+          criticalTokens: ["database"],
+          expectedActions: ["create_node"],
+        }),
+      ],
+      adapters: [
+        createLiveGatewayWebSocketAdapter({
+          createWebSocket: (url) => {
+            requestedUrl = url;
+            return new FakeGatewaySocket("add a database here");
+          },
+          ...credentials,
+          fetchImpl: ticketFetch,
+          frameDelayMs: 0,
+          origin: "http://localhost:3000",
+          timeoutMs: 1_000,
+        }),
+      ],
+      assetCatalog: {
+        async load() {
+          return { id: "synthetic-wav", sha256: "0".repeat(64), privacyClass: "synthetic", wav };
+        },
+      },
+      requireAssets: true,
+    });
+    assert.equal(report.passed, true, name);
+    assert.doesNotMatch(requestedUrl, /[?&](access_)?token=/, name);
+    if (bearer) {
+      assert.equal(ticketRequests.length, ticketCallsBefore + 1, name);
+      assert.equal(ticketRequests.at(-1).method, "POST", name);
+      assert.equal(ticketRequests.at(-1).headers.authorization, bearer, name);
+      assert.equal(new URL(requestedUrl).searchParams.get("ticket"), "synthetic-ticket", name);
+    } else {
+      assert.equal(ticketRequests.length, ticketCallsBefore, name);
+      assert.equal(new URL(requestedUrl).searchParams.get("ticket"), null, name);
+    }
+  }
 });
 
 test("Meet-tagged scenarios fail closed now that the Meet bridge replay is gone", async () => {

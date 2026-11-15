@@ -66,6 +66,10 @@ function runtimeConfig(model, apiKey) {
     apiKey,
     defaultModel: model,
     allowedModels: [...new Set([...base.allowedModels, model])],
+    // Recordings keep the whole JSON answer and hash the exact request body.
+    // Streaming only adds `stream: true` (the model input is identical), so
+    // record and replay the buffered request.
+    stream: false,
   };
 }
 

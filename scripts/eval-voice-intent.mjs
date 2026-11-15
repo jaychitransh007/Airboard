@@ -894,37 +894,12 @@ async function writeReports(report) {
   await mkdir(outputDirectory, { recursive: true });
   const name = `semantic-${report.corpus.kind}`;
   const jsonPath = resolve(outputDirectory, `${name}.json`);
-  const junitPath = resolve(outputDirectory, `${name}.xml`);
   const markdownPath = resolve(outputDirectory, `${name}.md`);
-  const htmlPath = resolve(outputDirectory, `${name}.html`);
   await Promise.all([
     writeFile(jsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf8"),
-    writeFile(junitPath, semanticJUnit(report), "utf8"),
     writeFile(markdownPath, semanticMarkdown(report), "utf8"),
-    writeFile(htmlPath, semanticHtml(report), "utf8"),
   ]);
   console.log(`  Reports: ${outputDirectory}`);
-}
-
-function semanticJUnit(report) {
-  const tests = report.results
-    .map((result) => {
-      const name = escapeXml(`${result.caseId} attempt ${result.attempt}`);
-      const detail = escapeXml(result.failures.join("; "));
-      const outcome = result.passed
-        ? ""
-        : result.failureClass === "provider_infrastructure"
-          ? `<error type="provider_infrastructure" message="${detail}"/>`
-          : `<failure type="quality" message="${detail}"/>`;
-      return `  <testcase classname="semantic.${escapeXml(report.corpus.kind)}" name="${name}" time="${(result.latencyMs / 1_000).toFixed(3)}">${outcome}</testcase>`;
-    })
-    .join("\n");
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="Airboard semantic ${escapeXml(report.corpus.kind)}" tests="${report.results.length}" failures="${report.results.filter((result) => !result.passed && result.failureClass !== "provider_infrastructure").length}" errors="${report.summary.infrastructureFailures}">
-${tests}
-  <system-out>${escapeXml(JSON.stringify({ confusionMatrices: report.confusionMatrices }, null, 2))}</system-out>
-</testsuite>
-`;
 }
 
 function semanticMarkdown(report) {
@@ -952,27 +927,6 @@ ${semanticConfusionMarkdown(report.confusionMatrices.semanticStatus)}
 `;
 }
 
-function semanticHtml(report) {
-  const rows = report.results
-    .map(
-      (result) =>
-        `<tr><td>${escapeHtml(result.caseId)}</td><td>${result.attempt}</td><td>${result.passed ? "PASS" : "FAIL"}</td><td>${Math.round(result.latencyMs)} ms</td><td>${escapeHtml(result.failureClass ?? "")}</td><td>${escapeHtml(result.failures.join("; "))}</td></tr>`,
-    )
-    .join("");
-  const confusion = semanticConfusionHtml(
-    report.confusionMatrices.semanticStatus,
-  );
-  return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Airboard semantic evaluation</title>
-<style>body{font:14px system-ui;margin:2rem;color:#172033}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccd3df;padding:.45rem;text-align:left}th{background:#eef2f7}.pass{color:#08783e}</style></head>
-<body><h1>Airboard semantic evaluation: ${escapeHtml(report.corpus.kind)}</h1>
-<p>Dataset <code>${escapeHtml(report.corpus.datasetHash)}</code> · overall ${(report.summary.overallAccuracy * 100).toFixed(1)}% · core ${(report.summary.coreAccuracy * 100).toFixed(1)}% · end-to-action p95 ${Math.round(report.summary.semanticEndToActionP95Ms)} ms</p>
-${confusion}
-<table><thead><tr><th>Case</th><th>Attempt</th><th>Outcome</th><th>Latency</th><th>Class</th><th>Failure</th></tr></thead><tbody>${rows}</tbody></table>
-<p>Replay: <code>${escapeHtml(report.replay)}</code></p></body></html>
-`;
-}
-
 function semanticConfusionMarkdown(matrix) {
   if (!Array.isArray(matrix?.labels) || !matrix.matrix) return "";
   const lines = [
@@ -989,11 +943,6 @@ function semanticConfusionMarkdown(matrix) {
     );
   }
   return lines.join("\n");
-}
-
-function semanticConfusionHtml(matrix) {
-  if (!Array.isArray(matrix?.labels) || !matrix.matrix) return "";
-  return `<section><h2>Semantic-status confusion matrix</h2><table><thead><tr><th>Expected \\ Actual</th>${matrix.labels.map((label) => `<th>${escapeHtml(label)}</th>`).join("")}</tr></thead><tbody>${matrix.labels.map((expected) => `<tr><th>${escapeHtml(expected)}</th>${matrix.labels.map((actual) => `<td>${matrix.matrix[expected]?.[actual] ?? 0}</td>`).join("")}</tr>`).join("")}</tbody></table></section>`;
 }
 
 async function readJsonResponse(response) {
@@ -1320,19 +1269,6 @@ function optionalNonNegativeNumber(value) {
   if (value === undefined || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
-}
-
-function escapeXml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;");
-}
-
-function escapeHtml(value) {
-  return escapeXml(value);
 }
 
 function normalizeText(value) {

@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 import {
   classifyOpenAiProviderError,
   SemanticIntentProviderError,
+  type SemanticIntentProviderErrorKind,
 } from "./providerError";
 import { AIRBOARD_SEMANTIC_INTENT_PROMPT_VERSION } from "./contract";
 import {
@@ -26,6 +27,7 @@ import type {
   SemanticIntentProviderMetadata,
   SemanticIntentProviderResolution,
   SemanticIntentProviderUsage,
+  SemanticIntentProviderUsageDetail,
   SemanticIntentRequest,
   SemanticIntentRuntimeConfig,
 } from "./types";
@@ -164,6 +166,15 @@ Examples:
 - "diagram connectors from user two to user one. Currently, user one is making the call to user two, but user two should be making the call to user one, and then user two updates the database." -> reverse_connection for User One -> User Two with label calls, then connect User Two -> Database with label updates.
 - "There are two rectangles. Currently, request is flowing from User One to User Two. It should be reversed. Request should flow from User Two to User One, and then it updates Database." -> reverse_connection for User One -> User Two with label request, then connect User One -> Database with label updates.`;
 
+type OpenAiOutputItem = {
+  id?: string;
+  type?: string;
+  name?: string;
+  arguments?: string;
+  call_id?: string;
+  status?: string;
+};
+
 type OpenAiResponse = {
   id?: string;
   model?: string;
@@ -172,14 +183,26 @@ type OpenAiResponse = {
     input_tokens?: number;
     output_tokens?: number;
     total_tokens?: number;
+    input_tokens_details?: { cached_tokens?: number };
+    output_tokens_details?: { reasoning_tokens?: number };
   };
-  output?: Array<{
-    type?: string;
-    name?: string;
-    arguments?: string;
-    call_id?: string;
-  }>;
+  output?: OpenAiOutputItem[];
 };
+
+/** What the streamed answer yields once the plan tool call is finished. */
+type StreamedPlanCall = {
+  payload: OpenAiResponse;
+  itemDoneMs: number;
+  usage: SemanticIntentProviderUsageDetail | null;
+  lateUsage: Promise<SemanticIntentProviderUsageDetail | null> | null;
+};
+
+/**
+ * After the plan resolves, the rest of the stream (mostly the final event,
+ * which echoes the whole request) is read in the background only to log the
+ * token usage, and given up after this long.
+ */
+const LATE_USAGE_READ_LIMIT_MS = 5_000;
 
 type OpenAiErrorPayload = {
   error?: {
@@ -217,6 +240,7 @@ export class OpenAiResponsesSemanticIntentProvider implements SemanticIntentProv
       (extractedRelationshipCoverage?.explicitRelationshipCount ?? 0) >= 2
         ? extractedRelationshipCoverage
         : null;
+    const streamRequested = this.config.stream === true;
     const startedAt = performance.now();
     let response: Response;
     try {
@@ -268,6 +292,9 @@ export class OpenAiResponsesSemanticIntentProvider implements SemanticIntentProv
           // instance's requests to the same cache.
           prompt_cache_key: "airboard-semantic-intent",
           prompt_cache_retention: "24h",
+          // Streamed, the plan is ready at its finished tool call, before
+          // the final event that repeats the whole request.
+          ...(streamRequested ? { stream: true } : {}),
         }),
         ...(signal ? { signal } : {}),
       });
@@ -300,14 +327,29 @@ export class OpenAiResponsesSemanticIntentProvider implements SemanticIntentProv
       );
     }
 
+    const headersMs = Math.max(0, Math.round(performance.now() - startedAt));
+    const streamed =
+      streamRequested &&
+      response.body !== null &&
+      (getHeader(response, "content-type") ?? "").toLowerCase().includes("text/event-stream");
     let payload: OpenAiResponse;
-    try {
-      payload = (await response.json()) as OpenAiResponse;
-    } catch (caught) {
-      throw invalidOutput("Semantic intent provider returned malformed JSON.", {
-        cause: caught,
+    let streamedCall: StreamedPlanCall | null = null;
+    if (streamed && response.body) {
+      streamedCall = await readStreamedPlanCall(response.body, {
+        startedAt,
         providerRequestId,
+        ...(signal ? { signal } : {}),
       });
+      payload = streamedCall.payload;
+    } else {
+      try {
+        payload = (await response.json()) as OpenAiResponse;
+      } catch (caught) {
+        throw invalidOutput("Semantic intent provider returned malformed JSON.", {
+          cause: caught,
+          providerRequestId,
+        });
+      }
     }
     if (payload.status && payload.status !== "completed") {
       throw invalidOutput("Semantic intent provider did not complete the response.", {
@@ -354,19 +396,433 @@ export class OpenAiResponsesSemanticIntentProvider implements SemanticIntentProv
 
     const totalLatencyMs = Math.max(0, Math.round(performance.now() - startedAt));
     const responseModel = cleanString(payload.model) ?? model;
+    const usageDetail = streamedCall ? streamedCall.usage : parseUsageDetail(payload.usage);
     const metadata: SemanticIntentProviderMetadata = {
       responseId: cleanString(payload.id),
       responseModel,
       providerRequestId,
       clientRequestId,
+      // Streamed, OpenAI sends this header with the first byte, so it is the
+      // time to the headers rather than the whole answer.
       providerProcessingMs: parseNonNegativeNumber(
         getHeader(response, "openai-processing-ms"),
       ),
       totalLatencyMs,
-      usage: parseUsage(payload.usage),
+      usage: usageDetail ? toWireUsage(usageDetail) : null,
     };
-    return { plan: parsedPlan.value, metadata };
+    return {
+      plan: parsedPlan.value,
+      metadata,
+      diagnostics: {
+        streamed: streamedCall !== null,
+        headersMs,
+        itemDoneMs: streamedCall?.itemDoneMs ?? null,
+        usage: usageDetail,
+      },
+      ...(streamedCall?.lateUsage ? { lateUsage: streamedCall.lateUsage } : {}),
+    };
   }
+}
+
+/**
+ * Reads the Responses event stream until the one plan tool call is finished
+ * and the provider has started its `response.completed` event, so a failed
+ * response or a second tool call is still caught. The final event's body (the
+ * whole request echoed back) is not awaited; it is read in the background
+ * only to log token usage.
+ */
+async function readStreamedPlanCall(
+  body: ReadableStream<Uint8Array>,
+  options: { startedAt: number; providerRequestId: string | null; signal?: AbortSignal },
+): Promise<StreamedPlanCall> {
+  const { providerRequestId, signal, startedAt } = options;
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  const state: StreamState = {
+    buffer: "",
+    responseId: null,
+    responseModel: null,
+    planCallsAdded: 0,
+    argumentsByItem: new Map(),
+    planItems: [],
+    itemDoneMs: null,
+    completed: null,
+  };
+  let completionStarted = false;
+  try {
+    for (;;) {
+      let chunk: Awaited<ReturnType<typeof reader.read>>;
+      try {
+        chunk = await reader.read();
+      } catch (caught) {
+        if (signal?.aborted || isAbortError(caught)) {
+          throw new SemanticIntentProviderError("timeout", "Semantic intent request timed out.", {
+            cause: caught,
+          });
+        }
+        throw new SemanticIntentProviderError(
+          "provider_unavailable",
+          "Semantic intent provider stream was interrupted.",
+          { cause: caught, ...(providerRequestId ? { providerRequestId } : {}) },
+        );
+      }
+      if (chunk.done) {
+        state.buffer = normalizeLineEnds(state.buffer + decoder.decode());
+        for (const block of takeEventBlocks(state, true)) {
+          handleStreamEvent(state, block, startedAt, providerRequestId);
+        }
+        break;
+      }
+      state.buffer = normalizeLineEnds(state.buffer + decoder.decode(chunk.value, { stream: true }));
+      for (const block of takeEventBlocks(state, false)) {
+        handleStreamEvent(state, block, startedAt, providerRequestId);
+        if (state.completed) break;
+      }
+      if (state.completed) break;
+      if (state.planItems.length > 0 && peekEventName(state.buffer) === "response.completed") {
+        completionStarted = true;
+        break;
+      }
+    }
+  } catch (caught) {
+    void reader.cancel().catch(() => undefined);
+    throw caught;
+  }
+
+  if (state.planItems.length === 0) {
+    void reader.cancel().catch(() => undefined);
+    throw invalidOutput(
+      state.completed
+        ? "Semantic intent provider returned no diagram-plan tool call."
+        : "Semantic intent provider stream ended before the diagram-plan tool call.",
+      { providerRequestId },
+    );
+  }
+  if (!state.completed && !completionStarted) {
+    void reader.cancel().catch(() => undefined);
+    throw invalidOutput("Semantic intent provider stream ended before the response completed.", {
+      providerRequestId,
+    });
+  }
+
+  const payload: OpenAiResponse = {
+    ...(state.responseId ? { id: state.responseId } : {}),
+    ...(state.responseModel ? { model: state.responseModel } : {}),
+    status: "completed",
+    output: state.planItems,
+  };
+  if (state.completed) {
+    // Read to the end of the message rather than cancelling: a cancelled
+    // body makes undici destroy the keep-alive socket, so the next planner
+    // call would pay a fresh TCP+TLS handshake.
+    void drainStream(reader, LATE_USAGE_READ_LIMIT_MS);
+    return {
+      payload,
+      itemDoneMs: state.itemDoneMs ?? 0,
+      usage: parseUsageDetail(state.completed.usage),
+      lateUsage: null,
+    };
+  }
+  return {
+    payload,
+    itemDoneMs: state.itemDoneMs ?? 0,
+    usage: null,
+    lateUsage: readLateUsage(reader, decoder, state.buffer),
+  };
+}
+
+type StreamState = {
+  buffer: string;
+  responseId: string | null;
+  responseModel: string | null;
+  planCallsAdded: number;
+  argumentsByItem: Map<string, string>;
+  planItems: OpenAiOutputItem[];
+  itemDoneMs: number | null;
+  completed: OpenAiResponse | null;
+};
+
+type StreamEvent = { name: string | null; data: string };
+
+function normalizeLineEnds(input: string): string {
+  return input.includes("\r") ? input.replace(/\r\n/gu, "\n") : input;
+}
+
+/** Removes and returns the complete events at the front of the buffer. */
+function takeEventBlocks(state: StreamState, flush: boolean): StreamEvent[] {
+  const events: StreamEvent[] = [];
+  for (;;) {
+    const end = state.buffer.indexOf("\n\n");
+    if (end < 0) {
+      if (flush && state.buffer.trim()) {
+        events.push(parseEventBlock(state.buffer));
+        state.buffer = "";
+      }
+      return events;
+    }
+    const block = state.buffer.slice(0, end);
+    state.buffer = state.buffer.slice(end + 2);
+    if (block.trim()) events.push(parseEventBlock(block));
+  }
+}
+
+function parseEventBlock(block: string): StreamEvent {
+  let name: string | null = null;
+  const data: string[] = [];
+  for (const line of block.split("\n")) {
+    if (line.startsWith(":")) continue;
+    const colon = line.indexOf(":");
+    const field = colon < 0 ? line : line.slice(0, colon);
+    const value = colon < 0 ? "" : line.slice(colon + 1).replace(/^ /u, "");
+    if (field === "event") name = value.trim();
+    else if (field === "data") data.push(value);
+  }
+  return { name, data: data.join("\n") };
+}
+
+/** The name of the event that has started arriving but is not complete yet. */
+function peekEventName(buffer: string): string | null {
+  const match = /^event:[ ]?([^\n]*)\n/u.exec(buffer);
+  return match?.[1]?.trim() || null;
+}
+
+function handleStreamEvent(
+  state: StreamState,
+  event: StreamEvent,
+  startedAt: number,
+  providerRequestId: string | null,
+): void {
+  if (!event.data || event.data === "[DONE]") return;
+  let data: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(event.data) as unknown;
+    if (!parsed || typeof parsed !== "object") throw new Error("not an object");
+    data = parsed as Record<string, unknown>;
+  } catch (caught) {
+    throw invalidOutput("Semantic intent provider streamed a malformed event.", {
+      cause: caught,
+      providerRequestId,
+    });
+  }
+  const type = typeof data.type === "string" ? data.type : event.name;
+  const responseObject = asRecord(data.response) as OpenAiResponse | null;
+  switch (type) {
+    case "response.created":
+    case "response.in_progress":
+      state.responseId = cleanString(responseObject?.id) ?? state.responseId;
+      state.responseModel = cleanString(responseObject?.model) ?? state.responseModel;
+      return;
+    case "response.output_item.added": {
+      if (isPlanCall(asRecord(data.item))) {
+        state.planCallsAdded += 1;
+        if (state.planCallsAdded > 1) {
+          throw invalidOutput("Semantic intent provider returned more than one diagram-plan tool call.", {
+            providerRequestId,
+          });
+        }
+      }
+      return;
+    }
+    case "response.function_call_arguments.delta": {
+      const itemId = cleanString(data.item_id);
+      if (itemId && typeof data.delta === "string") {
+        state.argumentsByItem.set(itemId, (state.argumentsByItem.get(itemId) ?? "") + data.delta);
+      }
+      return;
+    }
+    case "response.function_call_arguments.done": {
+      const itemId = cleanString(data.item_id);
+      if (itemId && typeof data.arguments === "string") {
+        state.argumentsByItem.set(itemId, data.arguments);
+      }
+      return;
+    }
+    case "response.output_item.done": {
+      const item = asRecord(data.item) as OpenAiOutputItem | null;
+      if (!item || !isPlanCall(item)) return;
+      if (state.planItems.length > 0) {
+        throw invalidOutput("Semantic intent provider returned more than one diagram-plan tool call.", {
+          providerRequestId,
+        });
+      }
+      if (item.status !== undefined && item.status !== "completed") {
+        throw invalidOutput("Semantic intent provider did not finish the diagram-plan tool call.", {
+          providerRequestId,
+        });
+      }
+      const itemId = cleanString(item.id);
+      const argumentsText =
+        typeof item.arguments === "string"
+          ? item.arguments
+          : itemId
+            ? state.argumentsByItem.get(itemId)
+            : undefined;
+      state.planItems.push({
+        type: "function_call",
+        name: AIRBOARD_SEMANTIC_PLAN_TOOL_NAME,
+        ...(argumentsText !== undefined ? { arguments: argumentsText } : {}),
+        ...(typeof item.call_id === "string" ? { call_id: item.call_id } : {}),
+      });
+      state.itemDoneMs = Math.max(0, Math.round(performance.now() - startedAt));
+      return;
+    }
+    case "response.completed": {
+      if (!responseObject || (responseObject.status && responseObject.status !== "completed")) {
+        throw invalidOutput("Semantic intent provider did not complete the response.", {
+          providerRequestId,
+        });
+      }
+      const planCalls = (responseObject.output ?? []).filter((item) => isPlanCall(item));
+      if (planCalls.length > 1) {
+        throw invalidOutput("Semantic intent provider returned more than one diagram-plan tool call.", {
+          providerRequestId,
+        });
+      }
+      state.responseId = cleanString(responseObject.id) ?? state.responseId;
+      state.responseModel = cleanString(responseObject.model) ?? state.responseModel;
+      state.completed = responseObject;
+      return;
+    }
+    case "response.incomplete":
+      throw invalidOutput("Semantic intent provider did not complete the response.", {
+        providerRequestId,
+      });
+    case "response.failed":
+    case "error": {
+      const errorRecord =
+        type === "error"
+          ? (asRecord(data.error) ?? data)
+          : asRecord(responseObject && (responseObject as Record<string, unknown>).error);
+      const rawCode = errorRecord?.code ?? errorRecord?.type;
+      const providerCode =
+        typeof rawCode === "string" && rawCode.length <= 120 ? rawCode : undefined;
+      throw new SemanticIntentProviderError(
+        streamFailureKind(providerCode),
+        `Semantic intent provider failed the streamed response${providerCode ? ` (${providerCode})` : ""}.`,
+        {
+          ...(providerCode ? { providerCode } : {}),
+          ...(providerRequestId ? { providerRequestId } : {}),
+        },
+      );
+    }
+    default:
+      return;
+  }
+}
+
+/**
+ * A failure inside a stream arrives after a 200. Codes that would have been
+ * a quota, rate-limit, credential, model, or server error without streaming
+ * keep that kind, so the circuit breaker counts them the same way; anything
+ * else is an unusable answer.
+ */
+function streamFailureKind(providerCode: string | undefined): SemanticIntentProviderErrorKind {
+  if (!providerCode) return "invalid_output";
+  const kind = classifyOpenAiProviderError(500, providerCode);
+  if (kind !== "provider_unavailable") return kind;
+  return /server_error|overloaded|unavailable/iu.test(providerCode)
+    ? "provider_unavailable"
+    : "invalid_output";
+}
+
+/**
+ * Reads the rest of the stream for the final usage. Never rejects. Once the
+ * usage is found the remaining bytes (the end of the chunked message) are
+ * still read to the end in the background, so the connection goes back to
+ * the keep-alive pool instead of being destroyed. Cancels only on timeout or
+ * error.
+ */
+async function readLateUsage(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  decoder: InstanceType<typeof TextDecoder>,
+  buffer: string,
+): Promise<SemanticIntentProviderUsageDetail | null> {
+  const deadline = Date.now() + LATE_USAGE_READ_LIMIT_MS;
+  const timer = setTimeout(() => {
+    void reader.cancel().catch(() => undefined);
+  }, LATE_USAGE_READ_LIMIT_MS);
+  timer.unref?.();
+  let pending = buffer;
+  try {
+    for (;;) {
+      const { usage, found, rest } = findCompletedUsage(pending);
+      if (found) {
+        clearTimeout(timer);
+        void drainStream(reader, Math.max(0, deadline - Date.now()));
+        return usage;
+      }
+      pending = rest;
+      const chunk = await reader.read();
+      if (chunk.done) {
+        clearTimeout(timer);
+        return findCompletedUsage(`${normalizeLineEnds(pending + decoder.decode())}\n\n`).usage;
+      }
+      pending = normalizeLineEnds(pending + decoder.decode(chunk.value, { stream: true }));
+    }
+  } catch {
+    clearTimeout(timer);
+    void reader.cancel().catch(() => undefined);
+    return null;
+  }
+}
+
+/**
+ * Reads a response body to its end and discards it, so undici returns the
+ * socket to the keep-alive pool. Cancels (which destroys the socket) only on
+ * error or when `limitMs` passes first. Never rejects.
+ */
+export async function drainStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  limitMs: number,
+): Promise<void> {
+  const timer = setTimeout(() => {
+    void reader.cancel().catch(() => undefined);
+  }, limitMs);
+  timer.unref?.();
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) return;
+    }
+  } catch {
+    void reader.cancel().catch(() => undefined);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function findCompletedUsage(buffer: string): {
+  usage: SemanticIntentProviderUsageDetail | null;
+  found: boolean;
+  rest: string;
+} {
+  let rest = buffer;
+  for (;;) {
+    const end = rest.indexOf("\n\n");
+    if (end < 0) return { usage: null, found: false, rest };
+    const event = parseEventBlock(rest.slice(0, end));
+    rest = rest.slice(end + 2);
+    if (!event.data) continue;
+    try {
+      const data = JSON.parse(event.data) as { type?: unknown; response?: OpenAiResponse };
+      const type = typeof data.type === "string" ? data.type : event.name;
+      if (type === "response.completed") {
+        return { usage: parseUsageDetail(data.response?.usage), found: true, rest };
+      }
+    } catch {
+      return { usage: null, found: true, rest };
+    }
+  }
+}
+
+function isPlanCall(item: { type?: unknown; name?: unknown } | null | undefined): boolean {
+  return item?.type === "function_call" && item.name === AIRBOARD_SEMANTIC_PLAN_TOOL_NAME;
+}
+
+function asRecord(input: unknown): Record<string, unknown> | null {
+  return input && typeof input === "object" && !Array.isArray(input)
+    ? (input as Record<string, unknown>)
+    : null;
 }
 
 function extractSinglePlanFunctionCall(
@@ -438,13 +894,28 @@ function parseNonNegativeNumber(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
-function parseUsage(input: OpenAiResponse["usage"]): SemanticIntentProviderUsage | null {
+function parseUsageDetail(input: OpenAiResponse["usage"]): SemanticIntentProviderUsageDetail | null {
   const inputTokens = parseNonNegativeInteger(input?.input_tokens);
   const outputTokens = parseNonNegativeInteger(input?.output_tokens);
   const totalTokens = parseNonNegativeInteger(input?.total_tokens);
   return inputTokens !== null && outputTokens !== null && totalTokens !== null
-    ? { inputTokens, outputTokens, totalTokens }
+    ? {
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        cachedInputTokens: parseNonNegativeInteger(input?.input_tokens_details?.cached_tokens),
+        reasoningTokens: parseNonNegativeInteger(input?.output_tokens_details?.reasoning_tokens),
+      }
     : null;
+}
+
+/** The browser accepts exactly these three usage keys. */
+function toWireUsage(input: SemanticIntentProviderUsageDetail): SemanticIntentProviderUsage {
+  return {
+    inputTokens: input.inputTokens,
+    outputTokens: input.outputTokens,
+    totalTokens: input.totalTokens,
+  };
 }
 
 function parseNonNegativeInteger(input: unknown): number | null {

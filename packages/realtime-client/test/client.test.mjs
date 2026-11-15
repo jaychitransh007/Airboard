@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { BOARD_SCENE_VERSION } from "@airboard/core";
 import { AirboardRealtimeClient } from "../src/client.ts";
 
 class FakeSocket {
@@ -80,7 +81,7 @@ test("connects with session/participant query params and receives events", () =>
   const socket = sockets[0];
   assert.ok(socket.url.includes("boardSessionId=session-1"));
   assert.ok(socket.url.includes("participantId=participant-1"));
-  assert.equal(new URL(socket.url).searchParams.get("sceneVersion"), "2");
+  assert.equal(new URL(socket.url).searchParams.get("sceneVersion"), String(BOARD_SCENE_VERSION));
   socket.open();
   socket.message({ type: "board.event", event: { id: "e1", type: "cursor.moved" } });
   assert.deepEqual(statuses, ["connecting", "connected"]);

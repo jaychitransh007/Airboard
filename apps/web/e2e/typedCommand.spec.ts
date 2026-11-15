@@ -1,4 +1,16 @@
 import { expect, test } from "@playwright/test";
+import type { AirboardTestWindow } from "./support/testHooks";
+
+/** The text and binding fields read below, on any kind of scene element. */
+type ElementTextView = {
+  id: string;
+  kind: string;
+  status: string;
+  content?: { blocks: Array<{ runs: Array<{ text: string }> }> };
+  label?: { blocks: Array<{ runs: Array<{ text: string }> }> };
+  start?: { binding?: { elementId: string } };
+  end?: { binding?: { elementId: string } };
+};
 
 /**
  * E2E path (a): the typed command flow, end to end through parse → ground →
@@ -34,7 +46,7 @@ test("typing a command creates and edits objects instantly", async ({ page }) =>
   await expect(page.locator(".intent-feedback")).toContainText("Applied: Rename");
 
   const summary = await page.evaluate(() =>
-    (window as never as { __airboardTestHooks: { getBoardSummary(): unknown } })
+    (window as unknown as AirboardTestWindow)
       .__airboardTestHooks.getBoardSummary(),
   );
   expect(summary).toMatchObject({ objectCount: 1, labels: ["Payments"] });
@@ -60,11 +72,7 @@ test("typing a command creates and edits objects instantly", async ({ page }) =>
   await expect
     .poll(async () => {
       const state = await page.evaluate(() =>
-        (window as never as {
-          __airboardTestHooks: {
-            getBoardSummary(): { objectCount: number };
-          };
-        }).__airboardTestHooks.getBoardSummary(),
+        (window as unknown as AirboardTestWindow).__airboardTestHooks.getBoardSummary(),
       );
       return state.objectCount;
     })
@@ -79,7 +87,7 @@ test("typing a command creates and edits objects instantly", async ({ page }) =>
     .getByRole("button", { name: "Undo", exact: true })
     .click();
   const restored = await page.evaluate(() =>
-    (window as never as { __airboardTestHooks: { getBoardSummary(): { objectCount: number } } })
+    (window as unknown as AirboardTestWindow)
       .__airboardTestHooks.getBoardSummary(),
   );
   expect(restored.objectCount).toBe(1);
@@ -105,69 +113,14 @@ test("recipient narrative adds both dataset inputs atomically and repairs the ob
 
   const readEdges = () =>
     page.evaluate(() => {
-      const state = (
-        window as never as {
-          __airboardTestHooks: {
-            getCanonicalBoardState(): {
-              strokes: Record<
-                string,
-                {
-                  status: string;
-                  annotation?: {
-                    type: string;
-                    label?: string;
-                    snappedStartStrokeId?: string;
-                    snappedEndStrokeId?: string;
-                  };
-                }
-              >;
-              elements: Record<
-                string,
-                {
-                  id: string;
-                  kind: string;
-                  status: string;
-                  legacyStrokeId?: string;
-                  content?: { blocks: Array<{ runs: Array<{ text: string }> }> };
-                  label?: { blocks: Array<{ runs: Array<{ text: string }> }> };
-                  start?: { binding?: { elementId: string } };
-                  end?: { binding?: { elementId: string } };
-                }
-              >;
-            };
-          };
-        }
-      ).__airboardTestHooks.getCanonicalBoardState();
-      const labels = Object.fromEntries(
-        Object.entries(state.strokes)
-          .filter(
-            ([, stroke]) =>
-              stroke.status === "committed" &&
-              stroke.annotation &&
-              stroke.annotation.type !== "connector" &&
-              stroke.annotation.type !== "arrow",
-          )
-          .map(([id, stroke]) => [id, stroke.annotation?.label ?? ""]),
-      );
-      const legacyEdges = Object.values(state.strokes)
-        .filter(
-          (stroke) =>
-            stroke.status === "committed" &&
-            (stroke.annotation?.type === "connector" ||
-              stroke.annotation?.type === "arrow"),
-        )
-        .map((stroke) => ({
-          from: labels[stroke.annotation?.snappedStartStrokeId ?? ""],
-          to: labels[stroke.annotation?.snappedEndStrokeId ?? ""],
-          label: stroke.annotation?.label,
-        }));
+      const state = (window as unknown as AirboardTestWindow).__airboardTestHooks.getCanonicalBoardState();
       const plain = (document?: {
         blocks: Array<{ runs: Array<{ text: string }> }>;
       }) => document?.blocks
         .map((block) => block.runs.map((run) => run.text).join(""))
         .join("\n") ?? "";
-      const scene = Object.values(state.elements).filter(
-        (element) => element.status === "active" && !element.legacyStrokeId,
+      const scene = (Object.values(state.elements) as unknown as ElementTextView[]).filter(
+        (element) => element.status === "active",
       );
       const sceneLabels = Object.fromEntries(
         scene
@@ -186,7 +139,7 @@ test("recipient narrative adds both dataset inputs atomically and repairs the ob
           to: sceneLabels[element.end!.binding!.elementId],
           label: plain(element.label) || undefined,
         }));
-      return [...legacyEdges, ...sceneEdges]
+      return sceneEdges
         .sort((left, right) => String(left.from).localeCompare(String(right.from)));
     });
 
@@ -225,14 +178,7 @@ test("recipient narrative adds both dataset inputs atomically and repairs the ob
   await expect.poll(readEdges).toEqual(expectedEdges);
 
   const beforeRepeat = await page.evaluate(() => {
-    const hooks = (
-      window as never as {
-        __airboardTestHooks: {
-          getBoardEventLog(): unknown[];
-          getInteractionDiagnostics(): { undoDepth: number };
-        };
-      }
-    ).__airboardTestHooks;
+    const hooks = (window as unknown as AirboardTestWindow).__airboardTestHooks;
     return {
       eventCount: hooks.getBoardEventLog().length,
       undoDepth: hooks.getInteractionDiagnostics().undoDepth,
@@ -247,14 +193,7 @@ test("recipient narrative adds both dataset inputs atomically and repairs the ob
   );
   await expect.poll(readEdges).toEqual(expectedEdges);
   const afterRepeat = await page.evaluate(() => {
-    const hooks = (
-      window as never as {
-        __airboardTestHooks: {
-          getBoardEventLog(): unknown[];
-          getInteractionDiagnostics(): { undoDepth: number };
-        };
-      }
-    ).__airboardTestHooks;
+    const hooks = (window as unknown as AirboardTestWindow).__airboardTestHooks;
     return {
       eventCount: hooks.getBoardEventLog().length,
       undoDepth: hooks.getInteractionDiagnostics().undoDepth,
@@ -263,39 +202,17 @@ test("recipient narrative adds both dataset inputs atomically and repairs the ob
   expect(afterRepeat).toEqual(beforeRepeat);
 
   const finalState = await page.evaluate(() =>
-    (
-      window as never as {
-        __airboardTestHooks: {
-          getCanonicalBoardState(): {
-            strokes: Record<string, { status: string; annotation?: { label?: string } }>;
-            elements: Record<
-              string,
-              {
-                status: string;
-                legacyStrokeId?: string;
-                content?: { blocks: Array<{ runs: Array<{ text: string }> }> };
-              }
-            >;
-          };
-        };
-      }
-    ).__airboardTestHooks.getCanonicalBoardState(),
+    (window as unknown as AirboardTestWindow).__airboardTestHooks.getCanonicalBoardState(),
   );
-  const legacySchemaData = Object.values(finalState.strokes).some(
-      (stroke) =>
-        stroke.status === "committed" &&
-        stroke.annotation?.label === "Schema Data",
-    );
-  const sceneSchemaData = Object.values(finalState.elements).some(
+  const sceneSchemaData = (Object.values(finalState.elements) as unknown as ElementTextView[]).some(
     (element) =>
       element.status === "active" &&
-      !element.legacyStrokeId &&
       element.content?.blocks
         .flatMap((block) => block.runs)
         .map((run) => run.text)
         .join("") === "Schema Data",
   );
-  expect(legacySchemaData || sceneSchemaData).toBe(false);
+  expect(sceneSchemaData).toBe(false);
 });
 
 test("section membership round-trips with scene undo and redo", async ({ page }) => {
@@ -313,26 +230,8 @@ test("section membership round-trips with scene undo and redo", async ({ page })
   await apply("create a section around selected named Backend");
 
   const membership = () => page.evaluate(() => {
-    const state = (
-      window as never as {
-        __airboardTestHooks: {
-          getCanonicalBoardState(): {
-            elements: Record<
-              string,
-              {
-                id: string;
-                kind: string;
-                status: string;
-                legacyStrokeId?: string;
-                sectionId?: string;
-                memberIds?: string[];
-              }
-            >;
-          };
-        };
-      }
-    ).__airboardTestHooks.getCanonicalBoardState();
-    const elements = Object.values(state.elements).filter((element) => !element.legacyStrokeId);
+    const state = (window as unknown as AirboardTestWindow).__airboardTestHooks.getCanonicalBoardState();
+    const elements = Object.values(state.elements);
     const section = elements.find((element) => element.kind === "section");
     const members = elements.filter((element) => element.kind === "shape");
     return {

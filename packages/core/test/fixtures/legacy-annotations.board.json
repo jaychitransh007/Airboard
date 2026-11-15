@@ -1,0 +1,2480 @@
+{
+ "boardId": "board:legacy-annotations",
+ "sceneVersion": 2,
+ "elements": {
+  "node:process": {
+   "id": "node:process",
+   "boardId": "board:legacy-annotations",
+   "transform": {
+    "x": 68,
+    "y": 74,
+    "width": 144,
+    "height": 72,
+    "rotation": 0
+   },
+   "status": "active",
+   "zIndex": 0,
+   "locked": false,
+   "visible": true,
+   "creatorId": "user:pilot",
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "revision": 1,
+   "legacyStrokeId": "node:process",
+   "kind": "shape",
+   "shapeKind": "process",
+   "content": {
+    "type": "doc",
+    "blocks": [
+     {
+      "id": "node:process:content",
+      "type": "paragraph",
+      "runs": [
+       {
+        "text": "Process"
+       }
+      ]
+     }
+    ]
+   },
+   "style": {
+    "fill": "#f8fafc",
+    "fillOpacity": 1,
+    "stroke": "#111827",
+    "strokeOpacity": 1,
+    "strokeWidth": 3,
+    "strokeStyle": "solid",
+    "textColor": "#111827",
+    "textAlign": "center"
+   }
+  },
+  "node:service": {
+   "id": "node:service",
+   "boardId": "board:legacy-annotations",
+   "transform": {
+    "x": 284,
+    "y": 70,
+    "width": 152,
+    "height": 80,
+    "rotation": 0
+   },
+   "status": "active",
+   "zIndex": 1,
+   "locked": false,
+   "visible": true,
+   "creatorId": "user:pilot",
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "revision": 1,
+   "legacyStrokeId": "node:service",
+   "kind": "shape",
+   "shapeKind": "service",
+   "content": {
+    "type": "doc",
+    "blocks": [
+     {
+      "id": "node:service:content",
+      "type": "paragraph",
+      "runs": [
+       {
+        "text": "Service"
+       }
+      ]
+     }
+    ]
+   },
+   "style": {
+    "fill": "#f8fafc",
+    "fillOpacity": 1,
+    "stroke": "#111827",
+    "strokeOpacity": 1,
+    "strokeWidth": 3,
+    "strokeStyle": "solid",
+    "textColor": "#111827",
+    "textAlign": "center"
+   }
+  },
+  "node:database": {
+   "id": "node:database",
+   "boardId": "board:legacy-annotations",
+   "transform": {
+    "x": 508,
+    "y": 62,
+    "width": 144,
+    "height": 96,
+    "rotation": 0
+   },
+   "status": "active",
+   "zIndex": 2,
+   "locked": false,
+   "visible": true,
+   "creatorId": "user:pilot",
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "revision": 1,
+   "legacyStrokeId": "node:database",
+   "kind": "shape",
+   "shapeKind": "database",
+   "content": {
+    "type": "doc",
+    "blocks": [
+     {
+      "id": "node:database:content",
+      "type": "paragraph",
+      "runs": [
+       {
+        "text": "Database"
+       }
+      ]
+     }
+    ]
+   },
+   "style": {
+    "fill": "#f8fafc",
+    "fillOpacity": 1,
+    "stroke": "#111827",
+    "strokeOpacity": 1,
+    "strokeWidth": 3,
+    "strokeStyle": "solid",
+    "textColor": "#111827",
+    "textAlign": "center"
+   }
+  },
+  "node:queue": {
+   "id": "node:queue",
+   "boardId": "board:legacy-annotations",
+   "transform": {
+    "x": 724,
+    "y": 69,
+    "width": 152,
+    "height": 82,
+    "rotation": 0
+   },
+   "status": "active",
+   "zIndex": 3,
+   "locked": false,
+   "visible": true,
+   "creatorId": "user:pilot",
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "revision": 2,
+   "legacyStrokeId": "node:queue",
+   "kind": "shape",
+   "shapeKind": "queue",
+   "content": {
+    "type": "doc",
+    "blocks": [
+     {
+      "id": "node:queue:content",
+      "type": "paragraph",
+      "runs": [
+       {
+        "text": "Queue"
+       }
+      ]
+     }
+    ]
+   },
+   "style": {
+    "fill": "#f8fafc",
+    "fillOpacity": 1,
+    "stroke": "#111827",
+    "strokeOpacity": 1,
+    "strokeWidth": 3,
+    "strokeStyle": "solid",
+    "textColor": "#111827",
+    "textAlign": "center"
+   }
+  },
+  "node:user": {
+   "id": "node:user",
+   "boardId": "board:legacy-annotations",
+   "transform": {
+    "x": 956,
+    "y": 58,
+    "width": 128,
+    "height": 104,
+    "rotation": 0
+   },
+   "status": "active",
+   "zIndex": 4,
+   "locked": false,
+   "visible": true,
+   "creatorId": "user:pilot",
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "revision": 1,
+   "legacyStrokeId": "node:user",
+   "kind": "shape",
+   "shapeKind": "user",
+   "content": {
+    "type": "doc",
+    "blocks": [
+     {
+      "id": "node:user:content",
+      "type": "paragraph",
+      "runs": [
+       {
+        "text": "User"
+       }
+      ]
+     }
+    ]
+   },
+   "style": {
+    "fill": "#f8fafc",
+    "fillOpacity": 1,
+    "stroke": "#111827",
+    "strokeOpacity": 1,
+    "strokeWidth": 3,
+    "strokeStyle": "solid",
+    "textColor": "#111827",
+    "textAlign": "center"
+   }
+  },
+  "node:api": {
+   "id": "node:api",
+   "boardId": "board:legacy-annotations",
+   "transform": {
+    "x": 64,
+    "y": 240,
+    "width": 152,
+    "height": 80,
+    "rotation": 0
+   },
+   "status": "active",
+   "zIndex": 5,
+   "locked": false,
+   "visible": true,
+   "creatorId": "user:pilot",
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "revision": 1,
+   "legacyStrokeId": "node:api",
+   "kind": "shape",
+   "shapeKind": "api",
+   "content": {
+    "type": "doc",
+    "blocks": [
+     {
+      "id": "node:api:content",
+      "type": "paragraph",
+      "runs": [
+       {
+        "text": "Api"
+       }
+      ]
+     }
+    ]
+   },
+   "style": {
+    "fill": "#f8fafc",
+    "fillOpacity": 1,
+    "stroke": "#111827",
+    "strokeOpacity": 1,
+    "strokeWidth": 3,
+    "strokeStyle": "solid",
+    "textColor": "#111827",
+    "textAlign": "center"
+   }
+  },
+  "node:decision": {
+   "id": "node:decision",
+   "boardId": "board:legacy-annotations",
+   "transform": {
+    "x": 300,
+    "y": 236,
+    "width": 120,
+    "height": 88,
+    "rotation": 0
+   },
+   "status": "active",
+   "zIndex": 6,
+   "locked": false,
+   "visible": true,
+   "creatorId": "user:pilot",
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "revision": 2,
+   "legacyStrokeId": "node:decision",
+   "kind": "shape",
+   "shapeKind": "diamond",
+   "content": {
+    "type": "doc",
+    "blocks": [
+     {
+      "id": "node:decision:content",
+      "type": "paragraph",
+      "runs": [
+       {
+        "text": "Decision"
+       }
+      ]
+     }
+    ]
+   },
+   "style": {
+    "fill": "#f8fafc",
+    "fillOpacity": 1,
+    "stroke": "#111827",
+    "strokeOpacity": 1,
+    "strokeWidth": 3,
+    "strokeStyle": "solid",
+    "textColor": "#111827",
+    "textAlign": "center"
+   }
+  },
+  "node:note": {
+   "id": "node:note",
+   "boardId": "board:legacy-annotations",
+   "transform": {
+    "x": 492,
+    "y": 226,
+    "width": 176,
+    "height": 108,
+    "rotation": 0
+   },
+   "status": "active",
+   "zIndex": 7,
+   "locked": false,
+   "visible": true,
+   "creatorId": "user:pilot",
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "revision": 1,
+   "legacyStrokeId": "node:note",
+   "kind": "shape",
+   "shapeKind": "rounded-rectangle",
+   "content": {
+    "type": "doc",
+    "blocks": [
+     {
+      "id": "node:note:content",
+      "type": "paragraph",
+      "runs": [
+       {
+        "text": "Note"
+       }
+      ]
+     }
+    ]
+   },
+   "style": {
+    "fill": "#fef9c3",
+    "fillOpacity": 1,
+    "stroke": "#111827",
+    "strokeOpacity": 1,
+    "strokeWidth": 3,
+    "strokeStyle": "solid",
+    "textColor": "#111827",
+    "textAlign": "center"
+   }
+  },
+  "node:terminator": {
+   "id": "node:terminator",
+   "boardId": "board:legacy-annotations",
+   "transform": {
+    "x": 725,
+    "y": 251,
+    "width": 150,
+    "height": 58,
+    "rotation": 0
+   },
+   "status": "active",
+   "zIndex": 8,
+   "locked": false,
+   "visible": true,
+   "creatorId": "user:pilot",
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "revision": 1,
+   "legacyStrokeId": "node:terminator",
+   "kind": "shape",
+   "shapeKind": "terminator",
+   "content": {
+    "type": "doc",
+    "blocks": [
+     {
+      "id": "node:terminator:content",
+      "type": "paragraph",
+      "runs": [
+       {
+        "text": "Terminator"
+       }
+      ]
+     }
+    ]
+   },
+   "style": {
+    "fill": "#f8fafc",
+    "fillOpacity": 1,
+    "stroke": "#111827",
+    "strokeOpacity": 1,
+    "strokeWidth": 3,
+    "strokeStyle": "solid",
+    "textColor": "#111827",
+    "textAlign": "center"
+   }
+  },
+  "node:io": {
+   "id": "node:io",
+   "boardId": "board:legacy-annotations",
+   "transform": {
+    "x": 944,
+    "y": 244,
+    "width": 152,
+    "height": 72,
+    "rotation": 0
+   },
+   "status": "active",
+   "zIndex": 9,
+   "locked": false,
+   "visible": true,
+   "creatorId": "user:pilot",
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "revision": 1,
+   "legacyStrokeId": "node:io",
+   "kind": "shape",
+   "shapeKind": "right-parallelogram",
+   "content": {
+    "type": "doc",
+    "blocks": [
+     {
+      "id": "node:io:content",
+      "type": "paragraph",
+      "runs": [
+       {
+        "text": "Io"
+       }
+      ]
+     }
+    ]
+   },
+   "style": {
+    "fill": "#f8fafc",
+    "fillOpacity": 1,
+    "stroke": "#111827",
+    "strokeOpacity": 1,
+    "strokeWidth": 3,
+    "strokeStyle": "solid",
+    "textColor": "#111827",
+    "textAlign": "center"
+   }
+  },
+  "node:document": {
+   "id": "node:document",
+   "boardId": "board:legacy-annotations",
+   "transform": {
+    "x": 68,
+    "y": 407,
+    "width": 144,
+    "height": 86,
+    "rotation": 0
+   },
+   "status": "active",
+   "zIndex": 10,
+   "locked": false,
+   "visible": true,
+   "creatorId": "user:pilot",
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "revision": 1,
+   "legacyStrokeId": "node:document",
+   "kind": "shape",
+   "shapeKind": "document",
+   "content": {
+    "type": "doc",
+    "blocks": [
+     {
+      "id": "node:document:content",
+      "type": "paragraph",
+      "runs": [
+       {
+        "text": "Document"
+       }
+      ]
+     }
+    ]
+   },
+   "style": {
+    "fill": "#f8fafc",
+    "fillOpacity": 1,
+    "stroke": "#111827",
+    "strokeOpacity": 1,
+    "strokeWidth": 3,
+    "strokeStyle": "solid",
+    "textColor": "#111827",
+    "textAlign": "center"
+   }
+  },
+  "node:circle": {
+   "id": "node:circle",
+   "boardId": "board:legacy-annotations",
+   "transform": {
+    "x": 300,
+    "y": 390,
+    "width": 120,
+    "height": 120,
+    "rotation": 0
+   },
+   "status": "active",
+   "zIndex": 11,
+   "locked": false,
+   "visible": true,
+   "creatorId": "user:pilot",
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "revision": 1,
+   "legacyStrokeId": "node:circle",
+   "kind": "shape",
+   "shapeKind": "ellipse",
+   "content": {
+    "type": "doc",
+    "blocks": [
+     {
+      "id": "node:circle:content",
+      "type": "paragraph",
+      "runs": [
+       {
+        "text": "Circle"
+       }
+      ]
+     }
+    ]
+   },
+   "style": {
+    "fill": "#f8fafc",
+    "fillOpacity": 1,
+    "stroke": "#111827",
+    "strokeOpacity": 1,
+    "strokeWidth": 3,
+    "strokeStyle": "solid",
+    "textColor": "#111827",
+    "textAlign": "center"
+   }
+  },
+  "node:custom": {
+   "id": "node:custom",
+   "boardId": "board:legacy-annotations",
+   "transform": {
+    "x": 508,
+    "y": 414,
+    "width": 144,
+    "height": 72,
+    "rotation": 0
+   },
+   "status": "active",
+   "zIndex": 12,
+   "locked": false,
+   "visible": true,
+   "creatorId": "user:pilot",
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "revision": 1,
+   "legacyStrokeId": "node:custom",
+   "kind": "shape",
+   "shapeKind": "rounded-rectangle",
+   "content": {
+    "type": "doc",
+    "blocks": [
+     {
+      "id": "node:custom:content",
+      "type": "paragraph",
+      "runs": [
+       {
+        "text": "Custom"
+       }
+      ]
+     }
+    ]
+   },
+   "style": {
+    "fill": "#f8fafc",
+    "fillOpacity": 1,
+    "stroke": "#111827",
+    "strokeOpacity": 1,
+    "strokeWidth": 3,
+    "strokeStyle": "solid",
+    "textColor": "#111827",
+    "textAlign": "center"
+   }
+  },
+  "edge:connector": {
+   "id": "edge:connector",
+   "boardId": "board:legacy-annotations",
+   "transform": {
+    "x": 216,
+    "y": 114.6579822268688,
+    "width": 779.888092002091,
+    "height": 150.66019959131302,
+    "rotation": 0
+   },
+   "status": "active",
+   "zIndex": 13,
+   "locked": false,
+   "visible": true,
+   "creatorId": "user:pilot",
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "revision": 1,
+   "legacyStrokeId": "edge:connector",
+   "kind": "connector",
+   "pathKind": "bent",
+   "start": {
+    "point": {
+     "x": 995.888092002091,
+     "y": 114.6579822268688
+    },
+    "decoration": "none",
+    "binding": {
+     "elementId": "node:user",
+     "anchor": "auto"
+    }
+   },
+   "end": {
+    "point": {
+     "x": 216,
+     "y": 265.3181818181818
+    },
+    "decoration": "solid_arrow",
+    "binding": {
+     "elementId": "node:api",
+     "anchor": "auto"
+    }
+   },
+   "controlPoints": [],
+   "label": {
+    "type": "doc",
+    "blocks": [
+     {
+      "id": "edge:connector:label",
+      "type": "paragraph",
+      "runs": [
+       {
+        "text": "calls"
+       }
+      ]
+     }
+    ]
+   },
+   "labelPosition": 0.5,
+   "style": {
+    "color": "#334155",
+    "opacity": 1,
+    "thickness": "thin",
+    "strokeStyle": "solid",
+    "labelBackground": "none"
+   }
+  },
+  "edge:request": {
+   "id": "edge:request",
+   "boardId": "board:legacy-annotations",
+   "transform": {
+    "x": 436,
+    "y": 110,
+    "width": 72,
+    "height": 1,
+    "rotation": 0
+   },
+   "status": "active",
+   "zIndex": 14,
+   "locked": false,
+   "visible": true,
+   "creatorId": "user:pilot",
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "revision": 1,
+   "legacyStrokeId": "edge:request",
+   "kind": "connector",
+   "pathKind": "bent",
+   "start": {
+    "point": {
+     "x": 436,
+     "y": 110
+    },
+    "decoration": "none",
+    "binding": {
+     "elementId": "node:service",
+     "anchor": "auto"
+    }
+   },
+   "end": {
+    "point": {
+     "x": 508,
+     "y": 110
+    },
+    "decoration": "solid_arrow",
+    "binding": {
+     "elementId": "node:database",
+     "anchor": "auto"
+    }
+   },
+   "controlPoints": [],
+   "label": {
+    "type": "doc",
+    "blocks": [
+     {
+      "id": "edge:request:label",
+      "type": "paragraph",
+      "runs": [
+       {
+        "text": "writes"
+       }
+      ]
+     }
+    ]
+   },
+   "labelPosition": 0.5,
+   "style": {
+    "color": "#334155",
+    "opacity": 1,
+    "thickness": "thin",
+    "strokeStyle": "solid",
+    "labelBackground": "none"
+   }
+  },
+  "edge:reply": {
+   "id": "edge:reply",
+   "boardId": "board:legacy-annotations",
+   "transform": {
+    "x": 436,
+    "y": 110,
+    "width": 72,
+    "height": 1,
+    "rotation": 0
+   },
+   "status": "active",
+   "zIndex": 15,
+   "locked": false,
+   "visible": true,
+   "creatorId": "user:pilot",
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "revision": 1,
+   "legacyStrokeId": "edge:reply",
+   "kind": "connector",
+   "pathKind": "bent",
+   "start": {
+    "point": {
+     "x": 508,
+     "y": 110
+    },
+    "decoration": "none",
+    "binding": {
+     "elementId": "node:database",
+     "anchor": "auto"
+    }
+   },
+   "end": {
+    "point": {
+     "x": 436,
+     "y": 110
+    },
+    "decoration": "solid_arrow",
+    "binding": {
+     "elementId": "node:service",
+     "anchor": "auto"
+    }
+   },
+   "controlPoints": [],
+   "label": {
+    "type": "doc",
+    "blocks": [
+     {
+      "id": "edge:reply:label",
+      "type": "paragraph",
+      "runs": [
+       {
+        "text": "reads"
+       }
+      ]
+     }
+    ]
+   },
+   "labelPosition": 0.5,
+   "style": {
+    "color": "#334155",
+    "opacity": 1,
+    "thickness": "thin",
+    "strokeStyle": "solid",
+    "labelBackground": "none"
+   }
+  },
+  "group:back": {
+   "id": "group:back",
+   "boardId": "board:legacy-annotations",
+   "transform": {
+    "x": 272,
+    "y": 41,
+    "width": 632,
+    "height": 311,
+    "rotation": 0
+   },
+   "status": "active",
+   "zIndex": 16,
+   "locked": false,
+   "visible": true,
+   "creatorId": "user:pilot",
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "revision": 1,
+   "legacyStrokeId": "group:back",
+   "kind": "shape",
+   "shapeKind": "square",
+   "content": {
+    "type": "doc",
+    "blocks": [
+     {
+      "id": "group:back:content",
+      "type": "paragraph",
+      "runs": [
+       {
+        "text": "Back office"
+       }
+      ]
+     }
+    ]
+   },
+   "style": {
+    "fill": "rgba(248, 250, 252, 0.08)",
+    "fillOpacity": 0.8,
+    "stroke": "#64748b",
+    "strokeOpacity": 1,
+    "strokeWidth": 2,
+    "strokeStyle": "solid",
+    "textColor": "#111827",
+    "textAlign": "center"
+   }
+  },
+  "arrow:loose": {
+   "id": "arrow:loose",
+   "boardId": "board:legacy-annotations",
+   "transform": {
+    "x": 80,
+    "y": 600,
+    "width": 220,
+    "height": 40,
+    "rotation": 0
+   },
+   "status": "active",
+   "zIndex": 17,
+   "locked": false,
+   "visible": true,
+   "creatorId": "user:pilot",
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "revision": 1,
+   "legacyStrokeId": "arrow:loose",
+   "kind": "connector",
+   "pathKind": "straight",
+   "start": {
+    "point": {
+     "x": 80,
+     "y": 640
+    },
+    "decoration": "none"
+   },
+   "end": {
+    "point": {
+     "x": 300,
+     "y": 600
+    },
+    "decoration": "solid_arrow"
+   },
+   "controlPoints": [],
+   "label": {
+    "type": "doc",
+    "blocks": [
+     {
+      "id": "arrow:loose:label",
+      "type": "paragraph",
+      "runs": [
+       {
+        "text": ""
+       }
+      ]
+     }
+    ]
+   },
+   "labelPosition": 0.5,
+   "style": {
+    "color": "#111827",
+    "opacity": 1,
+    "thickness": "thin",
+    "strokeStyle": "solid",
+    "labelBackground": "none"
+   }
+  },
+  "sticky:memo": {
+   "id": "sticky:memo",
+   "boardId": "board:legacy-annotations",
+   "transform": {
+    "x": 360,
+    "y": 560,
+    "width": 160,
+    "height": 120,
+    "rotation": 0
+   },
+   "status": "active",
+   "zIndex": 18,
+   "locked": false,
+   "visible": true,
+   "creatorId": "user:pilot",
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "revision": 1,
+   "legacyStrokeId": "sticky:memo",
+   "kind": "sticky",
+   "content": {
+    "type": "doc",
+    "blocks": [
+     {
+      "id": "sticky:memo:content",
+      "type": "paragraph",
+      "runs": [
+       {
+        "text": "Remember the audit"
+       }
+      ]
+     }
+    ]
+   },
+   "layout": "rectangle",
+   "color": "#fde68a",
+   "authorVisible": true
+  },
+  "text:title": {
+   "id": "text:title",
+   "boardId": "board:legacy-annotations",
+   "transform": {
+    "x": 560,
+    "y": 590,
+    "width": 220,
+    "height": 40,
+    "rotation": 0
+   },
+   "status": "active",
+   "zIndex": 19,
+   "locked": false,
+   "visible": true,
+   "creatorId": "user:pilot",
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "revision": 1,
+   "legacyStrokeId": "text:title",
+   "kind": "text",
+   "content": {
+    "type": "doc",
+    "blocks": [
+     {
+      "id": "text:title:content",
+      "type": "paragraph",
+      "runs": [
+       {
+        "text": "Legacy diagram"
+       }
+      ]
+     }
+    ]
+   },
+   "mode": "area",
+   "style": {
+    "preset": "simple",
+    "color": "#111827",
+    "fontSize": 18,
+    "align": "left",
+    "verticalAlign": "top"
+   }
+  },
+  "highlight:mark": {
+   "id": "highlight:mark",
+   "boardId": "board:legacy-annotations",
+   "transform": {
+    "x": 820,
+    "y": 600,
+    "width": 200,
+    "height": 30,
+    "rotation": 0
+   },
+   "status": "active",
+   "zIndex": 20,
+   "locked": false,
+   "visible": true,
+   "creatorId": "user:pilot",
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "revision": 1,
+   "legacyStrokeId": "highlight:mark",
+   "kind": "drawing",
+   "drawingKind": "highlighter",
+   "points": [
+    {
+     "x": 820,
+     "y": 615,
+     "t": 1,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 900,
+     "y": 615,
+     "t": 2,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 1020,
+     "y": 615,
+     "t": 3,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    }
+   ],
+   "style": {
+    "color": "#facc15",
+    "thickness": 18,
+    "opacity": 0.35,
+    "straight": false
+   }
+  }
+ },
+ "strokes": {
+  "node:process": {
+   "id": "node:process",
+   "boardId": "board:legacy-annotations",
+   "userId": "user:pilot",
+   "tool": "marker",
+   "color": "#111827",
+   "thickness": 3,
+   "points": [
+    {
+     "x": 68,
+     "y": 74,
+     "t": 1790845200000,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 212,
+     "y": 74,
+     "t": 1790845200001,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 212,
+     "y": 146,
+     "t": 1790845200002,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 68,
+     "y": 146,
+     "t": 1790845200003,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 68,
+     "y": 74,
+     "t": 1790845200004,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    }
+   ],
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "status": "committed",
+   "annotation": {
+    "type": "flow_node",
+    "source": "voice",
+    "bounds": {
+     "x": 68,
+     "y": 74,
+     "width": 144,
+     "height": 72
+    },
+    "nodeType": "process",
+    "strokeColor": "#111827",
+    "fillColor": "#f8fafc",
+    "label": "Process"
+   },
+   "inputSource": "pointer",
+   "trackingSource": "manual",
+   "committedAt": "2026-10-01T09:00:00.000Z"
+  },
+  "node:service": {
+   "id": "node:service",
+   "boardId": "board:legacy-annotations",
+   "userId": "user:pilot",
+   "tool": "marker",
+   "color": "#111827",
+   "thickness": 3,
+   "points": [
+    {
+     "x": 284,
+     "y": 70,
+     "t": 1790845200000,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 436,
+     "y": 70,
+     "t": 1790845200001,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 436,
+     "y": 150,
+     "t": 1790845200002,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 284,
+     "y": 150,
+     "t": 1790845200003,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 284,
+     "y": 70,
+     "t": 1790845200004,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    }
+   ],
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "status": "committed",
+   "annotation": {
+    "type": "flow_node",
+    "source": "voice",
+    "bounds": {
+     "x": 284,
+     "y": 70,
+     "width": 152,
+     "height": 80
+    },
+    "nodeType": "service",
+    "strokeColor": "#111827",
+    "fillColor": "#f8fafc",
+    "label": "Service"
+   },
+   "inputSource": "pointer",
+   "trackingSource": "manual",
+   "committedAt": "2026-10-01T09:00:00.000Z"
+  },
+  "node:database": {
+   "id": "node:database",
+   "boardId": "board:legacy-annotations",
+   "userId": "user:pilot",
+   "tool": "marker",
+   "color": "#111827",
+   "thickness": 3,
+   "points": [
+    {
+     "x": 508,
+     "y": 62,
+     "t": 1790845200000,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 652,
+     "y": 62,
+     "t": 1790845200001,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 652,
+     "y": 158,
+     "t": 1790845200002,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 508,
+     "y": 158,
+     "t": 1790845200003,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 508,
+     "y": 62,
+     "t": 1790845200004,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    }
+   ],
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "status": "committed",
+   "annotation": {
+    "type": "flow_node",
+    "source": "voice",
+    "bounds": {
+     "x": 508,
+     "y": 62,
+     "width": 144,
+     "height": 96
+    },
+    "nodeType": "database",
+    "strokeColor": "#111827",
+    "fillColor": "#f8fafc",
+    "label": "Database"
+   },
+   "inputSource": "pointer",
+   "trackingSource": "manual",
+   "committedAt": "2026-10-01T09:00:00.000Z"
+  },
+  "node:queue": {
+   "id": "node:queue",
+   "boardId": "board:legacy-annotations",
+   "userId": "user:pilot",
+   "tool": "marker",
+   "color": "#111827",
+   "thickness": 3,
+   "points": [
+    {
+     "x": 724,
+     "y": 69,
+     "t": 1790845200000,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 876,
+     "y": 69,
+     "t": 1790845200001,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 876,
+     "y": 151,
+     "t": 1790845200002,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 724,
+     "y": 151,
+     "t": 1790845200003,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 724,
+     "y": 69,
+     "t": 1790845200004,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    }
+   ],
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "status": "committed",
+   "annotation": {
+    "type": "flow_node",
+    "source": "voice",
+    "bounds": {
+     "x": 724,
+     "y": 69,
+     "width": 152,
+     "height": 82
+    },
+    "nodeType": "queue",
+    "strokeColor": "#111827",
+    "fillColor": "#f8fafc",
+    "label": "Queue",
+    "groupId": "group:back"
+   },
+   "inputSource": "pointer",
+   "trackingSource": "manual",
+   "committedAt": "2026-10-01T09:00:00.000Z"
+  },
+  "node:user": {
+   "id": "node:user",
+   "boardId": "board:legacy-annotations",
+   "userId": "user:pilot",
+   "tool": "marker",
+   "color": "#111827",
+   "thickness": 3,
+   "points": [
+    {
+     "x": 956,
+     "y": 58,
+     "t": 1790845200000,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 1084,
+     "y": 58,
+     "t": 1790845200001,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 1084,
+     "y": 162,
+     "t": 1790845200002,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 956,
+     "y": 162,
+     "t": 1790845200003,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 956,
+     "y": 58,
+     "t": 1790845200004,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    }
+   ],
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "status": "committed",
+   "annotation": {
+    "type": "flow_node",
+    "source": "voice",
+    "bounds": {
+     "x": 956,
+     "y": 58,
+     "width": 128,
+     "height": 104
+    },
+    "nodeType": "user",
+    "strokeColor": "#111827",
+    "fillColor": "#f8fafc",
+    "label": "User"
+   },
+   "inputSource": "pointer",
+   "trackingSource": "manual",
+   "committedAt": "2026-10-01T09:00:00.000Z"
+  },
+  "node:api": {
+   "id": "node:api",
+   "boardId": "board:legacy-annotations",
+   "userId": "user:pilot",
+   "tool": "marker",
+   "color": "#111827",
+   "thickness": 3,
+   "points": [
+    {
+     "x": 64,
+     "y": 240,
+     "t": 1790845200000,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 216,
+     "y": 240,
+     "t": 1790845200001,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 216,
+     "y": 320,
+     "t": 1790845200002,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 64,
+     "y": 320,
+     "t": 1790845200003,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 64,
+     "y": 240,
+     "t": 1790845200004,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    }
+   ],
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "status": "committed",
+   "annotation": {
+    "type": "flow_node",
+    "source": "voice",
+    "bounds": {
+     "x": 64,
+     "y": 240,
+     "width": 152,
+     "height": 80
+    },
+    "nodeType": "api",
+    "strokeColor": "#111827",
+    "fillColor": "#f8fafc",
+    "label": "Api"
+   },
+   "inputSource": "pointer",
+   "trackingSource": "manual",
+   "committedAt": "2026-10-01T09:00:00.000Z"
+  },
+  "node:decision": {
+   "id": "node:decision",
+   "boardId": "board:legacy-annotations",
+   "userId": "user:pilot",
+   "tool": "marker",
+   "color": "#111827",
+   "thickness": 3,
+   "points": [
+    {
+     "x": 300,
+     "y": 236,
+     "t": 1790845200000,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 420,
+     "y": 236,
+     "t": 1790845200001,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 420,
+     "y": 324,
+     "t": 1790845200002,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 300,
+     "y": 324,
+     "t": 1790845200003,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 300,
+     "y": 236,
+     "t": 1790845200004,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    }
+   ],
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "status": "committed",
+   "annotation": {
+    "type": "flow_node",
+    "source": "voice",
+    "bounds": {
+     "x": 300,
+     "y": 236,
+     "width": 120,
+     "height": 88
+    },
+    "nodeType": "decision",
+    "strokeColor": "#111827",
+    "fillColor": "#f8fafc",
+    "label": "Decision",
+    "groupId": "group:back"
+   },
+   "inputSource": "pointer",
+   "trackingSource": "manual",
+   "committedAt": "2026-10-01T09:00:00.000Z"
+  },
+  "node:note": {
+   "id": "node:note",
+   "boardId": "board:legacy-annotations",
+   "userId": "user:pilot",
+   "tool": "marker",
+   "color": "#111827",
+   "thickness": 3,
+   "points": [
+    {
+     "x": 492,
+     "y": 226,
+     "t": 1790845200000,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 668,
+     "y": 226,
+     "t": 1790845200001,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 668,
+     "y": 334,
+     "t": 1790845200002,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 492,
+     "y": 334,
+     "t": 1790845200003,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 492,
+     "y": 226,
+     "t": 1790845200004,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    }
+   ],
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "status": "committed",
+   "annotation": {
+    "type": "flow_node",
+    "source": "voice",
+    "bounds": {
+     "x": 492,
+     "y": 226,
+     "width": 176,
+     "height": 108
+    },
+    "nodeType": "note",
+    "strokeColor": "#111827",
+    "fillColor": "#fef9c3",
+    "label": "Note"
+   },
+   "inputSource": "pointer",
+   "trackingSource": "manual",
+   "committedAt": "2026-10-01T09:00:00.000Z"
+  },
+  "node:terminator": {
+   "id": "node:terminator",
+   "boardId": "board:legacy-annotations",
+   "userId": "user:pilot",
+   "tool": "marker",
+   "color": "#111827",
+   "thickness": 3,
+   "points": [
+    {
+     "x": 725,
+     "y": 251,
+     "t": 1790845200000,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 875,
+     "y": 251,
+     "t": 1790845200001,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 875,
+     "y": 309,
+     "t": 1790845200002,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 725,
+     "y": 309,
+     "t": 1790845200003,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 725,
+     "y": 251,
+     "t": 1790845200004,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    }
+   ],
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "status": "committed",
+   "annotation": {
+    "type": "flow_node",
+    "source": "voice",
+    "bounds": {
+     "x": 725,
+     "y": 251,
+     "width": 150,
+     "height": 58
+    },
+    "nodeType": "terminator",
+    "strokeColor": "#111827",
+    "fillColor": "#f8fafc",
+    "label": "Terminator"
+   },
+   "inputSource": "pointer",
+   "trackingSource": "manual",
+   "committedAt": "2026-10-01T09:00:00.000Z"
+  },
+  "node:io": {
+   "id": "node:io",
+   "boardId": "board:legacy-annotations",
+   "userId": "user:pilot",
+   "tool": "marker",
+   "color": "#111827",
+   "thickness": 3,
+   "points": [
+    {
+     "x": 944,
+     "y": 244,
+     "t": 1790845200000,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 1096,
+     "y": 244,
+     "t": 1790845200001,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 1096,
+     "y": 316,
+     "t": 1790845200002,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 944,
+     "y": 316,
+     "t": 1790845200003,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 944,
+     "y": 244,
+     "t": 1790845200004,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    }
+   ],
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "status": "committed",
+   "annotation": {
+    "type": "flow_node",
+    "source": "voice",
+    "bounds": {
+     "x": 944,
+     "y": 244,
+     "width": 152,
+     "height": 72
+    },
+    "nodeType": "io",
+    "strokeColor": "#111827",
+    "fillColor": "#f8fafc",
+    "label": "Io"
+   },
+   "inputSource": "pointer",
+   "trackingSource": "manual",
+   "committedAt": "2026-10-01T09:00:00.000Z"
+  },
+  "node:document": {
+   "id": "node:document",
+   "boardId": "board:legacy-annotations",
+   "userId": "user:pilot",
+   "tool": "marker",
+   "color": "#111827",
+   "thickness": 3,
+   "points": [
+    {
+     "x": 68,
+     "y": 407,
+     "t": 1790845200000,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 212,
+     "y": 407,
+     "t": 1790845200001,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 212,
+     "y": 493,
+     "t": 1790845200002,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 68,
+     "y": 493,
+     "t": 1790845200003,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 68,
+     "y": 407,
+     "t": 1790845200004,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    }
+   ],
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "status": "committed",
+   "annotation": {
+    "type": "flow_node",
+    "source": "voice",
+    "bounds": {
+     "x": 68,
+     "y": 407,
+     "width": 144,
+     "height": 86
+    },
+    "nodeType": "document",
+    "strokeColor": "#111827",
+    "fillColor": "#f8fafc",
+    "label": "Document"
+   },
+   "inputSource": "pointer",
+   "trackingSource": "manual",
+   "committedAt": "2026-10-01T09:00:00.000Z"
+  },
+  "node:circle": {
+   "id": "node:circle",
+   "boardId": "board:legacy-annotations",
+   "userId": "user:pilot",
+   "tool": "marker",
+   "color": "#111827",
+   "thickness": 3,
+   "points": [
+    {
+     "x": 420,
+     "y": 450,
+     "t": 1790845200000,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 418.84711682419385,
+     "y": 461.7054193209677,
+     "t": 1790845200001,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 415.4327719506772,
+     "y": 472.9610059419054,
+     "t": 1790845200002,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 409.8881767381527,
+     "y": 483.33421398117616,
+     "t": 1790845200003,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 402.42640687119285,
+     "y": 492.42640687119285,
+     "t": 1790845200004,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 393.33421398117616,
+     "y": 499.8881767381527,
+     "t": 1790845200005,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 382.9610059419054,
+     "y": 505.4327719506772,
+     "t": 1790845200006,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 371.7054193209677,
+     "y": 508.84711682419385,
+     "t": 1790845200007,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 360,
+     "y": 510,
+     "t": 1790845200008,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 348.2945806790323,
+     "y": 508.84711682419385,
+     "t": 1790845200009,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 337.0389940580946,
+     "y": 505.4327719506772,
+     "t": 1790845200010,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 326.6657860188239,
+     "y": 499.8881767381527,
+     "t": 1790845200011,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 317.57359312880715,
+     "y": 492.42640687119285,
+     "t": 1790845200012,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 310.1118232618473,
+     "y": 483.33421398117616,
+     "t": 1790845200013,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 304.5672280493228,
+     "y": 472.9610059419054,
+     "t": 1790845200014,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 301.15288317580615,
+     "y": 461.70541932096774,
+     "t": 1790845200015,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 300,
+     "y": 450,
+     "t": 1790845200016,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 301.15288317580615,
+     "y": 438.2945806790323,
+     "t": 1790845200017,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 304.5672280493228,
+     "y": 427.0389940580946,
+     "t": 1790845200018,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 310.1118232618473,
+     "y": 416.6657860188239,
+     "t": 1790845200019,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 317.57359312880715,
+     "y": 407.57359312880715,
+     "t": 1790845200020,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 326.66578601882384,
+     "y": 400.1118232618473,
+     "t": 1790845200021,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 337.0389940580946,
+     "y": 394.5672280493228,
+     "t": 1790845200022,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 348.29458067903226,
+     "y": 391.1528831758062,
+     "t": 1790845200023,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 360,
+     "y": 390,
+     "t": 1790845200024,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 371.7054193209677,
+     "y": 391.15288317580615,
+     "t": 1790845200025,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 382.9610059419054,
+     "y": 394.5672280493228,
+     "t": 1790845200026,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 393.3342139811761,
+     "y": 400.1118232618473,
+     "t": 1790845200027,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 402.42640687119285,
+     "y": 407.57359312880715,
+     "t": 1790845200028,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 409.8881767381527,
+     "y": 416.66578601882384,
+     "t": 1790845200029,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 415.4327719506772,
+     "y": 427.0389940580946,
+     "t": 1790845200030,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 418.8471168241938,
+     "y": 438.29458067903226,
+     "t": 1790845200031,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 420,
+     "y": 450,
+     "t": 1790845200032,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    }
+   ],
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "status": "committed",
+   "annotation": {
+    "type": "ellipse",
+    "source": "voice",
+    "bounds": {
+     "x": 300,
+     "y": 390,
+     "width": 120,
+     "height": 120
+    },
+    "nodeType": "circle",
+    "strokeColor": "#111827",
+    "fillColor": "#f8fafc",
+    "label": "Circle"
+   },
+   "inputSource": "pointer",
+   "trackingSource": "manual",
+   "committedAt": "2026-10-01T09:00:00.000Z"
+  },
+  "node:custom": {
+   "id": "node:custom",
+   "boardId": "board:legacy-annotations",
+   "userId": "user:pilot",
+   "tool": "marker",
+   "color": "#111827",
+   "thickness": 3,
+   "points": [
+    {
+     "x": 508,
+     "y": 414,
+     "t": 1790845200000,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 652,
+     "y": 414,
+     "t": 1790845200001,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 652,
+     "y": 486,
+     "t": 1790845200002,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 508,
+     "y": 486,
+     "t": 1790845200003,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 508,
+     "y": 414,
+     "t": 1790845200004,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    }
+   ],
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "status": "committed",
+   "annotation": {
+    "type": "flow_node",
+    "source": "voice",
+    "bounds": {
+     "x": 508,
+     "y": 414,
+     "width": 144,
+     "height": 72
+    },
+    "nodeType": "custom",
+    "strokeColor": "#111827",
+    "fillColor": "#f8fafc",
+    "label": "Custom"
+   },
+   "inputSource": "pointer",
+   "trackingSource": "manual",
+   "committedAt": "2026-10-01T09:00:00.000Z"
+  },
+  "edge:connector": {
+   "id": "edge:connector",
+   "boardId": "board:legacy-annotations",
+   "userId": "user:pilot",
+   "tool": "marker",
+   "color": "#334155",
+   "thickness": 3,
+   "points": [
+    {
+     "x": 995.888092002091,
+     "y": 114.6579822268688,
+     "t": 1790845200000,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 216,
+     "y": 265.3181818181818,
+     "t": 1790845200001,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    }
+   ],
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "status": "committed",
+   "annotation": {
+    "type": "connector",
+    "source": "voice",
+    "start": {
+     "x": 995.888092002091,
+     "y": 114.6579822268688
+    },
+    "end": {
+     "x": 216,
+     "y": 265.3181818181818
+    },
+    "snappedStartStrokeId": "node:user",
+    "snappedEndStrokeId": "node:api",
+    "strokeColor": "#334155",
+    "label": "calls"
+   },
+   "inputSource": "pointer",
+   "trackingSource": "manual",
+   "committedAt": "2026-10-01T09:00:00.000Z"
+  },
+  "edge:request": {
+   "id": "edge:request",
+   "boardId": "board:legacy-annotations",
+   "userId": "user:pilot",
+   "tool": "marker",
+   "color": "#334155",
+   "thickness": 3,
+   "points": [
+    {
+     "x": 436,
+     "y": 110,
+     "t": 1790845200000,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 508,
+     "y": 110,
+     "t": 1790845200001,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    }
+   ],
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "status": "committed",
+   "annotation": {
+    "type": "connector",
+    "source": "voice",
+    "start": {
+     "x": 436,
+     "y": 110
+    },
+    "end": {
+     "x": 508,
+     "y": 110
+    },
+    "snappedStartStrokeId": "node:service",
+    "snappedEndStrokeId": "node:database",
+    "strokeColor": "#334155",
+    "label": "writes"
+   },
+   "inputSource": "pointer",
+   "trackingSource": "manual",
+   "committedAt": "2026-10-01T09:00:00.000Z"
+  },
+  "edge:reply": {
+   "id": "edge:reply",
+   "boardId": "board:legacy-annotations",
+   "userId": "user:pilot",
+   "tool": "marker",
+   "color": "#334155",
+   "thickness": 3,
+   "points": [
+    {
+     "x": 508,
+     "y": 110,
+     "t": 1790845200000,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 436,
+     "y": 110,
+     "t": 1790845200001,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    }
+   ],
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "status": "committed",
+   "annotation": {
+    "type": "connector",
+    "source": "voice",
+    "start": {
+     "x": 508,
+     "y": 110
+    },
+    "end": {
+     "x": 436,
+     "y": 110
+    },
+    "snappedStartStrokeId": "node:database",
+    "snappedEndStrokeId": "node:service",
+    "strokeColor": "#334155",
+    "routeOffset": 72,
+    "label": "reads"
+   },
+   "inputSource": "pointer",
+   "trackingSource": "manual",
+   "committedAt": "2026-10-01T09:00:00.000Z"
+  },
+  "group:back": {
+   "id": "group:back",
+   "boardId": "board:legacy-annotations",
+   "userId": "user:pilot",
+   "tool": "marker",
+   "color": "#64748b",
+   "thickness": 2,
+   "points": [
+    {
+     "x": 272,
+     "y": 41,
+     "t": 1790845200000,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 904,
+     "y": 41,
+     "t": 1790845200001,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 904,
+     "y": 352,
+     "t": 1790845200002,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 272,
+     "y": 352,
+     "t": 1790845200003,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 272,
+     "y": 41,
+     "t": 1790845200004,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    }
+   ],
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "status": "committed",
+   "annotation": {
+    "type": "rectangle",
+    "source": "voice",
+    "bounds": {
+     "x": 272,
+     "y": 41,
+     "width": 632,
+     "height": 311
+    },
+    "label": "Back office",
+    "strokeColor": "#64748b",
+    "fillColor": "rgba(248, 250, 252, 0.08)",
+    "opacity": 0.8,
+    "groupMemberStrokeIds": [
+     "node:queue",
+     "node:decision"
+    ]
+   },
+   "inputSource": "pointer",
+   "trackingSource": "manual",
+   "committedAt": "2026-10-01T09:00:00.000Z"
+  },
+  "arrow:loose": {
+   "id": "arrow:loose",
+   "boardId": "board:legacy-annotations",
+   "userId": "user:pilot",
+   "tool": "marker",
+   "color": "#111827",
+   "thickness": 3,
+   "points": [
+    {
+     "x": 80,
+     "y": 640,
+     "t": 1,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 300,
+     "y": 600,
+     "t": 2,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    }
+   ],
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "status": "committed",
+   "inputSource": "pointer",
+   "annotation": {
+    "type": "arrow",
+    "source": "gesture",
+    "start": {
+     "x": 80,
+     "y": 640
+    },
+    "end": {
+     "x": 300,
+     "y": 600
+    },
+    "strokeColor": "#111827"
+   },
+   "committedAt": "2026-10-01T09:00:00.000Z",
+   "cleanupApplied": true,
+   "lineSnapApplied": true
+  },
+  "sticky:memo": {
+   "id": "sticky:memo",
+   "boardId": "board:legacy-annotations",
+   "userId": "user:pilot",
+   "tool": "marker",
+   "color": "#111827",
+   "thickness": 3,
+   "points": [
+    {
+     "x": 360,
+     "y": 560,
+     "t": 1,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 520,
+     "y": 680,
+     "t": 2,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    }
+   ],
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "status": "committed",
+   "inputSource": "pointer",
+   "annotation": {
+    "type": "sticky_note",
+    "source": "gesture",
+    "bounds": {
+     "x": 360,
+     "y": 560,
+     "width": 160,
+     "height": 120
+    },
+    "label": "Remember the audit",
+    "fillColor": "#fde68a"
+   },
+   "committedAt": "2026-10-01T09:00:00.000Z",
+   "cleanupApplied": true,
+   "lineSnapApplied": false
+  },
+  "text:title": {
+   "id": "text:title",
+   "boardId": "board:legacy-annotations",
+   "userId": "user:pilot",
+   "tool": "marker",
+   "color": "#111827",
+   "thickness": 3,
+   "points": [
+    {
+     "x": 560,
+     "y": 590,
+     "t": 1,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 780,
+     "y": 630,
+     "t": 2,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    }
+   ],
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "status": "committed",
+   "inputSource": "pointer",
+   "annotation": {
+    "type": "text_label",
+    "source": "gesture",
+    "bounds": {
+     "x": 560,
+     "y": 590,
+     "width": 220,
+     "height": 40
+    },
+    "label": "Legacy diagram",
+    "strokeColor": "#111827"
+   },
+   "committedAt": "2026-10-01T09:00:00.000Z",
+   "cleanupApplied": true,
+   "lineSnapApplied": false
+  },
+  "highlight:mark": {
+   "id": "highlight:mark",
+   "boardId": "board:legacy-annotations",
+   "userId": "user:pilot",
+   "tool": "marker",
+   "color": "#facc15",
+   "thickness": 18,
+   "points": [
+    {
+     "x": 820,
+     "y": 615,
+     "t": 1,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 900,
+     "y": 615,
+     "t": 2,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    },
+    {
+     "x": 1020,
+     "y": 615,
+     "t": 3,
+     "inputSource": "pointer",
+     "trackingSource": "manual"
+    }
+   ],
+   "createdAt": "2026-10-01T09:00:00.000Z",
+   "updatedAt": "2026-10-01T09:00:00.000Z",
+   "status": "committed",
+   "inputSource": "pointer",
+   "annotation": {
+    "type": "highlight",
+    "source": "gesture",
+    "bounds": {
+     "x": 820,
+     "y": 600,
+     "width": 200,
+     "height": 30
+    },
+    "strokeColor": "#facc15",
+    "opacity": 0.35
+   },
+   "committedAt": "2026-10-01T09:00:00.000Z",
+   "cleanupApplied": true,
+   "lineSnapApplied": false
+  }
+ },
+ "activeStrokes": {},
+ "eraseActions": {},
+ "participants": {},
+ "cursors": {},
+ "lastSequence": 0
+}

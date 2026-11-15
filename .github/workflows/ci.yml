@@ -23,8 +23,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Builds the API and web apps (their build-time checks run here).
-      # Package tests import source, so they don't depend on this step.
+      # Runs before the build, because the web build regenerates the help
+      # content: a stale committed helpContent.ts must fail here.
+      - name: Help documentation
+        run: pnpm docs:check
+
+      # Builds the API and web apps. Package tests import source, so they
+      # don't depend on this step.
       - name: Build apps
         run: pnpm -r build
 
@@ -45,20 +50,9 @@ jobs:
       - name: Dependency audit (production)
         run: pnpm audit --prod --audit-level=high
 
-      - name: Help documentation
-        run: pnpm docs:check
-
+      # Eval CLIs only; a failing step prints its whole output here.
       - name: Offline interaction evaluation gate
-        run: pnpm eval:pr --skip-browser
-
-      - name: Upload privacy-safe evaluation reports
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: eval-pr-${{ github.run_id }}
-          path: artifacts/evals/
-          if-no-files-found: error
-          retention-days: 14
+        run: pnpm eval:pr
 
   e2e:
     name: Playwright E2E (interaction layer)
@@ -77,9 +71,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build packages
-        run: pnpm -r build
-
+      # No build step: Playwright's webServer builds the API itself and runs
+      # next dev, and the workspace packages are consumed as source.
       - name: Install Playwright browsers
         run: pnpm --filter @airboard/web exec playwright install chromium --with-deps
 

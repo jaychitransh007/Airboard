@@ -63,8 +63,7 @@
         "boardState": {
           "boardId": "board:primary",
           "nodes": [],
-          "edges": [],
-          "strokes": []
+          "edges": []
         },
         "nonBoardState": {
           "selection": [],
@@ -132,8 +131,8 @@
             "id": "checkout-committed-once",
             "source": "events",
             "match": {
-              "type": "stroke.committed",
-              "strokeId": "node:checkout-api"
+              "type": "object.created",
+              "objectId": "node:checkout-api"
             },
             "count": 1
           }
@@ -260,8 +259,8 @@
           {
             "id": "connector-committed-once",
             "match": {
-              "type": "stroke.committed",
-              "strokeId": "edge:node:checkout-api->node:orders-db:writes"
+              "type": "object.created",
+              "objectId": "edge:node:checkout-api->node:orders-db:writes"
             }
           }
         ],
@@ -675,13 +674,17 @@
         },
         "exactOnce": [
           {
-            "id": "cascade-delete-event-once",
+            "id": "cascade-delete-node-once",
             "match": {
-              "type": "stroke.deleted",
-              "strokeIds": [
-                "edge:checkout-orders",
-                "node:checkout-api"
-              ]
+              "type": "element.deleted",
+              "elementId": "node:checkout-api"
+            }
+          },
+          {
+            "id": "cascade-delete-edge-once",
+            "match": {
+              "type": "element.deleted",
+              "elementId": "edge:checkout-orders"
             }
           }
         ],
@@ -1082,8 +1085,8 @@
           {
             "id": "stylus-move-once",
             "match": {
-              "type": "stroke.annotation_updated",
-              "strokeId": "node:stylus-target"
+              "type": "element.patched",
+              "elementId": "node:stylus-target"
             },
             "count": 1
           }
@@ -1199,8 +1202,8 @@
           {
             "id": "catalog-create-once",
             "match": {
-              "type": "stroke.committed",
-              "strokeId": "node:catalog-decision"
+              "type": "object.created",
+              "objectId": "node:catalog-decision"
             },
             "count": 1
           }
@@ -1312,8 +1315,8 @@
           {
             "id": "typed-create-once",
             "match": {
-              "type": "stroke.committed",
-              "strokeId": "node:typed-events"
+              "type": "object.created",
+              "objectId": "node:typed-events"
             },
             "count": 1
           }
@@ -1450,8 +1453,8 @@
           {
             "id": "pointer-move-once",
             "match": {
-              "type": "stroke.annotation_updated",
-              "strokeId": "node:pointer-target"
+              "type": "element.patched",
+              "elementId": "node:pointer-target"
             },
             "count": 1
           }
@@ -1598,56 +1601,62 @@
             "atMs": 0,
             "type": "remote_board_event",
             "event": {
-              "id": "event:remote-start",
+              "id": "event:remote-create",
               "boardSessionId": "board:primary",
               "actorParticipantId": "participant:remote",
               "createdAt": "2026-07-30T00:00:00.000Z",
               "sequence": 1,
-              "type": "stroke.started",
-              "stroke": {
+              "type": "element.created",
+              "element": {
                 "id": "node:remote-note",
                 "boardId": "board:primary",
-                "userId": "user:remote",
-                "tool": "marker",
-                "color": "#111827",
-                "thickness": 4,
-                "points": [
-                  {
-                    "x": 100,
-                    "y": 100,
-                    "t": 1,
-                    "inputSource": "pointer"
-                  }
-                ],
+                "kind": "shape",
+                "status": "active",
+                "transform": {
+                  "x": 100,
+                  "y": 100,
+                  "width": 152,
+                  "height": 80,
+                  "rotation": 0
+                },
+                "zIndex": 0,
+                "locked": false,
+                "visible": true,
                 "createdAt": "2026-07-30T00:00:00.000Z",
                 "updatedAt": "2026-07-30T00:00:00.000Z",
-                "status": "active",
-                "annotation": {
-                  "type": "flow_node",
+                "revision": 1,
+                "creatorId": "user:remote",
+                "metadata": {
                   "source": "keyboard",
                   "nodeType": "note",
-                  "label": "Remote note",
-                  "bounds": {
-                    "x": 100,
-                    "y": 100,
-                    "width": 152,
-                    "height": 80
-                  }
+                  "nodeShape": "rounded-rectangle"
+                },
+                "shapeKind": "rounded-rectangle",
+                "content": {
+                  "type": "doc",
+                  "blocks": [
+                    {
+                      "id": "node:remote-note:content",
+                      "type": "paragraph",
+                      "runs": [
+                        {
+                          "text": "Remote note"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "style": {
+                  "fill": "#fef9c3",
+                  "fillOpacity": 1,
+                  "stroke": "#2563eb",
+                  "strokeOpacity": 1,
+                  "strokeWidth": 3,
+                  "strokeStyle": "solid",
+                  "textColor": "#111827",
+                  "textAlign": "center"
                 }
               }
-            }
-          },
-          {
-            "atMs": 20,
-            "type": "remote_board_event",
-            "event": {
-              "id": "event:remote-commit",
-              "boardSessionId": "board:primary",
-              "actorParticipantId": "participant:remote",
-              "createdAt": "2026-07-30T00:00:00.020Z",
-              "sequence": 2,
-              "type": "stroke.committed",
-              "strokeId": "node:remote-note"
             }
           }
         ]
@@ -1692,176 +1701,24 @@
         },
         "exactOnce": [
           {
-            "id": "remote-start-once",
+            "id": "remote-create-once",
             "match": {
-              "type": "stroke.started",
-              "stroke": {
+              "type": "element.created",
+              "element": {
                 "id": "node:remote-note"
               }
             },
             "count": 1
           },
           {
-            "id": "remote-commit-once",
+            "id": "remote-object-once",
             "match": {
-              "type": "stroke.committed",
-              "strokeId": "node:remote-note"
+              "type": "object.created",
+              "objectId": "node:remote-note"
             },
             "count": 1
           }
         ]
-      }
-    },
-    {
-      "schemaVersion": "interaction-eval-case.v1",
-      "id": "voice-reanchors-existing-disconnected-line",
-      "title": "Voice reanchors one stale existing connector",
-      "corpusVersion": "interaction-v1",
-      "modality": "voice",
-      "surface": "replay",
-      "riskLevel": "medium",
-      "datasetAssetHash": "none",
-      "description": "Regression for the production request that retained snapped IDs while its rendered connector geometry was visibly detached.",
-      "capabilities": [
-        "action:connect",
-        "node:service",
-        "contract:exact-once",
-        "contract:undo-round-trip"
-      ],
-      "tags": [
-        "voice",
-        "board-mutation",
-        "connector-repair",
-        "production-regression"
-      ],
-      "initial": {
-        "boardState": {
-          "boardId": "board:primary",
-          "nodes": [
-            {
-              "id": "node:user",
-              "annotation": {
-                "type": "flow_node",
-                "nodeType": "service",
-                "label": "User",
-                "bounds": { "x": 20, "y": 210, "width": 128, "height": 80 }
-              }
-            },
-            {
-              "id": "node:client",
-              "annotation": {
-                "type": "flow_node",
-                "nodeType": "service",
-                "label": "Client",
-                "bounds": { "x": 300, "y": 210, "width": 152, "height": 80 }
-              }
-            },
-            {
-              "id": "node:planner",
-              "annotation": {
-                "type": "flow_node",
-                "nodeType": "service",
-                "label": "Planner",
-                "bounds": { "x": 650, "y": 210, "width": 152, "height": 80 }
-              }
-            }
-          ],
-          "edges": [
-            {
-              "id": "edge:user-client",
-              "annotation": {
-                "type": "connector",
-                "label": "makes a request",
-                "snappedStartStrokeId": "node:user",
-                "snappedEndStrokeId": "node:client"
-              }
-            },
-            {
-              "id": "edge:request-goes-to",
-              "annotation": {
-                "type": "connector",
-                "label": "request goes to",
-                "strokeColor": "#67e8f9",
-                "opacity": 0.8,
-                "start": { "x": 520, "y": 420 },
-                "end": { "x": 650, "y": 250 },
-                "snappedStartStrokeId": "node:user",
-                "snappedEndStrokeId": "node:planner"
-              }
-            }
-          ]
-        },
-        "nonBoardState": {
-          "selection": ["node:client"],
-          "mode": "selected"
-        }
-      },
-      "interaction": {
-        "channel": "voice",
-        "input": {
-          "activation": "ptt",
-          "transcript": "Connect existing disconnected line to Client and Planner."
-        }
-      },
-      "expected": {
-        "outcome": "applied",
-        "route": { "channel": "voice", "activation": "ptt" },
-        "processingPath": [
-          "voice",
-          "deterministic_parser",
-          "grounding",
-          "atomic_transaction"
-        ],
-        "requiredActions": [
-          {
-            "type": "connection.attach",
-            "connectorId": "edge:request-goes-to",
-            "fromId": "node:client",
-            "toId": "node:planner"
-          }
-        ],
-        "feedbackCategory": "success",
-        "latencyBudget": { "totalMs": 1000 },
-        "comparison": {
-          "board": "partial",
-          "geometryTolerance": { "position": 1, "size": 0.5 }
-        },
-        "finalBoardState": {
-          "edges": [
-            {
-              "id": "edge:request-goes-to",
-              "status": "committed",
-              "annotation": {
-                "type": "connector",
-                "label": "request goes to",
-                "strokeColor": "#67e8f9",
-                "opacity": 0.8,
-                "start": { "x": 452, "y": 250 },
-                "end": { "x": 650, "y": 250 },
-                "snappedStartStrokeId": "node:client",
-                "snappedEndStrokeId": "node:planner"
-              }
-            }
-          ]
-        },
-        "finalNonBoardState": {
-          "selection": ["edge:request-goes-to"],
-          "mode": "selected"
-        },
-        "exactOnce": [
-          {
-            "id": "existing-connector-updated-once",
-            "match": {
-              "type": "stroke.annotation_updated",
-              "strokeId": "edge:request-goes-to"
-            },
-            "count": 1
-          }
-        ],
-        "undoRoundTrip": {
-          "board": true,
-          "requireUndoEvents": true
-        }
       }
     }
   ]

@@ -52,12 +52,12 @@ Providers to check during an incident:
 
 ## Tools
 
-**Roll back a release.** The previous releases are listed in [Project Status](Project%20Status.md) under "Rollback".
+**Roll back a release.** The release to roll back to, and the rollback floor no API may go below, are in [Project Status](Project%20Status.md#roll-back-to). Never roll the API back past the floor.
 ```
 AIRBOARD_RELEASE=launch-<hash> infra/cloud-run/release.sh promote api
 AIRBOARD_RELEASE=launch-<hash> infra/cloud-run/release.sh promote web
 ```
-Database migrations aren't rolled back. Each one is written to keep working with the API it replaced.
+Database migrations aren't rolled back. Most keep working with the API they replaced; a migration that drops tables (such as `20261112120000`) does not, and sets a new rollback floor.
 
 **Pause all changes (read-only).** Every change then answers "maintenance", and the app shows a banner:
 ```

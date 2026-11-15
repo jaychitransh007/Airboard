@@ -14,11 +14,14 @@ with nothing to install.
 - **Screen behind the board:** **Show a screen behind the board** in the
   board's **•••** menu puts slides or another app behind the diagram.
 
-Current revisions, rollback steps and open items are in
-[Docs/Project Status.md](Docs/Project%20Status.md); every change and deploy is
-in [Docs/Release Readiness Backlog.md](Docs/Release%20Readiness%20Backlog.md).
+Current revisions, the rollback target and open launch items are in
+[Docs/Project Status.md](Docs/Project%20Status.md); how to release and roll back
+is in the [Commercial Platform Runbook](Docs/Commercial%20Platform%20Runbook.md);
+every change and deploy is in
+[Docs/Release Readiness Backlog.md](Docs/Release%20Readiness%20Backlog.md).
 User-facing behaviour is documented in the Help Center sources under
-[Docs/help](Docs/help).
+[Docs/help](Docs/help). [Docs/README.md](Docs/README.md) says which doc owns
+which topic.
 
 ### How a board works
 

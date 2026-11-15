@@ -1,7 +1,7 @@
 # Security headers (web)
 
 The web app sends browser security headers on every response. They close
-threat-model gap W-1 ([Threat Model](Threat%20Model.md)): the session lives in
+threat-model gap W-1 (in the private, untracked Threat Model): the session lives in
 browser storage, so an injected script would mean account takeover, and any
 site could frame the app.
 

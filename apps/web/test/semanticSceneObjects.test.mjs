@@ -18,7 +18,7 @@ import { commitCommandTurn } from "../src/features/board/commandTurnCoordinator.
 import { computeSemanticAutoLayout } from "../src/features/board/semanticAutoLayout.ts";
 
 // RGB-039: Airo must see, and change, the shapes typed commands and the
-// toolbar make (v2 scene elements), not only its own legacy nodes.
+// toolbar make, alongside the nodes it draws itself.
 
 const BOARD = "scene-board";
 const commandContext = { boardSessionId: BOARD, actorParticipantId: "participant", userId: "user" };
@@ -31,7 +31,7 @@ function created(state, element) {
   });
 }
 
-/** User and API from typed commands, joined by a toolbar connector, plus Airo's own Database. */
+/** User and API from typed commands, joined by a toolbar connector, plus a Database Airo drew. */
 function mixedBoard() {
   let state = createInitialBoardState(BOARD);
   state = created(state, createBoardSceneElement({
@@ -60,7 +60,6 @@ function grounding(boardState, overrides = {}) {
     canvasHeight: 600,
     selectionIds: [],
     primarySelectionId: null,
-    hoverStrokeId: null,
     strokeColor: "#111111",
     ...overrides,
   };
@@ -85,9 +84,9 @@ test("connecting a typed shape to Airo's own node draws one connector between th
   const resolution = resolve(state, { type: "connect", from: label("API"), to: label("Database"), label: "talks to" });
   assert.ok(!("error" in resolution), JSON.stringify(resolution));
   assert.equal(resolution.commands.length, 1);
-  assert.equal(resolution.commands[0].type, "scene.connect");
+  assert.equal(resolution.commands[0].type, "nodes.connect", "a new arrow, drawn as a v2 connector");
   const next = applyDiagramCommand(state, resolution.commands[0], commandContext).state;
-  const connectors = Object.values(next.elements).filter((element) => element.kind === "connector" && element.status === "active" && !element.legacyStrokeId);
+  const connectors = Object.values(next.elements).filter((element) => element.kind === "connector" && element.status === "active");
   assert.equal(connectors.length, 2);
   const added = connectors.find(({ id }) => id !== "user-api");
   assert.deepEqual([added.start.binding.elementId, added.end.binding.elementId], ["api", "db"]);
@@ -111,11 +110,8 @@ test("rename, move, delete and reverse reach typed shapes and their connectors",
   assert.equal(move.commands[0].type, "scene.move");
   assert.deepEqual(move.commands[0].elementIds, ["api"]);
 
-  const mixedDelete = resolve(state, { type: "delete", targets: [label("API"), label("Database")] });
-  assert.deepEqual(mixedDelete.commands, [
-    { type: "objects.delete", objectIds: ["db"] },
-    { type: "scene.delete", elementIds: ["api"] },
-  ]);
+  const bothDelete = resolve(state, { type: "delete", targets: [label("API"), label("Database")] });
+  assert.deepEqual(bothDelete.commands, [{ type: "scene.delete", elementIds: ["api", "db"] }]);
 
   const reverse = resolve(state, {
     type: "reverse_connection",
@@ -167,7 +163,7 @@ test("Airo lines up and spreads out typed shapes with its own nodes", () => {
   const { state, turn } = applyAction(mixedBoard(), { type: "align", targets: [label("User"), label("API"), label("Database")], alignment: "bottom" });
   const bottom = (id) => state.elements[id].transform.y + state.elements[id].transform.height;
   assert.equal(bottom("api"), bottom("user"));
-  assert.equal(state.strokes.db.annotation.bounds.y + state.strokes.db.annotation.bounds.height, bottom("user"));
+  assert.equal(bottom("db"), bottom("user"));
   // The typed shapes stay selected for a follow-up such as "now move them left".
   assert.deepEqual(turn.selectionIds, ["user", "api", "db"]);
 
@@ -176,7 +172,7 @@ test("Airo lines up and spreads out typed shapes with its own nodes", () => {
   const distributed = applyAction(spread, { type: "distribute", targets: [label("User"), label("API"), label("Database")], axis: "horizontal" }).state;
   const right = (id) => distributed.elements[id].transform.x + distributed.elements[id].transform.width;
   const gapOne = distributed.elements.api.transform.x - right("user");
-  const gapTwo = distributed.strokes.db.annotation.bounds.x - right("api");
+  const gapTwo = distributed.elements.db.transform.x - right("api");
   assert.ok(Math.abs(gapOne - gapTwo) < 0.001, `even gaps: ${gapOne} and ${gapTwo}`);
 });
 
@@ -200,17 +196,17 @@ test("Airo copies a typed shape where it's asked to", () => {
   assert.equal(richTextToPlainText(copy.content), "API");
   assert.deepEqual([copy.transform.x, copy.transform.y], [400, 100 + 180]);
 
-  // Mixed copies: each kind through its own command, at the same offset.
-  const mixed = applyAction(before, {
+  // A typed shape and Airo's node are copied together, at the same offset.
+  const both = applyAction(before, {
     type: "duplicate", targets: [label("API"), label("Database")], placement: { kind: "offset", direction: "right", distance: "small" },
   });
-  assert.deepEqual(mixed.resolution.commands.map(({ type }) => type), ["objects.duplicate", "scene.duplicate"]);
-  const [apiCopy, dbCopy] = mixed.resolution.selectionAfter;
-  assert.equal(mixed.state.elements[apiCopy].transform.x, 400 + 48);
-  assert.equal(mixed.state.strokes[dbCopy].annotation.bounds.x, before.strokes.db.annotation.bounds.x + 48);
+  assert.deepEqual(both.resolution.commands.map(({ type }) => type), ["scene.duplicate"]);
+  const [apiCopy, dbCopy] = both.resolution.selectionAfter;
+  assert.equal(both.state.elements[apiCopy].transform.x, 400 + 48);
+  assert.equal(both.state.elements[dbCopy].transform.x, before.elements.db.transform.x + 48);
 });
 
-test("Airo groups typed shapes in a section, and says why it can't mix them with its own nodes", () => {
+test("Airo groups typed shapes in a section, together with its own nodes", () => {
   const { resolution, state } = applyAction(mixedBoard(), { type: "group", targets: [label("User"), label("API")], label: "Front end", handle: "g_1" });
   const [command] = resolution.commands;
   assert.equal(command.type, "scene.group");
@@ -219,8 +215,17 @@ test("Airo groups typed shapes in a section, and says why it can't mix them with
   assert.deepEqual(section.memberIds, ["user", "api"]);
   assert.deepEqual(resolution.selectionAfter, ["user", "api"]);
 
-  const mixed = resolve(mixedBoard(), { type: "group", targets: [label("API"), label("Database")], label: null, handle: "g_2" });
-  assert.match(mixed.error, /can't group its own diagram shapes with shapes added from the toolbar/);
+  const withAiro = applyAction(mixedBoard(), { type: "group", targets: [label("API"), label("Database")], label: null, handle: "g_2" });
+  assert.equal(withAiro.resolution.commands[0].type, "scene.group");
+  assert.deepEqual(withAiro.state.elements[withAiro.resolution.commands[0].sectionId].memberIds, ["api", "db"]);
+
+  let fresh = mixedBoard();
+  fresh = applyDiagramCommand(fresh, {
+    type: "node.create", nodeId: "cache", nodeType: "database", label: "Cache", center: { x: 760, y: 400 }, source: "voice",
+  }, commandContext).state;
+  const together = applyAction(fresh, { type: "group", targets: [label("API"), label("Cache")], label: "Back end", handle: "g_3" });
+  assert.equal(together.resolution.commands[0].type, "scene.group");
+  assert.deepEqual(together.state.elements[together.resolution.commands[0].sectionId].memberIds, ["api", "cache"]);
 });
 
 test("automatic placement keeps new nodes off typed shapes", () => {

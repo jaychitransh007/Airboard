@@ -17,7 +17,6 @@ export type AuthContext = {
 
 type RequestLike = {
   headers: Record<string, string | string[] | undefined>;
-  query?: unknown;
 };
 
 type ProfileRow = {

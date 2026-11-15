@@ -128,9 +128,40 @@ export type SemanticIntentProviderMetadata = {
   usage: SemanticIntentProviderUsage | null;
 };
 
+/**
+ * Token usage with the cache and reasoning detail. Server logs only: the
+ * browser checks `metadata.usage` for its exact keys, so these fields never go
+ * on the wire.
+ */
+export type SemanticIntentProviderUsageDetail = SemanticIntentProviderUsage & {
+  /** Input tokens served from the prompt cache (`input_tokens_details.cached_tokens`). */
+  cachedInputTokens: number | null;
+  /** `output_tokens_details.reasoning_tokens`. */
+  reasoningTokens: number | null;
+};
+
+/** Server-side timing and usage detail for one planner call, logged but never sent to the browser. */
+export type SemanticIntentProviderDiagnostics = {
+  /** Whether the answer was read from a server-sent event stream. */
+  streamed: boolean;
+  /** Milliseconds from sending the request to the response headers. */
+  headersMs: number | null;
+  /** Milliseconds from sending the request to the finished plan tool call (streamed only). */
+  itemDoneMs: number | null;
+  /** Usage when it was read before the planner answered, otherwise null. */
+  usage: SemanticIntentProviderUsageDetail | null;
+};
+
 export type SemanticIntentProviderResolution = {
   plan: SemanticPlan;
   metadata: SemanticIntentProviderMetadata;
+  diagnostics?: SemanticIntentProviderDiagnostics;
+  /**
+   * A streamed answer resolves at the finished tool call, before the
+   * provider's final event carries the token usage. This settles with that
+   * usage (or null) once the rest of the stream is read, for logging only.
+   */
+  lateUsage?: Promise<SemanticIntentProviderUsageDetail | null>;
 };
 
 export type SemanticIntentRuntimeConfig = {
@@ -144,6 +175,12 @@ export type SemanticIntentRuntimeConfig = {
   timeoutMs: number;
   maxConcurrentRequests: number;
   maxTranscriptCharacters: number;
+  /**
+   * Read the planner answer as a stream and stop at the finished tool call
+   * (AIRBOARD_INTENT_STREAM, on unless "off"). Off sends exactly the
+   * non-streamed request.
+   */
+  stream?: boolean;
   apiKey?: string;
 };
 

@@ -15,13 +15,11 @@ RUN pnpm install --frozen-lockfile --filter @airboard/web...
 
 COPY apps/web apps/web
 COPY Docs Docs
-# The automated-command contract intentionally scans every shipped runtime
-# surface for a second gesture inference path. These sources are verification
-# inputs only; they never enter the final web runtime image.
+# The help generator checks that every source path a help article cites
+# exists, and some cite API files. These sources are build inputs only; they
+# never enter the final web runtime image.
 COPY apps/api/src apps/api/src
 COPY scripts/generate-help-content.mjs scripts/generate-help-content.mjs
-COPY scripts/verify-camera-layer-contract.mjs scripts/verify-camera-layer-contract.mjs
-COPY scripts/verify-automated-command-contract.mjs scripts/verify-automated-command-contract.mjs
 
 ARG NEXT_PUBLIC_AIRBOARD_API_URL
 ARG NEXT_PUBLIC_SUPABASE_URL

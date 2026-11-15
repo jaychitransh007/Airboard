@@ -1,20 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
+import { waitForTestHooks, type AirboardTestWindow } from "./support/testHooks";
 
 type CanonicalBoard = {
   elements: Record<
     string,
     {
       status: string;
-      legacyStrokeId?: string;
       metadata?: { lastInputSource?: string };
-      points?: Array<{ inputSource?: string }>;
-    }
-  >;
-  strokes: Record<
-    string,
-    {
-      status: string;
-      inputSource?: string;
       points?: Array<{ inputSource?: string }>;
     }
   >;
@@ -25,15 +17,7 @@ async function objectPositions(
 ): Promise<Array<{ x: number; y: number }>> {
   return page.evaluate(
     () =>
-      (
-        window as never as {
-          __airboardTestHooks: {
-            getBoardSummary(): {
-              positions: Array<{ x: number; y: number } | null>;
-            };
-          };
-        }
-      ).__airboardTestHooks
+      (window as unknown as AirboardTestWindow).__airboardTestHooks
         .getBoardSummary()
         .positions.filter(
           (position): position is { x: number; y: number } =>
@@ -44,31 +28,17 @@ async function objectPositions(
 
 async function inputSources(page: Page): Promise<string[]> {
   return page.evaluate(() => {
-    const board = (
-      window as never as {
-        __airboardTestHooks: { getCanonicalBoardState(): CanonicalBoard };
-      }
-    ).__airboardTestHooks.getCanonicalBoardState();
-    const sceneSources = Object.values(board.elements)
-      .filter(
-        ({ status, legacyStrokeId }) => status === "active" && !legacyStrokeId,
-      )
+    // A narrow view of the board: just the input-source fields read here.
+    const board = (window as unknown as AirboardTestWindow).__airboardTestHooks
+      .getCanonicalBoardState() as unknown as CanonicalBoard;
+    return Object.values(board.elements)
+      .filter(({ status }) => status === "active")
       .map(
         ({ metadata, points }) =>
           metadata?.lastInputSource ??
           points?.find(({ inputSource }) => inputSource)?.inputSource ??
           "",
-      );
-    const strokeSources = Object.values(board.strokes)
-      .filter(({ status }) => status === "committed")
-      .map(
-        (stroke) =>
-          stroke.inputSource ??
-          stroke.points?.find(({ inputSource }) => inputSource)?.inputSource ??
-          "",
       )
-      .filter(Boolean);
-    return [...sceneSources, ...strokeSources]
       .filter(Boolean)
       .sort();
   });
@@ -78,13 +48,7 @@ async function viewport(
   page: Page,
 ): Promise<{ x: number; y: number; scale: number }> {
   return page.evaluate(() =>
-    (
-      window as never as {
-        __airboardTestHooks: {
-          getViewport(): { x: number; y: number; scale: number };
-        };
-      }
-    ).__airboardTestHooks.getViewport(),
+    (window as unknown as AirboardTestWindow).__airboardTestHooks.getViewport(),
   );
 }
 
@@ -139,7 +103,7 @@ test("pointer, touchpad, and stylus streams ground to attributed final state", a
   page,
 }) => {
   await page.goto("/?testStandalone=1");
-  await page.waitForFunction(() => "__airboardTestHooks" in window);
+  await waitForTestHooks(page);
 
   const canvas = page.locator("canvas.board-canvas");
   const box = await canvas.boundingBox();

@@ -1,10 +1,10 @@
 import {
   AIRBOARD_SEMANTIC_PLAN_MAX_DIAGRAM_COMMANDS,
-  applyBoardEvent,
   applyDiagramCommand,
   applyDiagramUndo,
-  connectorGeometryMatchesBindings,
+  boardDiagramGraph,
   createInitialBoardState,
+  isActiveElement,
 } from "../../packages/core/src/index.ts";
 import { commitCommandTurn } from "../../apps/web/src/features/board/commandTurnCoordinator.ts";
 import { resolveSemanticPlanAction } from "../../apps/web/src/features/board/intentPipeline.ts";
@@ -28,7 +28,8 @@ const FIXED_TIME = "2026-07-30T00:00:00.000Z";
 /**
  * Recreate the board snapshot sent to the semantic provider. The resulting
  * state is reduced through the production DiagramCommand implementation, so
- * grounding tests exercise the same annotation shapes as the application.
+ * grounding tests exercise the same objects as the application: v2 shapes
+ * and connectors, as Airo and the typed grammar draw them now.
  */
 export function seedBoardFromSemanticContext(semanticContext) {
   let state = createInitialBoardState(BOARD_ID);
@@ -83,34 +84,6 @@ export function seedBoardFromSemanticContext(semanticContext) {
       },
       deterministicCommandContext(`seed-edge-${index + 1}`),
     ).state;
-    if (edge.seedGeometry?.start && edge.seedGeometry?.end) {
-      const connectorId = `seed-edge-${index + 1}`;
-      const current = state.strokes[connectorId];
-      const annotation = {
-        ...current.annotation,
-        start: { ...edge.seedGeometry.start },
-        end: { ...edge.seedGeometry.end },
-      };
-      if (edge.seedGeometry.snappedStart === false) {
-        delete annotation.snappedStartStrokeId;
-      }
-      if (edge.seedGeometry.snappedEnd === false) {
-        delete annotation.snappedEndStrokeId;
-      }
-      state = applyBoardEvent(state, {
-        id: `seed-edge-geometry-${index + 1}`,
-        boardSessionId: BOARD_ID,
-        actorParticipantId: PARTICIPANT_ID,
-        createdAt: FIXED_TIME,
-        type: "stroke.annotation_updated",
-        strokeId: connectorId,
-        annotation,
-        points: [
-          { ...annotation.start, t: 1, inputSource: "pointer" },
-          { ...annotation.end, t: 2, inputSource: "pointer" },
-        ],
-      });
-    }
   }
 
   const selectedIds = [];
@@ -261,13 +234,6 @@ export function evaluateGroundedSemanticPlan(plan, semanticContext) {
   const canvasHeight =
     finitePositive(semanticContext.canvasHeight) ?? 600;
   const viewOrigin = pointValue(semanticContext.viewOrigin, { x: 0, y: 0 });
-  const hoverStrokeId = semanticContext.hoverObject
-    ? findSummaryId(
-        semanticContext.hoverObject,
-        semanticContext.objects,
-        seeded.objectIds,
-      )
-    : null;
   let previewState = initialState;
   const referenceSelectionIds = [...initialSelectionIds];
   const referencePrimarySelectionId =
@@ -298,7 +264,6 @@ export function evaluateGroundedSemanticPlan(plan, semanticContext) {
         autoCreateCenters,
         selectionIds: referenceSelectionIds,
         primarySelectionId: referencePrimarySelectionId,
-        hoverStrokeId,
         strokeColor: "#111111",
       },
       planHandles,
@@ -360,7 +325,7 @@ export function evaluateGroundedSemanticPlan(plan, semanticContext) {
     }
     if (resolved.selectionAfter) {
       workingSelectionIds = resolved.selectionAfter.filter(
-        (strokeId) => previewState.strokes[strokeId]?.status === "committed",
+        (id) => isActiveElement(previewState, id),
       );
       workingPrimarySelectionId =
         workingSelectionIds[workingSelectionIds.length - 1] ?? null;
@@ -642,26 +607,19 @@ export function deriveBoardEffects(initialState, finalState) {
   };
 }
 
-function semanticNodes(state) {
-  const nodes = Object.values(state.strokes)
-    .filter(
-      (stroke) =>
-        stroke.status === "committed" &&
-        stroke.annotation?.bounds &&
-        stroke.annotation.type !== "connector" &&
-        stroke.annotation.type !== "arrow",
-    )
-    .map((stroke) => ({
-      id: stroke.id,
-      label: stroke.annotation.label ?? null,
-      nodeType:
-        stroke.annotation.nodeType ?? stroke.annotation.type,
-      x:
-        stroke.annotation.bounds.x +
-        stroke.annotation.bounds.width / 2,
-      y:
-        stroke.annotation.bounds.y +
-        stroke.annotation.bounds.height / 2,
+/**
+ * Every named object on the board, legacy stroke or v2 element, read from the
+ * model-independent diagram graph. Group containers count as objects, as they
+ * always have.
+ */
+function semanticNodes(state, graph = boardDiagramGraph(state)) {
+  const nodes = [...graph.nodes, ...graph.groups]
+    .map((node) => ({
+      id: node.id,
+      label: node.label,
+      nodeType: node.kind,
+      x: node.bounds.x + node.bounds.width / 2,
+      y: node.bounds.y + node.bounds.height / 2,
     }))
     .sort(
       (left, right) =>
@@ -678,29 +636,17 @@ function semanticNodes(state) {
 }
 
 function semanticEdges(state) {
+  const graph = boardDiagramGraph(state);
   const nodes = new Map(
-    semanticNodes(state).map((node) => [node.id, node]),
+    semanticNodes(state, graph).map((node) => [node.id, node]),
   );
-  const edges = Object.values(state.strokes)
-    .filter(
-      (stroke) =>
-        stroke.status === "committed" &&
-        (stroke.annotation?.type === "connector" ||
-          stroke.annotation?.type === "arrow"),
-    )
-    .map((stroke) => ({
-      id: stroke.id,
-      label: stroke.annotation.label ?? null,
-      from: endpointSummary(
-        nodes.get(stroke.annotation.snappedStartStrokeId),
-      ),
-      to: endpointSummary(
-        nodes.get(stroke.annotation.snappedEndStrokeId),
-      ),
-      geometryAttached: connectorGeometryMatchesBindings(
-        state,
-        stroke.annotation,
-      ),
+  const edges = graph.edges
+    .map((edge) => ({
+      id: edge.id,
+      label: edge.label,
+      from: endpointSummary(nodes.get(edge.from)),
+      to: endpointSummary(nodes.get(edge.to)),
+      geometryAttached: edge.attached,
     }))
     .sort((left, right) => String(left.id).localeCompare(String(right.id)));
   const occurrenceByEndpoints = new Map();

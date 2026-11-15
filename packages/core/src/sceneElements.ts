@@ -1,20 +1,15 @@
 import type {
-  AnnotationBounds,
   AnnotationNodeType,
-  AnnotationPoint,
   BoardElementBase,
   BoardElementKind,
   BoardElementPatchOperation,
   BoardElementTransform,
   BoardJsonValue,
   BoardSceneElement,
-  ConnectorElement,
-  DrawingElement,
   MindMapNodeElement,
   RichTextDocument,
   ShapeKind,
   ShapeStyle,
-  Stroke,
   TableCell,
   TableCellStyle,
   TableColumn,
@@ -130,7 +125,6 @@ export function createBoardSceneElement(input: BoardSceneElementDraft): BoardSce
     ...(input.creatorId ? { creatorId: input.creatorId } : {}),
     ...(input.sectionId ? { sectionId: input.sectionId } : {}),
     ...(input.attachment ? { attachment: input.attachment } : {}),
-    ...(input.legacyStrokeId ? { legacyStrokeId: input.legacyStrokeId } : {}),
     ...(input.metadata ? { metadata: input.metadata } : {}),
   } satisfies BoardElementBase<BoardElementKind>;
 
@@ -184,6 +178,7 @@ export function createBoardSceneElement(input: BoardSceneElementDraft): BoardSce
         controlPoints: input.controlPoints ?? [],
         label: input.label ?? createRichTextDocument("", `${input.id}:label`),
         labelPosition: input.labelPosition ?? 0.5,
+        ...(input.routeOffset ? { routeOffset: input.routeOffset } : {}),
         style: input.style ?? {
           color: "#111827",
           opacity: 1,
@@ -343,131 +338,6 @@ export function createDefaultTableData(
     }
   }
   return { rows, columns, cells };
-}
-
-/** Converts a committed v1 stroke/annotation into its v2 scene equivalent. */
-export function boardSceneElementFromLegacyStroke(
-  stroke: Stroke,
-  options: { zIndex?: number; revision?: number } = {},
-): BoardSceneElement {
-  const annotation = stroke.annotation;
-  const transform = transformFromLegacyStroke(stroke);
-  const shared = {
-    id: stroke.id,
-    boardId: stroke.boardId,
-    transform,
-    status: stroke.status === "deleted" ? "deleted" : "active",
-    zIndex: options.zIndex ?? 0,
-    locked: false,
-    visible: true,
-    creatorId: stroke.userId,
-    createdAt: stroke.createdAt,
-    updatedAt: stroke.updatedAt,
-    revision: options.revision ?? 1,
-    legacyStrokeId: stroke.id,
-  } as const;
-  const label = annotation?.label ?? "";
-
-  if (annotation?.type === "sticky_note") {
-    return {
-      ...shared,
-      kind: "sticky",
-      content: createRichTextDocument(label, `${stroke.id}:content`),
-      layout: transform.width === transform.height ? "square" : "rectangle",
-      color: annotation.fillColor ?? "#fde68a",
-      authorVisible: true,
-    };
-  }
-
-  if (
-    annotation?.type === "flow_node" ||
-    annotation?.type === "rectangle" ||
-    annotation?.type === "ellipse"
-  ) {
-    const shapeKind =
-      annotation.shapeKind ?? legacyShapeKind(annotation.type, annotation.nodeType);
-    return {
-      ...shared,
-      kind: "shape",
-      shapeKind,
-      content: createRichTextDocument(label, `${stroke.id}:content`),
-      style: {
-        ...DEFAULT_SHAPE_STYLE,
-        fill: annotation.fillColor ?? DEFAULT_SHAPE_STYLE.fill,
-        fillOpacity: annotation.opacity ?? DEFAULT_SHAPE_STYLE.fillOpacity,
-        stroke: annotation.strokeColor ?? stroke.color,
-        strokeWidth: stroke.thickness,
-      },
-    };
-  }
-
-  if (annotation?.type === "connector" || annotation?.type === "arrow") {
-    const start = annotation.start ?? firstPoint(stroke) ?? { x: transform.x, y: transform.y };
-    const end = annotation.end ?? lastPoint(stroke) ?? {
-      x: transform.x + transform.width,
-      y: transform.y + transform.height,
-    };
-    const connector: ConnectorElement = {
-      ...shared,
-      kind: "connector",
-      pathKind: annotation.type === "connector" ? "bent" : "straight",
-      start: {
-        point: start,
-        decoration: "none",
-        ...(annotation.snappedStartStrokeId
-          ? { binding: { elementId: annotation.snappedStartStrokeId, anchor: "auto" } }
-          : {}),
-      },
-      end: {
-        point: end,
-        decoration: "solid_arrow",
-        ...(annotation.snappedEndStrokeId
-          ? { binding: { elementId: annotation.snappedEndStrokeId, anchor: "auto" } }
-          : {}),
-      },
-      controlPoints: [],
-      label: createRichTextDocument(label, `${stroke.id}:label`),
-      labelPosition: 0.5,
-      style: {
-        color: annotation.strokeColor ?? stroke.color,
-        opacity: annotation.opacity ?? 1,
-        thickness: stroke.thickness > 4 ? "thick" : "thin",
-        strokeStyle: annotation.lineStyle ?? "solid",
-        labelBackground: "none",
-      },
-    };
-    return connector;
-  }
-
-  if (annotation?.type === "text_label") {
-    return {
-      ...shared,
-      kind: "text",
-      content: createRichTextDocument(label, `${stroke.id}:content`),
-      mode: "area",
-      style: {
-        preset: "simple",
-        color: annotation.strokeColor ?? stroke.color,
-        fontSize: 18,
-        align: "left",
-        verticalAlign: "top",
-      },
-    };
-  }
-
-  const drawing: DrawingElement = {
-    ...shared,
-    kind: "drawing",
-    drawingKind: annotation?.type === "highlight" ? "highlighter" : "marker",
-    points: stroke.points,
-    style: {
-      color: annotation?.strokeColor ?? stroke.color,
-      thickness: stroke.thickness,
-      opacity: annotation?.opacity ?? (annotation?.type === "highlight" ? 0.35 : 1),
-      straight: Boolean(stroke.lineSnapApplied),
-    },
-  };
-  return drawing;
 }
 
 export function applyBoardElementPatches(
@@ -843,44 +713,8 @@ function moveById<T extends { id: string }>(
   return insertAt(remaining, requestedIndex, items[currentIndex]!);
 }
 
-function transformFromLegacyStroke(stroke: Stroke): BoardElementTransform {
-  const bounds = stroke.annotation?.bounds;
-  if (bounds) return transformFromBounds(bounds);
-
-  const annotationPoints = [stroke.annotation?.start, stroke.annotation?.end].filter(
-    (point): point is AnnotationPoint => Boolean(point),
-  );
-  const points = annotationPoints.length > 0 ? annotationPoints : stroke.points;
-  if (points.length === 0) return createElementTransform("drawing");
-  const xs = points.map((point) => point.x);
-  const ys = points.map((point) => point.y);
-  const minX = Math.min(...xs);
-  const minY = Math.min(...ys);
-  return {
-    x: minX,
-    y: minY,
-    width: Math.max(1, Math.max(...xs) - minX),
-    height: Math.max(1, Math.max(...ys) - minY),
-    rotation: 0,
-  };
-}
-
-function transformFromBounds(bounds: AnnotationBounds): BoardElementTransform {
-  return {
-    x: bounds.x,
-    y: bounds.y,
-    width: Math.max(1, bounds.width),
-    height: Math.max(1, bounds.height),
-    rotation: 0,
-  };
-}
-
-function legacyShapeKind(
-  annotationType: "flow_node" | "rectangle" | "ellipse",
-  nodeType?: AnnotationNodeType,
-): ShapeKind {
-  if (annotationType === "ellipse") return "ellipse";
-  if (annotationType === "rectangle") return "square";
+/** The catalogue shape a diagram node type is drawn as (a decision is a diamond). */
+export function shapeKindForNodeType(nodeType: AnnotationNodeType): ShapeKind {
   switch (nodeType) {
     case "process":
       return "process";
@@ -911,12 +745,24 @@ function legacyShapeKind(
   }
 }
 
-function firstPoint(stroke: Stroke): AnnotationPoint | undefined {
-  const point = stroke.points[0];
-  return point ? { x: point.x, y: point.y } : undefined;
-}
-
-function lastPoint(stroke: Stroke): AnnotationPoint | undefined {
-  const point = stroke.points.at(-1);
-  return point ? { x: point.x, y: point.y } : undefined;
+/**
+ * The diagram type of a v2 node, as Airo and the evals name it. A shape drawn
+ * for a diagram node type keeps that type ("decision", not "diamond") while
+ * it still has the shape it was drawn with; any other shape is named by its
+ * shape, a sticky is a "sticky_note" and anything else by its kind.
+ */
+export function sceneElementNodeType(element: BoardSceneElement): string {
+  if (element.kind === "shape") {
+    const metadata = element.metadata;
+    if (
+      metadata &&
+      typeof metadata.nodeType === "string" &&
+      metadata.nodeType &&
+      metadata.nodeShape === element.shapeKind
+    ) {
+      return metadata.nodeType;
+    }
+    return element.shapeKind;
+  }
+  return element.kind === "sticky" ? "sticky_note" : element.kind;
 }

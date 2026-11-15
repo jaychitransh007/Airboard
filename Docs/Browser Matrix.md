@@ -3,6 +3,8 @@
 Evidence for the standalone-GA gate `browser-matrix` in `ops/launch-evidence.json`:
 the promised desktop browser and OS matrix passes, with documented exclusions.
 
+> **Re-run required:** recorded on 6 November 2026, before RGB-046 (Trash removed) and RGB-047 (creation-first redesign) changed the UI it tested. Treat the results below as history until the matrix is run again.
+
 **Status (6 November 2026):** macOS passes on the current and previous Chrome.
 Windows hasn't been run, so the gate stays pending.
 

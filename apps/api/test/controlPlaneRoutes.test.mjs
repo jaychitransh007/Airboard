@@ -780,7 +780,6 @@ function shareTables() {
         owner_profile_id: PROFILE,
         latest_state: {
           elements: { a: { id: "a", kind: "shape" } },
-          strokes: {},
           participants: { p1: { displayName: "Priya Raman" } },
           cursors: { p1: { x: 1, y: 2 } },
           activeStrokes: { s1: {} },
